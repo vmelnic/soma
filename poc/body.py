@@ -123,15 +123,21 @@ class ThinBody:
             case Prim.EMIT:       return args[0]  # pass through for display
             case Prim.STOP:       return None
 
-    def execute_program(self, steps: list[ProgramStep]) -> dict:
-        """Execute a program. Resolve refs, call primitives, collect results."""
+    def execute_program(self, steps: list[ProgramStep], on_step=None) -> dict:
+        """Execute a program. Resolve refs, call primitives, collect results.
+
+        Args:
+            on_step: optional callback(step_idx, op_name, result_summary) for live trace
+        """
         results = []
         output = None
         trace = []
 
         for i, step in enumerate(steps):
             if step.opcode == Prim.STOP:
-                trace.append({"step": i, "op": "STOP"})
+                trace.append({"step": i, "op": "STOP", "ok": True})
+                if on_step:
+                    on_step(i, "STOP", "")
                 break
 
             # Resolve arguments
@@ -142,31 +148,81 @@ class ThinBody:
                     if aval < len(results):
                         resolved.append(results[aval])
                     else:
+                        trace.append({"step": i, "op": OPCODE_NAMES[step.opcode],
+                                      "ok": False, "error": f"invalid ref ${aval}"})
+                        self._cleanup_handles(results)
                         return {"success": False, "output": None,
-                                "trace": trace, "error": f"Invalid ref ${aval} at step {i}"}
+                                "trace": trace, "error": f"Step {i} ({OPCODE_NAMES[step.opcode]}): invalid ref ${aval}"}
                 elif atype == "span":
                     resolved.append(aval)
-                # none: don't append
 
             try:
                 result = self.execute_primitive(step.opcode, resolved)
                 results.append(result)
-                trace.append({"step": i, "op": OPCODE_NAMES[step.opcode], "result_type": type(result).__name__})
+
+                # Summarize result for trace
+                summary = self._summarize(result)
+                trace.append({"step": i, "op": OPCODE_NAMES[step.opcode],
+                              "ok": True, "summary": summary})
+
+                if on_step:
+                    on_step(i, OPCODE_NAMES[step.opcode], summary)
 
                 if step.opcode == Prim.EMIT:
                     output = result
 
             except Exception as e:
-                # Close any open file handles before returning
-                for r in results:
-                    if hasattr(r, "close") and not getattr(r, "closed", True):
-                        try:
-                            r.close()
-                        except Exception:
-                            pass
-                return {"success": False, "output": None, "trace": trace, "error": str(e)}
+                err_msg = self._friendly_error(step.opcode, resolved, e)
+                trace.append({"step": i, "op": OPCODE_NAMES[step.opcode],
+                              "ok": False, "error": err_msg})
+                if on_step:
+                    on_step(i, OPCODE_NAMES[step.opcode], f"ERROR: {err_msg}")
+                self._cleanup_handles(results)
+                return {"success": False, "output": None,
+                        "trace": trace, "error": f"Step {i} ({OPCODE_NAMES[step.opcode]}): {err_msg}"}
 
         return {"success": True, "output": output, "trace": trace, "error": None}
+
+    def _cleanup_handles(self, results: list):
+        """Close any open file handles in results."""
+        for r in results:
+            if hasattr(r, "close") and not getattr(r, "closed", True):
+                try:
+                    r.close()
+                except Exception:
+                    pass
+
+    def _summarize(self, result) -> str:
+        """Short summary of a primitive's result for the trace."""
+        if result is None:
+            return ""
+        if isinstance(result, bool):
+            return "ok" if result else "failed"
+        if isinstance(result, str):
+            if len(result) > 50:
+                return f"{len(result)} chars"
+            return result
+        if isinstance(result, list):
+            return f"{len(result)} items"
+        if isinstance(result, dict):
+            return ", ".join(f"{k}={v}" for k, v in list(result.items())[:3])
+        if hasattr(result, "name"):
+            return f"handle:{result.name}"
+        return type(result).__name__
+
+    def _friendly_error(self, opcode: int, args: list, exc: Exception) -> str:
+        """Convert OS exception to human-readable message."""
+        msg = str(exc)
+        if "No such file or directory" in msg:
+            path = args[0] if args and isinstance(args[0], str) else "?"
+            return f"file not found: {path}"
+        if "Permission denied" in msg:
+            return f"permission denied"
+        if "Is a directory" in msg:
+            return f"expected file, got directory"
+        if "File exists" in msg:
+            return f"file already exists"
+        return msg
 
     def capabilities(self) -> list[dict]:
         """Proprioception: report available primitives."""

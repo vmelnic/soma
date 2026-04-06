@@ -139,7 +139,133 @@ This language is unique per synthesis target. Two SOMA instances on different ha
 
 ---
 
-## 4. Synthesis Process
+## 4. Structured Intent Formalism and the Planning Layer
+
+### 4.1 The Two Classes of Intent
+
+Not all human intents are equal in complexity. A critical architectural distinction exists between two classes:
+
+**Class 1 — Operational Intent.** Direct, concrete, single-operation commands. "List files in /tmp." "Send a confirmation email to Maria." "Read the temperature sensor." These map to a single body operation with clear parameters. The neuronal execution core handles these directly — one intent, one opcode, one execution. A small neural network (sub-1M parameters) can classify and extract parameters reliably.
+
+**Class 2 — Creative/Architectural Intent.** Complex, multi-step, design-level commands. "Add a waitlist feature." "Make the booking page show a calendar view." "Add support for recurring appointments." These require understanding existing application state, reasoning about design, decomposing into a sequence of operations, and executing them in order. No single opcode suffices. This is what human developers do — and it is the hard problem.
+
+The neuronal execution core (Layer 3) is designed for Class 1. Attempting to handle Class 2 with the same architecture would require the entire execution core to possess general reasoning capabilities — effectively requiring an AGI-scale model on every device. This is neither practical nor necessary.
+
+### 4.2 The Small Model as Planning Layer
+
+Layer 2 (Planning and Decomposition) for complex intents can be implemented as a small language model (1B–3B parameters) — models like Phi-3, Llama 3.2 1B, or Qwen 2.5 3B. These run locally, on-device, with minimal resources.
+
+The key insight: decomposing complex intent into a sequence of known operations is a **constrained task**, not an open-ended generation task. The small model does not need general intelligence. It needs to understand:
+- The SOMA's current capabilities (body manifest).
+- The current application state (existing routes, database structures, business rules).
+- How to break a high-level request into a sequence of operations from the known vocabulary.
+
+This is a fine-tuning problem, not a scaling problem. A 1B model fine-tuned on decomposition examples for a specific domain (web applications, IoT, industrial control) can reliably produce structured operation sequences.
+
+```
+Human: "Add a waitlist feature for when time slots are full"
+                    │
+        [Small Model — Layer 2]
+                    │
+                    ▼
+Decomposed plan:
+  1. CREATE_TABLE waitlist (slot_id, client_name, email, position)
+  2. ADD_ROUTE POST /waitlist/join (slot_id, name, email)
+  3. ADD_ROUTE GET /waitlist/{slot_id}
+  4. ADD_TRIGGER on_slot_cancel → notify_first_waitlist
+  5. MODIFY_ROUTE GET /booking/{slot_id} → show waitlist when full
+                    │
+        [Neuronal Execution Core — Layer 3]
+                    │
+                    ▼
+        [Body: SQL + HTTP + SMTP]
+```
+
+The planning model is **part of the SOMA**, not an external dependency. During synthesis, the planning model is fitted to the target body's capabilities — it can only produce operation sequences that the body can execute. This prevents the planning layer from generating plans the execution core cannot fulfill.
+
+### 4.3 Gherkin as Structured Intent Language
+
+Open Question #4 in this paper asks: "Is natural language sufficient as an intent interface, or will high-performance applications require a more structured intent language?" The answer is: for Class 2 intents, a structured formalism dramatically improves reliability. We propose adopting **Gherkin** — the specification language from behavior-driven development (BDD) — as SOMA's structured intent formalism for complex operations.
+
+Gherkin is a human-readable, machine-parseable language for describing system behavior:
+
+```gherkin
+Feature: Waitlist
+  Scenario: Client joins waitlist when slot is full
+    Given a time slot at 2pm with Ana is fully booked
+    When a client submits name "Maria" and email "maria@mail.com"
+    Then the client is added to the waitlist at position 1
+    And the client receives a confirmation email
+
+  Scenario: Client gets notified when slot opens
+    Given "Maria" is position 1 on the waitlist for 2pm with Ana
+    When the booked client cancels
+    Then "Maria" receives a notification email
+    And the slot shows as available for "Maria" for 10 minutes
+```
+
+Gherkin is not code. It is a specification of behavior in structured natural language. It occupies the exact boundary between human intent and machine-executable specification.
+
+### 4.4 The Three Roles of Gherkin in SOMA
+
+**Role 1 — Intent formalism.**
+The small planning model (Layer 2) decomposes natural language into Gherkin scenarios. The human says "add a waitlist feature." The planning model produces the Gherkin specification above. The human can read it, validate it, and modify it before the SOMA executes. This is the SOMA's disambiguation mechanism (Section 2.4) made concrete — the SOMA shows its plan in a format the human can verify.
+
+**Role 2 — Self-verification.**
+The same Gherkin that defines a feature also verifies it works. After the SOMA executes the decomposed operations, it runs the Gherkin scenarios against itself as behavioral tests. If the scenarios pass, the feature is confirmed working. If they fail, the feedback layer (Layer 4) retries or escalates to the human. This solves the verification problem from Section 8 — the specification IS the test suite.
+
+**Role 3 — Versioning.**
+Section 9 raises the problem of versioning without source code. Gherkin specifications are versionable text documents. They can be diffed, branched, rolled back, and stored in version control. The complete behavior of a SOMA-powered application is defined by its Gherkin specification library plus its synthesis configuration. Both are versioned. The application's history is the history of its specifications, not the history of its code — because there is no code.
+
+### 4.5 The Complete Intent Pipeline
+
+The full pipeline from human intent to execution, handling both intent classes:
+
+```
+Human natural language
+  "Add a waitlist feature"
+           │
+  [Layer 1: Intent Reception — classify complexity]
+           │
+           ├── Class 1 (simple) ──────────────────────┐
+           │   "list files in /tmp"                    │
+           │                                           ▼
+           │                              [Layer 3: Direct execution]
+           │                                           │
+           ├── Class 2 (complex) ─────────┐            │
+           │                              ▼            │
+           │                   [Layer 2: Small model   │
+           │                    decomposes to Gherkin]  │
+           │                              │            │
+           │                              ▼            │
+           │                   [Human reviews/approves  │
+           │                    Gherkin specification]  │
+           │                              │            │
+           │                              ▼            │
+           │                   [Gherkin parsed into     │
+           │                    operation sequence]     │
+           │                              │            │
+           │                              ▼            │
+           │                   [Layer 3: Execute each   │
+           │                    operation sequentially] │
+           │                              │            │
+           │                              ▼            │
+           │                   [Run Gherkin scenarios   │
+           │                    as self-verification]   │
+           │                              │            │
+           ▼                              ▼            ▼
+                        [Body: hardware/OS/DB/network]
+```
+
+### 4.6 Why This Is Not "AI-Assisted Development"
+
+A critical distinction: this pipeline does not generate code. The small model generates Gherkin (a behavior specification), not Python or JavaScript. The Gherkin is parsed into operation sequences (opcodes), not source code. The operations are executed by the neuronal execution core, not by a compiler or interpreter. At no point does a programming language appear.
+
+This is also not "low-code" or "no-code" in the current industry sense. Low-code platforms still produce code behind a visual interface. SOMA produces no code at any layer. The Gherkin is a communication format between the planning layer and the execution layer — analogous to how SQL is a communication format between the SOMA and a database. It is a protocol, not a program.
+
+---
+
+## 5. Synthesis Process
 
 ### 4.1 Overview
 
@@ -187,7 +313,7 @@ The complete SOMA instance is assembled, loaded onto the target (or its simulato
 
 ---
 
-## 5. The Bootstrap Problem
+## 6. The Bootstrap Problem
 
 ### 5.1 The Paradox
 
@@ -212,7 +338,7 @@ Self-hosting is not just a technical milestone — it is the philosophical proof
 
 ---
 
-## 6. The Synthesizer
+## 7. The Synthesizer
 
 ### 6.1 What Is the Synthesizer?
 
@@ -236,11 +362,11 @@ Runs the synthesized SOMA instance against a test suite of intent-execution pair
 
 ### 6.3 The Synthesizer as a SOMA
 
-After self-hosting (Section 5), the synthesizer becomes a SOMA instance whose body is the synthesis environment — its I/O is "receive base architecture + target spec" and its output is "produce SOMA instance." It knows its own computational resources, can optimize its own synthesis strategies, and can adapt to new target types through runtime adaptation. The synthesizer-SOMA's intent interface accepts requests like: "Synthesize a SOMA for this ESP32 board" or "Re-synthesize the living room sensor SOMA with updated firmware support."
+After self-hosting (Section 6), the synthesizer becomes a SOMA instance whose body is the synthesis environment — its I/O is "receive base architecture + target spec" and its output is "produce SOMA instance." It knows its own computational resources, can optimize its own synthesis strategies, and can adapt to new target types through runtime adaptation. The synthesizer-SOMA's intent interface accepts requests like: "Synthesize a SOMA for this ESP32 board" or "Re-synthesize the living room sensor SOMA with updated firmware support."
 
 ---
 
-## 7. Verification and Trust
+## 8. Verification and Trust
 
 ### 7.1 The Problem of Opaque Execution
 
@@ -267,7 +393,7 @@ The SOMA can explain its actions in natural language through the intent interfac
 
 ---
 
-## 8. Versioning and Rollback
+## 9. Versioning and Rollback
 
 ### 8.1 The Problem
 
@@ -295,11 +421,11 @@ Because synthesis is deterministic, rollback is guaranteed to produce the exact 
 
 ### 8.4 Runtime Adaptation Snapshots
 
-Runtime adaptation (Section 10.3) modifies a SOMA's behavior within bounded limits. To preserve rollback capability, the SOMA periodically creates **adaptation snapshots** — serialized states of its adapted pathways. These snapshots can be restored, shared with other SOMA instances, or discarded during rollback.
+Runtime adaptation (Section 11.3) modifies a SOMA's behavior within bounded limits. To preserve rollback capability, the SOMA periodically creates **adaptation snapshots** — serialized states of its adapted pathways. These snapshots can be restored, shared with other SOMA instances, or discarded during rollback.
 
 ---
 
-## 9. Multi-SOMA Communication — The Soma Network
+## 10. Multi-SOMA Communication — The Soma Network
 
 ### 9.1 The Need for Composition
 
@@ -327,7 +453,7 @@ The Synaptic Protocol applies this model to SOMA networks:
 
 ---
 
-## 10. Runtime Behavior
+## 11. Runtime Behavior
 
 ### 10.1 The Execution Loop
 
@@ -399,7 +525,7 @@ Re-synthesis is required for fundamental changes: new hardware, major OS updates
 
 ---
 
-## 11. Real-Time Guarantees
+## 12. Real-Time Guarantees
 
 ### 11.1 The Challenge
 
@@ -426,7 +552,7 @@ Timing-bound pathways are verified during synthesis using **static timing analys
 
 ---
 
-## 12. Energy and Power
+## 13. Energy and Power
 
 ### 12.1 The Challenge
 
@@ -452,7 +578,7 @@ The SOMA itself decides where each task falls. This is proprioception applied to
 
 ---
 
-## 13. Performance Expectations
+## 14. Performance Expectations
 
 ### 13.1 Honest Assessment
 
@@ -475,7 +601,7 @@ SOMA should not be benchmarked against compiled code for raw instruction through
 
 ---
 
-## 14. Security Model
+## 15. Security Model
 
 ### 14.1 Threat Landscape
 
@@ -503,7 +629,7 @@ Users trust compilers today without reading the machine code they produce. The s
 
 ---
 
-## 15. Neuromorphic Hardware Affinity
+## 16. Neuromorphic Hardware Affinity
 
 ### 15.1 The Natural Substrate
 
@@ -535,7 +661,7 @@ In the near term, most SOMA instances will inhabit conventional hardware (x86, A
 
 ---
 
-## 16. Concrete Use Cases
+## 17. Concrete Use Cases
 
 ### 16.1 Use Case: Smart Agriculture Sensor Network
 
@@ -571,7 +697,7 @@ Synthesize SOMAs onto prototype hardware. Describe the desired product behavior 
 
 ---
 
-## 17. Comparison with Existing Paradigms
+## 18. Comparison with Existing Paradigms
 
 | Aspect | Traditional Development | AI-Assisted Development | SOMA |
 |---|---|---|---|
@@ -590,7 +716,7 @@ Synthesize SOMAs onto prototype hardware. Describe the desired product behavior 
 
 ---
 
-## 18. Coexistence and Migration Path
+## 19. Coexistence and Migration Path
 
 ### 18.1 Reality Check
 
@@ -619,7 +745,7 @@ Organizations won't adopt SOMA for ideology. They'll adopt it because it's cheap
 
 ---
 
-## 19. Research Roadmap
+## 20. Research Roadmap
 
 ### Phase 1 — Theoretical Foundation (Months 0–6)
 - Formalize the base neural architecture specification.
@@ -668,7 +794,7 @@ Organizations won't adopt SOMA for ideology. They'll adopt it because it's cheap
 
 ---
 
-## 20. Ethical and Societal Impact
+## 21. Ethical and Societal Impact
 
 ### 20.1 Developer Displacement
 
@@ -693,7 +819,7 @@ Mitigation:
 A SOMA directly controls hardware and adapts at runtime. This raises questions:
 
 - **Who is responsible** when a SOMA's adaptive behavior causes harm? The synthesizer creators? The intent provider? The SOMA itself?
-- **Can a SOMA refuse intent?** Should it? If a human instructs a SOMA to perform a harmful action, the capability boundary system (Section 14.2) provides a mechanism for refusal — but who defines the boundaries?
+- **Can a SOMA refuse intent?** Should it? If a human instructs a SOMA to perform a harmful action, the capability boundary system (Section 15.2) provides a mechanism for refusal — but who defines the boundaries?
 - **Adaptation drift.** If runtime adaptation changes a SOMA's behavior beyond what synthesis intended, at what point has the SOMA become something no one authorized?
 
 These are not solved problems. They are active ethical questions that must be addressed as the technology develops, not after deployment.
@@ -706,7 +832,7 @@ However, if synthesis requires expensive infrastructure or proprietary base arch
 
 ---
 
-## 21. Open Questions
+## 22. Open Questions
 
 The following remain unsolved and are presented as challenges for the research community:
 
@@ -723,7 +849,7 @@ The following remain unsolved and are presented as challenges for the research c
 
 ---
 
-## 22. Conclusion
+## 23. Conclusion
 
 The SOMA paradigm proposes a fundamental shift: instead of writing programs that run on computers, we synthesize computational organisms that **are** the computation. The model is the program. The hardware is the body. Human intent is the only input. This is not an incremental improvement to software development — it is a replacement of the paradigm itself.
 

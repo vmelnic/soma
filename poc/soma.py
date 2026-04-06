@@ -1,8 +1,8 @@
 """
-SOMA Instance — Phase 2: Program Execution.
+SOMA Instance — v0.3: Live Trace + Confidence + Error Recovery.
 
-The Mind generates multi-step programs. The Body executes them.
-The program trace is visible — proving the model IS the program.
+The Mind generates multi-step programs with cross-operation data flow.
+The Body executes them step by step with live trace output.
 
 Usage:
     python -m poc.soma
@@ -15,6 +15,9 @@ import torch
 from poc.body import ThinBody, Prim, OPCODE_NAMES
 from poc.mind import SomaMind
 from poc.tokenizer import Tokenizer, NULL_IDX
+
+
+CONFIDENCE_THRESHOLD = 0.3
 
 
 class Soma:
@@ -45,28 +48,95 @@ class Soma:
         ]) or lower in ("help", "?"):
             return self._proprioception()
 
-        # Layer 1: Intent reception
         tokens = self.tokenizer.tokenize(intent_text)
         token_ids = [NULL_IDX] + self.tokenizer.encode(intent_text)
 
         input_tensor = torch.tensor([token_ids], dtype=torch.long)
         length_tensor = torch.tensor([len(token_ids)], dtype=torch.long)
 
-        # Layers 2+3: Mind generates program
-        steps = self.mind.predict(input_tensor, length_tensor, tokens)
+        steps, confidence = self.mind.predict(input_tensor, length_tensor, tokens)
 
-        # Body executes program
-        result = self.body.execute_program(steps)
-
-        self.execution_count += 1
-        if not result["success"]:
-            self.error_count += 1
+        if confidence < CONFIDENCE_THRESHOLD:
+            return {
+                "type": "ambiguous",
+                "confidence": confidence,
+            }
 
         return {
             "type": "execution",
             "steps": steps,
-            "result": result,
+            "confidence": confidence,
         }
+
+    def execute_and_display(self, result: dict):
+        """Execute program and display with live trace."""
+        if result["type"] == "empty":
+            return
+
+        elif result["type"] == "proprioception":
+            p = result
+            print(f"\n  [Proprioception]")
+            print(f"  Mind: {p['mind']['parameters']:,} params, {p['mind']['architecture']}")
+            print(f"  Stats: {p['stats']['executions']} executions, {p['stats']['errors']} errors")
+            print(f"\n  Primitives ({len(p['primitives'])}):")
+            for prim in p["primitives"]:
+                a0, a1 = prim["args"]
+                args = ", ".join(a for a in [a0, a1] if a != "none")
+                print(f"    [{prim['opcode']:2d}] {prim['name']}{'(' + args + ')' if args else '()'}")
+
+        elif result["type"] == "ambiguous":
+            print(f"\n  [Mind] Confidence too low ({result['confidence']:.0%})")
+            print(f"         I'm not sure what you want. Could you rephrase?")
+
+        elif result["type"] == "execution":
+            steps = result["steps"]
+            confidence = result["confidence"]
+            real_steps = [s for s in steps if s.opcode != Prim.STOP]
+
+            print(f"\n  [Mind] Program ({len(real_steps)} steps, {confidence:.0%} confidence):")
+            for i, step in enumerate(steps):
+                print(f"    {step.format(i)}")
+                if step.opcode == Prim.STOP:
+                    break
+
+            # Execute with live trace
+            print()
+            def on_step(idx, op_name, summary):
+                if op_name == "STOP":
+                    return
+                if op_name == "EMIT":
+                    return  # we'll display output separately
+                status = f"... {summary}" if summary else ""
+                print(f"    [{idx}] {op_name} {status}")
+
+            exec_result = self.body.execute_program(steps, on_step=on_step)
+
+            self.execution_count += 1
+            if not exec_result["success"]:
+                self.error_count += 1
+                print(f"\n  [Body] Error: {exec_result['error']}")
+                # Show which steps succeeded
+                ok_steps = [t for t in exec_result["trace"] if t.get("ok")]
+                if ok_steps:
+                    print(f"         ({len(ok_steps)} steps completed before failure)")
+            else:
+                out = exec_result["output"]
+                if out is None:
+                    print(f"  [Body] Done.")
+                elif isinstance(out, list):
+                    print(f"  [Body] Output ({len(out)} items):")
+                    for item in out[:20]:
+                        print(f"    {item}")
+                    if len(out) > 20:
+                        print(f"    ... and {len(out) - 20} more")
+                elif isinstance(out, dict):
+                    print(f"  [Body] Output:")
+                    for k, v in out.items():
+                        print(f"    {k}: {v}")
+                elif isinstance(out, bool):
+                    print(f"  [Body] {out}")
+                else:
+                    print(f"  [Body] {out}")
 
     def _proprioception(self) -> dict:
         return {
@@ -75,7 +145,7 @@ class Soma:
             "mind": {
                 "parameters": sum(p.numel() for p in self.mind.parameters()),
                 "vocabulary": self.tokenizer.vocab_size,
-                "architecture": "BiLSTM encoder + GRU decoder",
+                "architecture": "BiLSTM encoder + GRU decoder (dynamic arg types)",
             },
             "stats": {
                 "executions": self.execution_count,
@@ -86,11 +156,12 @@ class Soma:
     def repl(self):
         total_params = sum(p.numel() for p in self.mind.parameters())
         print("=" * 60)
-        print("  SOMA Proof of Concept v0.2")
+        print("  SOMA Proof of Concept v0.3")
         print("  The Neural Network IS the Program")
         print("=" * 60)
         print(f"  Body:       macOS {platform.machine()} (19 primitives)")
         print(f"  Mind:       {total_params:,} params (BiLSTM + GRU)")
+        print(f"  Features:   compositional programs, cross-op data flow")
         print(f"  Vocabulary: {self.tokenizer.vocab_size} tokens")
         print("=" * 60)
         print("  Type intent. The mind generates a program. The body executes it.")
@@ -107,58 +178,7 @@ class Soma:
                     break
 
                 result = self.process_intent(intent)
-
-                if result["type"] == "empty":
-                    continue
-
-                elif result["type"] == "proprioception":
-                    p = result
-                    print(f"\n  [Proprioception]")
-                    print(f"  Mind: {p['mind']['parameters']:,} params, "
-                          f"{p['mind']['architecture']}")
-                    print(f"  Stats: {p['stats']['executions']} executions, "
-                          f"{p['stats']['errors']} errors")
-                    print(f"\n  Primitives ({len(p['primitives'])}):")
-                    for prim in p["primitives"]:
-                        a0, a1 = prim["args"]
-                        args = ", ".join(a for a in [a0, a1] if a != "none")
-                        print(f"    [{prim['opcode']:2d}] {prim['name']}"
-                              f"{'(' + args + ')' if args else '()'}")
-
-                elif result["type"] == "execution":
-                    steps = result["steps"]
-                    exec_result = result["result"]
-
-                    # Show the program the mind generated
-                    real_steps = [s for s in steps if s.opcode != Prim.STOP]
-                    print(f"\n  [Mind] Program ({len(real_steps)} steps):")
-                    for i, step in enumerate(steps):
-                        print(f"    {step.format(i)}")
-                        if step.opcode == Prim.STOP:
-                            break
-
-                    # Show execution result
-                    if exec_result["success"]:
-                        out = exec_result["output"]
-                        if isinstance(out, list):
-                            print(f"\n  [Body] Output:")
-                            for item in out[:20]:
-                                print(f"    {item}")
-                            if len(out) > 20:
-                                print(f"    ... ({len(out)} total)")
-                        elif isinstance(out, dict):
-                            print(f"\n  [Body] Output:")
-                            for k, v in out.items():
-                                print(f"    {k}: {v}")
-                        elif isinstance(out, bool):
-                            print(f"\n  [Body] {out}")
-                        elif out is not None:
-                            print(f"\n  [Body] {out}")
-                        else:
-                            print(f"\n  [Body] Done.")
-                    else:
-                        print(f"\n  [Body] Error: {exec_result['error']}")
-
+                self.execute_and_display(result)
                 print()
 
             except KeyboardInterrupt:

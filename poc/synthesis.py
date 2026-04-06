@@ -363,6 +363,128 @@ TASK_TYPES = {
             _s(Prim.STOP),
         ],
     },
+
+    # ===== COMPOSITIONAL TASKS (v0.3) =====
+
+    "read_then_delete": {
+        "params": [("path", FILENAMES + NOVEL_FILENAMES)],
+        "templates": [
+            "read {path} and then delete it",
+            "read {path} and remove it",
+            "show me {path} and then delete it",
+            "cat {path} then delete it",
+            "read {path} then remove the file",
+            "display {path} and delete it afterwards",
+            "read file {path} and then get rid of it",
+            "open {path} then delete it",
+            "show {path} and remove it after",
+            "read {path} and erase it",
+            "view {path} then throw it away",
+            "read the file {path} and then remove it",
+        ],
+        "program": [
+            _s(Prim.FILE_OPEN_R, "span:path"),
+            _s(Prim.FILE_READ, "ref:0"),
+            _s(Prim.FILE_CLOSE, "ref:0"),
+            _s(Prim.FILE_DELETE, "span:path"),
+            _s(Prim.EMIT, "ref:1"),
+            _s(Prim.STOP),
+        ],
+    },
+    "copy_then_delete": {
+        "params": [("source", FILENAMES), ("destination", FILENAMES)],
+        "templates": [
+            "copy {source} to {destination} and delete the original",
+            "copy {source} to {destination} then delete {source}",
+            "back up {source} to {destination} and remove {source}",
+            "duplicate {source} as {destination} then erase {source}",
+            "copy {source} to {destination} and remove the original",
+            "cp {source} {destination} then rm {source}",
+            "copy file {source} to {destination} and delete {source}",
+            "save {source} to {destination} then throw away {source}",
+            "copy {source} into {destination} and delete the source",
+            "back up {source} as {destination} then delete it",
+        ],
+        "program": [
+            _s(Prim.FILE_COPY, "span:source", "span:destination"),
+            _s(Prim.FILE_DELETE, "span:source"),
+            _s(Prim.EMIT, "ref:0"),
+            _s(Prim.STOP),
+        ],
+    },
+    "create_then_verify": {
+        "params": [("path", FILENAMES), ("content", CONTENTS)],
+        "templates": [
+            "create {path} with content {content} and verify it exists",
+            "create file {path} with {content} and check it exists",
+            "make {path} with {content} then verify it was created",
+            "write {content} to {path} and check it exists",
+            "create {path} containing {content} and confirm it exists",
+            "make file {path} with {content} and verify",
+            "create a file {path} with {content} then check if it exists",
+            "write file {path} with content {content} then verify",
+            "create {path} with content {content} and see if it exists",
+            "save {content} to {path} and check the file exists",
+        ],
+        "program": [
+            _s(Prim.FILE_OPEN_W, "span:path"),
+            _s(Prim.FILE_WRITE, "ref:0", "span:content"),
+            _s(Prim.FILE_CLOSE, "ref:0"),
+            _s(Prim.FILE_EXISTS, "span:path"),
+            _s(Prim.EMIT, "ref:3"),
+            _s(Prim.STOP),
+        ],
+    },
+    "create_then_read": {
+        "params": [("path", FILENAMES), ("content", CONTENTS)],
+        "templates": [
+            "create {path} with content {content} and read it back",
+            "write {content} to {path} then read it",
+            "create file {path} with {content} and show its contents",
+            "make {path} with {content} and then read it",
+            "create {path} containing {content} then display it",
+            "write {content} to {path} and read it back",
+            "save {content} to {path} then cat it",
+            "create {path} with {content} and verify the content",
+            "make file {path} with {content} then read it back",
+            "create a file {path} with {content} and show what was written",
+        ],
+        "program": [
+            _s(Prim.FILE_OPEN_W, "span:path"),
+            _s(Prim.FILE_WRITE, "ref:0", "span:content"),
+            _s(Prim.FILE_CLOSE, "ref:0"),
+            _s(Prim.FILE_OPEN_R, "span:path"),
+            _s(Prim.FILE_READ, "ref:3"),
+            _s(Prim.FILE_CLOSE, "ref:3"),
+            _s(Prim.EMIT, "ref:4"),
+            _s(Prim.STOP),
+        ],
+    },
+    "read_and_save": {
+        "params": [("source", FILENAMES + NOVEL_FILENAMES), ("destination", FILENAMES + NOVEL_FILENAMES)],
+        "templates": [
+            "read {source} and save it to {destination}",
+            "read {source} and write it to {destination}",
+            "read file {source} and save to {destination}",
+            "cat {source} and save to {destination}",
+            "read {source} then save the content to {destination}",
+            "open {source} and write its content to {destination}",
+            "read {source} and store it in {destination}",
+            "get contents of {source} and save to {destination}",
+            "read {source} and put it in {destination}",
+            "read {source} and copy its content to {destination}",
+        ],
+        "program": [
+            _s(Prim.FILE_OPEN_R, "span:source"),
+            _s(Prim.FILE_READ, "ref:0"),
+            _s(Prim.FILE_CLOSE, "ref:0"),
+            _s(Prim.FILE_OPEN_W, "span:destination"),
+            _s(Prim.FILE_WRITE, "ref:3", "ref:1"),  # CROSS-OP DATA FLOW: data from READ
+            _s(Prim.FILE_CLOSE, "ref:3"),
+            _s(Prim.EMIT, "ref:5"),
+            _s(Prim.STOP),
+        ],
+    },
 }
 
 
@@ -370,12 +492,18 @@ TASK_TYPES = {
 # Training data generation
 # ============================================================================
 
+# Arg type constants (must match mind.py)
+_ARG_NONE = 0
+_ARG_SPAN = 1
+_ARG_REF = 2
+
+
 def _resolve_program(program_template, param_names, param_values, tokens, tokenizer):
-    """Convert program template to training targets with resolved span/ref indices."""
+    """Convert program template to training targets with resolved span/ref indices and types."""
     steps = []
     for op, a0_desc, a1_desc in program_template:
-        a0s, a0e, a0r = -1, -1, -1
-        a1s, a1e, a1r = -1, -1, -1
+        a0s, a0e, a0r, a0t = -1, -1, -1, _ARG_NONE
+        a1s, a1e, a1r, a1t = -1, -1, -1, _ARG_NONE
 
         for desc, setter in [(a0_desc, "a0"), (a1_desc, "a1")]:
             if desc == "none":
@@ -388,22 +516,22 @@ def _resolve_program(program_template, param_names, param_values, tokens, tokeni
                 span = find_span(tokens, val_tokens)
                 if span is None:
                     return None
-                s, e = span[0] + 1, span[1] + 1  # +1 for NULL prefix
+                s, e = span[0] + 1, span[1] + 1
                 if setter == "a0":
-                    a0s, a0e = s, e
+                    a0s, a0e, a0t = s, e, _ARG_SPAN
                 else:
-                    a1s, a1e = s, e
+                    a1s, a1e, a1t = s, e, _ARG_SPAN
             elif desc.startswith("ref:"):
                 ref_idx = int(desc[4:])
                 if setter == "a0":
-                    a0r = ref_idx
+                    a0r, a0t = ref_idx, _ARG_REF
                 else:
-                    a1r = ref_idx
+                    a1r, a1t = ref_idx, _ARG_REF
 
         steps.append({
             "opcode": int(op),
-            "a0_span_s": a0s, "a0_span_e": a0e, "a0_ref": a0r,
-            "a1_span_s": a1s, "a1_span_e": a1e, "a1_ref": a1r,
+            "a0_type": a0t, "a0_span_s": a0s, "a0_span_e": a0e, "a0_ref": a0r,
+            "a1_type": a1t, "a1_span_s": a1s, "a1_span_e": a1e, "a1_ref": a1r,
         })
     return steps
 
@@ -480,8 +608,8 @@ def generate_training_data(seed: int = 42) -> list[dict]:
         while len(steps) < MAX_PROGRAM_STEPS:
             steps.append({
                 "opcode": int(Prim.STOP),
-                "a0_span_s": -1, "a0_span_e": -1, "a0_ref": -1,
-                "a1_span_s": -1, "a1_span_e": -1, "a1_ref": -1,
+                "a0_type": _ARG_NONE, "a0_span_s": -1, "a0_span_e": -1, "a0_ref": -1,
+                "a1_type": _ARG_NONE, "a1_span_s": -1, "a1_span_e": -1, "a1_ref": -1,
             })
 
         examples.append({
@@ -511,9 +639,13 @@ def collate_fn(batch):
     max_len = max(b["length"] for b in batch)
     padded = [b["token_ids"] + [0] * (max_len - b["length"]) for b in batch]
 
-    opcodes, a0ss, a0se, a1ss, a1se, a0r, a1r = [], [], [], [], [], [], []
+    opcodes = []
+    a0t, a1t = [], []
+    a0ss, a0se, a1ss, a1se, a0r, a1r = [], [], [], [], [], []
     for b in batch:
         opcodes.append([s["opcode"] for s in b["steps"]])
+        a0t.append([s["a0_type"] for s in b["steps"]])
+        a1t.append([s["a1_type"] for s in b["steps"]])
         a0ss.append([s["a0_span_s"] for s in b["steps"]])
         a0se.append([s["a0_span_e"] for s in b["steps"]])
         a1ss.append([s["a1_span_s"] for s in b["steps"]])
@@ -525,6 +657,8 @@ def collate_fn(batch):
         "input_ids": torch.tensor(padded, dtype=torch.long),
         "lengths": torch.tensor([b["length"] for b in batch], dtype=torch.long),
         "target_opcodes": torch.tensor(opcodes, dtype=torch.long),
+        "target_a0_type": torch.tensor(a0t, dtype=torch.long),
+        "target_a1_type": torch.tensor(a1t, dtype=torch.long),
         "target_a0_span_s": torch.tensor(a0ss, dtype=torch.long),
         "target_a0_span_e": torch.tensor(a0se, dtype=torch.long),
         "target_a1_span_s": torch.tensor(a1ss, dtype=torch.long),
@@ -614,6 +748,13 @@ def train_soma(
                 t_ops.reshape(B * S),
             )
 
+            # Arg type losses
+            loss_type = nn.functional.cross_entropy(
+                out["a0t"].reshape(B * S, -1), batch["target_a0_type"].to(device).reshape(B * S),
+            ) + nn.functional.cross_entropy(
+                out["a1t"].reshape(B * S, -1), batch["target_a1_type"].to(device).reshape(B * S),
+            )
+
             # Span losses (masked)
             loss_span = torch.tensor(0.0, device=device)
             for key_s, key_e, tgt_s, tgt_e in [
@@ -631,7 +772,7 @@ def train_soma(
                 tr = batch[tgt_r].to(device)
                 loss_ref = loss_ref + _masked_ce(out[key_r].reshape(B * S, -1), tr.reshape(B * S))
 
-            loss = loss_op + loss_span + loss_ref
+            loss = loss_op + loss_type + loss_span + loss_ref
 
             optimizer.zero_grad()
             loss.backward()
@@ -662,6 +803,11 @@ def train_soma(
                 loss_op = nn.functional.cross_entropy(
                     out["op_logits"].reshape(B * S, -1), t_ops.reshape(B * S),
                 )
+                loss_type = nn.functional.cross_entropy(
+                    out["a0t"].reshape(B * S, -1), batch["target_a0_type"].to(device).reshape(B * S),
+                ) + nn.functional.cross_entropy(
+                    out["a1t"].reshape(B * S, -1), batch["target_a1_type"].to(device).reshape(B * S),
+                )
                 loss_span = torch.tensor(0.0, device=device)
                 for key_s, key_e, tgt_s, tgt_e in [
                     ("s0s", "s0e", "target_a0_span_s", "target_a0_span_e"),
@@ -677,7 +823,7 @@ def train_soma(
                     tr = batch[tgt_r].to(device)
                     loss_ref = loss_ref + _masked_ce(out[key_r].reshape(B * S, -1), tr.reshape(B * S))
 
-                loss = loss_op + loss_span + loss_ref
+                loss = loss_op + loss_type + loss_span + loss_ref
                 val_loss += loss.item() * B
 
                 # Program exact match (opcode sequence)
