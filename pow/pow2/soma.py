@@ -27,7 +27,7 @@ CHECKPOINT_PATH = "pow/pow2/mind_checkpoint.pt"
 ADAPT_BATCH = 8
 ADAPT_EVERY = 5
 
-LORA_TARGETS = ["op_head", "a0t_head", "a1t_head",
+LORA_TARGETS = ["gru", "op_head", "a0t_head", "a1t_head",
                 "s0s_q", "s0e_q", "s1s_q", "s1e_q", "r0q", "r1q"]
 
 
@@ -47,7 +47,7 @@ class Soma:
             map_location="cpu", weights_only=True))
 
         self.lora_layers, self.trainable, self.total = apply_lora(
-            self.mind, rank=4, alpha=1.0, target_modules=LORA_TARGETS)
+            self.mind, rank=8, alpha=2.0, target_modules=LORA_TARGETS)
         self.mind.eval()
 
         self.experience = ExperienceBuffer(max_size=200)
