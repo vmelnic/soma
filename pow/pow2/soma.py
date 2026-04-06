@@ -10,16 +10,13 @@ Commands: :checkpoint :restore :rollback :consolidate :status :adapt
 import json
 import os
 import platform
-import sys
 
 import torch
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
-from poc.tokenizer import Tokenizer, find_span, NULL_IDX
-from pow.pow1.discovery import discover_body, STOP_ID, EMIT_ID
-from pow.pow1.bridge import GenericBridge
-from pow.pow1.mind import SomaMind, ARG_NONE, ARG_SPAN, ARG_REF
+from pow.pow2.tokenizer import Tokenizer, find_span, NULL_IDX
+from pow.pow2.discovery import discover_body, STOP_ID, EMIT_ID
+from pow.pow2.bridge import GenericBridge
+from pow.pow2.mind import SomaMind, ARG_NONE, ARG_SPAN, ARG_REF
 from pow.pow2.lora import apply_lora
 from pow.pow2.memory import (
     ExperienceBuffer, adapt_from_experience,
