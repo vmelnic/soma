@@ -1,30 +1,29 @@
 """
-SOMA Synthesizer — Training data generation and training loop.
+SOMA Synthesizer — Phase 2: Program Sequence Training.
 
-This is the "compiler" that produces a functioning Mind for a specific Body.
-It takes the Body's operation manifest and generates training data (intent-action
-pairs), then trains the neural architecture to map intents to operations.
+Generates (intent, program) pairs and trains the Mind to output
+multi-step programs with data dependencies.
 
 Usage:
     python -m poc.synthesis
 """
 
-import json
 import os
 import random
 import time
-from pathlib import Path
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from poc.body import OPERATIONS, NUM_OPERATIONS, MAX_PARAM_SLOTS
+from poc.body import (
+    Prim, NUM_PRIMITIVES, MAX_PROGRAM_STEPS, OPCODE_SCHEMA, OPCODE_NAMES,
+)
 from poc.mind import SomaMind
 from poc.tokenizer import Tokenizer, find_span, NULL_IDX
 
 # ============================================================================
-# Training Data Templates
+# Parameter pools
 # ============================================================================
 
 PATHS = [
@@ -45,578 +44,550 @@ CONTENTS = [
     "this is a test", "readme", "data here", "my content", "done",
 ]
 
-PATTERNS = [
-    "*.txt", "*.py", "*.md", "*.log", "*.json", "*.csv", "*.js",
-    "*.html", "*.css", "test*", "readme*", "*.xml", "config*",
+# Novel filenames that appear rarely in training — forces the model to
+# rely on context (the verb) rather than memorizing specific filenames.
+# These become near-UNK during training, teaching generalization.
+NOVEL_FILENAMES = [
+    "alpha.txt", "bravo.md", "charlie.log", "delta.json", "echo.py",
+    "foxtrot.csv", "golf.html", "hotel.js", "india.xml", "juliet.txt",
+    "kilo.md", "lima.log", "mike.json", "november.py", "oscar.csv",
+    "papa.txt", "quebec.md", "romeo.log", "sierra.json", "tango.py",
+    "uniform.txt", "victor.md", "whiskey.log", "xray.json", "yankee.py",
+    "zulu.txt", "archive.tar", "backup.zip", "draft.doc", "spec.pdf",
 ]
 
-TEMPLATES: dict[int, list[str]] = {
-    # 0: LIST_DIR
-    0: [
-        "list files in {path}",
-        "show files in {path}",
-        "show me the files in {path}",
-        "what files are in {path}",
-        "display contents of {path}",
-        "ls {path}",
-        "what's in {path}",
-        "list the contents of {path}",
-        "show me what's in {path}",
-        "get files from {path}",
-        "list directory {path}",
-        "dir {path}",
-        "files in {path}",
-        "please show files in {path}",
-        "i want to see files in {path}",
-        "what do we have in {path}",
-        "show directory listing for {path}",
-        "get directory contents of {path}",
-        "can you list files in {path}",
-        "display files in {path}",
-        "show me everything in {path}",
-        "check out files in {path}",
-        "browse {path}",
-        "explore {path}",
-        "look at files in {path}",
-        "see what is in {path}",
-        "check what files are in {path}",
-        "give me a listing of {path}",
-        "what exists in {path}",
-        "enumerate all files in {path}",
-    ],
-    # 1: CREATE_FILE
-    1: [
-        "create a file called {path} with content {content}",
-        "make a file {path} containing {content}",
-        "create {path} with content {content}",
-        "make a new file {path} with {content}",
-        "create file {path} content {content}",
-        "save {content} to file {path}",
-        "new file {path} with text {content}",
-        "put {content} into a new file called {path}",
-        "write a file named {path} with the content {content}",
-        "please create {path} containing {content}",
-        "make file {path} with {content} inside",
-        "generate a file {path} with {content}",
-        "create a new file {path} and write {content}",
-        "store {content} in file {path}",
-        "write file {path} with content {content}",
-        "create a file {path} and put {content} in it",
-        "write to file {path} the content {content}",
-        "create a text file {path} with {content}",
-        "save content {content} into file {path}",
-        "write the text {content} to a file called {path}",
-    ],
-    # 2: READ_FILE
-    2: [
-        "read {path}",
-        "show me {path}",
-        "cat {path}",
-        "display {path}",
-        "open {path}",
-        "read the file {path}",
-        "show contents of {path}",
-        "what's in file {path}",
-        "read file {path}",
-        "print {path}",
-        "view {path}",
-        "show {path} contents",
-        "get contents of {path}",
-        "display file {path}",
-        "read the contents of {path}",
-        "please show me file {path}",
-        "can you read {path}",
-        "let me see file {path}",
-        "output the contents of {path}",
-        "type {path}",
-        "show the content of file {path}",
-        "print out {path}",
-        "dump {path}",
-        "what does {path} contain",
-        "read out {path}",
-    ],
-    # 3: DELETE_FILE
-    3: [
-        "delete {path}",
-        "remove {path}",
-        "rm {path}",
-        "delete the file {path}",
-        "remove file {path}",
-        "erase {path}",
-        "get rid of {path}",
-        "trash {path}",
-        "delete file {path}",
-        "please delete {path}",
-        "can you remove {path}",
-        "destroy {path}",
-        "wipe {path}",
-        "unlink {path}",
-        "remove the file {path}",
-        "eliminate {path}",
-        "throw away {path}",
-        "discard {path}",
-    ],
-    # 4: MAKE_DIR
-    4: [
-        "create directory {path}",
-        "make directory {path}",
-        "mkdir {path}",
-        "create a folder {path}",
-        "make a folder called {path}",
-        "new directory {path}",
-        "create folder {path}",
-        "make folder {path}",
-        "please create directory {path}",
-        "add a directory {path}",
-        "create a new folder {path}",
-        "set up directory {path}",
-        "make a new directory called {path}",
-        "create a new directory {path}",
-        "add directory {path}",
-        "new folder {path}",
-    ],
-    # 5: FILE_INFO
-    5: [
-        "info about {path}",
-        "file info {path}",
-        "details of {path}",
-        "stat {path}",
-        "get info on {path}",
-        "show details of {path}",
-        "file details {path}",
-        "metadata for {path}",
-        "what is the size of {path}",
-        "when was {path} modified",
-        "show file information for {path}",
-        "tell me about file {path}",
-        "properties of {path}",
-        "get file details for {path}",
-        "file properties {path}",
-        "describe file {path}",
-    ],
-    # 6: CURRENT_DIR
-    6: [
-        "where am i",
-        "current directory",
-        "pwd",
-        "what directory am i in",
-        "print working directory",
-        "show current directory",
-        "which directory",
-        "current path",
-        "what is the current directory",
-        "show me the current path",
-        "what folder am i in",
-        "get current directory",
-        "where are we",
-        "current location",
-        "what's the working directory",
-        "where am i right now",
-        "what is my current location",
-        "what path am i in",
-        "show my location",
-        "present working directory",
-    ],
-    # 7: SYSTEM_INFO
-    7: [
-        "system info",
-        "system information",
-        "show system info",
-        "what system is this",
-        "uname",
-        "tell me about this system",
-        "what os is this",
-        "operating system info",
-        "show os information",
-        "what machine is this",
-        "system details",
-        "get system information",
-        "what platform am i on",
-        "show machine info",
-        "computer info",
-        "give me system information",
-        "describe this computer",
-        "what hardware is this",
-        "show computer details",
-        "os details",
-    ],
-    # 8: CURRENT_TIME
-    8: [
-        "what time is it",
-        "current time",
-        "tell me the time",
-        "show the time",
-        "time now",
-        "what is the time",
-        "get current time",
-        "show current date",
-        "what day is it",
-        "current date and time",
-        "give me the time",
-        "tell me the date",
-        "date",
-        "what's the time",
-        "time please",
-        "whats the current time",
-        "what is the current time right now",
-        "display the time",
-        "show me the time",
-        "what's the date today",
-        "what is today's date",
-        "current time and date",
-        "right now what time is it",
-        "clock",
-    ],
-    # 9: DISK_USAGE
-    9: [
-        "disk usage",
-        "disk space",
-        "how much disk space",
-        "show disk usage",
-        "df",
-        "storage space",
-        "how much space is left",
-        "check disk space",
-        "available disk space",
-        "free space",
-        "how much storage",
-        "show storage info",
-        "how much free space do i have",
-        "storage left",
-        "remaining disk space",
-        "how full is the disk",
-        "space available",
-        "check storage",
-        "disk free space",
-        "how much room is left",
-    ],
-    # 10: PROCESS_LIST
-    10: [
-        "list processes",
-        "show processes",
-        "running processes",
-        "ps",
-        "what's running",
-        "show running processes",
-        "process list",
-        "active processes",
-        "list running processes",
-        "what processes are running",
-        "top processes",
-        "show active processes",
-        "what processes are active",
-        "current processes",
-        "show me all processes",
-        "what is currently running",
-        "display running processes",
-        "tasks running",
-        "show all tasks",
-        "what tasks are active",
-    ],
-    # 11: MOVE_FILE
-    11: [
-        "move {source} to {destination}",
-        "rename {source} to {destination}",
-        "mv {source} {destination}",
-        "move file {source} to {destination}",
-        "rename file {source} to {destination}",
-        "relocate {source} to {destination}",
-        "move {source} into {destination}",
-        "please move {source} to {destination}",
-        "transfer {source} to {destination}",
-        "can you move {source} to {destination}",
-        "move the file {source} to {destination}",
-        "rename the file {source} as {destination}",
-    ],
-    # 12: COPY_FILE
-    12: [
-        "copy {source} to {destination}",
-        "cp {source} {destination}",
-        "duplicate {source} to {destination}",
-        "copy file {source} to {destination}",
-        "make a copy of {source} as {destination}",
-        "clone {source} to {destination}",
-        "copy {source} into {destination}",
-        "please copy {source} to {destination}",
-        "replicate {source} as {destination}",
-        "can you copy {source} to {destination}",
-        "copy the file {source} to {destination}",
-        "duplicate file {source} as {destination}",
-        "back up {source} to {destination}",
-        "create a copy of {source} called {destination}",
-    ],
-    # 13: FIND_FILE
-    13: [
-        "find {pattern}",
-        "search for {pattern}",
-        "find files matching {pattern}",
-        "look for {pattern}",
-        "search {pattern}",
-        "find all {pattern} files",
-        "locate {pattern}",
-        "where are the {pattern} files",
-        "find files named {pattern}",
-        "search for files matching {pattern}",
-        "please find {pattern}",
-        "can you find {pattern}",
-        "look for files named {pattern}",
-        "hunt for {pattern}",
-        "scan for {pattern}",
-    ],
-    # 14: FILE_EXISTS
-    14: [
-        "does {path} exist",
-        "check if {path} exists",
-        "is there a file {path}",
-        "file exists {path}",
-        "does file {path} exist",
-        "check {path} exists",
-        "is {path} there",
-        "see if {path} exists",
-        "does {path} exist on disk",
-        "verify {path} exists",
-        "is there a {path}",
-        "check for {path}",
-        "tell me if {path} exists",
-        "does the file {path} exist",
-        "is {path} present",
-        "look if {path} exists",
-        "test if {path} exists",
-    ],
+ALL_PATHS = PATHS + FILENAMES + NOVEL_FILENAMES
+
+# ============================================================================
+# Task types: (templates, program generator)
+# Each task maps intent templates to a program sequence.
+# ============================================================================
+
+# Program step shorthand:
+# S(op, "span:name", "none") or S(op, "ref:N", "span:name")
+def _s(op, a0="none", a1="none"):
+    """Build a program step descriptor."""
+    return (op, a0, a1)
+
+
+TASK_TYPES = {
+    "read_file": {
+        "params": [("path", FILENAMES + NOVEL_FILENAMES)],
+        "templates": [
+            "read {path}", "cat {path}", "show me {path}", "display {path}",
+            "open {path}", "read the file {path}", "show contents of {path}",
+            "read file {path}", "print {path}", "view {path}",
+            "get contents of {path}", "display file {path}",
+            "read the contents of {path}", "can you read {path}",
+            "let me see file {path}", "show the content of file {path}",
+            "what does {path} contain", "dump {path}", "type {path}",
+            "output the contents of {path}", "print out {path}",
+            "read out {path}", "show {path} contents",
+            "please show me file {path}", "what's in file {path}",
+        ],
+        "program": [
+            _s(Prim.FILE_OPEN_R, "span:path"),
+            _s(Prim.FILE_READ, "ref:0"),
+            _s(Prim.FILE_CLOSE, "ref:0"),
+            _s(Prim.EMIT, "ref:1"),
+            _s(Prim.STOP),
+        ],
+    },
+    "create_file_content": {
+        "params": [("path", FILENAMES), ("content", CONTENTS)],
+        "templates": [
+            "create a file called {path} with content {content}",
+            "make a file {path} containing {content}",
+            "create {path} with content {content}",
+            "make a new file {path} with {content}",
+            "create file {path} content {content}",
+            "save {content} to file {path}",
+            "new file {path} with text {content}",
+            "write a file named {path} with the content {content}",
+            "please create {path} containing {content}",
+            "make file {path} with {content} inside",
+            "create a new file {path} and write {content}",
+            "store {content} in file {path}",
+            "write file {path} with content {content}",
+            "create a text file {path} with {content}",
+            "write the text {content} to a file called {path}",
+        ],
+        "program": [
+            _s(Prim.FILE_OPEN_W, "span:path"),
+            _s(Prim.FILE_WRITE, "ref:0", "span:content"),
+            _s(Prim.FILE_CLOSE, "ref:0"),
+            _s(Prim.EMIT, "ref:2"),
+            _s(Prim.STOP),
+        ],
+    },
+    "create_file_empty": {
+        "params": [("path", FILENAMES)],
+        "templates": [
+            "create file {path}", "create {path}", "make file {path}",
+            "touch {path}", "create a file {path}",
+            "create a file called {path}", "make a file called {path}",
+            "create an empty file {path}", "new file {path}",
+            "make a new file {path}", "please create file {path}",
+            "generate file {path}", "create a new file called {path}",
+            "make a new file called {path}", "add a file {path}",
+        ],
+        "program": [
+            _s(Prim.FILE_OPEN_W, "span:path"),
+            _s(Prim.FILE_CLOSE, "ref:0"),
+            _s(Prim.EMIT, "ref:1"),
+            _s(Prim.STOP),
+        ],
+    },
+    "delete_file": {
+        "params": [("path", ALL_PATHS)],
+        "templates": [
+            "delete {path}", "remove {path}", "rm {path}",
+            "delete the file {path}", "remove file {path}",
+            "erase {path}", "get rid of {path}", "trash {path}",
+            "delete file {path}", "please delete {path}",
+            "can you remove {path}", "destroy {path}", "wipe {path}",
+            "unlink {path}", "throw away {path}", "discard {path}",
+            "eliminate {path}", "remove the file {path}",
+        ],
+        "program": [
+            _s(Prim.FILE_DELETE, "span:path"),
+            _s(Prim.EMIT, "ref:0"),
+            _s(Prim.STOP),
+        ],
+    },
+    "list_dir": {
+        "params": [("path", ALL_PATHS)],
+        "templates": [
+            "list files in {path}", "show files in {path}",
+            "show me the files in {path}", "what files are in {path}",
+            "ls {path}", "what's in {path}", "list the contents of {path}",
+            "show me what's in {path}", "get files from {path}",
+            "list directory {path}", "dir {path}", "files in {path}",
+            "please show files in {path}", "display files in {path}",
+            "show me everything in {path}", "check out files in {path}",
+            "browse {path}", "explore {path}", "look at files in {path}",
+            "see what is in {path}", "what do we have in {path}",
+            "show directory listing for {path}", "get directory contents of {path}",
+            "can you list files in {path}", "enumerate all files in {path}",
+            "display contents of {path}", "check what files are in {path}",
+            "give me a listing of {path}", "what exists in {path}",
+        ],
+        "program": [
+            _s(Prim.DIR_LIST, "span:path"),
+            _s(Prim.EMIT, "ref:0"),
+            _s(Prim.STOP),
+        ],
+    },
+    "file_info": {
+        "params": [("path", ALL_PATHS)],
+        "templates": [
+            "info about {path}", "file info {path}", "details of {path}",
+            "stat {path}", "get info on {path}", "show details of {path}",
+            "file details {path}", "metadata for {path}",
+            "what is the size of {path}", "when was {path} modified",
+            "show file information for {path}", "tell me about file {path}",
+            "properties of {path}", "get file details for {path}",
+            "describe file {path}", "file properties {path}",
+        ],
+        "program": [
+            _s(Prim.FILE_STAT, "span:path"),
+            _s(Prim.EMIT, "ref:0"),
+            _s(Prim.STOP),
+        ],
+    },
+    "make_dir": {
+        "params": [("path", FILENAMES + ["projects", "output", "backup", "logs", "temp", "archive"])],
+        "templates": [
+            "create directory {path}", "make directory {path}", "mkdir {path}",
+            "create a folder {path}", "make a folder called {path}",
+            "new directory {path}", "create folder {path}", "make folder {path}",
+            "please create directory {path}", "add a directory {path}",
+            "create a new folder {path}", "set up directory {path}",
+            "make a new directory called {path}", "create a new directory {path}",
+            "add directory {path}", "new folder {path}",
+        ],
+        "program": [
+            _s(Prim.DIR_CREATE, "span:path"),
+            _s(Prim.EMIT, "ref:0"),
+            _s(Prim.STOP),
+        ],
+    },
+    "file_exists": {
+        "params": [("path", ALL_PATHS)],
+        "templates": [
+            "does {path} exist", "check if {path} exists",
+            "is there a file {path}", "file exists {path}",
+            "does file {path} exist", "check {path} exists",
+            "is {path} there", "see if {path} exists",
+            "verify {path} exists", "is there a {path}",
+            "check for {path}", "tell me if {path} exists",
+            "does the file {path} exist", "is {path} present",
+            "test if {path} exists", "look if {path} exists",
+        ],
+        "program": [
+            _s(Prim.FILE_EXISTS, "span:path"),
+            _s(Prim.EMIT, "ref:0"),
+            _s(Prim.STOP),
+        ],
+    },
+    "rename_file": {
+        "params": [("source", FILENAMES), ("destination", FILENAMES)],
+        "templates": [
+            "move {source} to {destination}", "rename {source} to {destination}",
+            "mv {source} {destination}", "move file {source} to {destination}",
+            "rename file {source} to {destination}",
+            "relocate {source} to {destination}",
+            "move {source} into {destination}",
+            "please move {source} to {destination}",
+            "transfer {source} to {destination}",
+            "can you move {source} to {destination}",
+            "move the file {source} to {destination}",
+            "rename the file {source} as {destination}",
+        ],
+        "program": [
+            _s(Prim.FILE_RENAME, "span:source", "span:destination"),
+            _s(Prim.EMIT, "ref:0"),
+            _s(Prim.STOP),
+        ],
+    },
+    "copy_file": {
+        "params": [("source", FILENAMES), ("destination", FILENAMES)],
+        "templates": [
+            "copy {source} to {destination}", "cp {source} {destination}",
+            "duplicate {source} to {destination}",
+            "copy file {source} to {destination}",
+            "make a copy of {source} as {destination}",
+            "clone {source} to {destination}",
+            "copy {source} into {destination}",
+            "please copy {source} to {destination}",
+            "can you copy {source} to {destination}",
+            "copy the file {source} to {destination}",
+            "duplicate file {source} as {destination}",
+            "back up {source} to {destination}",
+            "create a copy of {source} called {destination}",
+        ],
+        "program": [
+            _s(Prim.FILE_COPY, "span:source", "span:destination"),
+            _s(Prim.EMIT, "ref:0"),
+            _s(Prim.STOP),
+        ],
+    },
+    "current_dir": {
+        "params": [],
+        "templates": [
+            "where am i", "current directory", "pwd",
+            "what directory am i in", "print working directory",
+            "show current directory", "which directory", "current path",
+            "what is the current directory", "show me the current path",
+            "what folder am i in", "get current directory", "where are we",
+            "current location", "what's the working directory",
+            "where am i right now", "what is my current location",
+            "what path am i in", "show my location",
+            "present working directory",
+        ],
+        "program": [
+            _s(Prim.SYS_CWD),
+            _s(Prim.EMIT, "ref:0"),
+            _s(Prim.STOP),
+        ],
+    },
+    "system_info": {
+        "params": [],
+        "templates": [
+            "system info", "system information", "show system info",
+            "what system is this", "uname", "tell me about this system",
+            "what os is this", "operating system info",
+            "show os information", "what machine is this",
+            "system details", "get system information",
+            "what platform am i on", "show machine info", "computer info",
+            "give me system information", "describe this computer",
+            "what hardware is this", "show computer details", "os details",
+        ],
+        "program": [
+            _s(Prim.SYS_INFO),
+            _s(Prim.EMIT, "ref:0"),
+            _s(Prim.STOP),
+        ],
+    },
+    "current_time": {
+        "params": [],
+        "templates": [
+            "what time is it", "current time", "tell me the time",
+            "show the time", "time now", "what is the time",
+            "get current time", "show current date", "what day is it",
+            "current date and time", "give me the time", "tell me the date",
+            "date", "what's the time", "time please",
+            "whats the current time", "what is the current time right now",
+            "display the time", "show me the time", "what's the date today",
+            "what is today's date", "clock", "right now what time is it",
+        ],
+        "program": [
+            _s(Prim.SYS_TIME),
+            _s(Prim.EMIT, "ref:0"),
+            _s(Prim.STOP),
+        ],
+    },
+    "disk_usage": {
+        "params": [],
+        "templates": [
+            "disk usage", "disk space", "how much disk space",
+            "show disk usage", "df", "storage space",
+            "how much space is left", "check disk space",
+            "available disk space", "free space", "how much storage",
+            "show storage info", "how much free space do i have",
+            "storage left", "remaining disk space", "how full is the disk",
+            "space available", "check storage", "disk free space",
+            "how much room is left",
+        ],
+        "program": [
+            _s(Prim.SYS_DISK),
+            _s(Prim.EMIT, "ref:0"),
+            _s(Prim.STOP),
+        ],
+    },
+    "process_list": {
+        "params": [],
+        "templates": [
+            "list processes", "show processes", "running processes", "ps",
+            "what's running", "show running processes", "process list",
+            "active processes", "list running processes",
+            "what processes are running", "top processes",
+            "show active processes", "what processes are active",
+            "current processes", "show me all processes",
+            "what is currently running", "display running processes",
+            "tasks running", "show all tasks", "what tasks are active",
+        ],
+        "program": [
+            _s(Prim.SYS_PROCS),
+            _s(Prim.EMIT, "ref:0"),
+            _s(Prim.STOP),
+        ],
+    },
 }
 
-# Templates for CREATE_FILE without content (single param: path only)
-CREATE_FILE_NO_CONTENT = [
-    "create file {path}",
-    "create {path}",
-    "make file {path}",
-    "touch {path}",
-    "create a file {path}",
-    "create a file called {path}",
-    "make a file called {path}",
-    "create an empty file {path}",
-    "new file {path}",
-    "make a new file {path}",
-    "please create file {path}",
-    "generate file {path}",
-    "create a new file called {path}",
-    "make a new file called {path}",
-    "add a file {path}",
-    "create a blank file {path}",
-]
 
+# ============================================================================
+# Training data generation
+# ============================================================================
 
-def _get_param_pool(param_type: str, param_name: str) -> list[str]:
-    if param_name == "pattern":
-        return PATTERNS
-    if param_name == "content":
-        return CONTENTS
-    if param_name in ("source", "destination"):
-        return FILENAMES
-    if param_type == "path":
-        return PATHS + FILENAMES
-    return FILENAMES
+def _resolve_program(program_template, param_names, param_values, tokens, tokenizer):
+    """Convert program template to training targets with resolved span/ref indices."""
+    steps = []
+    for op, a0_desc, a1_desc in program_template:
+        a0s, a0e, a0r = -1, -1, -1
+        a1s, a1e, a1r = -1, -1, -1
+
+        for desc, setter in [(a0_desc, "a0"), (a1_desc, "a1")]:
+            if desc == "none":
+                continue
+            elif desc.startswith("span:"):
+                name = desc[5:]
+                idx = param_names.index(name)
+                val = param_values[idx]
+                val_tokens = tokenizer.tokenize(val)
+                span = find_span(tokens, val_tokens)
+                if span is None:
+                    return None
+                s, e = span[0] + 1, span[1] + 1  # +1 for NULL prefix
+                if setter == "a0":
+                    a0s, a0e = s, e
+                else:
+                    a1s, a1e = s, e
+            elif desc.startswith("ref:"):
+                ref_idx = int(desc[4:])
+                if setter == "a0":
+                    a0r = ref_idx
+                else:
+                    a1r = ref_idx
+
+        steps.append({
+            "opcode": int(op),
+            "a0_span_s": a0s, "a0_span_e": a0e, "a0_ref": a0r,
+            "a1_span_s": a1s, "a1_span_e": a1e, "a1_ref": a1r,
+        })
+    return steps
 
 
 def generate_training_data(seed: int = 42) -> list[dict]:
-    """Generate synthetic training examples from templates."""
+    """Generate (intent, program) training examples."""
     rng = random.Random(seed)
-    examples = []
+    tokenizer = Tokenizer()
+    examples_raw = []
 
-    for op in OPERATIONS:
-        templates = TEMPLATES[op.opcode]
-        num_params = len(op.params)
+    for task_name, task in TASK_TYPES.items():
+        templates = task["templates"]
+        params_spec = task["params"]
+        program_template = task["program"]
+        num_params = len(params_spec)
 
         if num_params == 0:
-            # Oversample zero-param ops to balance against 1/2-param ops
             for template in templates:
-                for _ in range(8):
-                    examples.append({
+                for _ in range(8):  # oversample zero-param tasks
+                    examples_raw.append({
                         "text": template,
-                        "op_id": op.opcode,
-                        "param_values": [None, None],
+                        "param_names": [],
+                        "param_values": [],
+                        "program_template": program_template,
                     })
 
-        if num_params == 1:
-            pool = _get_param_pool(op.params[0].type, op.params[0].name)
+        elif num_params == 1:
+            pname, pool = params_spec[0]
             for template in templates:
-                sampled = rng.sample(pool, min(len(pool), 7))
+                sampled = rng.sample(pool, min(len(pool), 10))
                 for val in sampled:
-                    text = template.format(
-                        path=val, pattern=val, source=val, destination=val
-                    )
-                    examples.append({
+                    text = template.format(**{pname: val})
+                    examples_raw.append({
                         "text": text,
-                        "op_id": op.opcode,
-                        "param_values": [val, None],
+                        "param_names": [pname],
+                        "param_values": [val],
+                        "program_template": program_template,
                     })
 
-        # CREATE_FILE also has single-param templates (no content)
-        if op.opcode == 1:
-            pool = _get_param_pool("path", "path")
-            for template in CREATE_FILE_NO_CONTENT:
-                sampled = rng.sample(pool, min(len(pool), 7))
-                for val in sampled:
-                    text = template.format(path=val)
-                    examples.append({
-                        "text": text,
-                        "op_id": op.opcode,
-                        "param_values": [val, None],
-                    })
-
-        if num_params == 2:
-            pool0 = _get_param_pool(op.params[0].type, op.params[0].name)
-            pool1 = _get_param_pool(op.params[1].type, op.params[1].name)
+        elif num_params == 2:
+            pname0, pool0 = params_spec[0]
+            pname1, pool1 = params_spec[1]
             for template in templates:
-                pairs = []
                 for _ in range(12):
                     v0 = rng.choice(pool0)
                     v1 = rng.choice(pool1)
                     if v0 != v1:
-                        pairs.append((v0, v1))
-                for v0, v1 in pairs:
-                    text = template.format(
-                        path=v0, content=v1,
-                        source=v0, destination=v1,
-                    )
-                    examples.append({
-                        "text": text,
-                        "op_id": op.opcode,
-                        "param_values": [v0, v1],
-                    })
+                        text = template.format(**{pname0: v0, pname1: v1})
+                        examples_raw.append({
+                            "text": text,
+                            "param_names": [pname0, pname1],
+                            "param_values": [v0, v1],
+                            "program_template": program_template,
+                        })
+
+    # Build tokenizer vocab from all texts
+    tokenizer.build_vocab([ex["text"] for ex in examples_raw])
+
+    # Resolve programs
+    examples = []
+    skipped = 0
+    for ex in examples_raw:
+        tokens = tokenizer.tokenize(ex["text"])
+        token_ids = [NULL_IDX] + tokenizer.encode(ex["text"])
+        steps = _resolve_program(
+            ex["program_template"], ex["param_names"], ex["param_values"],
+            tokens, tokenizer,
+        )
+        if steps is None:
+            skipped += 1
+            continue
+
+        # Pad to MAX_PROGRAM_STEPS
+        while len(steps) < MAX_PROGRAM_STEPS:
+            steps.append({
+                "opcode": int(Prim.STOP),
+                "a0_span_s": -1, "a0_span_e": -1, "a0_ref": -1,
+                "a1_span_s": -1, "a1_span_e": -1, "a1_ref": -1,
+            })
+
+        examples.append({
+            "token_ids": token_ids,
+            "length": len(token_ids),
+            "steps": steps[:MAX_PROGRAM_STEPS],
+        })
 
     rng.shuffle(examples)
-    return examples
+    return examples, tokenizer, skipped
 
 
-def prepare_example(example: dict, tokenizer: Tokenizer) -> dict | None:
-    """Convert raw example to training format with span positions.
-    Prepends <NULL> token so null spans point at index 0."""
-    tokens = tokenizer.tokenize(example["text"])
-    token_ids = [NULL_IDX] + tokenizer.encode(example["text"])
-    length = len(token_ids)
-
-    spans_start = []
-    spans_end = []
-    for param_val in example["param_values"]:
-        if param_val is None:
-            spans_start.append(0)
-            spans_end.append(0)
-        else:
-            param_tokens = tokenizer.tokenize(param_val)
-            span = find_span(tokens, param_tokens)
-            if span is None:
-                return None
-            spans_start.append(span[0] + 1)
-            spans_end.append(span[1] + 1)
-
-    return {
-        "token_ids": token_ids,
-        "length": length,
-        "op_id": example["op_id"],
-        "span_starts": spans_start,
-        "span_ends": spans_end,
-    }
-
+# ============================================================================
+# Dataset and DataLoader
+# ============================================================================
 
 class SomaDataset(Dataset):
-    def __init__(self, examples: list[dict]):
+    def __init__(self, examples):
         self.examples = examples
-
     def __len__(self):
         return len(self.examples)
-
     def __getitem__(self, idx):
         return self.examples[idx]
 
 
-def collate_fn(batch: list[dict]) -> dict:
+def collate_fn(batch):
     max_len = max(b["length"] for b in batch)
-    padded_ids = [
-        b["token_ids"] + [0] * (max_len - b["length"])
-        for b in batch
-    ]
+    padded = [b["token_ids"] + [0] * (max_len - b["length"]) for b in batch]
+
+    opcodes, a0ss, a0se, a1ss, a1se, a0r, a1r = [], [], [], [], [], [], []
+    for b in batch:
+        opcodes.append([s["opcode"] for s in b["steps"]])
+        a0ss.append([s["a0_span_s"] for s in b["steps"]])
+        a0se.append([s["a0_span_e"] for s in b["steps"]])
+        a1ss.append([s["a1_span_s"] for s in b["steps"]])
+        a1se.append([s["a1_span_e"] for s in b["steps"]])
+        a0r.append([s["a0_ref"] for s in b["steps"]])
+        a1r.append([s["a1_ref"] for s in b["steps"]])
+
     return {
-        "input_ids": torch.tensor(padded_ids, dtype=torch.long),
+        "input_ids": torch.tensor(padded, dtype=torch.long),
         "lengths": torch.tensor([b["length"] for b in batch], dtype=torch.long),
-        "op_ids": torch.tensor([b["op_id"] for b in batch], dtype=torch.long),
-        "span_starts": torch.tensor([b["span_starts"] for b in batch], dtype=torch.long),
-        "span_ends": torch.tensor([b["span_ends"] for b in batch], dtype=torch.long),
+        "target_opcodes": torch.tensor(opcodes, dtype=torch.long),
+        "target_a0_span_s": torch.tensor(a0ss, dtype=torch.long),
+        "target_a0_span_e": torch.tensor(a0se, dtype=torch.long),
+        "target_a1_span_s": torch.tensor(a1ss, dtype=torch.long),
+        "target_a1_span_e": torch.tensor(a1se, dtype=torch.long),
+        "target_a0_ref": torch.tensor(a0r, dtype=torch.long),
+        "target_a1_ref": torch.tensor(a1r, dtype=torch.long),
     }
+
+
+# ============================================================================
+# Training
+# ============================================================================
+
+def _masked_ce(logits, targets, ignore_val=-1):
+    """CrossEntropy loss only where targets != ignore_val."""
+    mask = targets != ignore_val
+    if not mask.any():
+        return torch.tensor(0.0, device=logits.device)
+    return nn.functional.cross_entropy(logits[mask], targets[mask])
 
 
 def train_soma(
     save_dir: str = "poc/artifacts",
-    epochs: int = 120,
+    epochs: int = 200,
     batch_size: int = 32,
-    lr: float = 2e-3,
-    patience: int = 20,
+    lr: float = 1e-3,
+    patience: int = 30,
     seed: int = 42,
 ):
-    """Synthesize a SOMA Mind onto the Body."""
     torch.manual_seed(seed)
     random.seed(seed)
     device = torch.device("cpu")
     print(f"Device: {device}")
 
-    # --- Generate training data ---
+    # Generate data
     print("\n[Synthesis] Generating training data...")
-    raw_examples = generate_training_data(seed=seed)
-    print(f"  Raw examples: {len(raw_examples)}")
+    examples, tokenizer, skipped = generate_training_data(seed=seed)
+    print(f"  Examples: {len(examples)} (skipped {skipped})")
+    print(f"  Vocabulary: {tokenizer.vocab_size}")
 
-    tokenizer = Tokenizer()
-    tokenizer.build_vocab([ex["text"] for ex in raw_examples])
-    print(f"  Vocabulary size: {tokenizer.vocab_size}")
-
-    prepared = []
-    skipped = 0
-    for ex in raw_examples:
-        p = prepare_example(ex, tokenizer)
-        if p is not None:
-            prepared.append(p)
-        else:
-            skipped += 1
-    print(f"  Prepared examples: {len(prepared)} (skipped {skipped})")
-
-    n = len(prepared)
+    n = len(examples)
     n_train = int(0.8 * n)
     n_val = int(0.1 * n)
-    train_data = prepared[:n_train]
-    val_data = prepared[n_train:n_train + n_val]
-    test_data = prepared[n_train + n_val:]
+    train_data = examples[:n_train]
+    val_data = examples[n_train:n_train + n_val]
+    test_data = examples[n_train + n_val:]
     print(f"  Train: {len(train_data)}, Val: {len(val_data)}, Test: {len(test_data)}")
 
-    op_counts = [0] * NUM_OPERATIONS
-    for ex in train_data:
-        op_counts[ex["op_id"]] += 1
-
-    weights = torch.zeros(NUM_OPERATIONS)
-    for i, c in enumerate(op_counts):
-        weights[i] = 1.0 / max(c, 1)
-    weights = weights / weights.sum() * NUM_OPERATIONS
-
-    # --- Create model ---
+    # Model
     model = SomaMind(vocab_size=tokenizer.vocab_size).to(device)
     total_params = sum(p.numel() for p in model.parameters())
     print(f"\n[Synthesis] Model: {total_params:,} parameters")
 
-    criterion_op = nn.CrossEntropyLoss(weight=weights.to(device))
-    criterion_span = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5
+        optimizer, mode="min", factor=0.5, patience=10,
     )
 
-    train_loader = DataLoader(
-        SomaDataset(train_data), batch_size=batch_size,
-        shuffle=True, collate_fn=collate_fn,
-    )
-    val_loader = DataLoader(
-        SomaDataset(val_data), batch_size=batch_size,
-        shuffle=False, collate_fn=collate_fn,
-    )
+    train_loader = DataLoader(SomaDataset(train_data), batch_size=batch_size,
+                              shuffle=True, collate_fn=collate_fn)
+    val_loader = DataLoader(SomaDataset(val_data), batch_size=batch_size,
+                            shuffle=False, collate_fn=collate_fn)
 
-    # --- Training ---
     print(f"\n[Synthesis] Training for up to {epochs} epochs (patience={patience})...")
     best_val_loss = float("inf")
     best_epoch = 0
@@ -627,92 +598,102 @@ def train_soma(
     for epoch in range(1, epochs + 1):
         model.train()
         train_loss = 0.0
-        train_correct_op = 0
         train_total = 0
 
         for batch in train_loader:
-            input_ids = batch["input_ids"].to(device)
-            lengths = batch["lengths"].to(device)
-            op_ids = batch["op_ids"].to(device)
-            span_starts = batch["span_starts"].to(device)
-            span_ends = batch["span_ends"].to(device)
+            ids = batch["input_ids"].to(device)
+            lens = batch["lengths"].to(device)
+            t_ops = batch["target_opcodes"].to(device)
 
-            op_logits, span_logits = model(input_ids, lengths)
-            loss_op = criterion_op(op_logits, op_ids)
+            out = model(ids, lens, t_ops)
+            B, S, _ = out["op_logits"].shape
 
+            # Opcode loss
+            loss_op = nn.functional.cross_entropy(
+                out["op_logits"].reshape(B * S, -1),
+                t_ops.reshape(B * S),
+            )
+
+            # Span losses (masked)
             loss_span = torch.tensor(0.0, device=device)
-            for slot_idx, (s_logits, e_logits) in enumerate(span_logits):
-                loss_span = loss_span + criterion_span(s_logits, span_starts[:, slot_idx])
-                loss_span = loss_span + criterion_span(e_logits, span_ends[:, slot_idx])
+            for key_s, key_e, tgt_s, tgt_e in [
+                ("s0s", "s0e", "target_a0_span_s", "target_a0_span_e"),
+                ("s1s", "s1e", "target_a1_span_s", "target_a1_span_e"),
+            ]:
+                ts = batch[tgt_s].to(device)
+                te = batch[tgt_e].to(device)
+                loss_span = loss_span + _masked_ce(out[key_s].reshape(B * S, -1), ts.reshape(B * S))
+                loss_span = loss_span + _masked_ce(out[key_e].reshape(B * S, -1), te.reshape(B * S))
 
-            loss = loss_op + loss_span
+            # Ref losses (masked)
+            loss_ref = torch.tensor(0.0, device=device)
+            for key_r, tgt_r in [("r0", "target_a0_ref"), ("r1", "target_a1_ref")]:
+                tr = batch[tgt_r].to(device)
+                loss_ref = loss_ref + _masked_ce(out[key_r].reshape(B * S, -1), tr.reshape(B * S))
+
+            loss = loss_op + loss_span + loss_ref
 
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
-            train_loss += loss.item() * input_ids.size(0)
-            train_correct_op += (op_logits.argmax(dim=-1) == op_ids).sum().item()
-            train_total += input_ids.size(0)
+            train_loss += loss.item() * B
+            train_total += B
 
         train_loss /= train_total
-        train_acc = train_correct_op / train_total
 
         # Validate
         model.eval()
         val_loss = 0.0
-        val_correct_op = 0
-        val_correct_span = 0
-        val_correct_e2e = 0
+        val_prog_correct = 0
         val_total = 0
 
         with torch.no_grad():
             for batch in val_loader:
-                input_ids = batch["input_ids"].to(device)
-                lengths = batch["lengths"].to(device)
-                op_ids = batch["op_ids"].to(device)
-                span_starts = batch["span_starts"].to(device)
-                span_ends = batch["span_ends"].to(device)
+                ids = batch["input_ids"].to(device)
+                lens = batch["lengths"].to(device)
+                t_ops = batch["target_opcodes"].to(device)
+                B = ids.size(0)
+                S = MAX_PROGRAM_STEPS
 
-                op_logits, span_logits = model(input_ids, lengths)
-                loss_op = criterion_op(op_logits, op_ids)
+                out = model(ids, lens, t_ops)
+
+                loss_op = nn.functional.cross_entropy(
+                    out["op_logits"].reshape(B * S, -1), t_ops.reshape(B * S),
+                )
                 loss_span = torch.tensor(0.0, device=device)
-                for slot_idx, (s_logits, e_logits) in enumerate(span_logits):
-                    loss_span = loss_span + criterion_span(s_logits, span_starts[:, slot_idx])
-                    loss_span = loss_span + criterion_span(e_logits, span_ends[:, slot_idx])
-                loss = loss_op + loss_span
+                for key_s, key_e, tgt_s, tgt_e in [
+                    ("s0s", "s0e", "target_a0_span_s", "target_a0_span_e"),
+                    ("s1s", "s1e", "target_a1_span_s", "target_a1_span_e"),
+                ]:
+                    ts = batch[tgt_s].to(device)
+                    te = batch[tgt_e].to(device)
+                    loss_span = loss_span + _masked_ce(out[key_s].reshape(B * S, -1), ts.reshape(B * S))
+                    loss_span = loss_span + _masked_ce(out[key_e].reshape(B * S, -1), te.reshape(B * S))
 
-                val_loss += loss.item() * input_ids.size(0)
-                pred_ops = op_logits.argmax(dim=-1)
-                op_correct = (pred_ops == op_ids)
-                val_correct_op += op_correct.sum().item()
+                loss_ref = torch.tensor(0.0, device=device)
+                for key_r, tgt_r in [("r0", "target_a0_ref"), ("r1", "target_a1_ref")]:
+                    tr = batch[tgt_r].to(device)
+                    loss_ref = loss_ref + _masked_ce(out[key_r].reshape(B * S, -1), tr.reshape(B * S))
 
-                all_spans_correct = torch.ones(input_ids.size(0), dtype=torch.bool, device=device)
-                for slot_idx, (s_logits, e_logits) in enumerate(span_logits):
-                    pred_s = s_logits.argmax(dim=-1)
-                    pred_e = e_logits.argmax(dim=-1)
-                    s_ok = (pred_s == span_starts[:, slot_idx])
-                    e_ok = (pred_e == span_ends[:, slot_idx])
-                    all_spans_correct = all_spans_correct & s_ok & e_ok
+                loss = loss_op + loss_span + loss_ref
+                val_loss += loss.item() * B
 
-                val_correct_span += all_spans_correct.sum().item()
-                val_correct_e2e += (op_correct & all_spans_correct).sum().item()
-                val_total += input_ids.size(0)
+                # Program exact match (opcode sequence)
+                pred_ops = out["op_logits"].argmax(dim=-1)
+                val_prog_correct += (pred_ops == t_ops).all(dim=-1).sum().item()
+                val_total += B
 
         val_loss /= val_total
-        val_op_acc = val_correct_op / val_total
-        val_span_acc = val_correct_span / val_total
-        val_e2e_acc = val_correct_e2e / val_total
-
+        val_prog_acc = val_prog_correct / val_total
         scheduler.step(val_loss)
 
         if epoch % 10 == 0 or epoch == 1:
             print(
                 f"  Epoch {epoch:3d} | "
-                f"Train loss={train_loss:.4f} acc={train_acc:.3f} | "
-                f"Val loss={val_loss:.4f} op={val_op_acc:.3f} "
-                f"span={val_span_acc:.3f} e2e={val_e2e_acc:.3f}"
+                f"Train loss={train_loss:.4f} | "
+                f"Val loss={val_loss:.4f} prog_match={val_prog_acc:.3f}"
             )
 
         if val_loss < best_val_loss:
@@ -731,70 +712,42 @@ def train_soma(
 
     model.load_state_dict(best_state)
 
-    # --- Test set ---
+    # Test
     print("\n[Synthesis] Test set results:")
     model.eval()
-    test_correct_op = 0
-    test_correct_span = 0
-    test_correct_e2e = 0
+    test_loader = DataLoader(SomaDataset(test_data), batch_size=batch_size,
+                             shuffle=False, collate_fn=collate_fn)
+    test_prog_correct = 0
+    test_op_correct = 0
     test_total = 0
-
-    test_loader = DataLoader(
-        SomaDataset(test_data), batch_size=batch_size,
-        shuffle=False, collate_fn=collate_fn,
-    )
+    test_steps_total = 0
 
     with torch.no_grad():
         for batch in test_loader:
-            input_ids = batch["input_ids"].to(device)
-            lengths = batch["lengths"].to(device)
-            op_ids = batch["op_ids"].to(device)
-            span_starts = batch["span_starts"].to(device)
-            span_ends = batch["span_ends"].to(device)
+            ids = batch["input_ids"].to(device)
+            lens = batch["lengths"].to(device)
+            t_ops = batch["target_opcodes"].to(device)
+            B = ids.size(0)
 
-            op_logits, span_logits = model(input_ids, lengths)
-            pred_ops = op_logits.argmax(dim=-1)
-            op_correct = (pred_ops == op_ids)
-            test_correct_op += op_correct.sum().item()
+            out = model(ids, lens, t_ops)
+            pred_ops = out["op_logits"].argmax(dim=-1)
+            test_prog_correct += (pred_ops == t_ops).all(dim=-1).sum().item()
+            test_op_correct += (pred_ops == t_ops).sum().item()
+            test_total += B
+            test_steps_total += B * MAX_PROGRAM_STEPS
 
-            all_spans_correct = torch.ones(input_ids.size(0), dtype=torch.bool, device=device)
-            for slot_idx, (s_logits, e_logits) in enumerate(span_logits):
-                pred_s = s_logits.argmax(dim=-1)
-                pred_e = e_logits.argmax(dim=-1)
-                s_ok = (pred_s == span_starts[:, slot_idx])
-                e_ok = (pred_e == span_ends[:, slot_idx])
-                all_spans_correct = all_spans_correct & s_ok & e_ok
+    print(f"  Program Exact Match: {test_prog_correct / test_total:.3f}")
+    print(f"  Per-Step Op Accuracy: {test_op_correct / test_steps_total:.3f}")
 
-            test_correct_span += all_spans_correct.sum().item()
-            test_correct_e2e += (op_correct & all_spans_correct).sum().item()
-            test_total += input_ids.size(0)
-
-    test_op_acc = test_correct_op / test_total
-    test_span_acc = test_correct_span / test_total
-    test_e2e_acc = test_correct_e2e / test_total
-
-    print(f"  Op Accuracy:   {test_op_acc:.3f}")
-    print(f"  Span Accuracy: {test_span_acc:.3f}")
-    print(f"  E2E Accuracy:  {test_e2e_acc:.3f}")
-
-    # --- Save ---
+    # Save
     os.makedirs(save_dir, exist_ok=True)
     model_path = os.path.join(save_dir, "soma_mind.pt")
     vocab_path = os.path.join(save_dir, "vocab.json")
-
     torch.save(best_state, model_path)
     tokenizer.save(vocab_path)
     print(f"\n[Synthesis] Saved model -> {model_path}")
     print(f"[Synthesis] Saved vocab -> {vocab_path}")
     print("[Synthesis] SOMA synthesis complete.")
-
-    return {
-        "test_op_acc": test_op_acc,
-        "test_span_acc": test_span_acc,
-        "test_e2e_acc": test_e2e_acc,
-        "best_epoch": best_epoch,
-        "training_time": elapsed,
-    }
 
 
 if __name__ == "__main__":

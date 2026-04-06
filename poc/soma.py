@@ -1,31 +1,26 @@
 """
-SOMA Instance — The running organism.
+SOMA Instance — Phase 2: Program Execution.
 
-This ties the Mind (neural architecture) and Body (OS interface) together
-into a living SOMA that receives human intent and directly executes it.
+The Mind generates multi-step programs. The Body executes them.
+The program trace is visible — proving the model IS the program.
 
 Usage:
     python -m poc.soma
 """
 
 import platform
-import sys
 
 import torch
 
-from poc.body import Body
+from poc.body import ThinBody, Prim, OPCODE_NAMES
 from poc.mind import SomaMind
 from poc.tokenizer import Tokenizer, NULL_IDX
 
 
-CONFIDENCE_THRESHOLD = 0.4
-
-
 class Soma:
-    """A running SOMA instance — the organism."""
 
     def __init__(self, model_path: str, vocab_path: str):
-        self.body = Body()
+        self.body = ThinBody()
 
         self.tokenizer = Tokenizer()
         self.tokenizer.load(vocab_path)
@@ -37,11 +32,8 @@ class Soma:
 
         self.execution_count = 0
         self.error_count = 0
-        self.success_count = 0
-        self.last_op = None
 
     def process_intent(self, intent_text: str) -> dict:
-        """The core SOMA loop: intent -> mind -> body -> result."""
         intent_text = intent_text.strip()
         if not intent_text:
             return {"type": "empty"}
@@ -49,98 +41,59 @@ class Soma:
         lower = intent_text.lower()
         if any(kw in lower for kw in [
             "what can you do", "your capabilities", "what operations",
-            "what do you know", "about yourself", "what are you",
+            "about yourself", "what are you",
         ]) or lower in ("help", "?"):
-            return self._proprioception_report()
+            return self._proprioception()
 
+        # Layer 1: Intent reception
         tokens = self.tokenizer.tokenize(intent_text)
         token_ids = [NULL_IDX] + self.tokenizer.encode(intent_text)
-        length = len(token_ids)
 
         input_tensor = torch.tensor([token_ids], dtype=torch.long)
-        length_tensor = torch.tensor([length], dtype=torch.long)
+        length_tensor = torch.tensor([len(token_ids)], dtype=torch.long)
 
-        predicted_op, spans, confidence = self.mind.predict(input_tensor, length_tensor)
+        # Layers 2+3: Mind generates program
+        steps = self.mind.predict(input_tensor, length_tensor, tokens)
 
-        opcode = predicted_op.item()
-        conf = confidence.item()
-
-        if conf < CONFIDENCE_THRESHOLD:
-            op_logits, _ = self.mind(input_tensor, length_tensor)
-            probs = torch.softmax(op_logits, dim=-1)[0]
-            top3 = probs.topk(3)
-            guesses = [
-                (self.body.operations[i.item()].name, p.item())
-                for i, p in zip(top3.indices, top3.values)
-            ]
-            return {
-                "type": "ambiguous",
-                "message": "I'm not confident about what you want. Could you rephrase?",
-                "top_guesses": guesses,
-            }
-
-        op_schema = self.body.operations[opcode]
-
-        params = []
-        for slot_idx, (start, end) in enumerate(spans):
-            s, e = start.item(), end.item()
-            if s == 0 and e == 0:
-                params.append(None)
-            else:
-                param_tokens = tokens[s - 1 : e]
-                params.append(" ".join(param_tokens))
-
-        result = self.body.dispatch(opcode, params)
+        # Body executes program
+        result = self.body.execute_program(steps)
 
         self.execution_count += 1
-        self.last_op = op_schema.name
-        if result["success"]:
-            self.success_count += 1
-        else:
+        if not result["success"]:
             self.error_count += 1
-
-        param_dict = {}
-        for i, p in enumerate(params):
-            if p is not None and i < len(op_schema.params):
-                param_dict[op_schema.params[i].name] = p
 
         return {
             "type": "execution",
-            "operation": op_schema.name,
-            "confidence": conf,
-            "params": param_dict,
+            "steps": steps,
             "result": result,
         }
 
-    def _proprioception_report(self) -> dict:
+    def _proprioception(self) -> dict:
         return {
             "type": "proprioception",
-            "capabilities": self.body.capabilities(),
-            "stats": {
-                "total_executions": self.execution_count,
-                "successes": self.success_count,
-                "errors": self.error_count,
-                "last_operation": self.last_op,
-            },
+            "primitives": self.body.capabilities(),
             "mind": {
                 "parameters": sum(p.numel() for p in self.mind.parameters()),
                 "vocabulary": self.tokenizer.vocab_size,
+                "architecture": "BiLSTM encoder + GRU decoder",
+            },
+            "stats": {
+                "executions": self.execution_count,
+                "errors": self.error_count,
             },
         }
 
     def repl(self):
-        """Interactive REPL — the intent interface."""
         total_params = sum(p.numel() for p in self.mind.parameters())
         print("=" * 60)
-        print("  SOMA Proof of Concept v0.1")
-        print("  Embodied Neural Computing")
+        print("  SOMA Proof of Concept v0.2")
+        print("  The Neural Network IS the Program")
         print("=" * 60)
-        print(f"  Body:       macOS {platform.machine()}")
-        print(f"  Mind:       {total_params:,} parameters (BiLSTM)")
-        print(f"  Operations: {len(self.body.operations)}")
+        print(f"  Body:       macOS {platform.machine()} (19 primitives)")
+        print(f"  Mind:       {total_params:,} params (BiLSTM + GRU)")
         print(f"  Vocabulary: {self.tokenizer.vocab_size} tokens")
         print("=" * 60)
-        print("  Type natural language intent. No code. Just say what you want.")
+        print("  Type intent. The mind generates a program. The body executes it.")
         print("  Type 'quit' to exit, 'help' for capabilities.")
         print()
 
@@ -159,53 +112,52 @@ class Soma:
                     continue
 
                 elif result["type"] == "proprioception":
-                    print("\n  [Proprioception]")
-                    print(f"  Mind: {result['mind']['parameters']:,} params, "
-                          f"{result['mind']['vocabulary']} tokens")
-                    print(f"  Stats: {result['stats']['total_executions']} executions, "
-                          f"{result['stats']['errors']} errors")
-                    if result["stats"]["last_operation"]:
-                        print(f"  Last op: {result['stats']['last_operation']}")
-                    print()
-                    print("  Capabilities:")
-                    for cap in result["capabilities"]:
-                        params_str = ", ".join(
-                            p["name"] for p in cap["params"]
-                        ) or "none"
-                        print(f"    [{cap['opcode']:2d}] {cap['name']}: "
-                              f"{cap['description']} ({params_str})")
-
-                elif result["type"] == "ambiguous":
-                    print(f"\n  [Mind] {result['message']}")
-                    print("  Top guesses:")
-                    for name, prob in result["top_guesses"]:
-                        print(f"    {name}: {prob:.1%}")
+                    p = result
+                    print(f"\n  [Proprioception]")
+                    print(f"  Mind: {p['mind']['parameters']:,} params, "
+                          f"{p['mind']['architecture']}")
+                    print(f"  Stats: {p['stats']['executions']} executions, "
+                          f"{p['stats']['errors']} errors")
+                    print(f"\n  Primitives ({len(p['primitives'])}):")
+                    for prim in p["primitives"]:
+                        a0, a1 = prim["args"]
+                        args = ", ".join(a for a in [a0, a1] if a != "none")
+                        print(f"    [{prim['opcode']:2d}] {prim['name']}"
+                              f"{'(' + args + ')' if args else '()'}")
 
                 elif result["type"] == "execution":
-                    op = result["operation"]
-                    conf = result["confidence"]
-                    params = result["params"]
+                    steps = result["steps"]
                     exec_result = result["result"]
 
-                    print(f"\n  [Mind] {op} (confidence: {conf:.1%})")
-                    if params:
-                        for k, v in params.items():
-                            print(f"         {k}: {v}")
+                    # Show the program the mind generated
+                    real_steps = [s for s in steps if s.opcode != Prim.STOP]
+                    print(f"\n  [Mind] Program ({len(real_steps)} steps):")
+                    for i, step in enumerate(steps):
+                        print(f"    {step.format(i)}")
+                        if step.opcode == Prim.STOP:
+                            break
 
+                    # Show execution result
                     if exec_result["success"]:
-                        r = exec_result["result"]
-                        if isinstance(r, list):
-                            print("  [Body] Result:")
-                            for item in r:
-                                print(f"         {item}")
-                        elif isinstance(r, dict):
-                            print("  [Body] Result:")
-                            for k, v in r.items():
-                                print(f"         {k}: {v}")
+                        out = exec_result["output"]
+                        if isinstance(out, list):
+                            print(f"\n  [Body] Output:")
+                            for item in out[:20]:
+                                print(f"    {item}")
+                            if len(out) > 20:
+                                print(f"    ... ({len(out)} total)")
+                        elif isinstance(out, dict):
+                            print(f"\n  [Body] Output:")
+                            for k, v in out.items():
+                                print(f"    {k}: {v}")
+                        elif isinstance(out, bool):
+                            print(f"\n  [Body] {out}")
+                        elif out is not None:
+                            print(f"\n  [Body] {out}")
                         else:
-                            print(f"  [Body] {r}")
+                            print(f"\n  [Body] Done.")
                     else:
-                        print(f"  [Body] Error: {exec_result['error']}")
+                        print(f"\n  [Body] Error: {exec_result['error']}")
 
                 print()
 

@@ -1,198 +1,177 @@
 """
-SOMA Body — The hardware/environment interface.
+SOMA Body — Phase 2: Thin Primitive Executor.
 
-This is the fixed dispatcher that maps opcodes to real OS operations.
-It is NOT generated, NOT neural, NOT interpreted. It is the body's
-nervous system — a fixed wiring from opcode signals to muscle movements.
+The body is a dumb pipe to the OS. One line per primitive. Zero logic.
+All sequencing, composition, and dependency management lives in the Mind.
 
-The Body also provides proprioception: self-knowledge of capabilities.
+19 primitives form the "instruction set" of this SOMA's body.
+The Mind generates programs (sequences of primitives with data dependencies).
+The Body blindly executes them step by step.
 """
 
 import os
 import platform
 import shutil
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
+from enum import IntEnum
+
+
+class Prim(IntEnum):
+    """The primitive instruction set."""
+    FILE_OPEN_R = 0
+    FILE_OPEN_W = 1
+    FILE_READ = 2
+    FILE_WRITE = 3
+    FILE_CLOSE = 4
+    DIR_LIST = 5
+    FILE_DELETE = 6
+    FILE_STAT = 7
+    DIR_CREATE = 8
+    FILE_RENAME = 9
+    FILE_COPY = 10
+    FILE_EXISTS = 11
+    SYS_CWD = 12
+    SYS_INFO = 13
+    SYS_TIME = 14
+    SYS_DISK = 15
+    SYS_PROCS = 16
+    EMIT = 17
+    STOP = 18
+
+
+NUM_PRIMITIVES = len(Prim)
+MAX_PROGRAM_STEPS = 8
+START_TOKEN = NUM_PRIMITIVES  # 19, used as decoder start signal
+
+OPCODE_NAMES = [p.name for p in Prim]
+
+# Argument schema per opcode: (arg0_type, arg1_type)
+# "none" = no argument, "span" = extract from input, "ref" = reference previous step
+OPCODE_SCHEMA = {
+    Prim.FILE_OPEN_R: ("span", "none"),
+    Prim.FILE_OPEN_W: ("span", "none"),
+    Prim.FILE_READ:   ("ref",  "none"),
+    Prim.FILE_WRITE:  ("ref",  "span"),
+    Prim.FILE_CLOSE:  ("ref",  "none"),
+    Prim.DIR_LIST:    ("span", "none"),
+    Prim.FILE_DELETE: ("span", "none"),
+    Prim.FILE_STAT:   ("span", "none"),
+    Prim.DIR_CREATE:  ("span", "none"),
+    Prim.FILE_RENAME: ("span", "span"),
+    Prim.FILE_COPY:   ("span", "span"),
+    Prim.FILE_EXISTS: ("span", "none"),
+    Prim.SYS_CWD:    ("none", "none"),
+    Prim.SYS_INFO:   ("none", "none"),
+    Prim.SYS_TIME:   ("none", "none"),
+    Prim.SYS_DISK:   ("none", "none"),
+    Prim.SYS_PROCS:  ("none", "none"),
+    Prim.EMIT:       ("ref",  "none"),
+    Prim.STOP:       ("none", "none"),
+}
 
 
 @dataclass
-class ParamSlot:
-    name: str       # e.g., "path", "content"
-    type: str       # "path", "string"
-    required: bool = True
-
-
-@dataclass
-class Operation:
-    name: str
+class ProgramStep:
     opcode: int
-    description: str
-    params: list[ParamSlot] = field(default_factory=list)
+    arg0_type: str   # "none", "span", "ref"
+    arg0_value: object  # str for span, int for ref, None for none
+    arg1_type: str
+    arg1_value: object
+
+    def format(self, step_idx: int) -> str:
+        """Format step for display."""
+        name = OPCODE_NAMES[self.opcode]
+        args = []
+        for atype, aval in [(self.arg0_type, self.arg0_value),
+                            (self.arg1_type, self.arg1_value)]:
+            if atype == "span":
+                args.append(f'"{aval}"')
+            elif atype == "ref":
+                args.append(f"${aval}")
+            # none: skip
+        args_str = ", ".join(args)
+        if self.opcode == Prim.STOP:
+            return "STOP"
+        return f"${step_idx} = {name}({args_str})"
 
 
-# --- The Body Manifest ---
-# This is the SOMA's proprioceptive knowledge of what its body can do.
+class ThinBody:
+    """Thin executor. One OS call per primitive. Zero logic."""
 
-OPERATIONS = [
-    Operation("LIST_DIR", 0, "List files in a directory",
-              [ParamSlot("path", "path")]),
-    Operation("CREATE_FILE", 1, "Create a file with optional content",
-              [ParamSlot("path", "path"), ParamSlot("content", "string", required=False)]),
-    Operation("READ_FILE", 2, "Read contents of a file",
-              [ParamSlot("path", "path")]),
-    Operation("DELETE_FILE", 3, "Delete a file",
-              [ParamSlot("path", "path")]),
-    Operation("MAKE_DIR", 4, "Create a directory",
-              [ParamSlot("path", "path")]),
-    Operation("FILE_INFO", 5, "Get file metadata",
-              [ParamSlot("path", "path")]),
-    Operation("CURRENT_DIR", 6, "Get current working directory", []),
-    Operation("SYSTEM_INFO", 7, "Get system information", []),
-    Operation("CURRENT_TIME", 8, "Get current date and time", []),
-    Operation("DISK_USAGE", 9, "Get disk usage statistics", []),
-    Operation("PROCESS_LIST", 10, "List running processes", []),
-    Operation("MOVE_FILE", 11, "Move or rename a file",
-              [ParamSlot("source", "path"), ParamSlot("destination", "path")]),
-    Operation("COPY_FILE", 12, "Copy a file",
-              [ParamSlot("source", "path"), ParamSlot("destination", "path")]),
-    Operation("FIND_FILE", 13, "Find files by name pattern",
-              [ParamSlot("pattern", "string")]),
-    Operation("FILE_EXISTS", 14, "Check if a file exists",
-              [ParamSlot("path", "path")]),
-]
+    def execute_primitive(self, opcode: int, args: list) -> object:
+        """Execute a single primitive. One line each. No logic."""
+        match opcode:
+            case Prim.FILE_OPEN_R: return open(os.path.expanduser(args[0]), "r")
+            case Prim.FILE_OPEN_W: return open(os.path.expanduser(args[0]), "w")
+            case Prim.FILE_READ:   return args[0].read()
+            case Prim.FILE_WRITE:  args[0].write(args[1]); return True
+            case Prim.FILE_CLOSE:  args[0].close(); return True
+            case Prim.DIR_LIST:    return sorted(os.listdir(os.path.expanduser(args[0])))
+            case Prim.FILE_DELETE: os.remove(os.path.expanduser(args[0])); return True
+            case Prim.FILE_STAT:   s = os.stat(os.path.expanduser(args[0])); return {"size": s.st_size, "modified": datetime.fromtimestamp(s.st_mtime).isoformat()}
+            case Prim.DIR_CREATE:  os.makedirs(os.path.expanduser(args[0]), exist_ok=True); return True
+            case Prim.FILE_RENAME: shutil.move(os.path.expanduser(args[0]), os.path.expanduser(args[1])); return True
+            case Prim.FILE_COPY:   shutil.copy2(os.path.expanduser(args[0]), os.path.expanduser(args[1])); return True
+            case Prim.FILE_EXISTS: return os.path.exists(os.path.expanduser(args[0]))
+            case Prim.SYS_CWD:    return os.getcwd()
+            case Prim.SYS_INFO:   return {"system": platform.system(), "machine": platform.machine(), "processor": platform.processor()}
+            case Prim.SYS_TIME:   return datetime.now().isoformat()
+            case Prim.SYS_DISK:   u = shutil.disk_usage("/"); return {"total_gb": round(u.total / 1e9, 2), "used_gb": round(u.used / 1e9, 2), "free_gb": round(u.free / 1e9, 2)}
+            case Prim.SYS_PROCS:  return subprocess.run(["ps", "aux"], capture_output=True, text=True).stdout.strip().split("\n")[:15]
+            case Prim.EMIT:       return args[0]  # pass through for display
+            case Prim.STOP:       return None
 
-NUM_OPERATIONS = len(OPERATIONS)
-MAX_PARAM_SLOTS = 2
+    def execute_program(self, steps: list[ProgramStep]) -> dict:
+        """Execute a program. Resolve refs, call primitives, collect results."""
+        results = []
+        output = None
+        trace = []
 
+        for i, step in enumerate(steps):
+            if step.opcode == Prim.STOP:
+                trace.append({"step": i, "op": "STOP"})
+                break
 
-class Body:
-    """The fixed nervous system. Maps (opcode, params) to OS execution."""
+            # Resolve arguments
+            resolved = []
+            for atype, aval in [(step.arg0_type, step.arg0_value),
+                                (step.arg1_type, step.arg1_value)]:
+                if atype == "ref":
+                    if aval < len(results):
+                        resolved.append(results[aval])
+                    else:
+                        return {"success": False, "output": None,
+                                "trace": trace, "error": f"Invalid ref ${aval} at step {i}"}
+                elif atype == "span":
+                    resolved.append(aval)
+                # none: don't append
 
-    def __init__(self):
-        self.operations = {op.opcode: op for op in OPERATIONS}
-        self._dispatch_table = {
-            0:  self._list_dir,
-            1:  self._create_file,
-            2:  self._read_file,
-            3:  self._delete_file,
-            4:  self._make_dir,
-            5:  self._file_info,
-            6:  self._current_dir,
-            7:  self._system_info,
-            8:  self._current_time,
-            9:  self._disk_usage,
-            10: self._process_list,
-            11: self._move_file,
-            12: self._copy_file,
-            13: self._find_file,
-            14: self._file_exists,
-        }
+            try:
+                result = self.execute_primitive(step.opcode, resolved)
+                results.append(result)
+                trace.append({"step": i, "op": OPCODE_NAMES[step.opcode], "result_type": type(result).__name__})
 
-    def dispatch(self, opcode: int, params: list[str | None]) -> dict:
-        """Execute an operation. Returns {success, result, error}."""
-        op = self.operations.get(opcode)
-        if op is None:
-            return {"success": False, "result": None, "error": f"Unknown opcode: {opcode}"}
+                if step.opcode == Prim.EMIT:
+                    output = result
 
-        # Filter to non-None params
-        provided = [p for p in params if p is not None]
-        required_count = sum(1 for p in op.params if p.required)
+            except Exception as e:
+                # Close any open file handles before returning
+                for r in results:
+                    if hasattr(r, "close") and not getattr(r, "closed", True):
+                        try:
+                            r.close()
+                        except Exception:
+                            pass
+                return {"success": False, "output": None, "trace": trace, "error": str(e)}
 
-        if len(provided) < required_count:
-            return {"success": False, "result": None,
-                    "error": f"{op.name} requires {required_count} params, got {len(provided)}"}
-
-        try:
-            result = self._dispatch_table[opcode](*provided[:len(op.params)])
-            return {"success": True, "result": result, "error": None}
-        except Exception as e:
-            return {"success": False, "result": None, "error": str(e)}
+        return {"success": True, "output": output, "trace": trace, "error": None}
 
     def capabilities(self) -> list[dict]:
-        """Proprioception: report what this body can do."""
+        """Proprioception: report available primitives."""
         return [
-            {
-                "name": op.name,
-                "opcode": op.opcode,
-                "description": op.description,
-                "params": [{"name": p.name, "type": p.type} for p in op.params],
-            }
-            for op in OPERATIONS
+            {"opcode": p.value, "name": p.name,
+             "args": OPCODE_SCHEMA[p]}
+            for p in Prim
         ]
-
-    # --- Operation implementations (the muscles) ---
-
-    def _list_dir(self, path: str) -> list[str]:
-        return sorted(os.listdir(os.path.expanduser(path)))
-
-    def _create_file(self, path: str, content: str = "") -> str:
-        path = os.path.expanduser(path)
-        with open(path, "w") as f:
-            f.write(content)
-        return f"Created {path}"
-
-    def _read_file(self, path: str) -> str:
-        with open(os.path.expanduser(path), "r") as f:
-            return f.read()
-
-    def _delete_file(self, path: str) -> str:
-        path = os.path.expanduser(path)
-        os.remove(path)
-        return f"Deleted {path}"
-
-    def _make_dir(self, path: str) -> str:
-        path = os.path.expanduser(path)
-        os.makedirs(path, exist_ok=True)
-        return f"Created directory {path}"
-
-    def _file_info(self, path: str) -> dict:
-        stat = os.stat(os.path.expanduser(path))
-        return {
-            "size_bytes": stat.st_size,
-            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-            "mode": oct(stat.st_mode),
-        }
-
-    def _current_dir(self) -> str:
-        return os.getcwd()
-
-    def _system_info(self) -> dict:
-        return {
-            "system": platform.system(),
-            "machine": platform.machine(),
-            "processor": platform.processor(),
-            "version": platform.version(),
-        }
-
-    def _current_time(self) -> str:
-        return datetime.now().isoformat()
-
-    def _disk_usage(self) -> dict:
-        usage = shutil.disk_usage("/")
-        return {
-            "total_gb": round(usage.total / (1024**3), 2),
-            "used_gb": round(usage.used / (1024**3), 2),
-            "free_gb": round(usage.free / (1024**3), 2),
-        }
-
-    def _process_list(self) -> list[str]:
-        result = subprocess.run(["ps", "aux"], capture_output=True, text=True)
-        lines = result.stdout.strip().split("\n")
-        return lines[:20]
-
-    def _move_file(self, source: str, dest: str) -> str:
-        shutil.move(os.path.expanduser(source), os.path.expanduser(dest))
-        return f"Moved {source} -> {dest}"
-
-    def _copy_file(self, source: str, dest: str) -> str:
-        shutil.copy2(os.path.expanduser(source), os.path.expanduser(dest))
-        return f"Copied {source} -> {dest}"
-
-    def _find_file(self, pattern: str) -> list[str]:
-        import glob as g
-        results = g.glob(f"**/{pattern}", recursive=True)
-        return results[:20]
-
-    def _file_exists(self, path: str) -> bool:
-        return os.path.exists(os.path.expanduser(path))
