@@ -1,27 +1,22 @@
 """
 LoRA — Low-Rank Adaptation for SOMA Experiential Memory.
 
-Implements Whitepaper Section 12.2:
-  Experiential Memory (Hippocampus -> LoRA Adaptation Layers)
+Whitepaper Section 12.2: Experiential Memory (Hippocampus -> LoRA).
 
-The base model weights (from synthesis) are FROZEN — permanent memory.
-LoRA adds small trainable matrices (A, B) on top: W' = W + B @ A.
-Only LoRA parameters update during experience. The SOMA literally
-becomes a slightly different neural structure after each experience.
+Base weights are FROZEN (permanent memory).
+LoRA adds trainable low-rank matrices: W' = W + scale * B @ A.
+The SOMA becomes a different neural structure after each experience.
 
-Reference: Hu et al. (2021) "LoRA: Low-Rank Adaptation of Large Language Models"
+Ref: Hu et al. (2021) "LoRA: Low-Rank Adaptation of Large Language Models"
 """
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class LoRALinear(nn.Module):
-    """A Linear layer with frozen base weights + trainable LoRA adaptation.
-
-    Forward: y = W_frozen @ x + (B @ A) @ x
-    Only A and B are trainable. Base W is permanent memory.
-    """
+    """Linear with frozen base + trainable LoRA: y = W_base(x) + scale*(x@A.T)@B.T"""
 
     def __init__(self, base: nn.Linear, rank: int = 4, alpha: float = 1.0):
         super().__init__()
@@ -30,136 +25,121 @@ class LoRALinear(nn.Module):
         if self.base.bias is not None:
             self.base.bias.requires_grad_(False)
 
-        in_f = base.in_features
-        out_f = base.out_features
+        in_f, out_f = base.in_features, base.out_features
         self.rank = rank
         self.scale = alpha / rank
-
-        # LoRA matrices: W' = W + scale * B @ A
-        # A initialized with small random, B initialized to zero
-        # So initially LoRA has no effect (B @ A = 0)
         self.lora_A = nn.Parameter(torch.randn(rank, in_f) * 0.01)
         self.lora_B = nn.Parameter(torch.zeros(out_f, rank))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        base_out = self.base(x)
-        # LoRA adaptation: low-rank delta
-        lora_out = (x @ self.lora_A.T) @ self.lora_B.T * self.scale
-        return base_out + lora_out
+    def forward(self, x):
+        return self.base(x) + (x @ self.lora_A.T) @ self.lora_B.T * self.scale
 
     def merge(self):
-        """Consolidation: merge LoRA into base weights (sleep cycle).
-        After merge, LoRA is reset to zero — ready for new learning."""
         with torch.no_grad():
             self.base.weight.add_(self.scale * self.lora_B @ self.lora_A)
-            self.lora_A.zero_()
-            self.lora_B.zero_()
-            # Re-initialize A with small random for next learning cycle
             self.lora_A.normal_(0, 0.01)
+            self.lora_B.zero_()
 
-    def lora_state(self) -> dict:
-        """Serialize LoRA state (for checkpointing)."""
-        return {
-            "A": self.lora_A.data.clone(),
-            "B": self.lora_B.data.clone(),
-        }
+    def lora_state(self):
+        return {"lora_A": self.lora_A.data.clone(), "lora_B": self.lora_B.data.clone()}
 
-    def load_lora_state(self, state: dict):
-        """Restore LoRA state (from checkpoint)."""
-        self.lora_A.data.copy_(state["A"])
-        self.lora_B.data.copy_(state["B"])
+    def load_lora_state(self, state):
+        self.lora_A.data.copy_(state["lora_A"])
+        self.lora_B.data.copy_(state["lora_B"])
 
 
 class LoRAGRUCell(nn.Module):
-    """A GRUCell with frozen base weights + trainable LoRA on gate matrices.
+    """GRUCell with frozen base + trainable LoRA on gate weight matrices.
 
-    GRU has two weight matrices:
-      weight_ih: (3*hidden, input)  — input-to-gates [r, z, n]
-      weight_hh: (3*hidden, hidden) — hidden-to-gates [r, z, n]
+    Properly reimplements GRU forward with LoRA deltas applied to
+    the gate computations. No in-place weight modification.
 
-    LoRA adapts BOTH, giving the decoder the ability to change
-    how it processes sequences — not just output heads.
+    GRU equations:
+      gi = x @ W_ih.T + b_ih        (input gates: r, z, n)
+      gh = h @ W_hh.T + b_hh        (hidden gates: r, z, n)
+      r = sigmoid(gi_r + gh_r)       (reset gate)
+      z = sigmoid(gi_z + gh_z)       (update gate)
+      n = tanh(gi_n + r * gh_n)      (new gate)
+      h' = (1-z) * n + z * h
+
+    LoRA adds delta to gate computations:
+      gi += x @ (scale * B_ih @ A_ih).T
+      gh += h @ (scale * B_hh @ A_hh).T
     """
 
     def __init__(self, base: nn.GRUCell, rank: int = 4, alpha: float = 1.0):
         super().__init__()
-        self.base = base
-        self.base.weight_ih.requires_grad_(False)
-        self.base.weight_hh.requires_grad_(False)
-        if self.base.bias_ih is not None:
-            self.base.bias_ih.requires_grad_(False)
-        if self.base.bias_hh is not None:
-            self.base.bias_hh.requires_grad_(False)
-
+        self.input_size = base.input_size
+        self.hidden_size = base.hidden_size
         self.scale = alpha / rank
 
+        # Freeze base weights
+        self.w_ih = base.weight_ih.detach().clone()
+        self.w_hh = base.weight_hh.detach().clone()
+        self.b_ih = base.bias_ih.detach().clone() if base.bias_ih is not None else None
+        self.b_hh = base.bias_hh.detach().clone() if base.bias_hh is not None else None
+
+        # Register as buffers (not parameters — frozen)
+        self.register_buffer("base_w_ih", self.w_ih)
+        self.register_buffer("base_w_hh", self.w_hh)
+        if self.b_ih is not None:
+            self.register_buffer("base_b_ih", self.b_ih)
+            self.register_buffer("base_b_hh", self.b_hh)
+
         # LoRA on input-to-hidden
-        ih_out, ih_in = base.weight_ih.shape
+        ih_out, ih_in = self.w_ih.shape
         self.ih_A = nn.Parameter(torch.randn(rank, ih_in) * 0.01)
         self.ih_B = nn.Parameter(torch.zeros(ih_out, rank))
 
         # LoRA on hidden-to-hidden
-        hh_out, hh_in = base.weight_hh.shape
+        hh_out, hh_in = self.w_hh.shape
         self.hh_A = nn.Parameter(torch.randn(rank, hh_in) * 0.01)
         self.hh_B = nn.Parameter(torch.zeros(hh_out, rank))
 
-    def forward(self, x: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
-        # Base GRU computation + LoRA delta on gate computations
-        # GRU: gates = x @ W_ih.T + h @ W_hh.T + bias
-        # LoRA adds: x @ (B_ih @ A_ih).T + h @ (B_hh @ A_hh).T
-        #
-        # We apply LoRA by temporarily modifying the weights, running
-        # the base GRU, then restoring. This is cleaner than reimplementing GRU.
-        with torch.no_grad():
-            ih_delta = self.scale * self.ih_B @ self.ih_A
-            hh_delta = self.scale * self.hh_B @ self.hh_A
-            self.base.weight_ih.add_(ih_delta)
-            self.base.weight_hh.add_(hh_delta)
+    def forward(self, x, h):
+        # Compute effective weights: base + LoRA delta
+        w_ih = self.base_w_ih + self.scale * self.ih_B @ self.ih_A
+        w_hh = self.base_w_hh + self.scale * self.hh_B @ self.hh_A
 
-        result = self.base(x, h)
+        # Gate computations
+        gi = F.linear(x, w_ih, self.base_b_ih if self.b_ih is not None else None)
+        gh = F.linear(h, w_hh, self.base_b_hh if self.b_hh is not None else None)
 
-        with torch.no_grad():
-            self.base.weight_ih.sub_(ih_delta)
-            self.base.weight_hh.sub_(hh_delta)
+        # Split into 3 gates: reset, update, new
+        gi_r, gi_z, gi_n = gi.chunk(3, dim=-1)
+        gh_r, gh_z, gh_n = gh.chunk(3, dim=-1)
 
-        return result
+        r = torch.sigmoid(gi_r + gh_r)
+        z = torch.sigmoid(gi_z + gh_z)
+        n = torch.tanh(gi_n + r * gh_n)
+
+        return (1 - z) * n + z * h
 
     def merge(self):
         with torch.no_grad():
-            self.base.weight_ih.add_(self.scale * self.ih_B @ self.ih_A)
-            self.base.weight_hh.add_(self.scale * self.hh_B @ self.hh_A)
-            for p in [self.ih_A, self.ih_B, self.hh_A, self.hh_B]:
-                p.zero_()
-            self.ih_A.normal_(0, 0.01)
-            self.hh_A.normal_(0, 0.01)
+            self.base_w_ih.add_(self.scale * self.ih_B @ self.ih_A)
+            self.base_w_hh.add_(self.scale * self.hh_B @ self.hh_A)
+            self.ih_A.normal_(0, 0.01); self.ih_B.zero_()
+            self.hh_A.normal_(0, 0.01); self.hh_B.zero_()
 
     def lora_state(self):
         return {"ih_A": self.ih_A.data.clone(), "ih_B": self.ih_B.data.clone(),
                 "hh_A": self.hh_A.data.clone(), "hh_B": self.hh_B.data.clone()}
 
     def load_lora_state(self, state):
-        self.ih_A.data.copy_(state["ih_A"])
-        self.ih_B.data.copy_(state["ih_B"])
-        self.hh_A.data.copy_(state["hh_A"])
-        self.hh_B.data.copy_(state["hh_B"])
+        self.ih_A.data.copy_(state["ih_A"]); self.ih_B.data.copy_(state["ih_B"])
+        self.hh_A.data.copy_(state["hh_A"]); self.hh_B.data.copy_(state["hh_B"])
 
 
-def apply_lora(model: nn.Module, rank: int = 4, alpha: float = 1.0,
-               target_modules: list[str] | None = None):
-    """Apply LoRA adapters to Linear layers AND GRUCell.
-
-    Freezes all base parameters. Only LoRA A/B matrices are trainable.
-    Returns (lora_layers, trainable_count, total_count).
-    """
+def apply_lora(model, rank=4, alpha=1.0, target_modules=None):
+    """Apply LoRA to Linear and GRUCell layers. Freeze base. Return lora dict."""
     lora_layers = {}
-
     for param in model.parameters():
         param.requires_grad_(False)
 
     for name, module in list(model.named_modules()):
         if target_modules is not None and name not in target_modules:
             continue
-
         if isinstance(module, nn.Linear):
             lora = LoRALinear(module, rank=rank, alpha=alpha)
         elif isinstance(module, nn.GRUCell):
@@ -168,7 +148,6 @@ def apply_lora(model: nn.Module, rank: int = 4, alpha: float = 1.0,
             continue
 
         lora_layers[name] = lora
-
         parts = name.split(".")
         parent = model
         for part in parts[:-1]:
@@ -177,5 +156,4 @@ def apply_lora(model: nn.Module, rank: int = 4, alpha: float = 1.0,
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
-
     return lora_layers, trainable, total
