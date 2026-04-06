@@ -897,3 +897,525 @@ Why this is not "AI-assisted development"
 Cross-references updated throughout. All subsequent sections renumbered.
 
 The Gherkin addition also quietly solves three open problems from the whitepaper — verification, versioning, and intent formalism — with one concept. That's a strong sign it belongs in the architecture.
+
+Soma whitepaper
+Document · MD 
+
+poc-v2.zip
+zip
+
+take a look into, is it good enough to prove the SOMA? be honest, is this what we need?
+
+11:03 PM
+
+Weighed architectural progress against remaining limitations honestly
+Weighed architectural progress against remaining limitations honestly
+OK. I've read everything. Honest assessment:
+
+This is a massive improvement over v1. And it's actually starting to prove SOMA.
+
+Here's what changed and why it matters:
+
+v1: Mind classifies intent → picks opcode → Body has hand-written Python functions that do the work. The intelligence is in the Body.
+
+v2: Mind generates a multi-step program with data dependencies → Body is a dumb pipe that executes one OS call per primitive. The intelligence is in the Mind.
+
+Look at what happens when you say "read hello.txt":
+
+$0 = FILE_OPEN_R("hello.txt")    ← mind chose the primitive, extracted the path
+$1 = FILE_READ($0)                ← mind knows $0 returns a file handle, passes it
+$2 = FILE_CLOSE($0)               ← mind manages resource cleanup
+$3 = EMIT($1)                     ← mind decides what to return to human
+STOP                               ← mind decides when execution ends
+The model IS the program. That's not a slogan anymore — it's literally what's happening. The seq2seq decoder generates an instruction sequence. The ref mechanism means the model understands dataflow. The body is genuinely dumb — one OS call per line, zero logic, zero sequencing.
+
+What this proves that v1 didn't:
+
+The neural network composes operations, not just selects one
+The neural network manages data dependencies between steps
+The neural network controls execution flow (EMIT, STOP)
+The body has no intelligence — it's truly just "muscles"
+If you inspect the pipeline, the PROGRAM exists only as tensors in the mind's output
+The honest remaining weaknesses:
+
+Weakness 1 — Fixed program templates. Every task type maps to ONE program template. "read_file" always produces OPEN_R→READ→CLOSE→EMIT→STOP. The model memorizes programs, it doesn't compose novel ones. The real test would be: "read hello.txt and then delete it" — can it combine two program templates into one novel sequence? With current training, probably not. The architecture supports it (the GRU decoder can generate any sequence), but the training data doesn't teach composition.
+
+Weakness 2 — The primitives are still hand-selected. 19 primitives defined by a human in body.py. True SOMA would discover primitives from the target body specification during synthesis. But this is acceptable for a POC — even real CPUs have a hand-designed instruction set. The question is whether synthesis can eventually generate this table automatically.
+
+Weakness 3 — The match/case in ThinBody is still a dispatch table. But honestly, this is now equivalent to a CPU's instruction decoder — it maps opcode to hardware operation. That's a thin, fixed translation layer, not application logic. This is defensible.
+
+My verdict: this IS a valid proof of concept. v1 was a smart remote control. v2 is a neural computer executing programs it generates. The gap between "model generates program from tensors" and "human writes program in Python" is exactly the paradigm shift the whitepaper claims.
+
+What would make v0.3 definitive:
+
+Add one compositional task to the training data. Something like: "read hello.txt and copy it to /tmp" which requires:
+
+$0 = FILE_OPEN_R("hello.txt")
+$1 = FILE_READ($0)
+$2 = FILE_CLOSE($0)
+$3 = FILE_COPY("hello.txt", "/tmp")
+$4 = EMIT($1)
+STOP
+If the model can learn to compose primitives for novel multi-task intents — not just memorize fixed templates — that's the definitive proof. The architecture already supports it. You just need compositional training data.
+
+Want to discuss the web POC next, or push v0.3 with composition first?
+
+moving back to our discussion about small llm + gerkin + soma, the question is, how about the context?
+
+11:19 PM
+
+Examined context necessity for proper model decomposition
+Examined context necessity for proper model decomposition
+This is THE right question. And it exposes a real problem.
+
+When the small model receives "add a waitlist feature," it needs to know:
+
+What tables already exist in PostgreSQL
+What routes the SOMA currently handles
+What business rules are active
+What the booking data structure looks like
+That there's a concept of "slots" and "stylists"
+That email notifications are already a capability
+Without this context, "add a waitlist feature" is meaningless. The small model would hallucinate a schema that conflicts with what exists, create routes that duplicate existing ones, or miss dependencies entirely.
+
+This is the application state problem. And it's actually three sub-problems:
+
+Problem 1 — What exists right now?
+
+The SOMA needs a living model of itself — not just proprioception of hardware capabilities, but awareness of its current application state. What tables has it created? What routes does it handle? What Gherkin specs have been executed? This is a runtime self-model that goes beyond Layer 5 proprioception.
+
+Problem 2 — Context window limits.
+
+A 1B-3B model has a small context window (typically 4K-8K tokens, some up to 32K). A complex application's full state might exceed that. You can't just dump everything into the prompt.
+
+Problem 3 — Consistency.
+
+If the small model decomposes a feature based on stale or incomplete context, the resulting operations might break existing functionality.
+
+How I think this should work:
+
+The SOMA maintains a living manifest — a structured document that describes its current state:
+
+yaml
+soma_manifest:
+  database:
+    tables:
+      - name: stylists
+        columns: [id, name, specialty, schedule]
+      - name: slots
+        columns: [id, stylist_id, datetime, duration, status]
+      - name: bookings
+        columns: [id, slot_id, client_name, client_email, created_at]
+  
+  routes:
+    - GET /                → landing page
+    - GET /book            → booking form
+    - POST /book           → create booking
+    - GET /bookings/{date} → list bookings
+  
+  triggers:
+    - on_booking_created → send confirmation email
+  
+  business_rules:
+    - slots are 30 minutes
+    - operating hours: Tue-Sat 9am-6pm
+    - stylists: Ana, Julia, Carlos
+
+  gherkin_specs:
+    - booking.feature (12 scenarios, all passing)
+This manifest is NOT code. It's the SOMA's self-knowledge of what it has become. The SOMA updates it every time it executes a Class 2 operation. It's compact, structured, and fits easily in a small model's context window.
+
+The decomposition call then looks like:
+
+[System: You are SOMA's planning layer. Given the current 
+manifest and a human intent, decompose into Gherkin scenarios 
+that extend the existing application. Never conflict with 
+existing structures.]
+
+[Context: <soma_manifest>]
+
+[Human intent: "Add a waitlist feature for when slots are full"]
+
+[Output: Gherkin scenarios that reference existing tables, 
+routes, and rules by name]
+The small model sees the manifest, understands what exists, and produces Gherkin that extends it consistently. The manifest is typically under 1K tokens even for a complex application — leaving plenty of room for reasoning.
+
+Where this gets powerful:
+
+The manifest IS the application. Not the code. Not the binary. The manifest. If you have the manifest + the SOMA synthesizer + the Gherkin spec library, you can recreate the entire application from scratch. Destroy the database, wipe the routes — re-run all Gherkin specs against a fresh SOMA and you get the same application back. The manifest is the source of truth.
+
+The full context flow:
+
+Human: "Add a waitlist feature"
+           │
+    [SOMA loads current manifest]
+           │
+    [Small model receives: manifest + intent]
+           │
+    [Small model outputs: Gherkin referencing 
+     existing tables/routes by name]
+           │
+           ▼
+  Feature: Waitlist
+    Scenario: Client joins waitlist
+      Given the "slots" table shows slot 42 has status "full"
+      And a new table "waitlist" with columns 
+          (id, slot_id, client_name, client_email, position)
+      When POST /waitlist/join with slot_id=42, 
+          name="Maria", email="maria@mail.com"
+      Then "waitlist" contains a row with slot_id=42, position=1
+      And client receives confirmation email
+           │
+    [SOMA validates: does "slots" table exist? ✓
+     Does it have "status" column? Needs adding.
+     Does /waitlist/join conflict with existing routes? ✓ No]
+           │
+    [SOMA executes operations]
+           │
+    [SOMA updates manifest with new table, 
+     new routes, new trigger]
+           │
+    [SOMA runs Gherkin scenarios to verify]
+           │
+    [Manifest is now the new truth]
+The manifest also solves the Gherkin context problem. When the small model writes Gherkin, it references real table names, real column names, real route patterns — because it can see them in the manifest. The Gherkin is grounded in reality, not hallucinated.
+
+One more thing: The manifest history IS the application's version history. Every change produces a new manifest version. Rollback means reverting to a previous manifest and re-executing its Gherkin specs. No git needed for code because there is no code. Git for manifests and Gherkin specs is all you need.
+
+Does this answer your context question, or were you thinking about a different kind of context?
+
+i see some issue with manifest, first, should not be related to what we are building like: web, mobile or whatever, also the gherkin should/can be used for diff scenarios ex. "blink led" and/or SOMA can be called directly without involving small LLM or Gherkin. so lets think more deep about, because right now i see because you didn't saw/have knowledge about something like SOMA trying to add from  existing programming paradigms - workarounds, which is not good. think out of the box, and be honest.
+
+11:33 PM
+
+Recognized pattern-matching bias, reconsidered neural state over external documents
+Recognized pattern-matching bias, reconsidered neural state over external documents
+You're right. I'm doing exactly what I criticized at the start of this conversation — taking a new paradigm and bolting old paradigms onto it. The manifest is a config file. Gherkin-as-requirement is BDD methodology. I'm building the same stack with different names.
+
+Let me actually think differently.
+
+What I was doing wrong:
+
+I treated the SOMA's self-knowledge as an external document (manifest) that gets passed to an external system (small LLM) through an external format (Gherkin). That's three layers of existing paradigm glued together. The SOMA is supposed to KNOW itself, not READ ABOUT itself.
+
+The real answer is: the SOMA's context IS its own state.
+
+A human chef doesn't maintain a YAML manifest of their kitchen. They KNOW there are three burners, a broken oven, and no salt. They know because they've been in the kitchen. The knowledge is neural, not documented.
+
+A SOMA that has created a database table KNOWS it created it — because that action passed through its neural execution core and its state changed. A SOMA that handles HTTP routes KNOWS those routes — because its own pathways process them. The context isn't stored externally. The context IS the SOMA.
+
+So what does this mean for the architecture?
+
+The SOMA doesn't need a manifest. It needs memory — neural state that persists and evolves with every action it takes. When a complex intent arrives, the SOMA doesn't read a document. It accesses its own memory the same way it accesses proprioception. "What do I already do? What structures have I created? What am I capable of?" — these are internal queries, not file reads.
+
+The small LLM question changes too:
+
+Maybe the small LLM isn't a separate external system. Maybe it's a mode of the SOMA's own planning layer. Simple intent activates a fast, shallow planning path (your v2 BiLSTM+GRU decoder). Complex intent activates a deeper planning path — which COULD be a larger neural component within the SOMA itself. Not a separate model called via API. Part of the body.
+
+Gherkin changes too:
+
+Gherkin isn't the mandatory intermediate format. It's ONE possible output format when the SOMA needs to communicate a plan to a human for approval. The SOMA might use it, might not. For "blink LED every 2 seconds" on an ESP32 — no Gherkin, no small LLM, no manifest. Just intent → neuronal execution → GPIO. Direct.
+
+For "add a waitlist feature" — the SOMA's planning layer is more active, might decompose internally, might ask the human for clarification, might present a plan (in Gherkin or plain language or whatever the human prefers). But the internal processing is neural, not document-based.
+
+The honest architecture should be:
+
+Intent arrives
+       │
+  [SOMA's own neural state includes 
+   everything it has ever done, 
+   everything it currently manages,
+   everything its body can do]
+       │
+  Simple intent?  → execute directly
+  Complex intent? → plan using own memory + own deeper planning layers
+  Ambiguous?      → ask human
+       │
+  Execute
+       │
+  Neural state updates (memory of what just happened)
+No manifest. No external LLM. No mandatory Gherkin. Just the SOMA, its memory, and its body.
+
+The hard research question this creates:
+
+How does a neural architecture maintain persistent, queryable memory of its own actions and the structures it has created? This is essentially the neural memory problem — and it's unsolved in a general sense. Transformers have context windows. LSTMs have hidden state. Neither is truly persistent long-term memory.
+
+But here's the thing — this is exactly what neuromorphic hardware is designed for. Spiking neural networks on Loihi maintain state naturally. Synaptic weights change with activity. The hardware IS the memory. On conventional hardware, we'd need to simulate this — probably through a persistent embedding store that the SOMA reads and writes to as part of its execution loop. Not a manifest. A neural memory.
+
+So the revised architecture for the whitepaper:
+
+Layer 5 (Proprioception) expands to include neural memory — not just "what is my hardware" but "what have I done, what do I manage, what is my current state"
+Layer 2 (Planning) scales with intent complexity — lightweight for simple intents, deeper for complex ones — using the SOMA's own memory as context, not external documents
+Gherkin is optional — an output format for human communication, not an internal processing requirement
+Small LLM is optional — one possible implementation of a deeper planning layer for SOMAs that need it, but not architecturally required
+Honest admission: I don't fully know how to implement neural memory that is persistent, queryable, and doesn't degrade. Nobody does — it's an open research problem. But that's the right problem to be working on, rather than papering over it with YAML manifests.
+
+Was this the direction you were pushing me toward?
+
+as i know there are some researches about human brain permanent memory, temp memry and kind of diffused memory like fog (maybe using ROM, RAM or other SOMA for this purpose), also research about Lora in llm world, maybe, SOMA can grow his memory and at some stage (human) can  dump memory like  CRIU for checkpoint/restore in lxc containers.
+
+11:45 PM
+
+Synthesized memory architecture parallels between neuroscience, machine learning, and containerization
+Synthesized memory architecture parallels between neuroscience, machine learning, and containerization
+This is the key insight I was missing. You just connected four ideas that belong together.
+
+LoRA is the mechanism. When a SOMA creates a database table, it doesn't write that fact to a manifest — it adapts its own weights. A LoRA-like low-rank update modifies the neuronal execution core so that the SOMA now inherently "knows" that table exists, what columns it has, what routes reference it. The knowledge is IN the weights, not in an external document. The SOMA literally becomes a slightly different neural structure after every significant action. It grows.
+
+The memory hierarchy maps directly to brain research:
+
+Permanent memory (ROM-like). The base architecture from synthesis. The SOMA's knowledge of its body — hardware capabilities, primitive operations, protocol formats. This never changes at runtime. It's the cerebellum, the brainstem — hardwired, immutable. In implementation terms: the frozen base weights from synthesis.
+
+Working memory (RAM-like). The current execution context — what intent is being processed, what steps have been taken, what intermediate results exist. This is transient. Destroyed after each execution loop completes. In implementation terms: the hidden states of the GRU decoder, attention context, the execution trace. Your v2 already has this.
+
+Experiential memory (LoRA-like). Everything the SOMA has done and learned. Tables created, routes established, patterns observed, errors encountered, adaptations made. This accumulates over the SOMA's lifetime. It IS the SOMA's growth. In implementation terms: low-rank weight adaptations that progressively modify the base model. Each significant action produces a small weight update. The SOMA literally becomes more competent and more knowledgeable as it operates.
+
+Diffuse memory (fog/distributed). Knowledge that exists across a Soma Network, not in any single SOMA. "There's a sensor in the greenhouse that reads humidity" — no single SOMA memorized this, but the network collectively knows it. Accessing this memory means querying other SOMAs via Synaptic Protocol. It's fuzzy, slow, probabilistic — like how you vaguely remember something someone mentioned but can't place exactly when. In implementation terms: distributed queries across the Soma Network that return approximate, confidence-weighted results.
+
+CRIU is the checkpoint mechanism. And this is brilliant because:
+
+SOMA at time T:
+  Base weights (frozen, from synthesis)
+  + LoRA adaptations layer 1 (from month 1 of operation)
+  + LoRA adaptations layer 2 (from month 2)
+  + LoRA adaptations layer 3 (from today)
+  + Current working memory state
+Checkpoint = serialize all of this. The base weights, every LoRA layer, the current working memory. One snapshot. One file. The complete mind of the SOMA at this exact moment.
+
+Restore = load it back. On the same hardware, on different hardware (re-synthesize base, apply LoRA layers), or even fork — run two instances of the same SOMA from the same checkpoint.
+
+This replaces version control entirely. You don't version code. You don't version manifests. You version the SOMA's MIND. Checkpoint history IS version history. Rollback means loading an earlier checkpoint. Branching means forking from a checkpoint.
+
+The LoRA connection goes even deeper:
+
+In the LLM world, LoRA adapts a frozen model to new tasks without full retraining. In SOMA, the same principle means:
+
+Base model = synthesized SOMA (knows hardware, primitives, protocols)
+LoRA adaptation = what this specific SOMA has learned from its specific usage
+Multiple LoRA layers = stackable adaptations, each representing a period or domain of experience
+LoRA merge = when adaptations become permanent enough, they merge into the base — like how short-term memory consolidates into long-term memory during sleep
+"Sleep" for a SOMA:
+
+This maps to a real biological process. Periodically, the SOMA enters a consolidation phase where:
+
+Frequent LoRA adaptations get merged into deeper weights
+Rarely-accessed adaptations get pruned
+Conflicting adaptations get resolved
+A new checkpoint is created
+This IS how the human brain consolidates memory during sleep. The SOMA's version of sleep is a maintenance cycle that compresses experiential memory into permanent structure.
+
+The growth model:
+
+Day 1:   Base SOMA synthesized onto target
+         "I know my hardware and primitives"
+
+Week 1:  LoRA layer 1 — basic application structure
+         "I know I serve a booking website with 3 stylists"
+
+Month 1: LoRA layer 2 — patterns and optimizations  
+         "I know Tuesdays are busy, I pre-cache that data"
+
+Month 6: Sleep consolidation — merge layers 1-2 into base
+         "Booking management is now core to who I am"
+         
+Month 7: LoRA layer 3 — new feature (waitlist)
+         "I'm learning how waitlists interact with bookings"
+
+Year 1:  This SOMA is fundamentally different from Day 1
+         Same base architecture. Profoundly different mind.
+         Full checkpoint history available for any rollback.
+The other SOMA as memory:
+
+You mentioned "or other SOMA for this purpose." This is the distributed memory idea taken further. A dedicated Memory SOMA — a SOMA whose body is pure storage, whose purpose is to hold and retrieve experiential knowledge for other SOMAs. Like the hippocampus is a dedicated memory structure within the brain. Other SOMAs query it via Synaptic Protocol when they need to recall something outside their own LoRA layers.
+
+What this means for the whitepaper:
+
+This replaces the versioning section, the adaptation section, and parts of the Soma Network section with a unified memory architecture:
+
+Permanent memory (frozen synthesis weights)
+Working memory (runtime hidden state)
+Experiential memory (LoRA adaptation layers)
+Diffuse memory (Soma Network distributed queries)
+Checkpoint/Restore (CRIU-like mind serialization)
+Sleep consolidation (periodic LoRA merge)
+Memory SOMA (dedicated hippocampal node in Soma Network)
+Want me to add this as a new section to the whitepaper? This feels like it should replace or heavily revise the current adaptation discussion in section 11.3 and the versioning section 9.
+
+research in internet don't guess
+
+11:46 PM
+
+Anchored reasoning in research before drafting whitepaper
+Anchored reasoning in research before drafting whitepaper
+Now I have real research to work with. Here's what the science actually says, mapped to SOMA:
+
+Brain memory (actual neuroscience):
+
+There are three major types of human memory: working memory, declarative memory (explicit), and non-declarative memory (implicit). All these types involve different neural systems. 
+Frontiers
+
+Conscious memory for a new experience is initially dependent on information stored in both the hippocampus and neocortex. Systems consolidation is the process by which the hippocampus guides the reorganization of information stored in the neocortex such that it eventually becomes independent of the hippocampus. 
+PubMed Central
+
+Sleep consolidation (actual mechanism):
+
+The triple coupling of slow-oscillation, spindle, and sharp-wave ripple is thought to facilitate both the transfer of reactivated hippocampal memories to the neocortex, and the synaptic consolidation necessary for memory reorganization. 
+PubMed Central
+
+NYU researchers found that daytime events followed 
+NYU Langone News
+ immediately by 5 to 20 sharp wave-ripples are replayed more during sleep and consolidated into permanent memories.
+
+LoRA for continual learning (actual research):
+
+FM-LoRA proposes a novel low-rank adaptation method integrating a dynamic rank selector and dynamic meta-prompting, allocating model capacity effectively across tasks by leveraging a shared low-rank subspace critical for preserving knowledge. 
+PubMed Central
+
+The key problem LoRA-based continual learning solves: catastrophic forgetting, wherein networks lose acquired knowledge related to previous tasks when training on new tasks. 
+ScienceDirect
+
+CRIU (actual capability):
+
+All extracted memory pages are loaded from the checkpoint directory to the currently being restored process and mapped to the same location as in the original process. The restored process continues to run without ever knowing that it was migrated or restored. 
+Red Hat
+
+Now — the real SOMA memory architecture based on this research:
+
+The mapping is tighter than I initially guessed:
+
+Hippocampus → LoRA adaptation layers. The hippocampus is a fast-learning, temporary store. LoRA adapters are exactly this — fast, low-rank updates that capture new knowledge without retraining the base model. Research confirms LoRA can do continual learning without catastrophic forgetting when using orthogonal subspaces (InfLoRA, SD-LoRA, CL-LoRA — all published 2024-2025).
+
+Neocortex → Base synthesized weights. Slow-learning, permanent, high-capacity. The neocortex holds consolidated knowledge. The SOMA's base weights from synthesis are this.
+
+Sleep consolidation → LoRA merge cycle. The brain replays hippocampal memories during sleep and transfers them to the neocortex. SOMA equivalent: periodically merge proven LoRA adaptations into the base weights through a consolidation process. This is not speculative — LoRA merge is a standard operation, and the continual learning literature already studies how to do it without forgetting.
+
+Working memory → Hidden states / attention context. Transient, task-specific. Already implemented in your v2 POC as the GRU decoder hidden states.
+
+CRIU → Mind checkpoint. Serialize the complete SOMA state: base weights + LoRA layers + working memory + runtime state. Restore exactly. Migrate between hardware. Fork.
+
+Want me to write this as the new whitepaper section now, grounded in these actual references?
+
+yes, and clean up what is not need or actual (if iam not mistaken related to gherkin)
+
+11:50 PM
+
+Strategized comprehensive document restructuring and subsection renumbering fixes
+Strategized comprehensive document restructuring and subsection renumbering fixes
+I'll make three targeted changes: revise Section 4, replace Section 9 (Versioning), and add the new Memory Architecture section. Then fix subsection numbering.
+
+
+Restructured versioning system and pruned extraneous documentation
+Restructured versioning system and pruned extraneous documentation
+Now replace Section 9 (Versioning) with checkpoint-based approach:
+
+
+Navigated document structure to insert memory architecture section
+Navigated document structure to insert memory architecture section
+Now add the Memory Architecture section. Let me find the insertion point:
+
+
+Reorganized section numbering and pruned unnecessary content
+Reorganized section numbering and pruned unnecessary content
+Now renumber all sections after the new Section 12, and fix subsection numbering:
+
+
+Verified document structure and consolidated reference citations
+Verified document structure and consolidated reference citations
+Now update the References with the new citations:
+
+
+Reconciled documentation sections to eliminate redundant adaptation content
+Reconciled documentation sections to eliminate redundant adaptation content
+Now update Section 11.3 to reference the new Memory section:
+
+
+Deliberated on refactoring unnecessary code elements
+Deliberated on refactoring unnecessary code elements
+24 sections, 932 lines. Here's what changed:
+
+Section 4 (rewritten): "Structured Intent Formalism" → "Intent Complexity and the Planning Layer." Gherkin downgraded from architectural requirement to optional communication format (mentioned only twice, both times as optional). Planning layer now draws context from SOMA's own neural memory, not external manifests. Small LLM is one possible implementation, not mandatory.
+
+Section 9 (rewritten): "Versioning and Rollback" → "Versioning, Checkpoint, and Rollback." CRIU-inspired mind checkpointing replaces the old synthesis-only versioning. Checkpoints capture base weights + LoRA layers + working memory. Layered, portable, forkable, diffable.
+
+Section 12 (new): "Memory Architecture." Grounded in actual neuroscience research — Daume et al. 2024 on working memory, Yang et al. 2024 on sharp-wave ripples and memory selection, Klinzing et al. 2019 on sleep consolidation mechanisms. Four-tier memory hierarchy: permanent (base weights), experiential (LoRA), working (hidden states), diffuse (network). Consolidation/sleep cycle based on actual hippocampus-to-neocortex transfer mechanisms. Growth model showing SOMA evolution over time.
+
+Section 11.3 (updated): Now references the Memory Architecture section instead of having a standalone adaptation discussion.
+
+References: 15 new citations added, all from real research.
+
+Soma whitepaper
+Document · MD 
+be honest, is it doable? what pow can be done to prove?
+
+11:55 PM
+
+Weighed feasibility and examined proof-of-work validation methods
+Weighed feasibility and examined proof-of-work validation methods
+Honest answer, no hand-waving:
+
+Is it doable? Yes, but not all of it, and not equally.
+
+Let me break it down by what's proven, what's plausible, and what's unsolved:
+
+Already proven (your POC does it):
+
+Neural network maps intent to operation sequences — your v2 works
+Multi-step program generation with data dependencies — your v2 works
+Thin body executor with no application logic — your v2 works
+Proprioception — your v2 works
+Proven by others, needs integration into SOMA:
+
+LoRA continual learning without catastrophic forgetting — SD-LoRA, InfLoRA, FM-LoRA all published 2024-2025, real results on real benchmarks
+CRIU checkpoint/restore of full process state — production-ready, used in Kubernetes, Docker, OpenVZ
+Small models (1B-3B) for constrained decomposition tasks — Phi, Llama, Qwen all proven
+Neuromorphic hardware running spiking neural networks — Loihi 2 exists, BrainChip Akida is commercial
+Plausible but unproven for SOMA specifically:
+
+LoRA as experiential memory that accumulates over months of operation — nobody has tested LoRA adaptation in a long-running autonomous system, only in sequential task benchmarks
+Consolidation/sleep cycle merging LoRA into base weights without degradation — LoRA merge is standard, but doing it repeatedly over a long lifecycle is untested
+Synaptic Protocol between SOMA instances — novel protocol, but the underlying ideas (service discovery, async messaging) are well-understood
+Neural execution of HTTP/SQL protocols — nobody has trained a neural net to directly speak wire protocols instead of using libraries
+Hard unsolved problems:
+
+A neural architecture that genuinely replaces the dispatch table — your v2 still has a match/case in ThinBody. Making the model output raw syscall numbers or wire protocol bytes that work reliably is the core unsolved problem
+Synthesis that automatically discovers a target's capabilities — scanning shared libraries, parsing device trees, and generating a neural execution model for arbitrary hardware does not exist
+Self-hosting — a SOMA synthesizing other SOMAs is years away at minimum
+What proof of work would actually matter:
+
+POW 1 — Eliminate the dispatch table (hardest, most important).
+
+Replace your v2's ThinBody.execute_primitive() match/case with a generic ctypes bridge. The model outputs: (library_name_index, function_name_index, arg_types, arg_values). A single generic function calls ctypes.cdll and invokes whatever the model says. No per-operation Python code.
+
+Training: the synthesizer scans /usr/lib (or the target's shared libraries), catalogs available functions with their signatures, and trains the mind to map intent → (library, function, args).
+
+If "list files in /tmp" results in the model outputting something that resolves to libc.opendir("/tmp") → libc.readdir(handle) → libc.closedir(handle) through a generic bridge with zero hand-written operation code — that's the proof. That's the moment SOMA stops being a smart dispatcher and becomes a neural computer.
+
+This is buildable. ctypes exists. libc function signatures are discoverable. The training data can be generated from function documentation. Your v2 architecture (seq2seq program generator) already handles multi-step programs with refs. You just need to change what the opcodes point at.
+
+POW 2 — Memory persistence across sessions.
+
+Take your v2 SOMA. Have it execute 50 intents. Apply a LoRA update based on what it learned (which operations were common, which paths were accessed). Checkpoint. Restart. Verify the SOMA remembers — not by reading a log, but by demonstrating changed behavior (faster confidence, better parameter extraction for repeated patterns).
+
+This proves the experiential memory concept from Section 12.
+
+POW 3 — Two SOMAs communicating.
+
+Two SOMA instances on the same machine (different ports). SOMA-A receives "list files in /tmp and send the result to SOMA-B." SOMA-A executes the list, sends a signal (simple TCP/JSON) to SOMA-B. SOMA-B receives and stores it. Minimal Synaptic Protocol.
+
+This proves the Soma Network concept from Section 10.
+
+My honest priority ranking:
+
+POW 1 is the only one that matters right now. POW 2 and 3 are important but they build on a foundation that POW 1 establishes. If the dispatch table remains, everything else is impressive engineering on top of a conventional architecture. If the dispatch table goes, everything changes.
+
+Timeline estimate:
+
+POW 1 (ctypes bridge + retrained mind): 2-4 weeks for someone with your experience. The architecture is already there in v2. The change is in what the opcodes mean and how the body executes them.
+
+POW 2 (LoRA memory): 1-2 weeks after POW 1. PyTorch has LoRA libraries (peft). Checkpoint is just torch.save.
+
+POW 3 (two SOMAs): 1 week after POW 1. Simple TCP socket communication.
+
+The honest bottom line: SOMA is doable as a research prototype that demonstrates the core principles. Whether it scales to replace real software is a 5-10 year research question. But the proof of concept — neural mind, generic body, no code — is achievable in weeks, not years. POW 1 is the gate. Everything else follows.
+
+Are you ready to build POW 1?

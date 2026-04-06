@@ -1,0 +1,1 @@
+# SOMA Proof of Work
