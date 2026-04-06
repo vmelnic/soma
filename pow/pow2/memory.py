@@ -125,10 +125,15 @@ def restore_checkpoint(model, lora_layers, path):
 
 def reset_lora(lora_layers):
     """Rollback -- reset all LoRA to zero (lose experience)."""
+    from pow.pow2.lora import LoRALinear, LoRAGRUCell
     for layer in lora_layers.values():
         with torch.no_grad():
-            layer.lora_A.normal_(0, 0.01)
-            layer.lora_B.zero_()
+            if isinstance(layer, LoRALinear):
+                layer.lora_A.normal_(0, 0.01)
+                layer.lora_B.zero_()
+            elif isinstance(layer, LoRAGRUCell):
+                layer.ih_A.normal_(0, 0.01); layer.ih_B.zero_()
+                layer.hh_A.normal_(0, 0.01); layer.hh_B.zero_()
 
 
 def consolidate(lora_layers):

@@ -70,36 +70,105 @@ class LoRALinear(nn.Module):
         self.lora_B.data.copy_(state["B"])
 
 
+class LoRAGRUCell(nn.Module):
+    """A GRUCell with frozen base weights + trainable LoRA on gate matrices.
+
+    GRU has two weight matrices:
+      weight_ih: (3*hidden, input)  — input-to-gates [r, z, n]
+      weight_hh: (3*hidden, hidden) — hidden-to-gates [r, z, n]
+
+    LoRA adapts BOTH, giving the decoder the ability to change
+    how it processes sequences — not just output heads.
+    """
+
+    def __init__(self, base: nn.GRUCell, rank: int = 4, alpha: float = 1.0):
+        super().__init__()
+        self.base = base
+        self.base.weight_ih.requires_grad_(False)
+        self.base.weight_hh.requires_grad_(False)
+        if self.base.bias_ih is not None:
+            self.base.bias_ih.requires_grad_(False)
+        if self.base.bias_hh is not None:
+            self.base.bias_hh.requires_grad_(False)
+
+        self.scale = alpha / rank
+
+        # LoRA on input-to-hidden
+        ih_out, ih_in = base.weight_ih.shape
+        self.ih_A = nn.Parameter(torch.randn(rank, ih_in) * 0.01)
+        self.ih_B = nn.Parameter(torch.zeros(ih_out, rank))
+
+        # LoRA on hidden-to-hidden
+        hh_out, hh_in = base.weight_hh.shape
+        self.hh_A = nn.Parameter(torch.randn(rank, hh_in) * 0.01)
+        self.hh_B = nn.Parameter(torch.zeros(hh_out, rank))
+
+    def forward(self, x: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
+        # Base GRU computation + LoRA delta on gate computations
+        # GRU: gates = x @ W_ih.T + h @ W_hh.T + bias
+        # LoRA adds: x @ (B_ih @ A_ih).T + h @ (B_hh @ A_hh).T
+        #
+        # We apply LoRA by temporarily modifying the weights, running
+        # the base GRU, then restoring. This is cleaner than reimplementing GRU.
+        with torch.no_grad():
+            ih_delta = self.scale * self.ih_B @ self.ih_A
+            hh_delta = self.scale * self.hh_B @ self.hh_A
+            self.base.weight_ih.add_(ih_delta)
+            self.base.weight_hh.add_(hh_delta)
+
+        result = self.base(x, h)
+
+        with torch.no_grad():
+            self.base.weight_ih.sub_(ih_delta)
+            self.base.weight_hh.sub_(hh_delta)
+
+        return result
+
+    def merge(self):
+        with torch.no_grad():
+            self.base.weight_ih.add_(self.scale * self.ih_B @ self.ih_A)
+            self.base.weight_hh.add_(self.scale * self.hh_B @ self.hh_A)
+            for p in [self.ih_A, self.ih_B, self.hh_A, self.hh_B]:
+                p.zero_()
+            self.ih_A.normal_(0, 0.01)
+            self.hh_A.normal_(0, 0.01)
+
+    def lora_state(self):
+        return {"ih_A": self.ih_A.data.clone(), "ih_B": self.ih_B.data.clone(),
+                "hh_A": self.hh_A.data.clone(), "hh_B": self.hh_B.data.clone()}
+
+    def load_lora_state(self, state):
+        self.ih_A.data.copy_(state["ih_A"])
+        self.ih_B.data.copy_(state["ih_B"])
+        self.hh_A.data.copy_(state["hh_A"])
+        self.hh_B.data.copy_(state["hh_B"])
+
+
 def apply_lora(model: nn.Module, rank: int = 4, alpha: float = 1.0,
-               target_modules: list[str] | None = None) -> dict[str, LoRALinear]:
-    """Apply LoRA adapters to a model's Linear layers.
+               target_modules: list[str] | None = None):
+    """Apply LoRA adapters to Linear layers AND GRUCell.
 
     Freezes all base parameters. Only LoRA A/B matrices are trainable.
-    Returns dict of {name: LoRALinear} for checkpoint/restore.
-
-    Args:
-        model: The base model (from synthesis)
-        rank: LoRA rank (lower = fewer params, less capacity)
-        target_modules: List of attribute names to adapt. If None, adapts all Linear layers.
+    Returns (lora_layers, trainable_count, total_count).
     """
     lora_layers = {}
 
-    # Freeze everything first (permanent memory)
     for param in model.parameters():
         param.requires_grad_(False)
 
-    # Find and wrap target Linear layers with LoRA
     for name, module in list(model.named_modules()):
-        if not isinstance(module, nn.Linear):
-            continue
         if target_modules is not None and name not in target_modules:
             continue
 
-        # Replace the Linear with LoRALinear
-        lora = LoRALinear(module, rank=rank, alpha=alpha)
+        if isinstance(module, nn.Linear):
+            lora = LoRALinear(module, rank=rank, alpha=alpha)
+        elif isinstance(module, nn.GRUCell):
+            lora = LoRAGRUCell(module, rank=rank, alpha=alpha)
+        else:
+            continue
+
         lora_layers[name] = lora
 
-        # Set the LoRA module on the parent
         parts = name.split(".")
         parent = model
         for part in parts[:-1]:
