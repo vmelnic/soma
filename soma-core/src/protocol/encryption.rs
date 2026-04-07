@@ -8,8 +8,11 @@
 //! all subsequent signals are encrypted. The ENCRYPTED flag in SignalFlags
 //! indicates per-signal encryption status.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use anyhow::Result;
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce, aead::{Aead, KeyInit}};
+use sha2::{Sha256, Digest};
 
 /// Ed25519 identity keypair for a SOMA instance (Section 12.3).
 /// Used for peer authentication and plugin signing.
@@ -67,31 +70,60 @@ impl SomaIdentity {
 
 /// Shared session key derived from X25519 key exchange.
 pub struct SessionKeys {
-    /// Encryption key (32 bytes, derived from ECDH shared secret)
+    /// Encryption key (32 bytes, derived from ECDH shared secret via SHA-256 KDF)
     pub encrypt_key: [u8; 32],
-    /// Nonce counter for ChaCha20-Poly1305
-    pub nonce_counter: u64,
+    /// Nonce counter for outbound (send) encryption
+    pub send_nonce: AtomicU64,
+    /// Nonce counter for inbound (recv) decryption
+    pub recv_nonce: AtomicU64,
 }
 
 impl SessionKeys {
     /// Derive session keys from our secret and peer's public key via X25519 ECDH.
+    /// Uses SHA-256 with a domain separator for proper key derivation rather than
+    /// using the raw shared secret directly.
     pub fn derive(our_secret: &[u8; 32], peer_public: &[u8; 32]) -> Self {
         let secret = x25519_dalek::StaticSecret::from(*our_secret);
         let public = x25519_dalek::PublicKey::from(*peer_public);
         let shared = secret.diffie_hellman(&public);
+
+        // KDF: SHA-256 hash of shared secret with domain separator
+        let mut hasher = Sha256::new();
+        hasher.update(shared.as_bytes());
+        hasher.update(b"soma-session-key-v1"); // domain separator
+        let derived = hasher.finalize();
+        let mut encrypt_key = [0u8; 32];
+        encrypt_key.copy_from_slice(&derived);
+
         Self {
-            encrypt_key: shared.to_bytes(),
-            nonce_counter: 0,
+            encrypt_key,
+            send_nonce: AtomicU64::new(0),
+            recv_nonce: AtomicU64::new(0),
         }
     }
 
-    /// Get the next nonce for encryption (12 bytes for ChaCha20-Poly1305).
-    pub fn next_nonce(&mut self) -> [u8; 12] {
-        self.nonce_counter += 1;
+    /// Get the next nonce for sending/encryption (12 bytes for ChaCha20-Poly1305).
+    pub fn next_send_nonce(&self) -> [u8; 12] {
+        let counter = self.send_nonce.fetch_add(1, Ordering::Relaxed) + 1;
         let mut nonce = [0u8; 12];
-        let bytes = self.nonce_counter.to_le_bytes();
+        let bytes = counter.to_le_bytes();
         nonce[..8].copy_from_slice(&bytes);
         nonce
+    }
+
+    /// Get the next nonce for receiving/decryption (12 bytes for ChaCha20-Poly1305).
+    pub fn next_recv_nonce(&self) -> [u8; 12] {
+        let counter = self.recv_nonce.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut nonce = [0u8; 12];
+        let bytes = counter.to_le_bytes();
+        nonce[..8].copy_from_slice(&bytes);
+        nonce
+    }
+
+    /// Get the next nonce for encryption (12 bytes for ChaCha20-Poly1305).
+    /// Legacy method — delegates to next_send_nonce for backwards compatibility.
+    pub fn next_nonce(&self) -> [u8; 12] {
+        self.next_send_nonce()
     }
 }
 
@@ -198,9 +230,39 @@ mod tests {
 
     #[test]
     fn test_nonce_counter() {
-        let mut keys = SessionKeys::derive(&[1; 32], &[2; 32]);
+        let keys = SessionKeys::derive(&[1; 32], &[2; 32]);
         let n1 = keys.next_nonce();
         let n2 = keys.next_nonce();
         assert_ne!(n1, n2);
+    }
+
+    #[test]
+    fn test_directional_nonces() {
+        let keys = SessionKeys::derive(&[1; 32], &[2; 32]);
+        let send1 = keys.next_send_nonce();
+        let send2 = keys.next_send_nonce();
+        let recv1 = keys.next_recv_nonce();
+
+        // Send nonces increment independently
+        assert_ne!(send1, send2);
+        // Recv nonce starts at 1 (same counter value as send1, since they're independent)
+        assert_eq!(send1, recv1);
+    }
+
+    #[test]
+    fn test_kdf_not_raw_secret() {
+        // Verify that the derived key is NOT the raw shared secret
+        // (i.e., the KDF is actually applied)
+        let secret = [1u8; 32];
+        let peer_pub = [2u8; 32];
+
+        // Compute raw shared secret for comparison
+        let raw_secret = x25519_dalek::StaticSecret::from(secret);
+        let raw_public = x25519_dalek::PublicKey::from(peer_pub);
+        let raw_shared = raw_secret.diffie_hellman(&raw_public);
+
+        let keys = SessionKeys::derive(&secret, &peer_pub);
+        assert_ne!(keys.encrypt_key, raw_shared.to_bytes(),
+            "Derived key must not be the raw shared secret");
     }
 }

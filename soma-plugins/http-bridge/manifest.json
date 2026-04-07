@@ -1,0 +1,14 @@
+{
+  "plugin": {
+    "name": "http-bridge",
+    "version": "0.1.0",
+    "description": "HTTP client: GET, POST, PUT, DELETE for calling external APIs"
+  },
+  "conventions": [
+    {"name": "get", "description": "HTTP GET request"},
+    {"name": "post", "description": "HTTP POST request"},
+    {"name": "put", "description": "HTTP PUT request"},
+    {"name": "delete", "description": "HTTP DELETE request"},
+    {"name": "request", "description": "Generic HTTP request with any method"}
+  ]
+}

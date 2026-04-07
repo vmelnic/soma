@@ -1,0 +1,285 @@
+{
+  "schema_version": "1.0",
+  "plugin": "crypto",
+  "plugin_version": "0.1.0",
+  "examples": [
+    {
+      "id": "crypto_sha256_001",
+      "intents": [
+        "hash {data}",
+        "compute SHA256 of {data}",
+        "get the SHA-256 hash of {data}",
+        "sha256 hash {data}",
+        "calculate hash for {data}",
+        "generate SHA256 digest of {data}"
+      ],
+      "program": [
+        {"convention": "crypto.hash_sha256", "args": [{"name": "data", "type": "span", "extract": "data"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "data": ["hello", "password123", "test data", "secret message", "my file content"]
+      },
+      "tags": ["crypto", "hash", "sha256"]
+    },
+    {
+      "id": "crypto_argon2_001",
+      "intents": [
+        "hash password {password}",
+        "securely hash {password}",
+        "create password hash for {password}",
+        "argon2 hash {password}",
+        "hash {password} with argon2",
+        "generate a secure hash of password {password}"
+      ],
+      "program": [
+        {"convention": "crypto.hash_argon2", "args": [{"name": "password", "type": "span", "extract": "password"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "password": ["hunter2", "s3cret!", "MyP@ssw0rd", "correcthorsebatterystaple", "admin123"]
+      },
+      "tags": ["crypto", "hash", "argon2", "password"]
+    },
+    {
+      "id": "crypto_verify_argon2_001",
+      "intents": [
+        "verify password {password} against hash",
+        "check if {password} matches the hash",
+        "validate password {password}",
+        "does {password} match this argon2 hash",
+        "verify argon2 hash for {password}",
+        "check password {password} against stored hash"
+      ],
+      "program": [
+        {"convention": "crypto.verify_argon2", "args": [{"name": "password", "type": "span", "extract": "password"}, {"name": "hash", "type": "span", "extract": "hash"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "password": ["hunter2", "s3cret!", "MyP@ssw0rd", "correcthorsebatterystaple", "admin123"],
+        "hash": ["$argon2id$v=19$m=19456,t=2,p=1$EXAMPLE_SALT$EXAMPLE_HASH"]
+      },
+      "tags": ["crypto", "hash", "argon2", "password", "verify"]
+    },
+    {
+      "id": "crypto_random_bytes_001",
+      "intents": [
+        "generate {count} random bytes",
+        "create {count} bytes of random data",
+        "give me {count} cryptographic random bytes",
+        "produce {count} secure random bytes",
+        "random bytes of length {count}"
+      ],
+      "program": [
+        {"convention": "crypto.random_bytes", "args": [{"name": "count", "type": "span", "extract": "count"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "count": [16, 32, 64, 128, 256]
+      },
+      "tags": ["crypto", "random"]
+    },
+    {
+      "id": "crypto_random_hex_001",
+      "intents": [
+        "generate {count} byte hex string",
+        "random hex string of {count} bytes",
+        "create a {count}-byte random hex token",
+        "give me a random hex key of {count} bytes",
+        "produce a hex-encoded random value with {count} bytes"
+      ],
+      "program": [
+        {"convention": "crypto.random_hex", "args": [{"name": "count", "type": "span", "extract": "count"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "count": [16, 32, 64, 128, 256]
+      },
+      "tags": ["crypto", "random", "hex"]
+    },
+    {
+      "id": "crypto_uuid_001",
+      "intents": [
+        "generate a UUID",
+        "create a unique ID",
+        "make a random identifier",
+        "give me a UUID",
+        "new UUID please"
+      ],
+      "program": [
+        {"convention": "crypto.random_uuid", "args": []},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["crypto", "random", "uuid"]
+    },
+    {
+      "id": "crypto_sign_ed25519_001",
+      "intents": [
+        "sign data with ed25519 key",
+        "create an ed25519 signature",
+        "digitally sign this message",
+        "ed25519 sign the payload",
+        "sign bytes with private key"
+      ],
+      "program": [
+        {"convention": "crypto.sign_ed25519", "args": [{"name": "data", "type": "span", "extract": "data"}, {"name": "key", "type": "span", "extract": "key"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["crypto", "signing", "ed25519"]
+    },
+    {
+      "id": "crypto_verify_ed25519_001",
+      "intents": [
+        "verify ed25519 signature",
+        "check if the signature is valid",
+        "validate the ed25519 digital signature",
+        "verify signed data with public key",
+        "is this ed25519 signature correct"
+      ],
+      "program": [
+        {"convention": "crypto.verify_ed25519", "args": [{"name": "data", "type": "span", "extract": "data"}, {"name": "signature", "type": "span", "extract": "signature"}, {"name": "pubkey", "type": "span", "extract": "pubkey"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["crypto", "signing", "ed25519", "verify"]
+    },
+    {
+      "id": "crypto_encrypt_aead_001",
+      "intents": [
+        "encrypt data with chacha20",
+        "encrypt these bytes with AEAD",
+        "chacha20-poly1305 encrypt the payload",
+        "symmetrically encrypt the message",
+        "AEAD encrypt with the given key"
+      ],
+      "program": [
+        {"convention": "crypto.encrypt_aead", "args": [{"name": "plaintext", "type": "span", "extract": "plaintext"}, {"name": "key", "type": "span", "extract": "key"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["crypto", "encryption", "aead", "chacha20"]
+    },
+    {
+      "id": "crypto_decrypt_aead_001",
+      "intents": [
+        "decrypt data with chacha20",
+        "decrypt the AEAD ciphertext",
+        "chacha20-poly1305 decrypt the payload",
+        "symmetrically decrypt the message",
+        "AEAD decrypt with the given key"
+      ],
+      "program": [
+        {"convention": "crypto.decrypt_aead", "args": [{"name": "ciphertext", "type": "span", "extract": "ciphertext"}, {"name": "key", "type": "span", "extract": "key"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["crypto", "decryption", "aead", "chacha20"]
+    },
+    {
+      "id": "crypto_jwt_sign_001",
+      "intents": [
+        "create a JWT token",
+        "sign JWT with claims",
+        "generate a signed JWT",
+        "make a JSON web token",
+        "issue a JWT for these claims",
+        "sign a JWT with HS256"
+      ],
+      "program": [
+        {"convention": "crypto.jwt_sign", "args": [{"name": "claims", "type": "span", "extract": "claims"}, {"name": "secret", "type": "span", "extract": "secret"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "claims": ["{\"sub\":\"user1\",\"role\":\"admin\"}", "{\"sub\":\"service\",\"iat\":1700000000}", "{\"user_id\":42,\"scope\":\"read\"}"],
+        "secret": ["my-secret-key", "jwt-signing-key-2024"]
+      },
+      "tags": ["crypto", "jwt", "token"]
+    },
+    {
+      "id": "crypto_jwt_verify_001",
+      "intents": [
+        "verify JWT token",
+        "decode JWT",
+        "validate this JWT",
+        "check if JWT is valid",
+        "extract claims from JWT",
+        "verify and decode the JSON web token"
+      ],
+      "program": [
+        {"convention": "crypto.jwt_verify", "args": [{"name": "token", "type": "span", "extract": "token"}, {"name": "secret", "type": "span", "extract": "secret"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "token": ["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyMSJ9.EXAMPLE"],
+        "secret": ["my-secret-key", "jwt-signing-key-2024"]
+      },
+      "tags": ["crypto", "jwt", "token", "verify"]
+    },
+    {
+      "id": "crypto_hmac_001",
+      "intents": [
+        "compute HMAC of {data}",
+        "authenticate message {data}",
+        "HMAC-SHA256 of {data}",
+        "generate message authentication code for {data}",
+        "compute MAC for {data}"
+      ],
+      "program": [
+        {"convention": "crypto.hmac_sha256", "args": [{"name": "data", "type": "span", "extract": "data"}, {"name": "key", "type": "span", "extract": "key"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["crypto", "hmac", "mac", "authentication"]
+    },
+    {
+      "id": "crypto_hash_and_sign_001",
+      "intents": [
+        "hash {data} and create an HMAC",
+        "compute SHA256 of {data} then authenticate it",
+        "generate hash of {data} and sign it"
+      ],
+      "program": [
+        {"convention": "crypto.hash_sha256", "args": [{"name": "data", "type": "span", "extract": "data"}]},
+        {"convention": "EMIT", "args": [{"name": "hash", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "data": ["hello", "important message", "transaction data"]
+      },
+      "tags": ["crypto", "hash", "multi-step"]
+    },
+    {
+      "id": "crypto_generate_key_and_encrypt_001",
+      "intents": [
+        "generate a key and encrypt {data}",
+        "create an encryption key then encrypt {data}",
+        "make a random key and use it to encrypt {data}"
+      ],
+      "program": [
+        {"convention": "crypto.random_bytes", "args": [{"name": "count", "type": "literal", "value": 32}]},
+        {"convention": "crypto.encrypt_aead", "args": [{"name": "plaintext", "type": "span", "extract": "data"}, {"name": "key", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "data": ["secret message", "confidential report", "private key material"]
+      },
+      "tags": ["crypto", "encryption", "multi-step"]
+    }
+  ]
+}

@@ -85,6 +85,17 @@ impl PosixPlugin {
                 vec![arg("path", "string", true, "File path"),
                      arg("content", "string", true, "Content to append")],
                 "void", 10, None),
+            conv(22, "read_bytes",      "Read entire file as raw bytes",
+                vec![arg("path", "string", true, "File path")],
+                "bytes", 10, None),
+            conv(23, "write_bytes",     "Write raw bytes to file (create/overwrite)",
+                vec![arg("path", "string", true, "File path"),
+                     arg("data", "bytes", true, "Bytes to write")],
+                "void", 10, None),
+            conv(24, "write_chunk",     "Write bytes to open file descriptor",
+                vec![arg("handle", "handle", true, "File descriptor"),
+                     arg("data", "bytes", true, "Bytes to write")],
+                "int", 5, None),
         ];
         Self { conventions }
     }
@@ -124,7 +135,7 @@ fn conv(id: u32, name: &str, desc: &str, args: Vec<super::interface::ArgSpec>, r
     };
     // Conventions with side effects: create/delete/rename/write/mkdir + high-level write/copy/append
     let side_effects = match id {
-        1 | 3 | 8 | 9 | 10 | 17 | 19 | 21 => vec![SideEffect("filesystem".into())],
+        1 | 3 | 8 | 9 | 10 | 17 | 19 | 21 | 23 | 24 => vec![SideEffect("filesystem".into())],
         _ => vec![],
     };
     // Deterministic: stat, access, cwd, uname are deterministic-ish; reads depend on state
@@ -265,7 +276,12 @@ impl SomaPlugin for PosixPlugin {
             // create_dir
             9 => {
                 let path = to_cstring(&args[0])?;
-                unsafe { libc::mkdir(path.as_ptr(), 0o755); }
+                let rc = unsafe { libc::mkdir(path.as_ptr(), 0o755) };
+                if rc != 0 {
+                    return Err(PluginError::Failed(format!(
+                        "mkdir failed: {}", std::io::Error::last_os_error()
+                    )));
+                }
                 Ok(Value::Int(0))
             }
             // rename_path
@@ -379,6 +395,29 @@ impl SomaPlugin for PosixPlugin {
                 file.write_all(content.as_bytes())
                     .map_err(|e| PluginError::Failed(format!("append write failed: {}", e)))?;
                 Ok(Value::Null)
+            }
+            // read_bytes — single-call: read entire file as raw bytes
+            22 => {
+                let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
+                let bytes = std::fs::read(&path)
+                    .map_err(|e| PluginError::NotFound(format!("read_bytes failed: {}", e)))?;
+                Ok(Value::Bytes(bytes))
+            }
+            // write_bytes — single-call: write raw bytes to file
+            23 => {
+                let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
+                let data = match &args[1] { Value::Bytes(b) => b.clone(), _ => return Err(PluginError::InvalidArg("expected bytes".into())) };
+                std::fs::write(&path, &data)
+                    .map_err(|e| PluginError::Failed(format!("write_bytes failed: {}", e)))?;
+                Ok(Value::Null)
+            }
+            // write_chunk — write bytes to open fd
+            24 => {
+                let fd = get_fd(&args[0])?;
+                let data = match &args[1] { Value::Bytes(b) => b.clone(), _ => return Err(PluginError::InvalidArg("expected bytes".into())) };
+                let n = unsafe { libc::write(fd, data.as_ptr() as *const libc::c_void, data.len()) };
+                if n < 0 { return Err(PluginError::Failed("write_chunk failed".into())); }
+                Ok(Value::Int(n as i64))
             }
             _ => Err(PluginError::NotFound(format!("unknown convention: {}", conv_id))),
         }

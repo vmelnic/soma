@@ -26,6 +26,7 @@ use metrics::SomaMetrics;
 use mind::{ArgType, MindEngine, ProgramStep, STOP_ID};
 use mind::onnx_engine::OnnxMindEngine;
 use plugin::builtin::PosixPlugin;
+use plugin::interface::SomaPlugin;
 use plugin::manager::PluginManager;
 use proprioception::Proprioception;
 use protocol::discovery::PeerRegistry;
@@ -76,6 +77,9 @@ struct Cli {
 /// Active inference counter for resource limiting.
 static ACTIVE_INFERENCES: AtomicUsize = AtomicUsize::new(0);
 
+/// Flag to stop accepting new connections/requests during shutdown (Section 11.4 step 1).
+static ACCEPTING_CONNECTIONS: AtomicBool = AtomicBool::new(true);
+
 fn display_result(result: &plugin::manager::ProgramResult, _catalog: &[mind::CatalogEntry]) {
     if result.success {
         if let Some(output) = &result.output {
@@ -112,12 +116,19 @@ fn run_intent(
     experience_buf: &Arc<RwLock<ExperienceBuffer>>,
     soma_state: &Arc<RwLock<SomaState>>,
     soma_metrics: &Arc<SomaMetrics>,
+    config: &SomaConfig,
     text: &str,
     max_concurrent: usize,
     max_program_steps: usize,
     trace_verbosity: &str,
     soma_id: &str,
 ) {
+    // Section 11.4 step 1: reject new requests during shutdown
+    if !ACCEPTING_CONNECTIONS.load(Ordering::SeqCst) {
+        eprintln!("  [Resource] Error: SOMA is shutting down, not accepting new requests");
+        return;
+    }
+
     let current = ACTIVE_INFERENCES.fetch_add(1, Ordering::SeqCst);
     if current >= max_concurrent {
         ACTIVE_INFERENCES.fetch_sub(1, Ordering::SeqCst);
@@ -142,10 +153,8 @@ fn run_intent(
     )
     .entered();
 
-    // NOTE: mind.infer() is synchronous — cannot wrap with tokio::time::timeout.
-    // The decoder loop in onnx_engine.rs is bounded by model_meta.max_steps,
-    // which provides an implicit time cap. config.mind.max_inference_time_secs
-    // is reserved for future async enforcement (requires async infer()).
+    // mind.infer() is synchronous with internal timeout enforcement via
+    // max_inference_time_secs checked each decoder step (see onnx_engine.rs).
     let mind_guard = mind.read().unwrap();
     match mind_guard.infer(text) {
         Ok(program) => {
@@ -251,11 +260,13 @@ fn run_intent(
                             ArgType::None => 0u8,
                             ArgType::Span => 1u8,
                             ArgType::Ref => 2u8,
+                            ArgType::Literal => 3u8,
                         };
                         let a1 = match s.arg1_type {
                             ArgType::None => 0u8,
                             ArgType::Span => 1u8,
                             ArgType::Ref => 2u8,
+                            ArgType::Literal => 3u8,
                         };
                         (s.conv_id, a0, a1)
                     })
@@ -299,6 +310,42 @@ fn run_intent(
                     p.record_success();
                 } else {
                     p.record_failure();
+                }
+            }
+
+            // Runtime LoRA adaptation trigger (Section 4.7)
+            if config.mind.lora.adaptation_enabled && final_success {
+                let success_count = experience_buf.read().map(|buf| buf.success_count()).unwrap_or(0);
+                if success_count > 0 && success_count % config.mind.lora.adapt_every_n_successes == 0 {
+                    let experiences: Vec<Experience> = {
+                        let buf = experience_buf.read().unwrap();
+                        buf.successes().into_iter().cloned().collect()
+                    };
+                    let adapt_config = mind::adaptation::AdaptationConfig {
+                        enabled: true,
+                        adapt_every_n: config.mind.lora.adapt_every_n_successes,
+                        batch_size: config.mind.lora.adapt_batch_size,
+                        learning_rate: config.mind.lora.adapt_learning_rate,
+                    };
+                    let mut mind_guard = mind.write().unwrap();
+                    match mind::adaptation::adapt_from_experience(&mut *mind_guard, &experiences, &adapt_config) {
+                        Ok(result) => {
+                            println!("  [Mind] Adapted. Loss: {:.4}, Cycle: {}, LoRA magnitude: {:.6}",
+                                result.loss, result.cycle, result.lora_magnitude);
+                            if let Ok(mut p) = proprio.write() {
+                                p.record_adaptation();
+                            }
+                            soma_metrics.adaptations_total.fetch_add(1, Ordering::Relaxed);
+                            // Update LoRA magnitude metric
+                            soma_metrics.lora_magnitude.store(
+                                result.lora_magnitude.to_bits() as u64,
+                                Ordering::Relaxed,
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "LoRA adaptation failed");
+                        }
+                    }
                 }
             }
         }
@@ -365,9 +412,26 @@ fn do_checkpoint(
         })
         .collect();
 
+    // Checkpoint LoRA state from mind engine (Section 4.7)
+    let lora_state = if let Some(mind_ref) = mind {
+        if let Ok(m) = mind_ref.read() {
+            match m.checkpoint_lora() {
+                Ok(ckpt_lora) => ckpt_lora.layers,
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to checkpoint LoRA state");
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
     let mut ckpt = Checkpoint::new(
         config.soma.id.clone(),
-        Vec::new(),
+        lora_state,
         exp_count,
         adapt_count,
     );
@@ -376,10 +440,14 @@ fn do_checkpoint(
         .map(|(name, version)| memory::checkpoint::PluginManifestEntry { name, version })
         .collect();
 
-    // Record base model hash for checkpoint integrity verification
+    // Record base model hash and consolidated weight delta for checkpoint integrity
     if let Some(mind_ref) = mind {
         if let Ok(m) = mind_ref.read() {
             ckpt.base_model_hash = m.model_hash.clone();
+            // Persist consolidated LoRA weight delta (Section 6.3)
+            if !m.merged_opcode_delta.is_empty() {
+                ckpt.merged_opcode_delta = m.merged_opcode_delta.clone();
+            }
         }
     }
 
@@ -415,16 +483,27 @@ fn do_checkpoint(
 }
 
 fn do_consolidate(
-    _config: &SomaConfig,
+    config: &SomaConfig,
     proprio: &Arc<RwLock<Proprioception>>,
     mind: &Arc<RwLock<OnnxMindEngine>>,
+    experience_buf: &Arc<RwLock<ExperienceBuffer>>,
+    plugins: &Arc<RwLock<PluginManager>>,
+    soma_state: Option<&Arc<RwLock<SomaState>>>,
 ) {
     let consolidation = ConsolidationConfig::default();
     let p = proprio.read().unwrap();
-    if consolidation.should_consolidate(p.total_adaptations, 0.0) {
+    let adaptation_count = p.total_adaptations;
+    // Read current max LoRA magnitude from the mind engine
+    let max_magnitude = {
+        let m = mind.read().unwrap();
+        m.active_lora().iter()
+            .map(|l| l.magnitude())
+            .fold(0.0f32, f32::max)
+    };
+    if consolidation.should_consolidate(adaptation_count, max_magnitude) {
         println!(
-            "  [Memory] Consolidation criteria met ({} adaptations)",
-            p.total_adaptations
+            "  [Memory] Consolidation criteria met ({} adaptations, magnitude {:.4})",
+            adaptation_count, max_magnitude
         );
         drop(p); // release read lock before acquiring write lock on mind
         let mut mind_guard = mind.write().unwrap();
@@ -433,10 +512,26 @@ fn do_consolidate(
             "  [Memory] Consolidation complete: evaluated={}, merged={}, magnitude={:.4}",
             result.layers_evaluated, result.layers_merged, result.new_magnitude
         );
+        // Record consolidation in proprioception
+        drop(mind_guard);
+        if let Ok(mut p) = proprio.write() {
+            p.consolidations += result.layers_merged as u64;
+        }
+
+        // Post-consolidation: checkpoint the new permanent state (Section 6.3)
+        do_checkpoint(config, experience_buf, proprio, plugins, soma_state, Some(mind));
+
+        // Clear experience buffer after consolidation — learned knowledge
+        // is now consolidated into the model weights (Section 6.3)
+        if let Ok(mut buf) = experience_buf.write() {
+            let cleared = buf.len();
+            buf.clear();
+            println!("  [Memory] Experience buffer cleared ({} entries)", cleared);
+        }
     } else {
         println!(
-            "  [Memory] Consolidation not needed (adaptations: {}/{}, magnitude below threshold)",
-            p.total_adaptations, consolidation.threshold
+            "  [Memory] Consolidation not needed (adaptations: {}/{}, magnitude: {:.4}/{:.4})",
+            adaptation_count, consolidation.threshold, max_magnitude, consolidation.min_lora_magnitude
         );
     }
 }
@@ -475,7 +570,9 @@ fn do_shutdown(
     soma_state: Option<&Arc<RwLock<SomaState>>>,
     mind: Option<&Arc<RwLock<OnnxMindEngine>>>,
 ) {
-    // Step 1: Stop accepting — set a flag (server_handle.abort below)
+    // Step 1: Stop accepting new connections/requests immediately
+    ACCEPTING_CONNECTIONS.store(false, Ordering::SeqCst);
+    tracing::info!("Stopped accepting new connections");
 
     // Step 2: Notify peers with CLOSE signals (joined, not fire-and-forget)
     if let Some(peer_reg) = peers {
@@ -539,12 +636,12 @@ fn do_shutdown(
         do_checkpoint(config, experience_buf, proprio, plugins, soma_state, mind);
     }
 
-    // Step 6: Unload plugins (Section 11.4)
-    // Plugins are unloaded when the Arc<RwLock<PluginManager>> is dropped.
-    tracing::info!(
-        plugins = plugins.read().unwrap().plugin_names().len(),
-        "Plugins will be unloaded on exit"
-    );
+    // Step 6: Unload plugins BEFORE closing listeners (Section 11.4, spec step 6 before 7)
+    {
+        let plugin_count = plugins.read().unwrap().plugin_names().len();
+        plugins.write().unwrap().unload_all();
+        tracing::info!(plugins = plugin_count, "Plugins unloaded");
+    }
 
     // Step 7: Close listeners / stop protocol server
     if let Some(handle) = server_handle {
@@ -552,7 +649,7 @@ fn do_shutdown(
         tracing::info!("Protocol server stopped");
     }
 
-    // Step 7: Close MCP server (if running, it was already stopped by exiting run_stdio)
+    // Step 8: Close MCP server (if running, it was already stopped by exiting run_stdio)
     tracing::info!("MCP server closed");
 
     // Step 8: Log final stats and exit
@@ -627,6 +724,7 @@ async fn main() -> Result<()> {
             e
         })?;
     engine.temperature = config.mind.temperature;
+    engine.max_inference_time_secs = config.mind.max_inference_time_secs;
     let mind = Arc::new(RwLock::new(engine));
 
     // Step 3 verification: test inference on "ping" (Section 11.1)
@@ -656,20 +754,46 @@ async fn main() -> Result<()> {
 
     // Step 4: Load Plugins (Section 11.1: "Failed plugin: skip and continue")
     let mut plugins = PluginManager::new();
-    let _plugin_config = plugin::interface::PluginConfig::default();
-    // In future: parse [plugins.posix] TOML section into plugin_config
+
+    // Helper: build PluginConfig from [plugins.<name>] TOML section
+    let build_plugin_config = |name: &str| -> plugin::interface::PluginConfig {
+        let mut pc = plugin::interface::PluginConfig::default();
+        if let Some(toml_val) = config.plugins.get(name) {
+            // Convert toml::Value table entries to serde_json::Value
+            if let Some(table) = toml_val.as_table() {
+                for (k, v) in table {
+                    if let Ok(json_val) = serde_json::to_value(v) {
+                        pc.settings.insert(k.clone(), json_val);
+                    }
+                }
+            }
+        }
+        pc
+    };
+
+    // Register built-in PosixPlugin
     {
-        let posix: Box<dyn plugin::interface::SomaPlugin> = Box::new(PosixPlugin::new());
+        let mut posix = PosixPlugin::new();
+        let pc = build_plugin_config("posix");
+        if let Err(e) = posix.on_load(&pc) {
+            tracing::warn!(error = %e, "PosixPlugin on_load failed");
+        }
+        let posix: Box<dyn plugin::interface::SomaPlugin> = Box::new(posix);
         plugins.register(posix);
     }
 
-    // Scan plugins directory for dynamic plugins (Section 5.3)
+    // Discover plugins from directory, with manifest + platform filtering (Section 5.3)
     let plugins_dir = std::path::Path::new(&config.soma.plugins_directory);
-    let discovered = plugin::dynamic::scan_plugin_directory(plugins_dir);
-    for plugin_path in &discovered {
+    let discovered = plugin::dynamic::discover_plugins(plugins_dir);
+    for (plugin_path, _manifest) in &discovered {
         match plugin::dynamic::load_plugin_from_path(plugin_path) {
-            Ok(p) => {
-                tracing::info!(plugin = p.name(), path = %plugin_path.display(), "Dynamic plugin discovered");
+            Ok(mut p) => {
+                let pc = build_plugin_config(p.name());
+                if let Err(e) = p.on_load(&pc) {
+                    tracing::warn!(plugin = p.name(), error = %e, "Plugin on_load failed, skipping");
+                    continue;
+                }
+                tracing::info!(plugin = p.name(), path = %plugin_path.display(), "Dynamic plugin loaded");
                 plugins.register(p);
             }
             Err(e) => {
@@ -683,11 +807,86 @@ async fn main() -> Result<()> {
 
     let total_conv = plugins.conventions().len();
 
+    // Step 4b: Attach plugin-provided LoRA knowledge to the Mind at startup (Section 7.3)
+    {
+        let lora_plugins = plugins.plugins_with_lora_weights();
+        if !lora_plugins.is_empty() {
+            let mut attached_count = 0usize;
+            for name in &lora_plugins {
+                if let Some(lora_data) = plugins.get_plugin_lora_weights(name) {
+                    match mind.write().unwrap().attach_lora_bytes(name, &lora_data) {
+                        Ok(_) => {
+                            tracing::info!(plugin = %name, "Plugin LoRA attached to Mind");
+                            attached_count += 1;
+                        }
+                        Err(e) => {
+                            tracing::warn!(plugin = %name, error = %e, "Failed to attach plugin LoRA");
+                        }
+                    }
+                }
+            }
+            eprintln!(
+                "  LoRA knowledge attached from {}/{} plugin(s): {}",
+                attached_count,
+                lora_plugins.len(),
+                lora_plugins.join(", ")
+            );
+        }
+    }
+
+    // Step 4c: Verify convention coverage — model catalog vs loaded plugins (Section 11.1)
+    {
+        let m = mind.read().unwrap();
+        // Build catalog-to-plugin routing: maps model catalog IDs → plugin manager global IDs
+        let catalog = &m.meta().catalog;
+        plugins.build_catalog_routing(catalog);
+
+        // Check which catalog conventions have no matching plugin
+        let mut missing = Vec::new();
+        for entry in catalog {
+            if entry.name == "EMIT" || entry.name == "STOP" {
+                continue; // built-in control opcodes, handled separately
+            }
+            if plugins.resolve_catalog_id(entry.id as u32) == entry.id as u32 {
+                // Not remapped — means no matching plugin convention found by name
+                // Check if it exists via name_routing
+                if plugins.resolve_by_name(&entry.name).is_none() {
+                    missing.push((entry.id, entry.name.clone()));
+                }
+            }
+        }
+        if !missing.is_empty() {
+            for (id, name) in &missing {
+                tracing::warn!(
+                    conv_id = id,
+                    conv_name = %name,
+                    "Model catalog convention has no matching loaded plugin"
+                );
+            }
+            eprintln!(
+                "  Warning: {} convention(s) in model catalog have no matching plugin",
+                missing.len()
+            );
+        } else if !catalog.is_empty() {
+            tracing::info!(
+                catalog_size = catalog.len(),
+                "All model catalog conventions mapped to loaded plugins"
+            );
+        }
+    }
+
     // Step 5c: Initialize metrics (Whitepaper Section 11.5)
     let soma_metrics = Arc::new(SomaMetrics::new());
 
     // Wire metrics into plugin manager for call tracking
     plugins.set_metrics(soma_metrics.clone());
+
+    // Record loaded plugin names in proprioception
+    {
+        let plugin_names = plugins.plugin_names();
+        let mut p = proprio.write().unwrap();
+        p.set_plugins(plugin_names);
+    }
 
     // Step 5: Initialize memory system
     let experience_buf = Arc::new(RwLock::new(ExperienceBuffer::new(
@@ -725,11 +924,13 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Step 6: Load checkpoint — restores proprioception, decisions, and execution history
+    // Step 6: Load checkpoint — restores proprioception, decisions, execution history,
+    // LoRA state, and plugin states
     let restore_checkpoint = |ckpt: &Checkpoint,
                               proprio: &Arc<RwLock<Proprioception>>,
                               soma_state: &Arc<RwLock<SomaState>>,
-                              mind: &Arc<RwLock<OnnxMindEngine>>| {
+                              mind: &Arc<RwLock<OnnxMindEngine>>,
+                              plugins: &mut PluginManager| {
         // Verify base model hash matches — detect model changes since checkpoint
         if !ckpt.base_model_hash.is_empty() {
             let current_hash = mind.read().unwrap().model_hash.clone();
@@ -747,12 +948,50 @@ async fn main() -> Result<()> {
                 );
                 eprintln!("    LoRA state from this checkpoint may be incompatible — skipping LoRA restore.");
                 // Skip LoRA state restore (lora_state is not applied when hashes mismatch)
+            } else {
+                // Model hash matches — restore LoRA state if present (Section 4.7)
+                if !ckpt.lora_state.is_empty() {
+                    let lora_checkpoint = crate::mind::lora::LoRACheckpoint {
+                        layers: ckpt.lora_state.clone(),
+                        adaptation_count: ckpt.adaptation_count,
+                        experience_count: ckpt.experience_count,
+                    };
+                    if let Ok(mut m) = mind.write() {
+                        match m.restore_lora(&lora_checkpoint) {
+                            Ok(()) => eprintln!(
+                                "  Restored LoRA state ({} layers)",
+                                ckpt.lora_state.len()
+                            ),
+                            Err(e) => eprintln!("  Warning: Failed to restore LoRA state: {}", e),
+                        }
+                    }
+                }
+                // Restore consolidated weight delta if present
+                if !ckpt.merged_opcode_delta.is_empty() {
+                    if let Ok(mut m) = mind.write() {
+                        m.set_merged_opcode_delta(ckpt.merged_opcode_delta.clone());
+                        eprintln!(
+                            "  Restored consolidated weight delta ({} values)",
+                            ckpt.merged_opcode_delta.len()
+                        );
+                    }
+                }
             }
         }
         if let Ok(mut p) = proprio.write() {
             p.experience_count = ckpt.experience_count;
             p.total_adaptations = ckpt.adaptation_count;
         }
+
+        // Restore plugin states (Section 7.5: institutional memory)
+        if !ckpt.plugin_states.is_empty() {
+            let states: Vec<(String, serde_json::Value)> = ckpt.plugin_states.iter()
+                .map(|e| (e.plugin_name.clone(), e.state.clone()))
+                .collect();
+            plugins.restore_plugin_states(&states);
+            eprintln!("  Restored plugin states ({} plugins)", ckpt.plugin_states.len());
+        }
+
         // Restore decisions and execution history (Section 7.5: institutional memory)
         if let Ok(mut st) = soma_state.write() {
             for decision_val in &ckpt.decisions {
@@ -766,13 +1005,30 @@ async fn main() -> Result<()> {
                     st.decisions.record(what.to_string(), why.to_string(), session.to_string());
                 }
             }
+            // Restore execution history records
+            for exec_val in &ckpt.recent_executions {
+                if let Ok(record) = serde_json::from_value::<state::execution_history::ExecutionRecord>(exec_val.clone()) {
+                    st.executions.record(
+                        record.intent,
+                        record.program_steps,
+                        record.confidence,
+                        record.success,
+                        record.execution_time_ms,
+                        record.trace_id,
+                        record.error,
+                    );
+                }
+            }
+            if !ckpt.recent_executions.is_empty() {
+                eprintln!("  Restored {} execution history records", ckpt.recent_executions.len());
+            }
         }
     };
 
     if let Some(ref ckpt_path) = cli.checkpoint {
         match Checkpoint::load(ckpt_path) {
             Ok(ckpt) => {
-                restore_checkpoint(&ckpt, &proprio, &soma_state, &mind);
+                restore_checkpoint(&ckpt, &proprio, &soma_state, &mind, &mut plugins);
                 eprintln!(
                     "  Resumed from {}: {} experiences, {} adaptations, {} decisions",
                     ckpt_path.display(),
@@ -795,7 +1051,7 @@ async fn main() -> Result<()> {
             Ok(ckpts) if !ckpts.is_empty() => {
                 match Checkpoint::load(&ckpts[0]) {
                     Ok(ckpt) => {
-                        restore_checkpoint(&ckpt, &proprio, &soma_state, &mind);
+                        restore_checkpoint(&ckpt, &proprio, &soma_state, &mind, &mut plugins);
                         eprintln!(
                             "  Resumed: {} experiences, {} adaptations, {} decisions",
                             ckpt.experience_count, ckpt.adaptation_count, ckpt.decisions.len(),
@@ -821,7 +1077,8 @@ async fn main() -> Result<()> {
     };
 
     let server = SynapseServer::new(config.soma.id.clone(), bind_addr.clone())
-        .with_metrics(soma_metrics.clone());
+        .with_metrics(soma_metrics.clone())
+        .with_peer_registry(peer_registry.clone());
     let server_handle = tokio::spawn(async move {
         if let Err(e) = server.start(server_handler).await {
             tracing::error!(error = %e, "Protocol server error");
@@ -902,6 +1159,7 @@ async fn main() -> Result<()> {
             &experience_buf,
             &soma_state,
             &soma_metrics,
+            &config,
             intent,
             config.resources.max_concurrent_inferences,
             config.mind.max_program_steps,
@@ -914,7 +1172,7 @@ async fn main() -> Result<()> {
 
     // REPL
     eprintln!(
-        "  Type intent. :status :inspect :checkpoint :consolidate :decisions  quit"
+        "  Type intent. :status :health :inspect :checkpoint :consolidate :decisions  quit"
     );
     eprintln!();
 
@@ -1003,7 +1261,7 @@ async fn main() -> Result<()> {
             continue;
         }
         if text == ":consolidate" {
-            do_consolidate(&config, &proprio, &mind);
+            do_consolidate(&config, &proprio, &mind, &experience_buf, &plugins_arc, Some(&soma_state));
             println!();
             continue;
         }
@@ -1030,6 +1288,20 @@ async fn main() -> Result<()> {
             println!();
             continue;
         }
+        if text == ":health" {
+            let pm = plugins_arc.read().unwrap();
+            let warnings = pm.check_plugin_health();
+            if warnings.is_empty() {
+                println!("\n  [Health] All plugins healthy.");
+            } else {
+                println!("\n  [Health] Plugin warnings:");
+                for (name, msg) in &warnings {
+                    println!("    {} — {}", name, msg);
+                }
+            }
+            println!();
+            continue;
+        }
 
         run_intent(
             &mind,
@@ -1038,6 +1310,7 @@ async fn main() -> Result<()> {
             &experience_buf,
             &soma_state,
             &soma_metrics,
+            &config,
             text,
             max_concurrent,
             max_steps,

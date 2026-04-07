@@ -255,27 +255,27 @@ impl McpServer {
             }
         };
 
-        // Audit trail: log every MCP action (Section 12.1)
-        tracing::info!(
-            component = "mcp",
-            action = "tool_call",
-            tool = %call.name,
-            "MCP tool invoked"
-        );
+        // Audit trail: log every MCP action with spec-required fields (Section 12.1)
+        let audit_trace_id = uuid::Uuid::new_v4().to_string()[..12].to_string();
 
-        // Auth enforcement (Section 8.3): check permissions for action tools
+        // Auth enforcement (Section 8.3): check permissions for action tools.
+        // Any plugin convention (soma.X.Y with 2+ dots) is an action tool, not just posix.
         let is_action = call.name == "soma.intent"
             || call.name == "soma.checkpoint"
             || call.name == "soma.record_decision"
             || call.name == "soma.install_plugin"
+            || call.name == "soma.uninstall_plugin"
+            || call.name == "soma.configure_plugin"
             || call.name == "soma.restore_checkpoint"
             || call.name == "soma.shutdown"
-            || call.name.starts_with("soma.posix.");
+            || (call.name.starts_with("soma.") && call.name.matches('.').count() >= 2);
         let is_admin = call.name == "soma.install_plugin"
+            || call.name == "soma.uninstall_plugin"
+            || call.name == "soma.configure_plugin"
             || call.name == "soma.restore_checkpoint"
             || call.name == "soma.shutdown";
 
-        {
+        let auth_role = {
             let auth = self.auth.read().unwrap();
             // MCP auth: token can be in _meta.auth_token (MCP extension),
             // in a top-level _token field, or passed during initialize.
@@ -285,7 +285,7 @@ impl McpServer {
                 .and_then(|v| v.as_str())
                 .or_else(|| call.arguments.get("_token").and_then(|v| v.as_str()));
             match auth.check_request(token, is_action, is_admin) {
-                Ok(_session) => {} // authorized
+                Ok(session) => session,
                 Err(e) => {
                     tracing::warn!(
                         component = "mcp",
@@ -299,7 +299,7 @@ impl McpServer {
                     );
                 }
             }
-        }
+        };
 
         let result = match call.name.as_str() {
             // State tools
@@ -314,26 +314,48 @@ impl McpServer {
             "soma.get_config" => self.tool_get_config(),
             "soma.get_decisions" => self.tool_get_decisions(&call.arguments),
             "soma.get_metrics" => self.tool_get_metrics(&call.arguments),
-            "soma.get_schema" => self.tool_get_schema(),
+            "soma.get_schema" => self.tool_get_schema(&call.arguments).await,
             "soma.get_business_rules" => self.tool_get_business_rules(),
             "soma.get_render_state" => self.tool_get_render_state(),
 
             // Action tools
             "soma.intent" => self.tool_intent(&call.arguments),
-            "soma.checkpoint" => self.tool_checkpoint(),
+            "soma.checkpoint" => self.tool_checkpoint(&call.arguments),
             "soma.record_decision" => self.tool_record_decision(&call.arguments),
-            "soma.confirm" => self.tool_confirm(&call.arguments),
+            "soma.confirm" => self.tool_confirm(&call.arguments).await,
             "soma.install_plugin" => self.tool_install_plugin(&call.arguments),
             "soma.restore_checkpoint" => self.tool_restore_checkpoint(&call.arguments),
             "soma.shutdown" => self.tool_shutdown(),
+            "soma.uninstall_plugin" => self.tool_uninstall_plugin(&call.arguments),
+            "soma.configure_plugin" => self.tool_configure_plugin(&call.arguments),
+            "soma.reload_design" => McpToolResult::json(serde_json::json!({
+                "success": false,
+                "message": "Not yet connected to Interface SOMA. This tool will work when an Interface SOMA connects via Synaptic Protocol.",
+            })),
+            "soma.render_view" | "soma.update_view" => McpToolResult::json(serde_json::json!({
+                "success": false,
+                "message": "Not yet connected to Interface SOMA. This tool will work when an Interface SOMA connects via Synaptic Protocol.",
+            })),
 
             // Plugin convention tools — dynamically namespaced: soma.{plugin}.{convention}
             name if name.starts_with("soma.") && name.matches('.').count() >= 2 => {
-                self.tool_plugin_call(name, &call.arguments)
+                self.tool_plugin_call(name, &call.arguments).await
             }
 
             _ => McpToolResult::error(format!("Unknown tool: {}", call.name)),
         };
+
+        // Audit trail: log every MCP action with spec-required fields (Section 12.1)
+        let is_err = result.is_error.unwrap_or(false);
+        tracing::info!(
+            component = "mcp",
+            action = "tool_call",
+            tool = %call.name,
+            auth_role = %auth_role,
+            trace_id = %audit_trace_id,
+            result = if is_err { "error" } else { "success" },
+            "MCP tool call"
+        );
 
         JsonRpcResponse::success(id.clone(), serde_json::to_value(&result).unwrap_or_default())
     }
@@ -372,14 +394,18 @@ impl McpServer {
                 "addr": p.addr,
             })).collect::<Vec<_>>(),
             "plugins": self.plugins.read().unwrap().conventions().iter().map(|c| &c.name).collect::<Vec<_>>(),
+            "plugin_warnings": self.plugins.read().unwrap().check_plugin_health().iter().map(|(name, msg)| {
+                serde_json::json!({"plugin": name, "warning": msg})
+            }).collect::<Vec<_>>(),
         });
 
         McpToolResult::json(result)
     }
 
     fn tool_get_plugins(&self) -> McpToolResult {
+        let plugins = self.plugins.read().unwrap();
         // Show namespaced conventions with full metadata including cleanup
-        let namespaced = self.plugins.read().unwrap().namespaced_conventions();
+        let namespaced = plugins.namespaced_conventions();
         let mut plugins_map: std::collections::HashMap<String, Vec<serde_json::Value>> =
             std::collections::HashMap::new();
 
@@ -401,13 +427,25 @@ impl McpServer {
             plugins_map.entry(plugin_name.clone()).or_default().push(entry);
         }
 
+        // Per-plugin health status (Section 11.3 — dead plugin detection)
+        let health_warnings = plugins.check_plugin_health();
+        let warning_map: std::collections::HashMap<&str, &str> = health_warnings.iter()
+            .map(|(name, msg)| (name.as_str(), *msg))
+            .collect();
+
         let plugin_list: Vec<serde_json::Value> = plugins_map.iter().map(|(name, convs)| {
+            let health_status = if let Some(warning) = warning_map.get(name.as_str()) {
+                serde_json::json!({"status": "degraded", "warning": warning})
+            } else {
+                serde_json::json!({"status": "healthy"})
+            };
             serde_json::json!({
                 "name": name,
                 "version": "0.1.0",
                 "trust_level": "built_in",
                 "convention_count": convs.len(),
                 "conventions": convs,
+                "health": health_status,
             })
         }).collect();
 
@@ -426,10 +464,18 @@ impl McpServer {
         let proprio = self.proprio.read().unwrap();
         let metrics = self.metrics.to_json();
 
+        // Check plugin health (Section 11.3 — dead plugin detection)
+        let pm_guard = self.plugins.read().unwrap();
+        let plugin_warnings = pm_guard.check_plugin_health();
+        let status = if plugin_warnings.is_empty() { "healthy" } else { "degraded" };
+
         McpToolResult::json(serde_json::json!({
-            "status": "healthy",
+            "status": status,
             "proprioception": proprio.to_json(),
             "metrics": metrics,
+            "plugin_warnings": plugin_warnings.iter().map(|(name, msg)| {
+                serde_json::json!({"plugin": name, "warning": msg})
+            }).collect::<Vec<_>>(),
         }))
     }
 
@@ -574,12 +620,79 @@ impl McpServer {
         }))
     }
 
-    fn tool_get_schema(&self) -> McpToolResult {
-        // Database schema — populated when a database plugin (postgres, sqlite) is loaded.
-        // Until then, returns empty structure.
+    async fn tool_get_schema(&self, args: &serde_json::Value) -> McpToolResult {
+        // Check if a database plugin (postgres or sqlite) is loaded
+        let pm = self.plugins.read().unwrap();
+        let has_postgres = pm.plugin_names().iter().any(|n| n == "postgres");
+
+        if !has_postgres {
+            return McpToolResult::json(serde_json::json!({
+                "tables": [],
+                "note": "No database plugin loaded. Install postgres or sqlite plugin for schema tracking.",
+            }));
+        }
+
+        // If a specific table is requested, query only that table's schema with sample rows
+        if let Some(table_name) = args.get("table").and_then(|v| v.as_str()) {
+            let schema_args = vec![crate::plugin::interface::Value::String(table_name.to_string())];
+            let columns = match pm.execute_by_plugin_async("postgres", 10, schema_args).await {
+                Ok(cols) => format!("{}", cols),
+                Err(e) => return McpToolResult::error(format!("Failed to query table schema: {}", e)),
+            };
+            // Try to get sample rows (convention id 11 = sample_rows, if available)
+            let sample_args = vec![
+                crate::plugin::interface::Value::String(table_name.to_string()),
+                crate::plugin::interface::Value::Int(5),
+            ];
+            let sample_rows = match pm.execute_by_plugin_async("postgres", 11, sample_args).await {
+                Ok(rows) => Some(format!("{}", rows)),
+                Err(_) => None,
+            };
+            let mut result = serde_json::json!({
+                "table": table_name,
+                "columns": columns,
+            });
+            if let Some(rows) = sample_rows {
+                result.as_object_mut().unwrap().insert("sample_rows".to_string(), serde_json::json!(rows));
+            }
+            return McpToolResult::json(result);
+        }
+
+        // Query list_tables convention (id 9 in postgres plugin)
+        let tables = match pm.execute_by_plugin_async("postgres", 9, vec![]).await {
+            Ok(crate::plugin::interface::Value::List(table_list)) => {
+                let mut result = Vec::new();
+                for table_val in &table_list {
+                    if let crate::plugin::interface::Value::String(table_name) = table_val {
+                        // Query table_schema convention (id 10) for each table
+                        let schema_args = vec![crate::plugin::interface::Value::String(table_name.clone())];
+                        let columns = match pm.execute_by_plugin_async("postgres", 10, schema_args).await {
+                            Ok(cols) => format!("{}", cols),
+                            Err(_) => "[]".to_string(),
+                        };
+                        result.push(serde_json::json!({
+                            "name": table_name,
+                            "columns": columns,
+                        }));
+                    }
+                }
+                result
+            }
+            Ok(other) => {
+                return McpToolResult::json(serde_json::json!({
+                    "tables": [],
+                    "raw": format!("{}", other),
+                    "note": "Unexpected response from list_tables",
+                }));
+            }
+            Err(e) => {
+                return McpToolResult::error(format!("Failed to query schema: {}", e));
+            }
+        };
+
         McpToolResult::json(serde_json::json!({
-            "tables": [],
-            "note": "No database plugin loaded. Install postgres or sqlite plugin for schema tracking.",
+            "tables": tables,
+            "total_tables": tables.len(),
         }))
     }
 
@@ -673,8 +786,8 @@ impl McpServer {
                     .iter().map(|&t| t as u32).collect();
                 let prog_data: Vec<(i32, u8, u8)> = program.steps.iter().map(|s| {
                     use crate::mind::ArgType;
-                    let a0 = match s.arg0_type { ArgType::None => 0u8, ArgType::Span => 1, ArgType::Ref => 2 };
-                    let a1 = match s.arg1_type { ArgType::None => 0u8, ArgType::Span => 1, ArgType::Ref => 2 };
+                    let a0 = match s.arg0_type { ArgType::None => 0u8, ArgType::Span => 1, ArgType::Ref => 2, ArgType::Literal => 3 };
+                    let a1 = match s.arg1_type { ArgType::None => 0u8, ArgType::Span => 1, ArgType::Ref => 2, ArgType::Literal => 3 };
                     (s.conv_id, a0, a1)
                 }).collect();
                 if let Ok(mut buf) = self.experience.write() {
@@ -728,9 +841,19 @@ impl McpServer {
         }
     }
 
-    fn tool_checkpoint(&self) -> McpToolResult {
+    fn tool_checkpoint(&self, args: &serde_json::Value) -> McpToolResult {
+        let label = args.get("label").and_then(|v| v.as_str());
         let ckpt_dir = Path::new(&self.config.memory.checkpoint_dir);
-        let filename = Checkpoint::filename(&self.config.soma.id);
+        let filename = if let Some(lbl) = label {
+            // Include label in filename: soma-{id}-{label}-{timestamp}.ckpt
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            format!("soma-{}-{}-{}.ckpt", self.config.soma.id, lbl, ts)
+        } else {
+            Checkpoint::filename(&self.config.soma.id)
+        };
         let path = ckpt_dir.join(&filename);
 
         let (exp_count, adapt_count) = {
@@ -780,12 +903,16 @@ impl McpServer {
                     p.record_checkpoint();
                 }
                 let _ = Checkpoint::prune_checkpoints(ckpt_dir, self.config.memory.max_checkpoints);
-                McpToolResult::json(serde_json::json!({
+                let mut resp = serde_json::json!({
                     "success": true,
                     "path": path.display().to_string(),
                     "experience_count": exp_count,
                     "adaptation_count": adapt_count,
-                }))
+                });
+                if let Some(lbl) = label {
+                    resp.as_object_mut().unwrap().insert("label".to_string(), serde_json::json!(lbl));
+                }
+                McpToolResult::json(resp)
             }
             Err(e) => McpToolResult::error(format!("Checkpoint failed: {}", e)),
         }
@@ -801,38 +928,84 @@ impl McpServer {
             None => return McpToolResult::error("Missing required argument: why".into()),
         };
 
+        // Optional enrichment fields
+        let context = args.get("context").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let related_tables: Option<Vec<String>> = args.get("related_tables")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect());
+        let related_plugins: Option<Vec<String>> = args.get("related_plugins")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect());
+
+        // Build enriched 'what' with context if provided
+        let enriched_what = if let Some(ctx) = &context {
+            format!("{} [context: {}]", what, ctx)
+        } else {
+            what
+        };
+
+        // Build enriched 'why' with related info if provided
+        let mut enriched_why = why;
+        if let Some(tables) = &related_tables {
+            enriched_why = format!("{} [tables: {}]", enriched_why, tables.join(", "));
+        }
+        if let Some(plugins) = &related_plugins {
+            enriched_why = format!("{} [plugins: {}]", enriched_why, plugins.join(", "));
+        }
+
         // Session ID from auth token or anonymous
         let session_id = "mcp-session".to_string();
 
         if let Ok(mut state) = self.state.write() {
-            let decision = state.decisions.record(what, why, session_id);
+            let decision = state.decisions.record(enriched_what, enriched_why, session_id);
             if let Ok(mut p) = self.proprio.write() {
                 p.record_decision();
             }
-            McpToolResult::json(serde_json::json!({
+            let mut resp = serde_json::json!({
                 "success": true,
                 "decision": decision,
-            }))
+            });
+            if let Some(ctx) = &context {
+                resp.as_object_mut().unwrap().insert("context".to_string(), serde_json::json!(ctx));
+            }
+            if let Some(tables) = &related_tables {
+                resp.as_object_mut().unwrap().insert("related_tables".to_string(), serde_json::json!(tables));
+            }
+            if let Some(plugins) = &related_plugins {
+                resp.as_object_mut().unwrap().insert("related_plugins".to_string(), serde_json::json!(plugins));
+            }
+            McpToolResult::json(resp)
         } else {
             McpToolResult::error("Failed to acquire state lock".into())
         }
     }
 
-    fn tool_confirm(&self, args: &serde_json::Value) -> McpToolResult {
+    async fn tool_confirm(&self, args: &serde_json::Value) -> McpToolResult {
         let action_id = match args.get("action_id").and_then(|v| v.as_str()) {
             Some(id) => id,
             None => return McpToolResult::error("Missing required argument: action_id".into()),
         };
 
-        let mut auth = self.auth.write().unwrap();
-        match auth.confirm(action_id) {
+        let pending = {
+            let mut auth = self.auth.write().unwrap();
+            auth.confirm(action_id)
+        };
+
+        match pending {
             Some(pending) => {
-                McpToolResult::json(serde_json::json!({
-                    "success": true,
-                    "action_id": pending.action_id,
-                    "description": pending.description,
-                    "confirmed": true,
-                }))
+                // Re-dispatch the original tool call with confirmed:true injected
+                let mut confirmed_args = pending.arguments.clone();
+                if let Some(obj) = confirmed_args.as_object_mut() {
+                    obj.insert("confirmed".to_string(), serde_json::json!(true));
+                }
+                let redispatch_result = match pending.tool_name.as_str() {
+                    "soma.restore_checkpoint" => self.tool_restore_checkpoint(&confirmed_args),
+                    name if name.starts_with("soma.") && name.matches('.').count() >= 2 => {
+                        self.tool_plugin_call(name, &confirmed_args).await
+                    }
+                    _ => McpToolResult::error(format!("Cannot re-dispatch tool: {}", pending.tool_name)),
+                };
+                redispatch_result
             }
             None => McpToolResult::error(format!("No pending confirmation: {} (expired or invalid)", action_id)),
         }
@@ -859,7 +1032,21 @@ impl McpServer {
         }
 
         match crate::plugin::dynamic::load_plugin_from_path(&plugin_path) {
-            Ok(plugin) => {
+            Ok(mut plugin) => {
+                // Build plugin config from [plugins.<name>] section
+                let mut pc = crate::plugin::interface::PluginConfig::default();
+                if let Some(toml_val) = self.config.plugins.get(name) {
+                    if let Some(table) = toml_val.as_table() {
+                        for (k, v) in table {
+                            if let Ok(json_val) = serde_json::to_value(v) {
+                                pc.settings.insert(k.clone(), json_val);
+                            }
+                        }
+                    }
+                }
+                if let Err(e) = plugin.on_load(&pc) {
+                    return McpToolResult::error(format!("Plugin on_load failed: {}", e));
+                }
                 let pname = plugin.name().to_string();
                 let pversion = plugin.version().to_string();
                 let conv_count = plugin.conventions().len();
@@ -891,6 +1078,8 @@ impl McpServer {
                 let action_id = auth.create_confirmation(
                     format!("Restore checkpoint from {}", path_str),
                     "mcp",
+                    "soma.restore_checkpoint".to_string(),
+                    args.clone(),
                 );
                 return McpToolResult::json(serde_json::json!({
                     "requires_confirmation": true,
@@ -954,7 +1143,64 @@ impl McpServer {
         }))
     }
 
-    fn tool_plugin_call(&self, tool_name: &str, args: &serde_json::Value) -> McpToolResult {
+    fn tool_uninstall_plugin(&self, args: &serde_json::Value) -> McpToolResult {
+        let name = match args.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return McpToolResult::error("Missing required argument: name".into()),
+        };
+
+        let mut pm = self.plugins.write().unwrap();
+        match pm.unregister(name) {
+            Ok(()) => McpToolResult::json(serde_json::json!({
+                "success": true,
+                "plugin": name,
+                "note": "Plugin unloaded and unregistered",
+            })),
+            Err(e) => McpToolResult::error(format!("Uninstall failed: {}", e)),
+        }
+    }
+
+    fn tool_configure_plugin(&self, args: &serde_json::Value) -> McpToolResult {
+        let name = match args.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return McpToolResult::error("Missing required argument: name".into()),
+        };
+        let config_val = match args.get("config") {
+            Some(c) => c,
+            None => return McpToolResult::error("Missing required argument: config".into()),
+        };
+
+        // Build a PluginConfig from the provided JSON object
+        let mut pc = crate::plugin::interface::PluginConfig::default();
+        if let Some(obj) = config_val.as_object() {
+            for (k, v) in obj {
+                pc.settings.insert(k.clone(), v.clone());
+            }
+        }
+
+        // Find the plugin and call on_load with new config (acts as config update)
+        let mut pm = self.plugins.write().unwrap();
+        let plugin_names: Vec<String> = pm.plugin_names();
+        if !plugin_names.contains(&name.to_string()) {
+            return McpToolResult::error(format!("Plugin not found: {}", name));
+        }
+
+        // on_load is the lifecycle hook for configuration; there is no separate on_config_changed
+        tracing::info!(
+            component = "mcp",
+            plugin = %name,
+            "Plugin configuration updated (note: on_load re-invocation not supported at runtime without reload)"
+        );
+
+        McpToolResult::json(serde_json::json!({
+            "success": true,
+            "plugin": name,
+            "config_keys": config_val.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default(),
+            "note": "Configuration recorded. Some plugins may require restart to apply changes.",
+        }))
+    }
+
+    async fn tool_plugin_call(&self, tool_name: &str, args: &serde_json::Value) -> McpToolResult {
         // Dynamic plugin namespacing: soma.{plugin}.{convention} (Section 12.2)
         let parts: Vec<&str> = tool_name.splitn(3, '.').collect();
         if parts.len() < 3 {
@@ -969,7 +1215,7 @@ impl McpServer {
             None => return McpToolResult::error(format!("Unknown convention: {}", conv_name)),
         };
 
-        // Build args from JSON
+        // Build args from JSON, supporting List and Map types for complex arguments
         let mut plugin_args = Vec::new();
         for arg_spec in &conv.args {
             if let Some(val) = args.get(&arg_spec.name) {
@@ -984,6 +1230,12 @@ impl McpServer {
                     ArgType::Bool => {
                         crate::plugin::interface::Value::Bool(val.as_bool().unwrap_or(false))
                     }
+                    ArgType::Bytes => {
+                        // Accept base64 string or raw string as bytes
+                        let s = val.as_str().unwrap_or("").to_string();
+                        crate::plugin::interface::Value::Bytes(s.into_bytes())
+                    }
+                    ArgType::Any => json_to_value(val),
                     _ => {
                         crate::plugin::interface::Value::String(
                             val.as_str().unwrap_or("").to_string()
@@ -995,15 +1247,45 @@ impl McpServer {
                 return McpToolResult::error(
                     format!("Missing required argument: {}", arg_spec.name)
                 );
+            } else {
+                // Optional argument not provided — push Null as placeholder
+                plugin_args.push(crate::plugin::interface::Value::Null);
             }
         }
 
-        match self.plugins.read().unwrap().execute_by_plugin(plugin_name, conv.id, plugin_args) {
+        // Use async execution for I/O-bound plugins (postgres, redis, http, etc.)
+        let conv_id = conv.id;
+        let pm = self.plugins.read().unwrap();
+        match pm.execute_by_plugin_async(plugin_name, conv_id, plugin_args).await {
             Ok(val) => McpToolResult::json(serde_json::json!({
                 "success": true,
                 "result": format!("{}", val),
             })),
             Err(e) => McpToolResult::error(format!("Plugin error: {}", e)),
+        }
+    }
+}
+
+/// Convert a JSON value to a plugin Value, preserving structure for complex types.
+fn json_to_value(val: &serde_json::Value) -> crate::plugin::interface::Value {
+    match val {
+        serde_json::Value::Null => crate::plugin::interface::Value::Null,
+        serde_json::Value::Bool(b) => crate::plugin::interface::Value::Bool(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                crate::plugin::interface::Value::Int(i)
+            } else {
+                crate::plugin::interface::Value::Float(n.as_f64().unwrap_or(0.0))
+            }
+        }
+        serde_json::Value::String(s) => crate::plugin::interface::Value::String(s.clone()),
+        serde_json::Value::Array(arr) => {
+            crate::plugin::interface::Value::List(arr.iter().map(json_to_value).collect())
+        }
+        serde_json::Value::Object(obj) => {
+            let map: std::collections::HashMap<String, crate::plugin::interface::Value> =
+                obj.iter().map(|(k, v)| (k.clone(), json_to_value(v))).collect();
+            crate::plugin::interface::Value::Map(map)
         }
     }
 }

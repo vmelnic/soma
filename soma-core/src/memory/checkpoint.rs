@@ -35,6 +35,12 @@ pub struct Checkpoint {
     /// Plugin manifest — which plugins (and versions) were loaded at checkpoint time.
     #[serde(default)]
     pub plugin_manifest: Vec<PluginManifestEntry>,
+    /// Consolidated LoRA weight delta for the opcode head (Section 6.3).
+    /// Shape: (num_conventions * decoder_dim) in row-major order.
+    /// This accumulates `scale * B @ A` from past consolidations so that
+    /// permanently merged LoRA knowledge survives across restarts.
+    #[serde(default)]
+    pub merged_opcode_delta: Vec<f32>,
 }
 
 /// Serialized plugin state for checkpoint.
@@ -70,6 +76,7 @@ impl Checkpoint {
             recent_executions: Vec::new(),
             base_model_hash: String::new(),
             plugin_manifest: Vec::new(),
+            merged_opcode_delta: Vec::new(),
         }
     }
 

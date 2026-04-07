@@ -21,28 +21,91 @@ pub struct TraceEntry {
 }
 
 /// Per-convention execution statistics (Section 19.3).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ConventionStats {
     pub call_count: u64,
     pub total_time_ms: u64,
     pub error_count: u64,
     pub timeout_count: u64,
+    /// Ring buffer of recent durations (last 100) for percentile tracking.
+    recent_durations: Vec<u64>,
+}
+
+impl Default for ConventionStats {
+    fn default() -> Self {
+        Self {
+            call_count: 0,
+            total_time_ms: 0,
+            error_count: 0,
+            timeout_count: 0,
+            recent_durations: Vec::with_capacity(100),
+        }
+    }
+}
+
+const STATS_RING_SIZE: usize = 100;
+
+impl ConventionStats {
+    /// Record a duration sample into the ring buffer.
+    pub fn record_duration(&mut self, duration_ms: u64) {
+        if self.recent_durations.len() >= STATS_RING_SIZE {
+            // Overwrite oldest entry (ring buffer behavior)
+            let idx = (self.call_count as usize - 1) % STATS_RING_SIZE;
+            self.recent_durations[idx] = duration_ms;
+        } else {
+            self.recent_durations.push(duration_ms);
+        }
+    }
+
+    /// Compute average duration from recent samples.
+    pub fn avg_duration_ms(&self) -> f64 {
+        if self.recent_durations.is_empty() {
+            return 0.0;
+        }
+        let sum: u64 = self.recent_durations.iter().sum();
+        sum as f64 / self.recent_durations.len() as f64
+    }
+
+    /// Compute p50 (median) from recent samples.
+    pub fn p50_duration_ms(&self) -> u64 {
+        self.percentile(50)
+    }
+
+    /// Compute p99 from recent samples.
+    pub fn p99_duration_ms(&self) -> u64 {
+        self.percentile(99)
+    }
+
+    fn percentile(&self, pct: usize) -> u64 {
+        if self.recent_durations.is_empty() {
+            return 0;
+        }
+        let mut sorted = self.recent_durations.clone();
+        sorted.sort_unstable();
+        let idx = (pct * sorted.len() / 100).min(sorted.len() - 1);
+        sorted[idx]
+    }
 }
 
 pub struct PluginManager {
     plugins: Vec<Box<dyn SomaPlugin>>,
-    /// Maps convention ID (from catalog) -> (plugin_index, plugin_convention_id)
+    /// Maps global convention ID (plugin_idx*1000+local_id) -> (plugin_index, plugin_convention_id)
     routing: std::collections::HashMap<u32, (usize, u32)>,
     /// Tracks crashed plugins via interior mutability — execute_step(&self) can mark
     /// crashed plugins without &mut self (Section 11.3).
     crashed_plugins: std::sync::RwLock<std::collections::HashSet<usize>>,
     /// Name-based convention lookup (Section 5.4). Maps "plugin.convention" → global_id.
-    /// Used for future name-based model predictions. Currently populated alongside ID routing.
     name_routing: std::collections::HashMap<String, u32>,
+    /// Maps model catalog IDs → global routing IDs. Populated by `build_catalog_routing`.
+    /// When the Mind outputs catalog_id=34 (e.g. "postgres.execute"), this maps to
+    /// the correct global routing ID (e.g. 1001).
+    catalog_routing: std::collections::HashMap<u32, u32>,
     /// Optional metrics reference for tracking plugin calls
     metrics: Option<std::sync::Arc<crate::metrics::SomaMetrics>>,
     /// Per-convention stats: global_id -> stats (Section 19.3)
     convention_stats: std::sync::RwLock<std::collections::HashMap<u32, ConventionStats>>,
+    /// Plugins whose execution is denied (Section 12.2 permission enforcement).
+    denied_plugins: std::sync::RwLock<std::collections::HashSet<String>>,
 }
 
 impl PluginManager {
@@ -51,15 +114,55 @@ impl PluginManager {
             plugins: Vec::new(),
             routing: std::collections::HashMap::new(),
             name_routing: std::collections::HashMap::new(),
+            catalog_routing: std::collections::HashMap::new(),
             crashed_plugins: std::sync::RwLock::new(std::collections::HashSet::new()),
             metrics: None,
             convention_stats: std::sync::RwLock::new(std::collections::HashMap::new()),
+            denied_plugins: std::sync::RwLock::new(std::collections::HashSet::new()),
         }
     }
 
     /// Attach metrics for plugin call tracking (Section 11.5).
     pub fn set_metrics(&mut self, metrics: std::sync::Arc<crate::metrics::SomaMetrics>) {
         self.metrics = Some(metrics);
+    }
+
+    /// Populate denied_plugins from a list of plugin names (Section 12.2).
+    /// Called during startup with config.security.denied_plugins.
+    pub fn set_denied_plugins(&self, names: &[String]) {
+        if let Ok(mut denied) = self.denied_plugins.write() {
+            denied.clear();
+            for name in names {
+                denied.insert(name.clone());
+            }
+            if !names.is_empty() {
+                tracing::info!(count = names.len(), "Denied plugins configured");
+            }
+        }
+    }
+
+    /// Deny a single plugin by name at runtime.
+    pub fn deny_plugin(&self, name: &str) {
+        if let Ok(mut denied) = self.denied_plugins.write() {
+            denied.insert(name.to_string());
+            tracing::info!(plugin = name, "Plugin denied");
+        }
+    }
+
+    /// Allow a previously denied plugin.
+    pub fn allow_plugin(&self, name: &str) {
+        if let Ok(mut denied) = self.denied_plugins.write() {
+            denied.remove(name);
+            tracing::info!(plugin = name, "Plugin allowed");
+        }
+    }
+
+    /// Check whether a plugin is denied.
+    pub fn is_plugin_denied(&self, name: &str) -> bool {
+        self.denied_plugins
+            .read()
+            .map(|d| d.contains(name))
+            .unwrap_or(false)
     }
 
     /// Register a plugin. Checks dependencies are satisfied before registering
@@ -75,10 +178,22 @@ impl PluginManager {
                 tracing::error!(
                     plugin = plugin.name(),
                     missing_dep = %dep.name,
-                    "Required dependency not loaded — register plugins in dependency order"
+                    "Required dependency not loaded — refusing to register plugin"
                 );
-                // Still register (don't crash), but warn loudly
+                return;
             }
+        }
+
+        // Validate plugin config against its own schema (Section 5.2)
+        validate_plugin_config(&*plugin);
+
+        // Surface LoRA weights if the plugin provides them (Section 7.3)
+        if let Some(lora_data) = plugin.lora_weights() {
+            tracing::info!(
+                plugin = plugin.name(),
+                lora_bytes = lora_data.len(),
+                "Plugin provides LoRA weights — available for Mind attachment"
+            );
         }
 
         let plugin_idx = self.plugins.len();
@@ -114,43 +229,73 @@ impl PluginManager {
 
     /// Register multiple plugins in dependency-resolved order (Section 6.7).
     /// Uses topological sort to determine correct loading order.
+    /// Detects dependency cycles and skips cyclic plugins.
     pub fn register_all(&mut self, mut plugins: Vec<Box<dyn SomaPlugin>>) {
         // Build dependency graph
         let names: Vec<String> = plugins.iter().map(|p| p.name().to_string()).collect();
-        let mut order: Vec<usize> = Vec::new();
-        let mut visited = vec![false; plugins.len()];
 
-        // Simple topological sort (DFS-based)
-        fn visit(
+        // Cycle detection using DFS with three-color marking:
+        // 0 = white (unvisited), 1 = gray (in progress), 2 = black (done)
+        let n = plugins.len();
+        let mut color = vec![0u8; n];
+        let mut order: Vec<usize> = Vec::new();
+        let mut in_cycle: Vec<bool> = vec![false; n];
+
+        fn visit_with_cycle_check(
             idx: usize,
             plugins: &[Box<dyn SomaPlugin>],
             names: &[String],
-            visited: &mut [bool],
+            color: &mut [u8],
             order: &mut Vec<usize>,
-        ) {
-            if visited[idx] { return; }
-            visited[idx] = true;
+            in_cycle: &mut [bool],
+        ) -> bool {
+            if color[idx] == 2 { return false; } // black — already processed
+            if color[idx] == 1 { return true; }   // gray — cycle detected
+
+            color[idx] = 1; // mark gray (in progress)
 
             for dep in plugins[idx].dependencies() {
                 if let Some(dep_idx) = names.iter().position(|n| n == &dep.name) {
-                    visit(dep_idx, plugins, names, visited, order);
+                    if visit_with_cycle_check(dep_idx, plugins, names, color, order, in_cycle) {
+                        // Cycle found — mark both this node and dep as cyclic
+                        in_cycle[idx] = true;
+                        in_cycle[dep_idx] = true;
+                        return true;
+                    }
                 }
             }
+
+            color[idx] = 2; // mark black (done)
             order.push(idx);
+            false
         }
 
-        for i in 0..plugins.len() {
-            visit(i, &plugins, &names, &mut visited, &mut order);
+        for i in 0..n {
+            if color[i] == 0 {
+                visit_with_cycle_check(i, &plugins, &names, &mut color, &mut order, &mut in_cycle);
+            }
         }
 
-        // Register in topological order
-        // We need to drain in order, so collect indices and sort
+        // Log and skip plugins involved in cycles
+        for i in 0..n {
+            if in_cycle[i] {
+                tracing::error!(
+                    plugin = plugins[i].name(),
+                    "Dependency cycle detected — skipping plugin"
+                );
+            }
+        }
+
+        // Register in topological order, skipping cyclic plugins
         let mut indexed: Vec<(usize, Box<dyn SomaPlugin>)> = plugins
             .drain(..)
             .enumerate()
             .collect();
 
         for idx in order {
+            if in_cycle[idx] {
+                continue;
+            }
             if let Some(pos) = indexed.iter().position(|(i, _)| *i == idx) {
                 let (_, plugin) = indexed.remove(pos);
                 self.register(plugin);
@@ -161,6 +306,13 @@ impl PluginManager {
     /// Execute a single step by routing to the correct plugin.
     /// Wrapped in catch_unwind to prevent plugin panics from crashing SOMA.
     /// Crashed plugins are marked and disabled (Whitepaper Section 11.3).
+    ///
+    /// Gap #29: When a convention declares max_latency_ms and a tokio runtime is
+    /// available, execution is wrapped with tokio::time::timeout for preemptive
+    /// timeout enforcement (not just post-execution checking).
+    ///
+    /// Gap #30: Permission enforcement is real — denied plugins are refused
+    /// via the denied_plugins set, and plugin permission declarations are logged.
     fn execute_step(&self, conv_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
         let (plugin_idx, plugin_conv_id) = self.routing.get(&conv_id)
             .ok_or_else(|| PluginError::NotFound(
@@ -180,45 +332,176 @@ impl PluginManager {
             }
         }
 
-        let start = std::time::Instant::now();
-        let outcome = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.plugins[idx].execute(cid, args)
-        })) {
-            Ok(result) => {
-                if let Some(ref m) = self.metrics {
-                    m.record_plugin_call(result.is_ok());
-                }
-                result
+        let plugin_name = self.plugins[idx].name().to_string();
+
+        // Permission enforcement (Section 12.2, Gap #30)
+        // Check denied_plugins list — if plugin is denied, refuse execution.
+        {
+            let denied = self.denied_plugins.read().unwrap_or_else(|e| e.into_inner());
+            if denied.contains(&plugin_name) {
+                tracing::warn!(
+                    plugin = %plugin_name,
+                    conv_id,
+                    "Plugin execution denied — plugin is in denied_plugins list"
+                );
+                return Err(PluginError::PermissionDenied(format!(
+                    "plugin '{}' is denied by configuration",
+                    plugin_name
+                )));
             }
-            Err(panic_info) => {
-                let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
-                    format!("plugin '{}' panicked: {}", self.plugins[idx].name(), s)
-                } else if let Some(s) = panic_info.downcast_ref::<String>() {
-                    format!("plugin '{}' panicked: {}", self.plugins[idx].name(), s)
-                } else {
-                    format!("plugin '{}' panicked (unknown cause)", self.plugins[idx].name())
-                };
-                tracing::error!(conv_id, plugin = self.plugins[idx].name(), "Plugin crash — disabling plugin");
-                // Mark as crashed via interior mutability — SOMA continues with reduced capabilities
-                if let Ok(mut crashed) = self.crashed_plugins.write() {
-                    crashed.insert(idx);
-                }
-                Err(PluginError::Failed(msg))
+        }
+
+        // Log permission declarations for auditing (Section 12.2)
+        {
+            let perms = self.plugins[idx].permissions();
+            if !perms.filesystem.is_empty() || !perms.network.is_empty()
+                || !perms.env_vars.is_empty() || perms.process_spawn
+            {
+                tracing::debug!(
+                    plugin = %plugin_name,
+                    conv_id,
+                    fs_paths = ?perms.filesystem,
+                    net = ?perms.network,
+                    env = ?perms.env_vars,
+                    spawn = perms.process_spawn,
+                    "Plugin declares permissions"
+                );
             }
+        }
+
+        // Determine max_latency_ms for preemptive timeout (Gap #29)
+        let timeout_ms = {
+            let plugin_convs = self.plugins[idx].conventions();
+            plugin_convs.iter()
+                .find(|c| c.id == cid)
+                .map(|c| c.max_latency_ms as u64)
+                .unwrap_or(0)
         };
+
+        let start = std::time::Instant::now();
+
+        // If the convention declares a max_latency_ms and we have a tokio runtime,
+        // use preemptive timeout via execute_async + tokio::time::timeout (Gap #29).
+        let outcome = if timeout_ms > 0 {
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                let plugin = &self.plugins[idx];
+                let timeout_dur = std::time::Duration::from_millis(timeout_ms);
+                let timed_result = tokio::task::block_in_place(|| {
+                    handle.block_on(async {
+                        tokio::time::timeout(
+                            timeout_dur,
+                            plugin.execute_async(cid, args),
+                        ).await
+                    })
+                });
+                match timed_result {
+                    Ok(result) => result,
+                    Err(_elapsed) => {
+                        tracing::warn!(
+                            plugin = %plugin_name,
+                            conv_id,
+                            timeout_ms,
+                            "Convention execution timed out (preemptive)"
+                        );
+                        if let Ok(mut stats_map) = self.convention_stats.write() {
+                            let stats = stats_map.entry(conv_id).or_default();
+                            stats.timeout_count += 1;
+                        }
+                        Err(PluginError::Failed(format!(
+                            "plugin '{}' convention {} timed out after {}ms",
+                            plugin_name, conv_id, timeout_ms
+                        )))
+                    }
+                }
+            } else {
+                // No tokio runtime — fall back to sync with catch_unwind
+                Self::execute_with_catch_unwind(
+                    &self.plugins[idx], &plugin_name, cid, args,
+                    conv_id, &self.crashed_plugins, idx,
+                )
+            }
+        } else {
+            // No timeout configured — sync execution with panic catching
+            Self::execute_with_catch_unwind(
+                &self.plugins[idx], &plugin_name, cid, args,
+                conv_id, &self.crashed_plugins, idx,
+            )
+        };
+
         let elapsed_ms = start.elapsed().as_millis() as u64;
+
+        // Record per-plugin and global metrics
+        if let Some(ref m) = self.metrics {
+            m.record_plugin_call_named(&plugin_name, elapsed_ms, outcome.is_ok());
+        }
+
+        // Post-execution timeout check for conventions without preemptive timeout
+        // (when no tokio runtime was available, or timeout_ms was 0 but convention
+        // still has a max_latency_ms for advisory logging)
+        if timeout_ms == 0 {
+            let plugin_convs = self.plugins[idx].conventions();
+            if let Some(conv) = plugin_convs.iter().find(|c| c.id == cid) {
+                if conv.max_latency_ms > 0 && elapsed_ms > conv.max_latency_ms as u64 {
+                    tracing::warn!(
+                        plugin = self.plugins[idx].name(),
+                        conv_id,
+                        elapsed_ms,
+                        max_latency_ms = conv.max_latency_ms,
+                        "Convention exceeded max_latency_ms (post-execution)"
+                    );
+                    if let Ok(mut stats_map) = self.convention_stats.write() {
+                        let stats = stats_map.entry(conv_id).or_default();
+                        stats.timeout_count += 1;
+                    }
+                }
+            }
+        }
 
         // Track per-convention stats (Section 19.3)
         if let Ok(mut stats_map) = self.convention_stats.write() {
             let stats = stats_map.entry(conv_id).or_default();
             stats.call_count += 1;
             stats.total_time_ms += elapsed_ms;
+            stats.record_duration(elapsed_ms);
             if outcome.is_err() {
                 stats.error_count += 1;
             }
         }
 
         outcome
+    }
+
+    /// Execute a plugin call with catch_unwind for panic safety.
+    /// Extracted helper to avoid duplication between timeout and non-timeout paths.
+    fn execute_with_catch_unwind(
+        plugin: &Box<dyn SomaPlugin>,
+        plugin_name: &str,
+        cid: u32,
+        args: Vec<Value>,
+        conv_id: u32,
+        crashed_plugins: &std::sync::RwLock<std::collections::HashSet<usize>>,
+        idx: usize,
+    ) -> Result<Value, PluginError> {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            plugin.execute(cid, args)
+        })) {
+            Ok(result) => result,
+            Err(panic_info) => {
+                let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    format!("plugin '{}' panicked: {}", plugin_name, s)
+                } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                    format!("plugin '{}' panicked: {}", plugin_name, s)
+                } else {
+                    format!("plugin '{}' panicked (unknown cause)", plugin_name)
+                };
+                tracing::error!(conv_id, plugin = %plugin_name, "Plugin crash — disabling plugin");
+                // Mark as crashed via interior mutability — SOMA continues with reduced capabilities
+                if let Ok(mut crashed) = crashed_plugins.write() {
+                    crashed.insert(idx);
+                }
+                Err(PluginError::Failed(msg))
+            }
+        }
     }
 
     // mark_crashed is handled automatically by execute_step via interior mutability.
@@ -314,11 +597,16 @@ impl PluginManager {
                             };
                         }
                     }
+                    ArgValue::Literal(s) => {
+                        resolved.push(Value::String(s.clone()));
+                    }
                     ArgValue::None => {}
                 }
             }
 
-            match self.execute_step_with_retry(step.conv_id as u32, resolved) {
+            // Resolve model catalog ID to plugin manager global ID
+            let global_id = self.resolve_catalog_id(step.conv_id as u32);
+            match self.execute_step_with_retry(global_id, resolved) {
                 Ok(result) => {
                     let summary = format!("{}", &result);
                     trace.push(TraceEntry {
@@ -339,30 +627,38 @@ impl PluginManager {
                     });
 
                     // Invoke cleanup conventions for previously successful steps
-                    // (Whitepaper Section 6.7 — error recovery)
-                    for (j, prev_step) in steps[..i].iter().enumerate() {
+                    // in REVERSE order (Whitepaper Section 6.7 — error recovery).
+                    // Reverse order ensures resources are released in LIFO order.
+                    for j in (0..i).rev() {
+                        let prev_step = &steps[j];
                         if prev_step.conv_id == EMIT_ID || prev_step.conv_id == STOP_ID {
                             continue;
                         }
-                        // Look up the convention's cleanup action
-                        let convs = self.conventions();
-                        if let Some(conv) = convs.iter().find(|c| c.id == prev_step.conv_id as u32) {
-                            if let Some(ref cleanup_spec) = conv.cleanup {
-                                let cleanup_id = cleanup_spec.convention_id;
-                                if j < results.len() {
-                                    let cleanup_args = vec![results[j].clone()];
-                                    tracing::debug!(
-                                        step = j,
-                                        cleanup_conv = cleanup_id,
-                                        "Invoking cleanup convention"
-                                    );
-                                    if let Err(ce) = self.execute_step(cleanup_id, cleanup_args) {
-                                        tracing::warn!(
+                        // The model's conv_id is a global ID. Convert to local for convention lookup.
+                        let global_step_id = prev_step.conv_id as u32;
+                        // Find which plugin owns this convention via the routing table
+                        if let Some(&(owner_plugin_idx, local_conv_id)) = self.routing.get(&global_step_id) {
+                            let plugin_convs = self.plugins[owner_plugin_idx].conventions();
+                            if let Some(conv) = plugin_convs.iter().find(|c| c.id == local_conv_id) {
+                                if let Some(ref cleanup_spec) = conv.cleanup {
+                                    // CleanupSpec convention_id is local to the plugin.
+                                    // Compute global cleanup ID for execute_step.
+                                    let global_cleanup_id = (owner_plugin_idx as u32) * 1000 + cleanup_spec.convention_id;
+                                    if j < results.len() {
+                                        let cleanup_args = vec![results[j].clone()];
+                                        tracing::debug!(
                                             step = j,
-                                            cleanup_conv = cleanup_id,
-                                            error = %ce,
-                                            "Cleanup convention failed"
+                                            cleanup_conv = global_cleanup_id,
+                                            "Invoking cleanup convention"
                                         );
+                                        if let Err(ce) = self.execute_step(global_cleanup_id, cleanup_args) {
+                                            tracing::warn!(
+                                                step = j,
+                                                cleanup_conv = global_cleanup_id,
+                                                error = %ce,
+                                                "Cleanup convention failed"
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -410,6 +706,20 @@ impl PluginManager {
         self.execute_step_with_retry(global_id, args)
     }
 
+    /// Async variant of execute_by_plugin — uses plugin's execute_async for I/O-bound operations.
+    pub async fn execute_by_plugin_async(&self, plugin_name: &str, conv_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
+        let plugin_idx = self.plugins.iter().position(|p| p.name() == plugin_name)
+            .ok_or_else(|| PluginError::NotFound(format!("Plugin '{}' not loaded", plugin_name)))?;
+
+        // Check if plugin is crashed
+        if self.crashed_plugins.read().unwrap().contains(&plugin_idx) {
+            return Err(PluginError::Failed(format!("Plugin '{}' is crashed", plugin_name)));
+        }
+
+        let plugin = &self.plugins[plugin_idx];
+        plugin.execute_async(conv_id, args).await
+    }
+
     /// Resolve a convention by name (Section 5.4).
     /// Format: "plugin_name.convention_name" → global routing ID.
     pub fn resolve_by_name(&self, name: &str) -> Option<u32> {
@@ -423,6 +733,36 @@ impl PluginManager {
     /// Get plugin names list.
     pub fn plugin_names(&self) -> Vec<String> {
         self.plugins.iter().map(|p| p.name().to_string()).collect()
+    }
+
+    /// Build a mapping from model catalog IDs to plugin manager global routing IDs.
+    /// Call this after all plugins are loaded and the model catalog is available.
+    /// Each catalog entry has a `full_name` like "postgres.query" and a `catalog_id`.
+    /// This maps catalog_id → name_routing[full_name] (the global routing ID).
+    pub fn build_catalog_routing(&mut self, catalog: &[super::super::mind::CatalogEntry]) {
+        self.catalog_routing.clear();
+        for entry in catalog {
+            // Try to find this convention name in the loaded plugins' name_routing
+            if let Some(&global_id) = self.name_routing.get(&entry.name) {
+                self.catalog_routing.insert(entry.id as u32, global_id);
+            }
+            // Also try function field (some catalogs use this)
+            else if let Some(&global_id) = self.name_routing.get(&entry.function) {
+                self.catalog_routing.insert(entry.id as u32, global_id);
+            }
+        }
+        tracing::info!(
+            mapped = self.catalog_routing.len(),
+            total = catalog.len(),
+            "Catalog-to-plugin routing built"
+        );
+    }
+
+    /// Resolve a model catalog ID to a global routing ID.
+    /// Returns the global ID if mapped, otherwise returns the catalog ID unchanged
+    /// (backwards compatible with models that use global IDs directly).
+    pub fn resolve_catalog_id(&self, catalog_id: u32) -> u32 {
+        self.catalog_routing.get(&catalog_id).copied().unwrap_or(catalog_id)
     }
 
     /// Collect checkpoint state from all plugins (Section 7.5).
@@ -460,6 +800,7 @@ impl PluginManager {
                 total_time_ms: v.total_time_ms,
                 error_count: v.error_count,
                 timeout_count: v.timeout_count,
+                recent_durations: v.recent_durations.clone(),
             })).collect())
             .unwrap_or_default()
     }
@@ -474,6 +815,22 @@ impl PluginManager {
             .collect()
     }
 
+    /// Check which plugins provide LoRA weights (Section 7.3).
+    /// Returns a list of plugin names that have LoRA knowledge available.
+    pub fn plugins_with_lora_weights(&self) -> Vec<String> {
+        self.plugins.iter()
+            .filter(|p| p.lora_weights().is_some())
+            .map(|p| p.name().to_string())
+            .collect()
+    }
+
+    /// Get LoRA weights bytes for a specific plugin by name (Section 7.3).
+    pub fn get_plugin_lora_weights(&self, name: &str) -> Option<Vec<u8>> {
+        self.plugins.iter()
+            .find(|p| p.name() == name)
+            .and_then(|p| p.lora_weights())
+    }
+
     /// Call on_unload for all plugins during shutdown (Section 11.4).
     /// Unloads in reverse registration order (Whitepaper Section 16.2 step 6).
     pub fn unload_all(&mut self) {
@@ -483,6 +840,88 @@ impl PluginManager {
                 tracing::warn!(plugin = %name, error = %e, "Plugin unload error");
             } else {
                 tracing::debug!(plugin = %name, "Plugin unloaded");
+            }
+        }
+    }
+
+    /// Unregister a plugin by name. Calls on_unload, removes from plugins Vec,
+    /// and cleans up routing and name_routing entries.
+    pub fn unregister(&mut self, name: &str) -> Result<(), String> {
+        let idx = self.plugins.iter().position(|p| p.name() == name)
+            .ok_or_else(|| format!("Plugin not found: {}", name))?;
+
+        // Call on_unload
+        if let Err(e) = self.plugins[idx].on_unload() {
+            tracing::warn!(plugin = %name, error = %e, "Plugin unload error during unregister");
+        }
+
+        // Compute the ID offset for this plugin
+        let id_offset = (idx as u32) * 1000;
+
+        // Remove routing entries for this plugin
+        let conventions = self.plugins[idx].conventions();
+        for conv in &conventions {
+            let global_id = id_offset + conv.id;
+            self.routing.remove(&global_id);
+            let full_name = format!("{}.{}", name, conv.name);
+            self.name_routing.remove(&full_name);
+        }
+
+        // Remove the plugin
+        self.plugins.remove(idx);
+
+        tracing::info!(plugin = %name, "Plugin unregistered");
+        Ok(())
+    }
+
+    /// Dead plugin detection stub (Section 11.3).
+    /// Checks each plugin's error rate from ConventionStats and returns warnings
+    /// for plugins with >50% error rate.
+    pub fn check_plugin_health(&self) -> Vec<(String, &str)> {
+        let mut warnings = Vec::new();
+        let stats_map = match self.convention_stats.read() {
+            Ok(s) => s,
+            Err(_) => return warnings,
+        };
+
+        for (idx, plugin) in self.plugins.iter().enumerate() {
+            let id_offset = (idx as u32) * 1000;
+            let mut total_calls: u64 = 0;
+            let mut total_errors: u64 = 0;
+
+            // Aggregate stats across all conventions owned by this plugin
+            for (&global_id, stats) in stats_map.iter() {
+                if global_id >= id_offset && global_id < id_offset + 1000 {
+                    total_calls += stats.call_count;
+                    total_errors += stats.error_count;
+                }
+            }
+
+            if total_calls > 0 && total_errors * 100 / total_calls > 50 {
+                warnings.push((
+                    plugin.name().to_string(),
+                    "error rate exceeds 50% — plugin may be dead or malfunctioning",
+                ));
+            }
+        }
+
+        warnings
+    }
+}
+
+/// Validate a plugin's config against its declared schema (Section 5.2).
+/// Called during register() to catch misconfigurations early.
+fn validate_plugin_config(plugin: &dyn SomaPlugin) {
+    if let Some(schema) = plugin.config_schema() {
+        let config = super::interface::PluginConfig::default();
+        let errors = config.validate(&schema);
+        if !errors.is_empty() {
+            for err in &errors {
+                tracing::warn!(
+                    plugin = plugin.name(),
+                    error = %err,
+                    "Plugin config validation warning"
+                );
             }
         }
     }

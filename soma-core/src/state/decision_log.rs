@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// A recorded decision — what was done, why, and by whom.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct Decision {
     pub id: String,
     pub what: String,

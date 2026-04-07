@@ -158,6 +158,10 @@ Implementation validated against specs with 10-agent parallel audits:
 | `07_SYNTHESIZER.md` | 89 | 87 (+2 documented-future) |
 | **Total** | **328** | **326** |
 
+## Rules
+
+- **NEVER GUESS.** If you don't know the answer, read the code. If the code doesn't have the answer, read the spec. If the spec doesn't cover it, ask the user. Do not speculate, assume, or fabricate answers. Always verify by reading the actual source before responding.
+
 ## When Editing
 
 ### Rust (soma-core)

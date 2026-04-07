@@ -61,6 +61,9 @@ zstd = "0.13"
 # Dynamic plugin loading (Section 5.3)
 libloading = "0.8"
 
+# Plugin SDK (shared interface types)
+soma-plugin-sdk = { path = "../soma-plugins/sdk" }
+
 # WebSocket transport (Section 3.1)
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
@@ -72,6 +75,9 @@ path = "src/main.rs"
 [[bin]]
 name = "soma-dump"
 path = "src/bin/soma_dump.rs"
+
+[dev-dependencies]
+tempfile = "3"
 
 [profile.release]
 opt-level = 3

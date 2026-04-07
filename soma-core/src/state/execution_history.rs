@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// A recorded execution — intent, program, result.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct ExecutionRecord {
     pub id: String,
     pub intent: String,

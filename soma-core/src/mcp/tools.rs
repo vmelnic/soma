@@ -179,7 +179,9 @@ pub fn build_tool_list(conventions: &[(String, crate::plugin::interface::Convent
         description: "Get database schema state — tables, columns, types. Returns empty until a database plugin is loaded.".into(),
         input_schema: serde_json::json!({
             "type": "object",
-            "properties": {},
+            "properties": {
+                "table": { "type": "string", "description": "Optional: query only this table's schema with sample rows" }
+            },
         }),
     });
 
@@ -220,7 +222,9 @@ pub fn build_tool_list(conventions: &[(String, crate::plugin::interface::Convent
         description: "Save a checkpoint of the current SOMA state (LoRA, experiences, adaptations).".into(),
         input_schema: serde_json::json!({
             "type": "object",
-            "properties": {},
+            "properties": {
+                "label": { "type": "string", "description": "Optional label for the checkpoint (included in filename and metadata)" }
+            },
         }),
     });
 
@@ -231,7 +235,10 @@ pub fn build_tool_list(conventions: &[(String, crate::plugin::interface::Convent
             "type": "object",
             "properties": {
                 "what": { "type": "string", "description": "What was decided/built" },
-                "why": { "type": "string", "description": "Why this decision was made" }
+                "why": { "type": "string", "description": "Why this decision was made" },
+                "context": { "type": "string", "description": "Optional additional context for the decision" },
+                "related_tables": { "type": "array", "items": { "type": "string" }, "description": "Optional list of related database tables" },
+                "related_plugins": { "type": "array", "items": { "type": "string" }, "description": "Optional list of related plugin names" }
             },
             "required": ["what", "why"],
         }),
@@ -279,6 +286,66 @@ pub fn build_tool_list(conventions: &[(String, crate::plugin::interface::Convent
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {},
+        }),
+    });
+
+    tools.push(McpTool {
+        name: "soma.uninstall_plugin".into(),
+        description: "Uninstall a loaded plugin by name. Requires admin access.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "description": "Plugin name to uninstall (e.g. 'postgres', 'redis')" }
+            },
+            "required": ["name"],
+        }),
+    });
+
+    tools.push(McpTool {
+        name: "soma.configure_plugin".into(),
+        description: "Update configuration for a loaded plugin. Requires admin access.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "description": "Plugin name to configure" },
+                "config": { "type": "object", "description": "Configuration key-value pairs to set" }
+            },
+            "required": ["name", "config"],
+        }),
+    });
+
+    tools.push(McpTool {
+        name: "soma.reload_design".into(),
+        description: "Reload the current UI design from Interface SOMA.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {},
+        }),
+    });
+
+    tools.push(McpTool {
+        name: "soma.render_view".into(),
+        description: "Render a named view via Interface SOMA.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "view": { "type": "string", "description": "View name to render" },
+                "data": { "type": "object", "description": "Data context for the view" }
+            },
+            "required": ["view"],
+        }),
+    });
+
+    tools.push(McpTool {
+        name: "soma.update_view".into(),
+        description: "Update an existing rendered view with new data.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "view": { "type": "string", "description": "View name to update" },
+                "patch": { "type": "object", "description": "Partial data to merge into the view" }
+            },
+            "required": ["view"],
         }),
     });
 

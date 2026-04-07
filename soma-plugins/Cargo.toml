@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "sdk",
+    "auth",
+    "crypto",
+    "geo",
+    "http-bridge",
+    "postgres",
+    "redis",
+]
+resolver = "3"

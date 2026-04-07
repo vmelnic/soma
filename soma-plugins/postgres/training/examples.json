@@ -1,0 +1,273 @@
+{
+  "schema_version": "1.0",
+  "plugin": "postgres",
+  "plugin_version": "0.1.0",
+  "examples": [
+    {
+      "id": "postgres_query_001",
+      "intents": [
+        "find all {table}",
+        "list {table}",
+        "show me {table}",
+        "select from {table}",
+        "get all {table}",
+        "query the {table} table",
+        "fetch all {table} records",
+        "read the {table} table",
+        "what's in the {table} table"
+      ],
+      "program": [
+        {"convention": "postgres.query", "args": [{"name": "sql", "type": "span", "extract": "table"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "table": ["users", "contacts", "appointments", "messages", "reviews"]
+      },
+      "tags": ["postgres", "query", "select"]
+    },
+    {
+      "id": "postgres_execute_001",
+      "intents": [
+        "insert into {table}",
+        "add record to {table}",
+        "delete from {table}",
+        "update {table}",
+        "modify {table}",
+        "insert a new {table} entry",
+        "remove old records from {table}"
+      ],
+      "program": [
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "span", "extract": "table"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "table": ["users", "contacts", "appointments", "messages", "reviews"]
+      },
+      "tags": ["postgres", "execute", "write"]
+    },
+    {
+      "id": "postgres_query_one_001",
+      "intents": [
+        "find one {entity} where id is {id}",
+        "get {entity} by id {id}",
+        "look up {entity} with id {id}",
+        "fetch a single {entity} with id {id}",
+        "find {entity} matching id {id}"
+      ],
+      "program": [
+        {"convention": "postgres.query_one", "args": [{"name": "table", "type": "span", "extract": "entity"}, {"name": "id", "type": "span", "extract": "id"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "entity": ["user", "contact", "order", "product", "review"],
+        "id": ["1", "42", "100", "999", "abc"]
+      },
+      "tags": ["postgres", "query_one", "lookup"]
+    },
+    {
+      "id": "postgres_create_table_001",
+      "intents": [
+        "create a table called {table}",
+        "make table {table}",
+        "add {table} table",
+        "set up a {table} table",
+        "create the {table} table with columns"
+      ],
+      "program": [
+        {"convention": "postgres.create_table", "args": [{"name": "name", "type": "span", "extract": "table"}, {"name": "columns", "type": "literal", "value": "id SERIAL PRIMARY KEY, name TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW()"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "table": ["users", "contacts", "sessions", "events", "tasks"]
+      },
+      "tags": ["postgres", "create_table", "ddl"]
+    },
+    {
+      "id": "postgres_table_exists_001",
+      "intents": [
+        "does {table} exist",
+        "check if {table} table exists",
+        "is there a {table} table",
+        "does a table named {table} exist",
+        "verify the {table} table exists"
+      ],
+      "program": [
+        {"convention": "postgres.table_exists", "args": [{"name": "name", "type": "span", "extract": "table"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "table": ["users", "contacts", "orders", "sessions", "migrations"]
+      },
+      "tags": ["postgres", "table_exists", "check"]
+    },
+    {
+      "id": "postgres_list_tables_001",
+      "intents": [
+        "what tables exist",
+        "show all tables",
+        "list database tables",
+        "show me the database structure",
+        "what's in the database",
+        "list all tables in the database",
+        "show the tables"
+      ],
+      "program": [
+        {"convention": "postgres.list_tables", "args": []},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["postgres", "list_tables", "metadata"]
+    },
+    {
+      "id": "postgres_table_schema_001",
+      "intents": [
+        "describe {table}",
+        "show schema for {table}",
+        "what columns does {table} have",
+        "what's the structure of {table}",
+        "show columns of {table}",
+        "what fields are in {table}",
+        "describe the {table} table"
+      ],
+      "program": [
+        {"convention": "postgres.table_schema", "args": [{"name": "name", "type": "span", "extract": "table"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "table": ["users", "contacts", "orders", "products", "sessions"]
+      },
+      "tags": ["postgres", "table_schema", "metadata"]
+    },
+    {
+      "id": "postgres_alter_table_001",
+      "intents": [
+        "add column to {table}",
+        "alter table {table}",
+        "modify the {table} table",
+        "add a new field to {table}",
+        "change the {table} table structure"
+      ],
+      "program": [
+        {"convention": "postgres.alter_table", "args": [{"name": "name", "type": "span", "extract": "table"}, {"name": "changes", "type": "literal", "value": "ADD COLUMN new_col TEXT"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "table": ["users", "contacts", "orders", "products", "events"]
+      },
+      "tags": ["postgres", "alter_table", "ddl"]
+    },
+    {
+      "id": "postgres_begin_001",
+      "intents": [
+        "start a database transaction",
+        "begin a transaction",
+        "open a new transaction",
+        "start transaction",
+        "begin database transaction"
+      ],
+      "program": [
+        {"convention": "postgres.begin", "args": []},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["postgres", "begin", "transaction"]
+    },
+    {
+      "id": "postgres_commit_001",
+      "intents": [
+        "commit the transaction",
+        "save the transaction",
+        "finalize the transaction",
+        "commit transaction",
+        "finish transaction"
+      ],
+      "program": [
+        {"convention": "postgres.commit", "args": []},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["postgres", "commit", "transaction"]
+    },
+    {
+      "id": "postgres_rollback_001",
+      "intents": [
+        "rollback the transaction",
+        "abort the transaction",
+        "cancel the transaction",
+        "rollback transaction",
+        "undo transaction"
+      ],
+      "program": [
+        {"convention": "postgres.rollback", "args": []},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["postgres", "rollback", "transaction"]
+    },
+    {
+      "id": "postgres_create_then_list_001",
+      "intents": [
+        "create {table} table then list all tables",
+        "make {table} table and show all tables",
+        "add {table} table then list tables"
+      ],
+      "program": [
+        {"convention": "postgres.create_table", "args": [{"name": "name", "type": "span", "extract": "table"}, {"name": "columns", "type": "literal", "value": "id SERIAL PRIMARY KEY, name TEXT NOT NULL"}]},
+        {"convention": "postgres.list_tables", "args": []},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "table": ["users", "contacts", "sessions", "events", "tasks"]
+      },
+      "tags": ["postgres", "multi-step", "create_table", "list_tables"]
+    },
+    {
+      "id": "postgres_list_then_describe_001",
+      "intents": [
+        "list all tables then describe {table}",
+        "show all tables and then show schema for {table}",
+        "get tables then describe {table}"
+      ],
+      "program": [
+        {"convention": "postgres.list_tables", "args": []},
+        {"convention": "postgres.table_schema", "args": [{"name": "name", "type": "span", "extract": "table"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "table": ["users", "contacts", "orders", "products", "sessions"]
+      },
+      "tags": ["postgres", "multi-step", "list_tables", "table_schema"]
+    },
+    {
+      "id": "postgres_check_then_describe_001",
+      "intents": [
+        "check if {table} exists and show its schema",
+        "verify {table} exists then describe it",
+        "does {table} exist and what are its columns"
+      ],
+      "program": [
+        {"convention": "postgres.table_exists", "args": [{"name": "name", "type": "span", "extract": "table"}]},
+        {"convention": "postgres.table_schema", "args": [{"name": "name", "type": "span", "extract": "table"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "table": ["users", "contacts", "orders", "products", "sessions"]
+      },
+      "tags": ["postgres", "multi-step", "table_exists", "table_schema"]
+    }
+  ]
+}

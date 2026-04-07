@@ -29,7 +29,41 @@ pub fn verify_plugin_signature(
 
 /// Load a plugin from a shared library file.
 /// The library must export `soma_plugin_init` returning a raw pointer to SomaPlugin.
+///
+/// If a signature file (`<path>.sig`) and public key file (`<path>.pub`) exist alongside
+/// the plugin library, Ed25519 signature verification is performed before loading.
+/// Verification is mandatory when signature files are present — a failed check is an error.
+/// When no signature files exist, the plugin loads without verification (with a debug log).
 pub fn load_plugin_from_path(path: &Path) -> Result<Box<dyn SomaPlugin>> {
+    // Check for signature file (Section 20.4)
+    let ext_str = path.extension().unwrap_or_default().to_str().unwrap_or("");
+    let sig_path = path.with_extension(format!("{}.sig", ext_str));
+    let pub_path = path.with_extension(format!("{}.pub", ext_str));
+
+    if sig_path.exists() && pub_path.exists() {
+        let sig_bytes = std::fs::read(&sig_path)
+            .with_context(|| format!("Failed to read signature file: {}", sig_path.display()))?;
+        let pub_bytes = std::fs::read(&pub_path)
+            .with_context(|| format!("Failed to read public key file: {}", pub_path.display()))?;
+        if sig_bytes.len() == 64 && pub_bytes.len() == 32 {
+            let sig: [u8; 64] = sig_bytes.try_into().unwrap();
+            let pubk: [u8; 32] = pub_bytes.try_into().unwrap();
+            if !verify_plugin_signature(path, &sig, &pubk) {
+                anyhow::bail!("Plugin signature verification FAILED: {}", path.display());
+            }
+            tracing::info!(path = %path.display(), "Plugin signature verified");
+        } else {
+            tracing::warn!(
+                path = %path.display(),
+                sig_len = sig_bytes.len(),
+                pub_len = pub_bytes.len(),
+                "Signature/key files have invalid sizes (expected 64/32 bytes), loading without verification"
+            );
+        }
+    } else {
+        tracing::debug!(path = %path.display(), "No signature file found — loading without verification");
+    }
+
     let lib = unsafe {
         libloading::Library::new(path)
             .with_context(|| format!("Failed to load plugin library: {}", path.display()))?
@@ -62,26 +96,55 @@ pub fn load_plugin_from_path(path: &Path) -> Result<Box<dyn SomaPlugin>> {
 }
 
 /// Scan a directory for .so/.dylib plugin files.
+///
+/// Finds plugin libraries in two locations:
+/// 1. Top-level shared library files (e.g. `plugins/libfoo.dylib`)
+/// 2. Subdirectories containing a `manifest.json` or `manifest.toml` with a matching
+///    library file named `lib<dirname>.<ext>` (the `.soma-plugin` package layout)
 pub fn scan_plugin_directory(dir: &Path) -> Vec<std::path::PathBuf> {
     let ext = if cfg!(target_os = "macos") { "dylib" }
               else if cfg!(target_os = "windows") { "dll" }
               else { "so" };
 
+    let mut results: Vec<std::path::PathBuf> = Vec::new();
+
     match std::fs::read_dir(dir) {
-        Ok(entries) => entries
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path().extension()
-                    .map(|x| x == ext)
-                    .unwrap_or(false)
-            })
-            .map(|e| e.path())
-            .collect(),
+        Ok(entries) => {
+            let entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+
+            // Top-level library files
+            for entry in &entries {
+                let path = entry.path();
+                if path.extension().map(|x| x == ext).unwrap_or(false) {
+                    results.push(path);
+                }
+            }
+
+            // Also check subdirectories with manifest.json or manifest.toml
+            for entry in &entries {
+                let path = entry.path();
+                if path.is_dir() {
+                    let manifest_json = path.join("manifest.json");
+                    let manifest_toml = path.join("manifest.toml");
+                    if manifest_json.exists() || manifest_toml.exists() {
+                        // Look for the library file inside the subdirectory
+                        if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+                            let lib_name = format!("lib{}.{}", dir_name, ext);
+                            let lib_path = path.join(&lib_name);
+                            if lib_path.exists() {
+                                results.push(lib_path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Err(_) => {
             tracing::debug!(dir = %dir.display(), "Plugin directory not found, skipping");
-            Vec::new()
         }
     }
+
+    results
 }
 
 /// Plugin manifest parsed from manifest.toml (05_PLUGIN_CATALOG.md Section 4).
@@ -154,6 +217,8 @@ pub fn is_platform_compatible(manifest: &PluginManifest) -> bool {
     }
     let current = if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
         "aarch64-macos"
+    } else if cfg!(target_os = "macos") && cfg!(target_arch = "x86_64") {
+        "x86_64-macos"
     } else if cfg!(target_os = "linux") && cfg!(target_arch = "x86_64") {
         "x86_64-linux"
     } else if cfg!(target_os = "linux") && cfg!(target_arch = "aarch64") {
@@ -165,32 +230,35 @@ pub fn is_platform_compatible(manifest: &PluginManifest) -> bool {
 }
 
 /// Discover plugins from a directory, reading manifests for metadata.
+///
+/// This is the primary entry point for plugin discovery. It:
+/// 1. Calls `scan_plugin_directory` to find all plugin libraries (top-level and subdirectory packages)
+/// 2. Parses manifests for each discovered plugin
+/// 3. Filters out plugins incompatible with the current platform (via `is_platform_compatible`)
+///
+/// Plugins without manifests are always included (platform filtering requires a manifest).
 pub fn discover_plugins(dir: &Path) -> Vec<(std::path::PathBuf, Option<PluginManifest>)> {
     let mut result = Vec::new();
 
-    // Check for .so/.dylib files
+    // scan_plugin_directory handles both top-level libs and subdirectory packages
     for path in scan_plugin_directory(dir) {
         let parent = path.parent().unwrap_or(dir);
         let manifest = parse_manifest(parent);
-        result.push((path, manifest));
-    }
 
-    // Also check subdirectories for manifest.toml + binary
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.filter_map(|e| e.ok()) {
-            let subdir = entry.path();
-            if subdir.is_dir() {
-                if let Some(manifest) = parse_manifest(&subdir) {
-                    let ext = if cfg!(target_os = "macos") { "dylib" }
-                              else if cfg!(target_os = "windows") { "dll" }
-                              else { "so" };
-                    let binary = subdir.join(format!("plugin.{}", ext));
-                    if binary.exists() {
-                        result.push((binary, Some(manifest)));
-                    }
-                }
+        // Filter by platform compatibility when a manifest is available
+        if let Some(ref m) = manifest {
+            if !is_platform_compatible(m) {
+                tracing::debug!(
+                    plugin = %m.name,
+                    platforms = ?m.platforms,
+                    path = %path.display(),
+                    "Plugin not compatible with current platform, skipping"
+                );
+                continue;
             }
         }
+
+        result.push((path, manifest));
     }
 
     result

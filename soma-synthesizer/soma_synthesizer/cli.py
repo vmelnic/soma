@@ -51,7 +51,7 @@ def cmd_train(args):
 
     # 3. Validate training data (abort on errors)
     print("\n[Synthesis] Validating training data...")
-    validator = TrainingDataValidator(catalog)
+    validator = TrainingDataValidator(catalog.entries)
     report = validator.validate(examples)
     _print_validation_report(report)
     if report.errors:
@@ -77,14 +77,14 @@ def cmd_train(args):
     # 7. Create model
     model = SomaMind(
         vocab_size=tokenizer.vocab_size,
-        num_conventions=num_conventions,
+        num_opcodes=num_conventions,
         embed_dim=config.architecture.embed_dim,
         hidden_dim=config.architecture.hidden_dim,
         decoder_dim=config.architecture.decoder_dim,
         opcode_embed_dim=config.architecture.opcode_embed_dim,
         num_layers=config.architecture.num_encoder_layers,
         dropout=config.architecture.dropout,
-        max_program_steps=config.architecture.max_program_steps,
+        max_steps=config.architecture.max_program_steps,
     )
     total_params = sum(p.numel() for p in model.parameters())
     print(f"\n[Synthesis] Model: {config.architecture.type}, {total_params:,} parameters")
@@ -101,12 +101,12 @@ def cmd_train(args):
     # 9. Export
     output_dir = args.output
     os.makedirs(output_dir, exist_ok=True)
+    max_steps = config.architecture.max_program_steps
 
     if args.target in ("server", "both"):
-        server_dir = os.path.join(output_dir, "server")
-        os.makedirs(server_dir, exist_ok=True)
-        print(f"\n[Synthesis] Exporting ONNX to {server_dir}/...")
-        export_onnx(model, server_dir, config)
+        print(f"\n[Synthesis] Exporting ONNX to {output_dir}/...")
+        export_onnx(model, tokenizer, catalog.entries, output_dir,
+                    max_seq_len=20, max_steps=max_steps)
 
     if args.target in ("embedded", "both"):
         from soma_synthesizer.exporter import export_embedded
@@ -115,14 +115,14 @@ def cmd_train(args):
         print(f"\n[Synthesis] Exporting .soma-model to {embedded_dir}/...")
         export_embedded(model, embedded_dir, config)
 
-    # Save tokenizer, catalog, and metadata
-    vocab_path = os.path.join(output_dir, "vocab.json")
-    tokenizer.save(vocab_path)
-    print(f"  -> {vocab_path}")
+    # Save tokenizer
+    tokenizer_path = os.path.join(output_dir, "tokenizer.json")
+    tokenizer.save(tokenizer_path)
+    print(f"  -> {tokenizer_path}")
 
+    # Save catalog
     catalog_path = os.path.join(output_dir, "catalog.json")
-    with open(catalog_path, "w") as f:
-        json.dump(catalog, f, indent=2)
+    catalog.save(catalog_path)
     print(f"  -> {catalog_path}")
 
     # Save model checkpoint for later LoRA / re-export
@@ -130,9 +130,11 @@ def cmd_train(args):
     torch.save(model.state_dict(), model_path)
     print(f"  -> {model_path}")
 
-    meta_path = os.path.join(output_dir, "meta.json")
-    export_metadata(config, training_stats, tokenizer, catalog, meta_path)
-    print(f"  -> {meta_path}")
+    # Save metadata
+    meta_path = output_dir
+    export_metadata(model, catalog.entries, training_stats.__dict__, meta_path,
+                    max_seq_len=20, max_steps=max_steps)
+    print(f"  -> {meta_path}/meta.json")
 
     print("\n[Synthesis] SOMA synthesis complete.")
 
@@ -311,7 +313,7 @@ def cmd_validate(args):
     print(f"\n[Validate] Loaded {len(examples)} examples from {len(plugin_dirs)} plugins")
     print(f"[Validate] Convention catalog: {len(catalog)} entries")
 
-    validator = TrainingDataValidator(catalog)
+    validator = TrainingDataValidator(catalog.entries)
     report = validator.validate(examples)
     _print_validation_report(report)
 
@@ -562,13 +564,14 @@ def _discover_plugin_dirs(plugins_path: str) -> list[str]:
     for entry in sorted(os.listdir(plugins_path)):
         candidate = os.path.join(plugins_path, entry)
         if os.path.isdir(candidate):
-            manifest = os.path.join(candidate, "manifest.toml")
-            if os.path.isfile(manifest):
+            manifest_toml = os.path.join(candidate, "manifest.toml")
+            manifest_json = os.path.join(candidate, "manifest.json")
+            if os.path.isfile(manifest_toml) or os.path.isfile(manifest_json):
                 plugin_dirs.append(candidate)
 
     if not plugin_dirs:
         print(f"[Warning] No plugins found in {plugins_path} "
-              "(looking for subdirs with manifest.toml)")
+              "(looking for subdirs with manifest.toml or manifest.json)")
 
     return plugin_dirs
 

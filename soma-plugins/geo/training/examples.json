@@ -1,0 +1,226 @@
+{
+  "schema_version": "1.0",
+  "plugin": "geo",
+  "plugin_version": "0.1.0",
+  "examples": [
+    {
+      "id": "geo_distance_001",
+      "intents": [
+        "how far is {location1} from {location2}",
+        "calculate distance between {location1} and {location2}",
+        "what's the distance from {location1} to {location2}",
+        "distance between {location1} and {location2}",
+        "how many km from {location1} to {location2}",
+        "measure the distance from {location1} to {location2}"
+      ],
+      "program": [
+        {"convention": "geo.distance", "args": [{"name": "from", "type": "span", "extract": "location1"}, {"name": "to", "type": "span", "extract": "location2"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "location1": ["downtown", "city center", "the office", "home", "the airport"],
+        "location2": ["the park", "the mall", "school", "the station", "the hospital"]
+      },
+      "tags": ["geo", "distance", "haversine"]
+    },
+    {
+      "id": "geo_distance_002",
+      "intents": [
+        "how far apart are these two coordinates",
+        "get the haversine distance",
+        "compute great circle distance",
+        "what is the straight line distance between these points",
+        "calculate km between two GPS coordinates"
+      ],
+      "program": [
+        {"convention": "geo.distance", "args": [{"name": "lat1", "type": "span", "extract": "lat1"}, {"name": "lon1", "type": "span", "extract": "lon1"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["geo", "distance", "haversine", "gps"]
+    },
+    {
+      "id": "geo_within_radius_001",
+      "intents": [
+        "find points within {radius}km",
+        "filter locations within {radius} kilometers",
+        "what's nearby within {radius}km",
+        "search within {radius}km radius",
+        "show results within {radius}km"
+      ],
+      "program": [
+        {"convention": "geo.within_radius", "args": [{"name": "radius_km", "type": "span", "extract": "radius"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "radius": ["1", "5", "10", "25", "50"]
+      },
+      "tags": ["geo", "radius", "filter", "nearby"]
+    },
+    {
+      "id": "geo_within_radius_002",
+      "intents": [
+        "which locations are closest to me",
+        "find all places within walking distance",
+        "get nearby points of interest",
+        "filter to locations near this coordinate",
+        "what is within range of this position"
+      ],
+      "program": [
+        {"convention": "geo.within_radius", "args": []},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["geo", "radius", "filter", "nearby", "proximity"]
+    },
+    {
+      "id": "geo_bounding_box_001",
+      "intents": [
+        "get bounding box for {radius}km radius",
+        "calculate search bounds for {radius}km",
+        "what area covers {radius}km around this point",
+        "compute lat/lon bounds for a {radius}km search",
+        "bounding box for {radius}km radius query"
+      ],
+      "program": [
+        {"convention": "geo.bounding_box", "args": [{"name": "radius_km", "type": "span", "extract": "radius"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "radius": ["1", "5", "10", "25", "100"]
+      },
+      "tags": ["geo", "bounding_box", "bounds", "optimization"]
+    },
+    {
+      "id": "geo_bounding_box_002",
+      "intents": [
+        "get the min and max coordinates for a search area",
+        "calculate the geographic extent around a point",
+        "what are the corner coordinates for a radius search",
+        "generate a geographic bounding box",
+        "compute search rectangle for spatial query"
+      ],
+      "program": [
+        {"convention": "geo.bounding_box", "args": []},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["geo", "bounding_box", "spatial"]
+    },
+    {
+      "id": "geo_geocode_001",
+      "intents": [
+        "find coordinates for {address}",
+        "geocode {address}",
+        "where is {address}",
+        "get location of {address}",
+        "find {address} on map"
+      ],
+      "program": [
+        {"convention": "geo.geocode", "args": [{"name": "address", "type": "span", "extract": "address"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "address": ["downtown", "123 Main Street", "Central Park", "city center", "Times Square"]
+      },
+      "tags": ["geo", "geocode", "address", "coordinates"]
+    },
+    {
+      "id": "geo_geocode_002",
+      "intents": [
+        "look up the GPS coordinates of {address}",
+        "convert {address} to latitude and longitude",
+        "what are the coordinates of {address}",
+        "get the lat/lon for {address}",
+        "find the geographic position of {address}"
+      ],
+      "program": [
+        {"convention": "geo.geocode", "args": [{"name": "address", "type": "span", "extract": "address"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "address": ["Eiffel Tower", "Big Ben", "Golden Gate Bridge", "White House", "Sydney Opera House"]
+      },
+      "tags": ["geo", "geocode", "lookup", "landmark"]
+    },
+    {
+      "id": "geo_reverse_geocode_001",
+      "intents": [
+        "what address is at these coordinates",
+        "reverse geocode this location",
+        "what place is at this point",
+        "find address for coordinates",
+        "what's at this location"
+      ],
+      "program": [
+        {"convention": "geo.reverse_geocode", "args": []},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["geo", "reverse_geocode", "address", "lookup"]
+    },
+    {
+      "id": "geo_reverse_geocode_002",
+      "intents": [
+        "convert these GPS coordinates to a street address",
+        "what city is at this latitude and longitude",
+        "identify the location at these coordinates",
+        "look up the place name for this position",
+        "which neighborhood is at this point"
+      ],
+      "program": [
+        {"convention": "geo.reverse_geocode", "args": []},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["geo", "reverse_geocode", "address", "city"]
+    },
+    {
+      "id": "geo_geocode_and_distance_001",
+      "intents": [
+        "how far is {address1} from {address2}",
+        "distance between {address1} and {address2}",
+        "calculate distance from {address1} to {address2}"
+      ],
+      "program": [
+        {"convention": "geo.geocode", "args": [{"name": "address", "type": "span", "extract": "address1"}]},
+        {"convention": "geo.geocode", "args": [{"name": "address", "type": "span", "extract": "address2"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "address1": ["Times Square", "Central Park", "Eiffel Tower"],
+        "address2": ["Statue of Liberty", "Golden Gate Bridge", "Big Ben"]
+      },
+      "tags": ["geo", "geocode", "distance", "multi-step"]
+    },
+    {
+      "id": "geo_bbox_and_filter_001",
+      "intents": [
+        "get bounding box then filter points within {radius}km",
+        "optimize a radius search for {radius}km",
+        "pre-filter with bounding box for a {radius}km search"
+      ],
+      "program": [
+        {"convention": "geo.bounding_box", "args": [{"name": "radius_km", "type": "span", "extract": "radius"}]},
+        {"convention": "geo.within_radius", "args": [{"name": "radius_km", "type": "span", "extract": "radius"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "radius": ["5", "10", "25", "50", "100"]
+      },
+      "tags": ["geo", "bounding_box", "radius", "optimization", "multi-step"]
+    }
+  ]
+}

@@ -470,3 +470,71 @@ class SomaTrainer:
         novel_e2e = metrics["end_to_end"]
         print(f"  Novel Intents:     {novel_e2e:.3f}")
         return novel_e2e
+
+
+# ---------------------------------------------------------------------------
+# Convenience function for CLI integration
+# ---------------------------------------------------------------------------
+
+
+def train_mind(
+    model: nn.Module,
+    pairs: list[dict],
+    tokenizer,
+    catalog,
+    config,
+) -> TrainingStats:
+    """Train a SOMA Mind model from expanded pairs.
+
+    This function bridges the CLI (which works with raw pairs, tokenizer,
+    and catalog) and the SomaTrainer (which works with DataLoaders).
+
+    Args:
+        model: the SomaMind model instance
+        pairs: expanded (intent, program) pairs from ``expand_examples``
+        tokenizer: Tokenizer instance with built vocabulary
+        catalog: ConventionCatalog (finalized)
+        config: SynthesisConfig with training/architecture sections
+
+    Returns:
+        TrainingStats with final metrics
+    """
+    from soma_synthesizer.data import SynthesisDataset, split_data, collate_fn
+
+    # Split data
+    train_split = getattr(config.training, 'train_split', 0.8)
+    val_split = getattr(config.training, 'val_split', 0.1)
+    train_pairs, val_pairs, test_pairs = split_data(
+        pairs,
+        train_frac=train_split,
+        val_frac=val_split,
+    )
+
+    print(f"  Train: {len(train_pairs)}, Val: {len(val_pairs)}, Test: {len(test_pairs)}")
+
+    # Create datasets
+    max_steps = getattr(config.architecture, 'max_program_steps', 16)
+    max_seq = tokenizer.vocab_size  # upper bound for sequence length
+
+    encode_fn = lambda text: tokenizer.encode(text)
+    train_ds = SynthesisDataset(train_pairs, encode_fn, max_steps=max_steps)
+    val_ds = SynthesisDataset(val_pairs, encode_fn, max_steps=max_steps)
+    test_ds = SynthesisDataset(test_pairs, encode_fn, max_steps=max_steps)
+
+    batch_size = getattr(config.training, 'batch_size', 32)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+
+    # Train
+    trainer_config = {
+        "lr": getattr(config.training, 'learning_rate', 1e-3),
+        "weight_decay": getattr(config.training, 'weight_decay', 1e-2),
+        "epochs": getattr(config.training, 'epochs', 200),
+        "patience": getattr(config.training, 'patience', 30),
+        "grad_clip": getattr(config.training, 'gradient_clip', 1.0),
+    }
+    trainer = SomaTrainer(model, trainer_config)
+
+    stats = trainer.train(train_loader, val_loader, test_loader)
+    return stats

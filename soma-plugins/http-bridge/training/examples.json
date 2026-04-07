@@ -1,0 +1,188 @@
+{
+  "schema_version": "1.0",
+  "plugin": "http-bridge",
+  "plugin_version": "0.1.0",
+  "examples": [
+    {
+      "id": "http_get_001",
+      "intents": [
+        "fetch {url}",
+        "get {url}",
+        "download {url}",
+        "request {url}",
+        "call {url}",
+        "retrieve data from {url}"
+      ],
+      "program": [
+        {"convention": "http-bridge.get", "args": [{"name": "url", "type": "span", "extract": "url"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "url": ["https://api.example.com/users", "https://httpbin.org/get", "https://api.github.com", "https://jsonplaceholder.typicode.com/posts", "https://api.example.com/status"]
+      },
+      "tags": ["http", "get", "fetch"]
+    },
+    {
+      "id": "http_get_with_headers_001",
+      "intents": [
+        "fetch {url} with auth header",
+        "get {url} with authorization",
+        "call {url} with custom headers",
+        "request {url} with bearer token",
+        "download {url} with API key"
+      ],
+      "program": [
+        {"convention": "http-bridge.get", "args": [{"name": "url", "type": "span", "extract": "url"}, {"name": "headers", "type": "span", "extract": "headers"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "url": ["https://api.example.com/users", "https://api.example.com/protected"],
+        "headers": ["{\"Authorization\":\"Bearer tok_123\"}", "{\"X-API-Key\":\"key_abc\"}"]
+      },
+      "tags": ["http", "get", "headers", "auth"]
+    },
+    {
+      "id": "http_post_001",
+      "intents": [
+        "post to {url}",
+        "send data to {url}",
+        "submit to {url}",
+        "create resource at {url}",
+        "post request to {url}",
+        "send a POST to {url}"
+      ],
+      "program": [
+        {"convention": "http-bridge.post", "args": [{"name": "url", "type": "span", "extract": "url"}, {"name": "body", "type": "span", "extract": "body"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "url": ["https://api.example.com/users", "https://httpbin.org/post", "https://jsonplaceholder.typicode.com/posts", "https://api.example.com/events", "https://api.example.com/submit"],
+        "body": ["{\"name\":\"John\",\"email\":\"john@example.com\"}", "{\"title\":\"Hello\",\"content\":\"World\"}", "{\"action\":\"create\",\"data\":{}}"]
+      },
+      "tags": ["http", "post", "create"]
+    },
+    {
+      "id": "http_post_with_headers_001",
+      "intents": [
+        "post JSON to {url} with auth",
+        "send data to {url} with content type",
+        "submit JSON payload to {url}",
+        "create resource at {url} with headers",
+        "post to {url} with authorization"
+      ],
+      "program": [
+        {"convention": "http-bridge.post", "args": [{"name": "url", "type": "span", "extract": "url"}, {"name": "body", "type": "span", "extract": "body"}, {"name": "headers", "type": "span", "extract": "headers"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "url": ["https://api.example.com/users", "https://api.example.com/data"],
+        "body": ["{\"name\":\"Jane\"}", "{\"key\":\"value\"}"],
+        "headers": ["{\"Content-Type\":\"application/json\",\"Authorization\":\"Bearer tok_456\"}", "{\"X-API-Key\":\"key_xyz\"}"]
+      },
+      "tags": ["http", "post", "headers", "json"]
+    },
+    {
+      "id": "http_put_001",
+      "intents": [
+        "update {url}",
+        "put data to {url}",
+        "update resource at {url}",
+        "send a PUT to {url}",
+        "replace data at {url}"
+      ],
+      "program": [
+        {"convention": "http-bridge.put", "args": [{"name": "url", "type": "span", "extract": "url"}, {"name": "body", "type": "span", "extract": "body"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "url": ["https://api.example.com/users/1", "https://httpbin.org/put", "https://jsonplaceholder.typicode.com/posts/1", "https://api.example.com/config", "https://api.example.com/settings"],
+        "body": ["{\"name\":\"Updated Name\"}", "{\"status\":\"active\"}", "{\"title\":\"Updated Title\"}"]
+      },
+      "tags": ["http", "put", "update"]
+    },
+    {
+      "id": "http_delete_001",
+      "intents": [
+        "delete {url}",
+        "remove resource at {url}",
+        "send delete to {url}",
+        "delete the resource at {url}",
+        "destroy {url}"
+      ],
+      "program": [
+        {"convention": "http-bridge.delete", "args": [{"name": "url", "type": "span", "extract": "url"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "url": ["https://api.example.com/users/1", "https://httpbin.org/delete", "https://jsonplaceholder.typicode.com/posts/1", "https://api.example.com/sessions/abc", "https://api.example.com/cache/key1"]
+      },
+      "tags": ["http", "delete", "remove"]
+    },
+    {
+      "id": "http_request_001",
+      "intents": [
+        "make a {method} request to {url}",
+        "send {method} to {url}",
+        "{method} request to {url}",
+        "execute {method} on {url}",
+        "perform a {method} call to {url}"
+      ],
+      "program": [
+        {"convention": "http-bridge.request", "args": [{"name": "method", "type": "span", "extract": "method"}, {"name": "url", "type": "span", "extract": "url"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "method": ["GET", "POST", "PUT", "DELETE", "PATCH"],
+        "url": ["https://api.example.com/users", "https://httpbin.org/anything", "https://api.example.com/resources", "https://api.example.com/health", "https://api.example.com/v2/data"]
+      },
+      "tags": ["http", "request", "generic"]
+    },
+    {
+      "id": "http_request_with_body_001",
+      "intents": [
+        "send a {method} request to {url} with body",
+        "make a {method} call to {url} with payload",
+        "{method} {url} with data",
+        "execute {method} on {url} with JSON body",
+        "perform {method} to {url} with request body"
+      ],
+      "program": [
+        {"convention": "http-bridge.request", "args": [{"name": "method", "type": "span", "extract": "method"}, {"name": "url", "type": "span", "extract": "url"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "method": ["POST", "PUT", "PATCH"],
+        "url": ["https://api.example.com/resources", "https://httpbin.org/anything"],
+        "body": ["{\"action\":\"update\"}", "{\"data\":{\"id\":1}}"]
+      },
+      "tags": ["http", "request", "body", "generic"]
+    },
+    {
+      "id": "http_get_and_post_001",
+      "intents": [
+        "fetch data from {url} then post it to {target}",
+        "get {url} and forward to {target}",
+        "download from {url} and send to {target}"
+      ],
+      "program": [
+        {"convention": "http-bridge.get", "args": [{"name": "url", "type": "span", "extract": "url"}]},
+        {"convention": "http-bridge.post", "args": [{"name": "url", "type": "span", "extract": "target"}, {"name": "body", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "url": ["https://api.example.com/source", "https://httpbin.org/get"],
+        "target": ["https://api.example.com/sink", "https://httpbin.org/post"]
+      },
+      "tags": ["http", "multi-step", "pipeline"]
+    }
+  ]
+}

@@ -58,6 +58,10 @@ pub struct PendingConfirmation {
     pub description: String,
     pub created_at: std::time::Instant,
     pub token: String,
+    /// The original tool name that requires confirmation (for re-dispatch on confirm).
+    pub tool_name: String,
+    /// The original arguments for the tool call (for re-dispatch on confirm).
+    pub arguments: serde_json::Value,
 }
 
 /// Auth manager for MCP connections.
@@ -157,7 +161,14 @@ impl AuthManager {
     }
 
     /// Create a pending confirmation for a destructive action.
-    pub fn create_confirmation(&mut self, description: String, token: &str) -> String {
+    /// Stores the original tool_name and arguments so that `soma.confirm` can re-dispatch.
+    pub fn create_confirmation(
+        &mut self,
+        description: String,
+        token: &str,
+        tool_name: String,
+        arguments: serde_json::Value,
+    ) -> String {
         let action_id = format!("confirm-{}", self.next_action_id);
         self.next_action_id += 1;
 
@@ -166,16 +177,18 @@ impl AuthManager {
             description,
             created_at: std::time::Instant::now(),
             token: token.to_string(),
+            tool_name,
+            arguments,
         });
 
         action_id
     }
 
-    /// Confirm a pending action. Returns true if confirmed.
+    /// Confirm a pending action. Returns the pending confirmation if valid.
     pub fn confirm(&mut self, action_id: &str) -> Option<PendingConfirmation> {
         let pending = self.pending_confirmations.remove(action_id)?;
-        // Expire after 5 minutes
-        if pending.created_at.elapsed().as_secs() > 300 {
+        // Expire after 60 seconds (spec: 60s confirmation timeout)
+        if pending.created_at.elapsed().as_secs() > 60 {
             return None;
         }
         Some(pending)
@@ -184,7 +197,7 @@ impl AuthManager {
     /// Clean up expired confirmations.
     pub fn cleanup_expired(&mut self) {
         self.pending_confirmations.retain(|_, p| {
-            p.created_at.elapsed().as_secs() < 300
+            p.created_at.elapsed().as_secs() < 60
         });
     }
 }

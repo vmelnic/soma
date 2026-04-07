@@ -18,6 +18,7 @@
 use anyhow::{bail, Result};
 use crc32fast::Hasher;
 
+use super::encryption::SessionKeys;
 use super::signal::{Signal, SignalFlags, SignalType};
 
 /// Conditionally compress a payload using zstd level 3.
@@ -29,7 +30,7 @@ fn maybe_compress(payload: &[u8], signal_type: SignalType) -> (Vec<u8>, bool) {
     if payload.len() < 256 {
         return (payload.to_vec(), false);
     }
-    if signal_type == SignalType::StreamData {
+    if signal_type == SignalType::StreamData || signal_type == SignalType::Binary {
         return (payload.to_vec(), false);
     }
 
@@ -62,7 +63,11 @@ pub const MIN_FRAME_SIZE: usize = 26;
 pub const DEFAULT_MAX_FRAME_SIZE: usize = 10 * 1024 * 1024 + 1024;
 
 /// Encode a Signal into binary wire format. Returns the complete frame bytes.
-pub fn encode_frame(signal: &Signal) -> Vec<u8> {
+///
+/// When `session_keys` is `Some`, the session's encryption key and send nonce
+/// are used for AEAD encryption (if the ENCRYPTED flag is set). When `None`,
+/// falls back to the hardcoded test key for backwards compatibility.
+pub fn encode_frame(signal: &Signal, session_keys: Option<&SessionKeys>) -> Vec<u8> {
     let sender_bytes = signal.sender_id.as_bytes();
     let sender_len = sender_bytes.len().min(255) as u8;
 
@@ -100,9 +105,12 @@ pub fn encode_frame(signal: &Signal) -> Vec<u8> {
 
     // Encryption: if ENCRYPTED flag is set, encrypt payload (Section 9.4)
     let payload_bytes = if flags.contains(SignalFlags::ENCRYPTED) {
-        // Use a fixed key/nonce for now (real: session-derived keys)
-        let key = [0x42u8; 32];
-        let nonce = [0u8; 12];
+        let (key, nonce) = if let Some(sk) = session_keys {
+            (sk.encrypt_key, sk.next_send_nonce())
+        } else {
+            // Fallback: hardcoded key/nonce for backwards compatibility / tests
+            ([0x42u8; 32], [0u8; 12])
+        };
         let aad = signal.sender_id.as_bytes();
         match super::encryption::encrypt_payload(&key, &nonce, &payload_bytes, aad) {
             Ok(encrypted) => encrypted,
@@ -160,9 +168,13 @@ pub fn encode_frame(signal: &Signal) -> Vec<u8> {
 /// Decode a complete binary frame into a Signal.
 /// `data` must contain the entire frame including checksum.
 ///
+/// When `session_keys` is `Some`, the session's encryption key and recv nonce
+/// are used for AEAD decryption (if the ENCRYPTED flag is set). When `None`,
+/// falls back to the hardcoded test key for backwards compatibility.
+///
 /// Returns `Ok(None)` for frames with unknown signal types per Spec Section 12.3:
 /// "Unknown signal type received → Ignore signal. Log warning. Do NOT close connection."
-pub fn decode_frame(data: &[u8]) -> Result<Option<Signal>> {
+pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<Option<Signal>> {
     if data.len() < MIN_FRAME_SIZE {
         bail!(
             "Frame too small: {} bytes (minimum {})",
@@ -269,8 +281,12 @@ pub fn decode_frame(data: &[u8]) -> Result<Option<Signal>> {
 
     // Decrypt payload if ENCRYPTED flag is set (Section 9.4)
     let raw_payload = if flags.contains(SignalFlags::ENCRYPTED) {
-        let key = [0x42u8; 32]; // Must match encode key (real: session-derived)
-        let nonce = [0u8; 12];
+        let (key, nonce) = if let Some(sk) = session_keys {
+            (sk.encrypt_key, sk.next_recv_nonce())
+        } else {
+            // Fallback: hardcoded key/nonce for backwards compatibility / tests
+            ([0x42u8; 32], [0u8; 12])
+        };
         let aad = sender_id.as_bytes();
         match super::encryption::decrypt_payload(&key, &nonce, &raw_payload, aad) {
             Ok(decrypted) => decrypted,
@@ -407,7 +423,7 @@ pub async fn write_frame(
     writer: &mut (impl tokio::io::AsyncWriteExt + Unpin),
     signal: &Signal,
 ) -> Result<()> {
-    let frame = encode_frame(signal);
+    let frame = encode_frame(signal, None);
     writer.write_all(&frame).await?;
     writer.flush().await?;
     Ok(())
@@ -426,8 +442,8 @@ mod tests {
         signal.metadata = serde_json::json!({"content_type": "text/plain"});
         signal.trace_id = "abc123".to_string();
 
-        let encoded = encode_frame(&signal);
-        let decoded = decode_frame(&encoded)
+        let encoded = encode_frame(&signal, None);
+        let decoded = decode_frame(&encoded, None)
             .expect("decode should succeed")
             .expect("known signal type should return Some");
 
@@ -442,8 +458,8 @@ mod tests {
     #[test]
     fn test_empty_signal() {
         let signal = Signal::new(SignalType::Ping, "s".to_string());
-        let encoded = encode_frame(&signal);
-        let decoded = decode_frame(&encoded)
+        let encoded = encode_frame(&signal, None);
+        let decoded = decode_frame(&encoded, None)
             .expect("decode should succeed")
             .expect("known signal type should return Some");
         assert_eq!(decoded.signal_type, SignalType::Ping);
@@ -454,19 +470,19 @@ mod tests {
     #[test]
     fn test_checksum_corruption() {
         let signal = Signal::new(SignalType::Ping, "s".to_string());
-        let mut encoded = encode_frame(&signal);
+        let mut encoded = encode_frame(&signal, None);
         // Corrupt the last byte (part of checksum)
         let last = encoded.len() - 1;
         encoded[last] ^= 0xFF;
-        assert!(decode_frame(&encoded).is_err());
+        assert!(decode_frame(&encoded, None).is_err());
     }
 
     #[test]
     fn test_invalid_magic() {
         let signal = Signal::new(SignalType::Ping, "s".to_string());
-        let mut encoded = encode_frame(&signal);
+        let mut encoded = encode_frame(&signal, None);
         encoded[0] = 0x00;
-        assert!(decode_frame(&encoded).is_err());
+        assert!(decode_frame(&encoded, None).is_err());
     }
 
     #[test]
@@ -499,8 +515,8 @@ mod tests {
         ];
         for st in types {
             let signal = Signal::new(st, "test".to_string());
-            let encoded = encode_frame(&signal);
-            let decoded = decode_frame(&encoded).unwrap().unwrap();
+            let encoded = encode_frame(&signal, None);
+            let decoded = decode_frame(&encoded, None).unwrap().unwrap();
             assert_eq!(decoded.signal_type, st);
         }
     }
@@ -511,8 +527,8 @@ mod tests {
         signal.flags = SignalFlags::COMPRESSED | SignalFlags::PRIORITY;
         // Set a large enough payload so compression actually engages
         signal.payload = vec![0x42; 512];
-        let encoded = encode_frame(&signal);
-        let decoded = decode_frame(&encoded).unwrap().unwrap();
+        let encoded = encode_frame(&signal, None);
+        let decoded = decode_frame(&encoded, None).unwrap().unwrap();
         assert!(decoded.flags.contains(SignalFlags::COMPRESSED));
         assert!(decoded.flags.contains(SignalFlags::PRIORITY));
         assert!(!decoded.flags.contains(SignalFlags::ENCRYPTED));
@@ -530,14 +546,14 @@ mod tests {
         signal.payload = payload.clone();
         signal.metadata = serde_json::json!({"content_type": "application/octet-stream"});
 
-        let encoded = encode_frame(&signal);
+        let encoded = encode_frame(&signal, None);
         // The encoded frame should be smaller than raw payload + overhead
         // because compression kicks in for payloads > 1024 bytes
         assert!(encoded.len() < payload.len() + 100,
             "Encoded frame ({} bytes) should be noticeably smaller than raw payload ({} bytes)",
             encoded.len(), payload.len());
 
-        let decoded = decode_frame(&encoded).unwrap().unwrap();
+        let decoded = decode_frame(&encoded, None).unwrap().unwrap();
         assert_eq!(decoded.payload, payload, "Payload must survive compression roundtrip");
         assert_eq!(decoded.signal_type, SignalType::Data);
         assert_eq!(decoded.sender_id, "compress-test");
@@ -551,8 +567,8 @@ mod tests {
         signal.payload = b"tiny".to_vec(); // < 256 bytes
         signal.flags = SignalFlags::COMPRESSED; // request compression
 
-        let encoded = encode_frame(&signal);
-        let decoded = decode_frame(&encoded).unwrap().unwrap();
+        let encoded = encode_frame(&signal, None);
+        let decoded = decode_frame(&encoded, None).unwrap().unwrap();
         // Compression should be cleared because payload is too small
         assert!(!decoded.flags.contains(SignalFlags::COMPRESSED));
         assert_eq!(decoded.payload, b"tiny");
@@ -564,8 +580,8 @@ mod tests {
         signal.payload = vec![0xAB; 2048]; // large payload but StreamData
         signal.flags = SignalFlags::COMPRESSED;
 
-        let encoded = encode_frame(&signal);
-        let decoded = decode_frame(&encoded).unwrap().unwrap();
+        let encoded = encode_frame(&signal, None);
+        let decoded = decode_frame(&encoded, None).unwrap().unwrap();
         // StreamData should never be compressed
         assert!(!decoded.flags.contains(SignalFlags::COMPRESSED));
         assert_eq!(decoded.payload, vec![0xAB; 2048]);
@@ -575,7 +591,7 @@ mod tests {
     fn test_unknown_signal_type_returns_none() {
         // Spec Section 12.3: unknown signal type should be ignored, not error
         let signal = Signal::new(SignalType::Ping, "s".to_string());
-        let mut encoded = encode_frame(&signal);
+        let mut encoded = encode_frame(&signal, None);
 
         // Replace the signal type byte (offset 4) with an unknown value
         encoded[4] = 0xBB;
@@ -588,7 +604,7 @@ mod tests {
         encoded[crc_offset..].copy_from_slice(&crc.to_be_bytes());
 
         // decode_frame should succeed with None (not error)
-        let result = decode_frame(&encoded);
+        let result = decode_frame(&encoded, None);
         assert!(result.is_ok(), "Unknown signal type should not return Err");
         assert!(result.unwrap().is_none(), "Unknown signal type should return None");
     }

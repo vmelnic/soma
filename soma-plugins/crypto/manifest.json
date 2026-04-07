@@ -1,0 +1,22 @@
+{
+  "plugin": {
+    "name": "crypto",
+    "version": "0.1.0",
+    "description": "Cryptographic operations: hashing, signing, encryption, JWT, random generation"
+  },
+  "conventions": [
+    {"name": "hash_sha256", "description": "SHA-256 hash of data"},
+    {"name": "hash_argon2", "description": "Argon2 password hash"},
+    {"name": "verify_argon2", "description": "Verify Argon2 password hash"},
+    {"name": "random_bytes", "description": "Generate cryptographic random bytes"},
+    {"name": "random_hex", "description": "Generate random hex string"},
+    {"name": "random_uuid", "description": "Generate UUID v4"},
+    {"name": "sign_ed25519", "description": "Ed25519 digital signature"},
+    {"name": "verify_ed25519", "description": "Verify Ed25519 signature"},
+    {"name": "encrypt_aead", "description": "ChaCha20-Poly1305 AEAD encryption"},
+    {"name": "decrypt_aead", "description": "ChaCha20-Poly1305 AEAD decryption"},
+    {"name": "jwt_sign", "description": "Sign JWT with HS256"},
+    {"name": "jwt_verify", "description": "Verify and decode JWT"},
+    {"name": "hmac_sha256", "description": "HMAC-SHA256 message authentication"}
+  ]
+}

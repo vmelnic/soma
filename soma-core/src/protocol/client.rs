@@ -38,6 +38,8 @@ pub struct SynapseClient {
     pub max_signal_size: u32,
     /// Active subscriptions for replay on reconnect (Section 14.3).
     active_subscriptions: Vec<SubscriptionRecord>,
+    /// Session token from last successful handshake, carried forward on reconnect (Section 14.5).
+    session_token: Option<String>,
 }
 
 impl SynapseClient {
@@ -49,11 +51,12 @@ impl SynapseClient {
             plugins: vec!["posix".into()],
             max_signal_size: 10_485_760,
             active_subscriptions: Vec::new(),
+            session_token: None,
         }
     }
 
     /// Connect to a peer, perform handshake, and return the connection.
-    pub async fn connect(&self, addr: &str) -> Result<Arc<SynapseConnection>> {
+    pub async fn connect(&mut self, addr: &str) -> Result<Arc<SynapseConnection>> {
         let stream = TcpStream::connect(addr).await?;
         let (reader, writer) = stream.into_split();
 
@@ -65,10 +68,21 @@ impl SynapseClient {
             self.max_signal_size,
         ));
 
+        // Carry forward session token from previous connection (Section 14.5)
+        if let Some(ref token) = self.session_token {
+            *conn.session_token.lock().await = token.clone();
+        }
+
         // Perform client-side handshake
         let cap_refs: Vec<&str> = self.capabilities.iter().map(|s| s.as_str()).collect();
         let plug_refs: Vec<&str> = self.plugins.iter().map(|s| s.as_str()).collect();
         let peer_id = conn.client_handshake(&cap_refs, &plug_refs).await?;
+
+        // Store the session token received from the server
+        let new_token = conn.session_token.lock().await.clone();
+        if !new_token.is_empty() {
+            self.session_token = Some(new_token);
+        }
 
         tracing::info!(
             peer = %addr,
@@ -81,12 +95,18 @@ impl SynapseClient {
 
     /// Connect with auto-reconnect. Retries with exponential backoff
     /// per Spec Section 14.2. Returns the connection on success.
-    pub async fn connect_with_retry(&self, addr: &str) -> Result<Arc<SynapseConnection>> {
+    pub async fn connect_with_retry(&mut self, addr: &str) -> Result<Arc<SynapseConnection>> {
         let mut attempt = 0u32;
 
         loop {
             match self.connect(addr).await {
-                Ok(conn) => return Ok(conn),
+                Ok(conn) => {
+                    // Replay subscriptions on reconnect (Spec Section 14.3)
+                    if !self.active_subscriptions.is_empty() {
+                        self.replay_subscriptions(&conn).await?;
+                    }
+                    return Ok(conn);
+                }
                 Err(e) => {
                     let delay = if (attempt as usize) < BACKOFF_SCHEDULE.len() {
                         BACKOFF_SCHEDULE[attempt as usize]
@@ -115,7 +135,7 @@ impl SynapseClient {
     /// Send a single signal to a peer (connect, handshake, send, receive response, disconnect).
     /// This is the simple one-shot API for sending intents.
     pub async fn send(addr: &str, local_id: &str, signal: &Signal) -> Result<Option<Signal>> {
-        let client = SynapseClient::new(local_id.to_string());
+        let mut client = SynapseClient::new(local_id.to_string());
         let conn = client.connect(addr).await?;
 
         // Send the signal
@@ -160,10 +180,14 @@ impl SynapseClient {
 
         // Register pending before sending
         let sequence = intent.sequence;
-        let rx = router.register_pending(sequence);
+        let rx = router.register_pending(sequence)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        // Send the intent
-        Self::send(addr, sender, &intent).await?;
+        // Send the intent and deliver the response to the router
+        let response = Self::send(addr, sender, &intent).await?;
+        if let Some(resp) = response {
+            router.deliver_response(sequence, resp);
+        }
 
         // Wait for correlated response
         match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
@@ -205,6 +229,15 @@ impl SynapseClient {
     /// Remove a tracked subscription.
     pub fn untrack_subscription(&mut self, topic: &str) {
         self.active_subscriptions.retain(|s| s.topic != topic);
+    }
+
+    /// Update the last seen sequence number for a tracked subscription.
+    /// Should be called when a signal is received on a subscribed topic,
+    /// so that replay on reconnect can resume from the correct point.
+    pub fn update_subscription_sequence(&mut self, topic: &str, sequence: u32) {
+        if let Some(sub) = self.active_subscriptions.iter_mut().find(|s| s.topic == topic) {
+            sub.last_seen_sequence = Some(sequence);
+        }
     }
 
     /// Replay all tracked subscriptions on a connection (after reconnect).

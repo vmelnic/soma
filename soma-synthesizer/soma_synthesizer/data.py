@@ -93,6 +93,10 @@ class ConventionCatalog:
 
     # -- query ---------------------------------------------------------------
 
+    def __len__(self) -> int:
+        """Total number of opcodes (conventions + EMIT + STOP)."""
+        return self.num_opcodes
+
     @property
     def num_conventions(self) -> int:
         """Number of *plugin* conventions (excludes EMIT/STOP)."""
@@ -133,6 +137,30 @@ class ConventionCatalog:
         return cat
 
 
+def build_catalog(plugin_dirs: list[str]) -> ConventionCatalog:
+    """Build a convention catalog from plugin manifest files.
+
+    Scans each directory for ``manifest.json`` and registers all
+    conventions.  Returns a finalized catalog with EMIT/STOP appended.
+    """
+    catalog = ConventionCatalog()
+    for plugin_dir in plugin_dirs:
+        manifest_path = os.path.join(plugin_dir, "manifest.json")
+        plugin_name = os.path.basename(plugin_dir)
+        conventions: list[dict] = []
+
+        if os.path.exists(manifest_path):
+            with open(manifest_path) as f:
+                manifest = json.load(f)
+            plugin_name = manifest.get("plugin", {}).get("name", plugin_name)
+            conventions = manifest.get("conventions", [])
+
+        catalog.add_plugin(plugin_name, conventions)
+
+    catalog.finalize()
+    return catalog
+
+
 # ---------------------------------------------------------------------------
 # Training data collection
 # ---------------------------------------------------------------------------
@@ -161,37 +189,28 @@ def _validate_conventions(data: dict, plugin_dir: str, available: set[str] | Non
 def collect_training_data(
     plugin_dirs: list[str],
     domain_file: str | None = None,
-) -> tuple[list[dict], ConventionCatalog]:
-    """Collect training examples and build a unified catalog.
+) -> list[dict]:
+    """Collect training examples from all plugins and optional domain data.
 
     Args:
         plugin_dirs: directories, each containing a plugin with
-            ``training/examples.json`` and optionally a ``manifest.json``
-            (or ``manifest.toml`` — this function handles JSON only;
-            TOML support can be added when toml is available).
+            ``training/examples.json`` and optionally a ``manifest.json``.
         domain_file: optional path to a JSON file with domain-specific
             ``{"examples": [...]}`` training data.
 
     Returns:
-        (all_examples, catalog) where *all_examples* is a flat list of
-        example dicts in the format defined in 03_PLUGINS.md Section 16.
+        Flat list of example dicts in the format defined in
+        03_PLUGINS.md Section 16.
     """
     all_examples: list[dict] = []
-    catalog = ConventionCatalog()
 
     for plugin_dir in plugin_dirs:
-        # --- manifest (conventions) ----------------------------------------
-        manifest_path = os.path.join(plugin_dir, "manifest.json")
         plugin_name = os.path.basename(plugin_dir)
-        conventions: list[dict] = []
-
+        manifest_path = os.path.join(plugin_dir, "manifest.json")
         if os.path.exists(manifest_path):
             with open(manifest_path) as f:
                 manifest = json.load(f)
             plugin_name = manifest.get("plugin", {}).get("name", plugin_name)
-            conventions = manifest.get("conventions", [])
-
-        catalog.add_plugin(plugin_name, conventions)
 
         # --- training examples ---------------------------------------------
         training_file = os.path.join(plugin_dir, "training", "examples.json")
@@ -203,8 +222,6 @@ def collect_training_data(
                 ex.setdefault("_plugin", data.get("plugin", plugin_name))
             all_examples.extend(data.get("examples", []))
 
-    catalog.finalize()
-
     # --- domain-specific data (optional) -----------------------------------
     if domain_file and os.path.exists(domain_file):
         with open(domain_file) as f:
@@ -213,7 +230,7 @@ def collect_training_data(
             ex.setdefault("_plugin", "_domain")
         all_examples.extend(domain_data.get("examples", []))
 
-    return all_examples, catalog
+    return all_examples
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@
 //! OnnxMindEngine implements it for server/desktop targets.
 //! EmbeddedMindEngine (future) will implement it for ESP32/MCU.
 
+pub mod adaptation;
 pub mod onnx_engine;
 pub mod tokenizer;
 pub mod lora;
@@ -33,13 +34,14 @@ pub struct ProgramStep {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ArgType { None, Span, Ref }
+pub enum ArgType { None, Span, Ref, Literal }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ArgValue {
     None,
     Span(String),
     Ref(usize),
+    Literal(String),
 }
 
 /// A generated program — sequence of steps.
@@ -55,13 +57,18 @@ pub struct ModelMeta {
     pub vocab_size: usize,
     pub num_conventions: usize,
     pub max_steps: usize,
+    #[serde(default = "default_max_seq_len")]
     pub max_seq_len: usize,
     pub decoder_dim: usize,
     pub emit_id: usize,
     pub stop_id: usize,
     pub start_token: usize,
+    /// Convention catalog — may be embedded in meta.json or loaded from catalog.json
+    #[serde(default)]
     pub catalog: Vec<CatalogEntry>,
 }
+
+fn default_max_seq_len() -> usize { 20 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct CatalogEntry {
@@ -122,6 +129,10 @@ pub trait MindEngine: Send + Sync {
     /// Attach a LoRA adapter by name with the given weights.
     fn attach_lora(&mut self, _name: &str, _weights: &crate::mind::lora::LoRAWeights) -> Result<()> { Ok(()) }
 
+    /// Attach LoRA layers from serialized bytes (plugin LoRA, Section 7.3).
+    /// The bytes are expected to be a JSON-serialized `LoRABundle`.
+    fn attach_lora_bytes(&mut self, _plugin_name: &str, _data: &[u8]) -> Result<()> { Ok(()) }
+
     /// Detach (remove) a LoRA adapter by name without merging.
     fn detach_lora(&mut self, _name: &str) -> Result<()> { Ok(()) }
 
@@ -153,6 +164,7 @@ impl ProgramStep {
                 match val {
                     ArgValue::Span(s) => args.push(format!("\"{}\"", s)),
                     ArgValue::Ref(r) => args.push(format!("${}", r)),
+                    ArgValue::Literal(s) => args.push(format!("'{}'", s)),
                     ArgValue::None => {}
                 }
             }

@@ -1,9 +1,19 @@
 //! Prometheus-compatible metrics (Whitepaper Sections 11.5, 18.4).
 //!
-//! 20 metrics covering inference, plugin execution, protocol, memory, and adaptation.
+//! 20+ metrics covering inference, plugin execution, protocol, memory, and adaptation.
 //! All counters use atomic operations for lock-free concurrent updates.
+//! Per-plugin metrics are tracked via `PluginMetrics` in a concurrent `DashMap`.
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
+use dashmap::DashMap;
+
+/// Per-plugin metric counters.
+pub struct PluginMetrics {
+    pub calls: AtomicU64,
+    pub errors: AtomicU64,
+    pub duration_sum_ms: AtomicU64,
+}
 
 /// SOMA runtime metrics — Prometheus-compatible counters and gauges.
 pub struct SomaMetrics {
@@ -42,6 +52,12 @@ pub struct SomaMetrics {
     pub protocol_signals_sent: AtomicU64,
     pub protocol_signals_received: AtomicU64,
     pub protocol_bytes_transferred: AtomicU64,
+
+    // Per-plugin metrics (Section 18.4)
+    pub per_plugin: DashMap<String, PluginMetrics>,
+
+    // Uptime tracking
+    pub start_time: Instant,
 }
 
 impl SomaMetrics {
@@ -67,6 +83,8 @@ impl SomaMetrics {
             protocol_signals_sent: AtomicU64::new(0),
             protocol_signals_received: AtomicU64::new(0),
             protocol_bytes_transferred: AtomicU64::new(0),
+            per_plugin: DashMap::new(),
+            start_time: Instant::now(),
         }
     }
 
@@ -87,11 +105,33 @@ impl SomaMetrics {
         self.program_steps_executed.fetch_add(steps, Ordering::Relaxed);
     }
 
-    /// Record a plugin call.
+    /// Record a plugin call (global counters only, no per-plugin tracking).
     pub fn record_plugin_call(&self, success: bool) {
         self.plugin_calls_total.fetch_add(1, Ordering::Relaxed);
         if !success {
             self.plugin_calls_failed.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Record a plugin call with per-plugin metric tracking.
+    /// Updates both global counters and per-plugin counters.
+    pub fn record_plugin_call_named(&self, plugin_name: &str, duration_ms: u64, success: bool) {
+        self.plugin_calls_total.fetch_add(1, Ordering::Relaxed);
+        self.plugin_duration_sum_ms.fetch_add(duration_ms, Ordering::Relaxed);
+        if !success {
+            self.plugin_calls_failed.fetch_add(1, Ordering::Relaxed);
+        }
+
+        // Per-plugin tracking
+        let entry = self.per_plugin.entry(plugin_name.to_string()).or_insert_with(|| PluginMetrics {
+            calls: AtomicU64::new(0),
+            errors: AtomicU64::new(0),
+            duration_sum_ms: AtomicU64::new(0),
+        });
+        entry.calls.fetch_add(1, Ordering::Relaxed);
+        entry.duration_sum_ms.fetch_add(duration_ms, Ordering::Relaxed);
+        if !success {
+            entry.errors.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -145,6 +185,21 @@ impl SomaMetrics {
         self.inference_duration_sum_ms.load(Ordering::Relaxed) as f64 / total as f64
     }
 
+    /// Serialize per-plugin metrics to JSON.
+    fn per_plugin_json(&self) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+        for entry in self.per_plugin.iter() {
+            let name = entry.key().clone();
+            let pm = entry.value();
+            map.insert(name, serde_json::json!({
+                "calls": pm.calls.load(Ordering::Relaxed),
+                "errors": pm.errors.load(Ordering::Relaxed),
+                "duration_sum_ms": pm.duration_sum_ms.load(Ordering::Relaxed),
+            }));
+        }
+        serde_json::Value::Object(map)
+    }
+
     /// Serialize to Prometheus text exposition format.
     pub fn to_prometheus(&self) -> String {
         let mut out = String::with_capacity(2048);
@@ -165,12 +220,46 @@ impl SomaMetrics {
             "Total program steps executed", self.program_steps_executed.load(Ordering::Relaxed));
         prom(&mut out, "soma_plugin_calls_total", "counter",
             "Total plugin convention calls", self.plugin_calls_total.load(Ordering::Relaxed));
-        prom(&mut out, "soma_plugin_calls_failed", "counter",
+        prom(&mut out, "soma_plugin_errors_total", "counter",
             "Failed plugin calls", self.plugin_calls_failed.load(Ordering::Relaxed));
         prom(&mut out, "soma_plugin_retries", "counter",
             "Plugin call retries", self.plugin_retries.load(Ordering::Relaxed));
         prom(&mut out, "soma_plugin_duration_sum_ms", "counter",
             "Sum of plugin call durations in ms", self.plugin_duration_sum_ms.load(Ordering::Relaxed));
+
+        // Per-plugin metrics
+        if !self.per_plugin.is_empty() {
+            out.push_str("# HELP soma_plugin_calls_total_per Per-plugin total calls\n");
+            out.push_str("# TYPE soma_plugin_calls_total_per counter\n");
+            for entry in self.per_plugin.iter() {
+                let name = entry.key();
+                let pm = entry.value();
+                out.push_str(&format!(
+                    "soma_plugin_calls_total{{plugin=\"{}\"}} {}\n",
+                    name, pm.calls.load(Ordering::Relaxed),
+                ));
+            }
+            out.push_str("# HELP soma_plugin_errors_total_per Per-plugin error count\n");
+            out.push_str("# TYPE soma_plugin_errors_total_per counter\n");
+            for entry in self.per_plugin.iter() {
+                let name = entry.key();
+                let pm = entry.value();
+                out.push_str(&format!(
+                    "soma_plugin_errors_total{{plugin=\"{}\"}} {}\n",
+                    name, pm.errors.load(Ordering::Relaxed),
+                ));
+            }
+            out.push_str("# HELP soma_plugin_duration_sum_ms_per Per-plugin duration sum in ms\n");
+            out.push_str("# TYPE soma_plugin_duration_sum_ms_per counter\n");
+            for entry in self.per_plugin.iter() {
+                let name = entry.key();
+                let pm = entry.value();
+                out.push_str(&format!(
+                    "soma_plugin_duration_sum_ms{{plugin=\"{}\"}} {}\n",
+                    name, pm.duration_sum_ms.load(Ordering::Relaxed),
+                ));
+            }
+        }
         prom(&mut out, "soma_experience_buffer_size", "gauge",
             "Current experience buffer size", self.experience_buffer_size.load(Ordering::Relaxed));
         prom(&mut out, "soma_adaptations_total", "counter",
@@ -189,6 +278,10 @@ impl SomaMetrics {
             "Total signals received", self.protocol_signals_received.load(Ordering::Relaxed));
         prom(&mut out, "soma_protocol_bytes_transferred", "counter",
             "Total bytes transferred", self.protocol_bytes_transferred.load(Ordering::Relaxed));
+
+        // Uptime gauge
+        prom_f64(&mut out, "soma_uptime_seconds", "gauge",
+            "Seconds since SOMA instance started", self.start_time.elapsed().as_secs_f64());
 
         out
     }
@@ -245,6 +338,8 @@ impl SomaMetrics {
                 "signals_received": self.protocol_signals_received.load(Ordering::Relaxed),
                 "bytes_transferred": self.protocol_bytes_transferred.load(Ordering::Relaxed),
             },
+            "uptime_seconds": self.start_time.elapsed().as_secs_f64(),
+            "per_plugin": self.per_plugin_json(),
         })
     }
 }

@@ -1,213 +1,26 @@
 {
-  "vocab_size": 223,
-  "num_conventions": 16,
-  "max_steps": 8,
-  "max_seq_len": 20,
+  "soma_synthesizer_version": "0.1.0",
+  "architecture": "bilstm_gru",
+  "vocab_size": 606,
+  "embed_dim": 64,
+  "hidden_dim": 128,
   "decoder_dim": 256,
-  "emit_id": 16,
-  "stop_id": 17,
-  "start_token": 18,
-  "catalog": [
-    {
-      "id": 0,
-      "name": "open_read",
-      "function": "open",
-      "call_pattern": "direct",
-      "var_args": [
-        {
-          "name": "path",
-          "type": "string"
-        }
-      ],
-      "description": "Open file for reading"
-    },
-    {
-      "id": 1,
-      "name": "create_file",
-      "function": "creat",
-      "call_pattern": "direct",
-      "var_args": [
-        {
-          "name": "path",
-          "type": "string"
-        }
-      ],
-      "description": "Create or truncate file for writing"
-    },
-    {
-      "id": 2,
-      "name": "read_content",
-      "function": "read",
-      "call_pattern": "buffered_read",
-      "var_args": [
-        {
-          "name": "fd",
-          "type": "fd"
-        }
-      ],
-      "description": "Read content from file descriptor"
-    },
-    {
-      "id": 3,
-      "name": "write_content",
-      "function": "write",
-      "call_pattern": "write_bytes",
-      "var_args": [
-        {
-          "name": "fd",
-          "type": "fd"
-        },
-        {
-          "name": "data",
-          "type": "bytes"
-        }
-      ],
-      "description": "Write data to file descriptor"
-    },
-    {
-      "id": 4,
-      "name": "close_fd",
-      "function": "close",
-      "call_pattern": "direct",
-      "var_args": [
-        {
-          "name": "fd",
-          "type": "fd"
-        }
-      ],
-      "description": "Close a file descriptor"
-    },
-    {
-      "id": 5,
-      "name": "open_dir",
-      "function": "opendir",
-      "call_pattern": "direct",
-      "var_args": [
-        {
-          "name": "path",
-          "type": "string"
-        }
-      ],
-      "description": "Open directory for reading entries"
-    },
-    {
-      "id": 6,
-      "name": "read_dir_entries",
-      "function": "readdir",
-      "call_pattern": "iterate",
-      "var_args": [
-        {
-          "name": "dirp",
-          "type": "ptr"
-        }
-      ],
-      "description": "Read all directory entries"
-    },
-    {
-      "id": 7,
-      "name": "close_dir",
-      "function": "closedir",
-      "call_pattern": "direct",
-      "var_args": [
-        {
-          "name": "dirp",
-          "type": "ptr"
-        }
-      ],
-      "description": "Close directory handle"
-    },
-    {
-      "id": 8,
-      "name": "delete_file",
-      "function": "unlink",
-      "call_pattern": "direct",
-      "var_args": [
-        {
-          "name": "path",
-          "type": "string"
-        }
-      ],
-      "description": "Delete a file by path"
-    },
-    {
-      "id": 9,
-      "name": "create_dir",
-      "function": "mkdir",
-      "call_pattern": "direct",
-      "var_args": [
-        {
-          "name": "path",
-          "type": "string"
-        }
-      ],
-      "description": "Create a new directory"
-    },
-    {
-      "id": 10,
-      "name": "rename_path",
-      "function": "rename",
-      "call_pattern": "direct",
-      "var_args": [
-        {
-          "name": "old_path",
-          "type": "string"
-        },
-        {
-          "name": "new_path",
-          "type": "string"
-        }
-      ],
-      "description": "Rename or move a file"
-    },
-    {
-      "id": 11,
-      "name": "check_access",
-      "function": "access",
-      "call_pattern": "direct",
-      "var_args": [
-        {
-          "name": "path",
-          "type": "string"
-        }
-      ],
-      "description": "Check if file exists and is accessible"
-    },
-    {
-      "id": 12,
-      "name": "file_stat",
-      "function": "stat",
-      "call_pattern": "struct_query",
-      "var_args": [
-        {
-          "name": "path",
-          "type": "string"
-        }
-      ],
-      "description": "Get file size and modification time"
-    },
-    {
-      "id": 13,
-      "name": "get_cwd",
-      "function": "getcwd",
-      "call_pattern": "buffered_str",
-      "var_args": [],
-      "description": "Get current working directory"
-    },
-    {
-      "id": 14,
-      "name": "get_time",
-      "function": "gettimeofday",
-      "call_pattern": "struct_query",
-      "var_args": [],
-      "description": "Get current time of day"
-    },
-    {
-      "id": 15,
-      "name": "get_uname",
-      "function": "uname",
-      "call_pattern": "struct_query",
-      "var_args": [],
-      "description": "Get operating system information"
-    }
-  ]
+  "num_layers": 2,
+  "num_conventions": 58,
+  "num_output_ids": 60,
+  "max_steps": 16,
+  "max_seq_len": 20,
+  "emit_id": 58,
+  "stop_id": 59,
+  "start_token": 60,
+  "parameter_count": 1843488,
+  "plugins": [],
+  "training": {
+    "examples": 8704,
+    "epochs": 45,
+    "test_e2e_accuracy": 0.9989,
+    "training_time_seconds": 712
+  },
+  "export_timestamp": "2026-04-07T21:03:43.946476+00:00",
+  "model_hash": "0d33f6b2b2b8c4c2dcbbdc3da6a407c3fcedc76cb2be9acbee8f084fb8339441"
 }

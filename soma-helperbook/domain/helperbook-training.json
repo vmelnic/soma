@@ -1,0 +1,501 @@
+{
+  "schema_version": "1.0",
+  "plugin": "_domain",
+  "plugin_version": "0.1.0",
+  "examples": [
+    {
+      "id": "hb_001",
+      "intents": [
+        "create a new user with phone {phone} and name {name}",
+        "register user {name} with phone number {phone}",
+        "add user {name} phone {phone}",
+        "sign up {name} with phone {phone}",
+        "create account for {name} with number {phone}"
+      ],
+      "program": [
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "INSERT INTO users (phone, name, created_at) VALUES ($1, $2, NOW())"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "phone": {"pool": ["+40712345678", "+1234567890", "+447911123456", "+33612345678", "+491701234567"], "type": "string"},
+        "name": {"pool": ["Ana", "Ion", "Maria", "Alex", "Elena"], "type": "string"}
+      },
+      "tags": ["helperbook", "user", "create"]
+    },
+    {
+      "id": "hb_002",
+      "intents": [
+        "find user by phone {phone}",
+        "look up user with phone {phone}",
+        "get user with number {phone}",
+        "search for user {phone}",
+        "who has phone number {phone}"
+      ],
+      "program": [
+        {"convention": "postgres.query_one", "args": [{"name": "sql", "type": "literal", "value": "SELECT id, phone, name, bio, created_at FROM users WHERE phone = $1"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "phone": {"pool": ["+40712345678", "+1234567890", "+447911123456", "+33612345678", "+491701234567"], "type": "string"}
+      },
+      "tags": ["helperbook", "user", "lookup"]
+    },
+    {
+      "id": "hb_003",
+      "intents": [
+        "update user {name} profile bio to {bio}",
+        "set bio for {name} to {bio}",
+        "change {name} profile description to {bio}",
+        "update profile bio of {name} to {bio}",
+        "edit {name} bio {bio}"
+      ],
+      "program": [
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "UPDATE users SET bio = $2, updated_at = NOW() WHERE name = $1"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "name": {"pool": ["Ana", "Ion", "Maria", "Alex", "Elena"], "type": "string"},
+        "bio": {"pool": ["Hair stylist with 10 years experience", "Professional cleaner", "Certified yoga instructor", "Licensed plumber since 2015", "Freelance photographer"], "type": "string"}
+      },
+      "tags": ["helperbook", "user", "update", "profile"]
+    },
+    {
+      "id": "hb_004",
+      "intents": [
+        "register new user with phone {phone}",
+        "start registration for phone {phone}",
+        "begin sign up for {phone}",
+        "send registration code to {phone}",
+        "initiate registration for {phone}"
+      ],
+      "program": [
+        {"convention": "auth.generate_otp", "args": [{"name": "phone", "type": "span", "extract": "phone"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "phone": {"pool": ["+40712345678", "+1234567890", "+447911123456", "+33612345678", "+491701234567"], "type": "string"}
+      },
+      "tags": ["helperbook", "auth", "registration", "otp"]
+    },
+    {
+      "id": "hb_005",
+      "intents": [
+        "complete registration for {phone} with code {code}",
+        "verify registration of {phone} using code {code}",
+        "finish sign up for {phone} with OTP {code}",
+        "confirm registration {phone} code {code}",
+        "validate registration code {code} for {phone}"
+      ],
+      "program": [
+        {"convention": "auth.verify_otp", "args": [{"name": "phone", "type": "span", "extract": "phone"}, {"name": "code", "type": "span", "extract": "code"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "phone": {"pool": ["+40712345678", "+1234567890", "+447911123456", "+33612345678", "+491701234567"], "type": "string"},
+        "code": {"pool": ["123456", "654321", "000000", "111111", "999999"], "type": "string"}
+      },
+      "tags": ["helperbook", "auth", "registration", "verify"]
+    },
+    {
+      "id": "hb_006",
+      "intents": [
+        "full login for {phone} with code {code}",
+        "log in {phone} using OTP {code}",
+        "authenticate {phone} with code {code} and create session",
+        "complete login for {phone} with code {code}",
+        "sign in {phone} with verification code {code}"
+      ],
+      "program": [
+        {"convention": "auth.verify_otp", "args": [{"name": "phone", "type": "span", "extract": "phone"}, {"name": "code", "type": "span", "extract": "code"}]},
+        {"convention": "auth.create_session", "args": [{"name": "user_id", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "phone": {"pool": ["+40712345678", "+1234567890", "+447911123456", "+33612345678", "+491701234567"], "type": "string"},
+        "code": {"pool": ["123456", "654321", "000000", "111111", "999999"], "type": "string"}
+      },
+      "tags": ["helperbook", "auth", "login", "multi-step"]
+    },
+    {
+      "id": "hb_007",
+      "intents": [
+        "send connection request from {user1} to {user2}",
+        "{user1} wants to connect with {user2}",
+        "request connection between {user1} and {user2}",
+        "create connection request from {user1} to {user2}",
+        "{user1} sends a connection request to {user2}"
+      ],
+      "program": [
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "INSERT INTO connections (requester_id, recipient_id, status, created_at) VALUES ($1, $2, 'pending', NOW())"}]},
+        {"convention": "redis.publish", "args": [{"name": "channel", "type": "literal", "value": "notifications"}, {"name": "message", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user1": {"pool": ["user_001", "user_002", "user_003", "user_004", "user_005"], "type": "string"},
+        "user2": {"pool": ["user_010", "user_020", "user_030", "user_040", "user_050"], "type": "string"}
+      },
+      "tags": ["helperbook", "connection", "request", "multi-step"]
+    },
+    {
+      "id": "hb_008",
+      "intents": [
+        "accept connection request {request_id}",
+        "approve connection {request_id}",
+        "confirm connection request {request_id}",
+        "accept the connection {request_id}",
+        "say yes to connection request {request_id}"
+      ],
+      "program": [
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "UPDATE connections SET status = 'accepted', updated_at = NOW() WHERE id = $1"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "request_id": {"pool": ["req_001", "req_002", "req_003", "req_100", "req_999"], "type": "string"}
+      },
+      "tags": ["helperbook", "connection", "accept"]
+    },
+    {
+      "id": "hb_009",
+      "intents": [
+        "list pending connection requests for {user_id}",
+        "show pending connections for {user_id}",
+        "get unanswered connection requests for {user_id}",
+        "what connection requests does {user_id} have",
+        "check pending requests for {user_id}"
+      ],
+      "program": [
+        {"convention": "postgres.query", "args": [{"name": "sql", "type": "literal", "value": "SELECT id, requester_id, created_at FROM connections WHERE recipient_id = $1 AND status = 'pending' ORDER BY created_at DESC"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": {"pool": ["user_001", "user_002", "user_003", "user_004", "user_005"], "type": "string"}
+      },
+      "tags": ["helperbook", "connection", "pending", "list"]
+    },
+    {
+      "id": "hb_010",
+      "intents": [
+        "send message from {sender} to {recipient} saying {content}",
+        "{sender} messages {recipient} with {content}",
+        "deliver message from {sender} to {recipient} text {content}",
+        "post message from {sender} to {recipient} saying {content}",
+        "new message from {sender} to {recipient} content {content}"
+      ],
+      "program": [
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "INSERT INTO messages (sender_id, recipient_id, content, status, created_at) VALUES ($1, $2, $3, 'sent', NOW())"}]},
+        {"convention": "redis.publish", "args": [{"name": "channel", "type": "literal", "value": "chat"}, {"name": "message", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "sender": {"pool": ["user_001", "user_002", "user_003", "user_004", "user_005"], "type": "string"},
+        "recipient": {"pool": ["user_010", "user_020", "user_030", "user_040", "user_050"], "type": "string"},
+        "content": {"pool": ["Hello!", "Are you available?", "What time works?", "See you tomorrow", "Thanks!"], "type": "string"}
+      },
+      "tags": ["helperbook", "messaging", "send", "multi-step"]
+    },
+    {
+      "id": "hb_011",
+      "intents": [
+        "get messages in chat {chat_id}",
+        "show conversation {chat_id}",
+        "load chat history for {chat_id}",
+        "fetch messages from chat {chat_id}",
+        "read chat {chat_id} messages"
+      ],
+      "program": [
+        {"convention": "postgres.query", "args": [{"name": "sql", "type": "literal", "value": "SELECT id, sender_id, content, status, created_at FROM messages WHERE chat_id = $1 ORDER BY created_at ASC"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "chat_id": {"pool": ["chat_001", "chat_002", "chat_100", "chat_abc", "chat_xyz"], "type": "string"}
+      },
+      "tags": ["helperbook", "messaging", "history"]
+    },
+    {
+      "id": "hb_012",
+      "intents": [
+        "mark messages as read in chat {chat_id}",
+        "set messages read in chat {chat_id}",
+        "read receipt for chat {chat_id}",
+        "mark all messages read in {chat_id}",
+        "acknowledge messages in chat {chat_id}"
+      ],
+      "program": [
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "UPDATE messages SET status = 'read', read_at = NOW() WHERE chat_id = $1 AND status = 'sent'"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "chat_id": {"pool": ["chat_001", "chat_002", "chat_100", "chat_abc", "chat_xyz"], "type": "string"}
+      },
+      "tags": ["helperbook", "messaging", "read"]
+    },
+    {
+      "id": "hb_013",
+      "intents": [
+        "create appointment between {client} and {provider} for {service} at {time}",
+        "book {service} with {provider} for {client} at {time}",
+        "schedule {service} appointment {client} with {provider} at {time}",
+        "new appointment {client} and {provider} for {service} at {time}",
+        "reserve {service} session with {provider} for {client} at {time}"
+      ],
+      "program": [
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "INSERT INTO appointments (client_id, provider_id, service, scheduled_at, status, created_at) VALUES ($1, $2, $3, $4, 'pending', NOW())"}]},
+        {"convention": "redis.publish", "args": [{"name": "channel", "type": "literal", "value": "notifications"}, {"name": "message", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "client": {"pool": ["user_001", "user_002", "user_003", "user_004", "user_005"], "type": "string"},
+        "provider": {"pool": ["provider_010", "provider_020", "provider_030", "provider_040", "provider_050"], "type": "string"},
+        "service": {"pool": ["Hair Styling", "House Cleaning", "Tutoring", "Photography", "Massage"], "type": "string"},
+        "time": {"pool": ["2025-01-15 10:00", "2025-01-16 14:30", "2025-01-17 09:00", "2025-01-18 16:00", "2025-01-20 11:00"], "type": "string"}
+      },
+      "tags": ["helperbook", "appointment", "create", "multi-step"]
+    },
+    {
+      "id": "hb_014",
+      "intents": [
+        "confirm appointment {apt_id}",
+        "approve appointment {apt_id}",
+        "accept appointment {apt_id}",
+        "mark appointment {apt_id} as confirmed",
+        "provider confirms appointment {apt_id}"
+      ],
+      "program": [
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "UPDATE appointments SET status = 'confirmed', updated_at = NOW() WHERE id = $1"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "apt_id": {"pool": ["apt_001", "apt_002", "apt_100", "apt_500", "apt_999"], "type": "string"}
+      },
+      "tags": ["helperbook", "appointment", "confirm"]
+    },
+    {
+      "id": "hb_015",
+      "intents": [
+        "list appointments for {user_id}",
+        "show appointments for {user_id}",
+        "get all appointments of {user_id}",
+        "what appointments does {user_id} have",
+        "check schedule for {user_id}"
+      ],
+      "program": [
+        {"convention": "postgres.query", "args": [{"name": "sql", "type": "literal", "value": "SELECT id, client_id, provider_id, service, scheduled_at, status FROM appointments WHERE client_id = $1 OR provider_id = $1 ORDER BY scheduled_at ASC"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": {"pool": ["user_001", "user_002", "user_003", "provider_010", "provider_020"], "type": "string"}
+      },
+      "tags": ["helperbook", "appointment", "list"]
+    },
+    {
+      "id": "hb_016",
+      "intents": [
+        "cancel appointment {apt_id}",
+        "abort appointment {apt_id}",
+        "cancel the booking {apt_id}",
+        "withdraw appointment {apt_id}",
+        "delete appointment {apt_id}"
+      ],
+      "program": [
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "UPDATE appointments SET status = 'cancelled', updated_at = NOW() WHERE id = $1"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "apt_id": {"pool": ["apt_001", "apt_002", "apt_100", "apt_500", "apt_999"], "type": "string"}
+      },
+      "tags": ["helperbook", "appointment", "cancel"]
+    },
+    {
+      "id": "hb_017",
+      "intents": [
+        "find providers offering {service} nearby",
+        "search for {service} providers",
+        "who offers {service} around here",
+        "list providers for {service}",
+        "show me {service} providers near me"
+      ],
+      "program": [
+        {"convention": "postgres.query", "args": [{"name": "sql", "type": "literal", "value": "SELECT u.id, u.name, u.bio, us.price, us.rating_avg FROM users u JOIN user_services us ON u.id = us.user_id WHERE us.service_name = $1 AND u.is_provider = true ORDER BY us.rating_avg DESC"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "service": {"pool": ["Hair Styling", "House Cleaning", "Tutoring", "Photography", "Massage"], "type": "string"}
+      },
+      "tags": ["helperbook", "provider", "search"]
+    },
+    {
+      "id": "hb_018",
+      "intents": [
+        "find providers within {radius}km of {location}",
+        "search for providers near {location} within {radius} kilometers",
+        "who is available within {radius}km of {location}",
+        "providers within {radius}km radius of {location}",
+        "locate providers close to {location} within {radius}km"
+      ],
+      "program": [
+        {"convention": "geo.geocode", "args": [{"name": "address", "type": "span", "extract": "location"}]},
+        {"convention": "postgres.query", "args": [{"name": "sql", "type": "literal", "value": "SELECT u.id, u.name, u.bio, u.lat, u.lon FROM users u WHERE u.is_provider = true AND earth_distance(ll_to_earth(u.lat, u.lon), ll_to_earth($1, $2)) <= $3 * 1000"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "radius": {"pool": ["1", "5", "10", "25", "50"], "type": "string"},
+        "location": {"pool": ["downtown", "city center", "north side", "university area", "main square"], "type": "string"}
+      },
+      "tags": ["helperbook", "provider", "geo", "search", "multi-step"]
+    },
+    {
+      "id": "hb_019",
+      "intents": [
+        "submit review for appointment {apt_id} with rating {rating}",
+        "rate appointment {apt_id} with {rating} stars",
+        "leave a {rating} star review for appointment {apt_id}",
+        "review appointment {apt_id} rating {rating}",
+        "give appointment {apt_id} a rating of {rating}"
+      ],
+      "program": [
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "INSERT INTO reviews (appointment_id, rating, created_at) VALUES ($1, $2, NOW())"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "apt_id": {"pool": ["apt_001", "apt_002", "apt_100", "apt_500", "apt_999"], "type": "string"},
+        "rating": {"pool": ["1", "2", "3", "4", "5"], "type": "string"}
+      },
+      "tags": ["helperbook", "review", "submit"]
+    },
+    {
+      "id": "hb_020",
+      "intents": [
+        "get reviews for provider {provider_id}",
+        "show reviews of provider {provider_id}",
+        "what are the ratings for {provider_id}",
+        "list reviews for {provider_id}",
+        "check provider {provider_id} reviews"
+      ],
+      "program": [
+        {"convention": "postgres.query", "args": [{"name": "sql", "type": "literal", "value": "SELECT r.id, r.rating, r.comment, r.created_at, a.service FROM reviews r JOIN appointments a ON r.appointment_id = a.id WHERE a.provider_id = $1 ORDER BY r.created_at DESC"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "provider_id": {"pool": ["provider_010", "provider_020", "provider_030", "provider_040", "provider_050"], "type": "string"}
+      },
+      "tags": ["helperbook", "review", "list"]
+    },
+    {
+      "id": "hb_021",
+      "intents": [
+        "get user profile {user_id} with caching",
+        "fetch cached profile for {user_id}",
+        "look up profile {user_id} from cache",
+        "retrieve user {user_id} profile cached",
+        "get profile {user_id} from cache"
+      ],
+      "program": [
+        {"convention": "redis.get", "args": [{"name": "key", "type": "literal", "value": "user:profile"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": {"pool": ["user_001", "user_002", "user_003", "user_004", "user_005"], "type": "string"}
+      },
+      "tags": ["helperbook", "cache", "profile"]
+    },
+    {
+      "id": "hb_022",
+      "intents": [
+        "cache search results for {query}",
+        "store search results for {query} in cache",
+        "save search {query} to cache",
+        "cache the results of searching {query}",
+        "persist search results for {query}"
+      ],
+      "program": [
+        {"convention": "postgres.query", "args": [{"name": "sql", "type": "literal", "value": "SELECT u.id, u.name, u.bio, us.service_name, us.rating_avg FROM users u JOIN user_services us ON u.id = us.user_id WHERE us.service_name ILIKE $1 AND u.is_provider = true"}]},
+        {"convention": "redis.set", "args": [{"name": "key", "type": "literal", "value": "search:results"}, {"name": "value", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "query": {"pool": ["hair styling", "cleaning", "tutoring", "photography", "massage"], "type": "string"}
+      },
+      "tags": ["helperbook", "cache", "search", "multi-step"]
+    },
+    {
+      "id": "hb_023",
+      "intents": [
+        "notify {user_id} about {event}",
+        "send notification to {user_id} for {event}",
+        "alert {user_id} about {event}",
+        "push notification {event} to {user_id}",
+        "inform {user_id} of {event}"
+      ],
+      "program": [
+        {"convention": "redis.publish", "args": [{"name": "channel", "type": "literal", "value": "notifications"}, {"name": "message", "type": "span", "extract": "event"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": {"pool": ["user_001", "user_002", "user_003", "user_004", "user_005"], "type": "string"},
+        "event": {"pool": ["new_message", "appointment_confirmed", "connection_accepted", "new_review", "reminder"], "type": "string"}
+      },
+      "tags": ["helperbook", "notification", "publish"]
+    },
+    {
+      "id": "hb_024",
+      "intents": [
+        "get unread notification count for {user_id}",
+        "how many unread notifications for {user_id}",
+        "check unread count for {user_id}",
+        "unread notifications for {user_id}",
+        "count of unread alerts for {user_id}"
+      ],
+      "program": [
+        {"convention": "redis.get", "args": [{"name": "key", "type": "literal", "value": "unread:count"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": {"pool": ["user_001", "user_002", "user_003", "user_004", "user_005"], "type": "string"}
+      },
+      "tags": ["helperbook", "notification", "unread", "count"]
+    },
+    {
+      "id": "hb_025",
+      "intents": [
+        "increment unread count for {user_id}",
+        "add one to unread notifications for {user_id}",
+        "bump unread counter for {user_id}",
+        "increase unread count of {user_id}",
+        "tick up unread for {user_id}"
+      ],
+      "program": [
+        {"convention": "redis.incr", "args": [{"name": "key", "type": "literal", "value": "unread:count"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": {"pool": ["user_001", "user_002", "user_003", "user_004", "user_005"], "type": "string"}
+      },
+      "tags": ["helperbook", "notification", "unread", "increment"]
+    }
+  ]
+}

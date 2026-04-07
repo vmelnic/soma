@@ -26,7 +26,7 @@ fn default_model_dir() -> String {
 }
 
 fn default_max_steps() -> usize {
-    32
+    16
 }
 
 fn default_max_inference_time_secs() -> u64 {
@@ -98,19 +98,47 @@ fn default_bind() -> String {
 }
 
 fn default_max_conn() -> usize {
-    16
+    100
 }
 
 fn default_max_infer() -> usize {
-    4
+    10
 }
 
 fn default_max_plugin() -> usize {
-    8
+    50
 }
 
 fn default_max_plugins_loaded() -> usize {
     50
+}
+
+fn default_max_signal_size() -> usize {
+    10_485_760 // 10 MB
+}
+
+fn default_keepalive_interval_secs() -> u64 {
+    30
+}
+
+fn default_max_memory_bytes() -> usize {
+    536_870_912 // 512 MB
+}
+
+fn default_mcp_max_connections() -> usize {
+    10
+}
+
+fn default_confirmation_timeout_secs() -> u64 {
+    60
+}
+
+fn default_confirmation_patterns() -> Vec<String> {
+    vec![
+        "DROP".to_string(),
+        "DELETE".to_string(),
+        "TRUNCATE".to_string(),
+    ]
 }
 
 fn default_max_lora_layers() -> usize {
@@ -145,6 +173,9 @@ pub struct SomaConfig {
     pub mcp: McpSection,
     #[serde(default)]
     pub security: SecuritySection,
+    /// Per-plugin configuration sections: [plugins.postgres], [plugins.redis], etc.
+    #[serde(default)]
+    pub plugins: HashMap<String, toml::Value>,
 }
 
 fn default_trace_verbosity() -> String {
@@ -294,6 +325,12 @@ pub struct ProtocolSection {
     pub connection_timeout_secs: u64,
     #[serde(default)]
     pub encryption: EncryptionConfig,
+    /// Maximum signal payload size in bytes (Section 20.1). Default 10 MB.
+    #[serde(default = "default_max_signal_size")]
+    pub max_signal_size: usize,
+    /// Keepalive interval in seconds (Section 20.1). Default 30s.
+    #[serde(default = "default_keepalive_interval_secs")]
+    pub keepalive_interval_secs: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -306,6 +343,9 @@ pub struct ResourceSection {
     /// Checked at plugin registration time.
     #[serde(default = "default_max_plugins_loaded")]
     pub max_plugins_loaded: usize,
+    /// Maximum memory usage in bytes (Section 20.1). Default 512 MB.
+    #[serde(default = "default_max_memory_bytes")]
+    pub max_memory_bytes: usize,
 }
 
 /// MCP Server configuration (Whitepaper Section 8).
@@ -323,6 +363,9 @@ pub struct McpSection {
     /// Maximum execution history entries
     #[serde(default = "default_max_executions")]
     pub max_execution_history: usize,
+    /// Maximum concurrent MCP client connections. Default 10.
+    #[serde(default = "default_mcp_max_connections")]
+    pub max_connections: usize,
 }
 
 impl Default for McpSection {
@@ -332,6 +375,7 @@ impl Default for McpSection {
             http_bind: default_mcp_http_bind(),
             enabled: default_true(),
             max_execution_history: default_max_executions(),
+            max_connections: default_mcp_max_connections(),
         }
     }
 }
@@ -366,6 +410,17 @@ pub struct SecuritySection {
     /// Destructive actions require two-step confirmation
     #[serde(default = "default_true")]
     pub require_confirmation: bool,
+    /// Timeout in seconds for confirmation prompts. Default 60.
+    #[serde(default = "default_confirmation_timeout_secs")]
+    pub confirmation_timeout_secs: u64,
+    /// Patterns that trigger confirmation when require_confirmation is true.
+    /// Default: ["DROP", "DELETE", "TRUNCATE"].
+    #[serde(default = "default_confirmation_patterns")]
+    pub confirmation_patterns: Vec<String>,
+    /// Plugins whose execution is denied (Section 12.2 permission enforcement).
+    /// Plugin names in this list will be refused at execute_step time.
+    #[serde(default)]
+    pub denied_plugins: Vec<String>,
 }
 
 impl Default for SecuritySection {
@@ -376,6 +431,9 @@ impl Default for SecuritySection {
             builder_token_env: default_builder_token_env(),
             viewer_token_env: default_viewer_token_env(),
             require_confirmation: true,
+            confirmation_timeout_secs: default_confirmation_timeout_secs(),
+            confirmation_patterns: default_confirmation_patterns(),
+            denied_plugins: Vec::new(),
         }
     }
 }
@@ -390,6 +448,7 @@ impl Default for SomaConfig {
             resources: ResourceSection::default(),
             mcp: McpSection::default(),
             security: SecuritySection::default(),
+            plugins: HashMap::new(),
         }
     }
 }
@@ -439,6 +498,8 @@ impl Default for ProtocolSection {
             peers: HashMap::new(),
             connection_timeout_secs: default_connection_timeout_secs(),
             encryption: EncryptionConfig::default(),
+            max_signal_size: default_max_signal_size(),
+            keepalive_interval_secs: default_keepalive_interval_secs(),
         }
     }
 }
@@ -449,6 +510,7 @@ impl Default for ResourceSection {
             max_concurrent_inferences: default_max_infer(),
             max_concurrent_plugin_calls: default_max_plugin(),
             max_plugins_loaded: default_max_plugins_loaded(),
+            max_memory_bytes: default_max_memory_bytes(),
         }
     }
 }
@@ -456,15 +518,49 @@ impl Default for ResourceSection {
 impl SomaConfig {
     /// Load configuration from a TOML file. If the file does not exist,
     /// returns the default configuration.
+    /// After parsing, validates values and clamps invalid ones to sensible defaults.
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
             tracing::info!("No config file at {}, using defaults", path.display());
             return Ok(Self::default());
         }
         let content = std::fs::read_to_string(path)?;
-        let config: SomaConfig = toml::from_str(&content)?;
+        let mut config: SomaConfig = toml::from_str(&content)?;
+        config.validate_and_clamp();
         tracing::info!("Loaded config from {}", path.display());
         Ok(config)
+    }
+
+    /// Validate configuration values and clamp invalid ones to sensible defaults.
+    /// Logs warnings for any values that were out of range.
+    fn validate_and_clamp(&mut self) {
+        // Temperature must be positive
+        if self.mind.temperature <= 0.0 {
+            tracing::warn!(
+                "mind.temperature must be > 0 (was {}), clamping to 1.0",
+                self.mind.temperature
+            );
+            self.mind.temperature = 1.0;
+        }
+
+        // max_program_steps must be positive
+        if self.mind.max_program_steps == 0 {
+            tracing::warn!(
+                "mind.max_program_steps must be > 0 (was 0), clamping to {}",
+                default_max_steps()
+            );
+            self.mind.max_program_steps = default_max_steps();
+        }
+
+        // Validate log level
+        let valid_levels = ["trace", "debug", "info", "warn", "error"];
+        if !valid_levels.contains(&self.soma.log_level.to_lowercase().as_str()) {
+            tracing::warn!(
+                "soma.log_level '{}' is not a valid level (trace/debug/info/warn/error), defaulting to 'info'",
+                self.soma.log_level
+            );
+            self.soma.log_level = "info".to_string();
+        }
     }
 
     /// Apply environment variable overrides (Section 15.3).

@@ -50,13 +50,89 @@ class EncoderForExport(nn.Module):
     Replaces ``pack_padded_sequence`` with explicit masking so the graph
     is fully traceable by the ONNX exporter.  Inputs use a float mask
     instead of integer lengths for the same reason.
+
+    The BiLSTM backward pass would normally process padding tokens
+    right-to-left before reaching real tokens, contaminating hidden
+    states.  ``pack_padded_sequence`` avoids this by skipping padding
+    entirely.  Since that op is not ONNX-exportable, we split the
+    BiLSTM into separate forward and backward passes and reverse the
+    non-padded portion of the input for the backward direction so
+    padding ends up at the *end* of the sequence in both directions.
     """
 
     def __init__(self, mind):
         super().__init__()
         self.embedding = mind.embedding
-        self.encoder = mind.encoder
         self.init_h = mind.init_h
+
+        # Extract per-direction weights from the BiLSTM so we can run
+        # forward and backward passes independently.  The original
+        # nn.LSTM stores weights for each (layer, direction) pair.
+        lstm = mind.encoder
+        self.num_layers = lstm.num_layers
+        self.hidden_size = lstm.hidden_size
+
+        self.fwd_lstms = nn.ModuleList()
+        self.bwd_lstms = nn.ModuleList()
+        for layer_idx in range(lstm.num_layers):
+            # Input size for layer 0 is embed_dim; for subsequent layers
+            # it is 2 * hidden_size (concatenated forward + backward).
+            inp_size = lstm.input_size if layer_idx == 0 else 2 * lstm.hidden_size
+
+            fwd = nn.LSTM(inp_size, lstm.hidden_size, num_layers=1,
+                          batch_first=True, bidirectional=False)
+            bwd = nn.LSTM(inp_size, lstm.hidden_size, num_layers=1,
+                          batch_first=True, bidirectional=False)
+
+            # Copy weights: forward direction suffix is '' or '_l{i}',
+            # backward direction suffix is '_reverse'.
+            fwd.weight_ih_l0.data.copy_(getattr(lstm, f'weight_ih_l{layer_idx}').data)
+            fwd.weight_hh_l0.data.copy_(getattr(lstm, f'weight_hh_l{layer_idx}').data)
+            fwd.bias_ih_l0.data.copy_(getattr(lstm, f'bias_ih_l{layer_idx}').data)
+            fwd.bias_hh_l0.data.copy_(getattr(lstm, f'bias_hh_l{layer_idx}').data)
+
+            bwd.weight_ih_l0.data.copy_(getattr(lstm, f'weight_ih_l{layer_idx}_reverse').data)
+            bwd.weight_hh_l0.data.copy_(getattr(lstm, f'weight_hh_l{layer_idx}_reverse').data)
+            bwd.bias_ih_l0.data.copy_(getattr(lstm, f'bias_ih_l{layer_idx}_reverse').data)
+            bwd.bias_hh_l0.data.copy_(getattr(lstm, f'bias_hh_l{layer_idx}_reverse').data)
+
+            self.fwd_lstms.append(fwd)
+            self.bwd_lstms.append(bwd)
+
+    def _reverse_padded(self, x, mask_float):
+        """Reverse the real (non-padded) portion of each sequence.
+
+        For a sequence [A, B, C, 0, 0] with mask [1,1,1,0,0] this
+        produces [C, B, A, 0, 0].  After running a forward-only LSTM
+        on this reversed input and reversing the output back, we get
+        the equivalent of a backward LSTM that never sees padding.
+
+        Uses only ``torch.where`` and ``torch.gather`` (ONNX ops
+        ``Where`` and ``GatherElements``) to avoid ``Clip`` which
+        tract-onnx cannot type-check when min/max scalars have a
+        different dtype to the input tensor.
+        """
+        B, L, D = x.shape
+        idx = torch.arange(L, device=x.device).unsqueeze(0).expand(B, -1).float()  # (B, L)
+        length = mask_float.sum(dim=1, keepdim=True)  # (B, 1) float
+        # Ensure length >= 1 without clamp: max(length, 1)
+        ones = torch.ones_like(length)
+        safe_length = torch.where(length > ones, length, ones)  # (B, 1)
+        # Reversed index for real positions: length - 1 - i
+        rev_idx = safe_length - 1.0 - idx  # (B, L)
+        # For padding positions (mask == 0), keep the original index
+        # so gather doesn't read out-of-bounds.  The output will be
+        # zeroed by the mask multiplication below anyway.
+        is_real = mask_float > 0.5  # (B, L) bool
+        final_idx = torch.where(is_real, rev_idx, idx)  # (B, L) float
+        final_idx_long = final_idx.long()
+
+        # Gather along sequence dimension
+        idx_3d = final_idx_long.unsqueeze(-1).expand(-1, -1, D)
+        x_rev = torch.gather(x, 1, idx_3d)
+        # Zero out padding positions
+        x_rev = x_rev * mask_float.unsqueeze(-1)
+        return x_rev
 
     def forward(self, input_ids, mask_float):
         """
@@ -70,10 +146,29 @@ class EncoderForExport(nn.Module):
             init_hidden: (B, decoder_dim) initial decoder hidden state.
         """
         emb = self.embedding(input_ids)
-        encoder_out, _ = self.encoder(emb)
         mask_3d = mask_float.unsqueeze(-1)
-        length = mask_float.sum(dim=1, keepdim=True).clamp(min=1)
-        pooled = (encoder_out * mask_3d).sum(dim=1) / length
+
+        layer_input = emb
+        for layer_idx in range(self.num_layers):
+            # Forward direction: run on original sequence order
+            fwd_out, _ = self.fwd_lstms[layer_idx](layer_input)
+            fwd_out = fwd_out * mask_3d
+
+            # Backward direction: reverse real tokens so padding is at
+            # the end, run a forward LSTM, then reverse the output back.
+            bwd_input = self._reverse_padded(layer_input, mask_float)
+            bwd_out_rev, _ = self.bwd_lstms[layer_idx](bwd_input)
+            bwd_out = self._reverse_padded(bwd_out_rev, mask_float)
+
+            # Concatenate forward and backward outputs
+            layer_input = torch.cat([fwd_out, bwd_out], dim=-1)
+
+        encoder_out = layer_input
+        # Compute length avoiding clamp (which generates Clip).
+        length = mask_float.sum(dim=1, keepdim=True)  # (B, 1)
+        ones = torch.ones_like(length)
+        safe_length = torch.where(length > ones, length, ones)
+        pooled = (encoder_out * mask_3d).sum(dim=1) / safe_length
         init_hidden = torch.tanh(self.init_h(pooled))
         return encoder_out, pooled, init_hidden
 
@@ -355,8 +450,23 @@ def export_metadata(model, catalog, training_stats, output_dir,
     hidden_dim = model.encoder.hidden_size
     num_layers = model.encoder.num_layers
     decoder_dim = model.init_h.out_features
-    num_conventions = len(catalog)
-    num_output_ids = num_conventions + 2  # +EMIT +STOP
+    # catalog already includes EMIT and STOP entries (from finalize())
+    num_output_ids = len(catalog)  # total opcodes including EMIT+STOP
+    # Find EMIT and STOP IDs from the catalog entries
+    emit_id = None
+    stop_id = None
+    for entry in catalog:
+        name = entry.get("full_name", entry.get("name", ""))
+        cid = entry.get("catalog_id", entry.get("id", 0))
+        if name == "EMIT":
+            emit_id = cid
+        elif name == "STOP":
+            stop_id = cid
+    if emit_id is None:
+        emit_id = num_output_ids - 2
+    if stop_id is None:
+        stop_id = num_output_ids - 1
+    num_conventions = emit_id  # plugin conventions only (before EMIT)
     param_count = sum(p.numel() for p in model.parameters())
 
     # Compute SHA-256 over exported ONNX files if they exist
@@ -379,9 +489,9 @@ def export_metadata(model, catalog, training_stats, output_dir,
         "num_output_ids": num_output_ids,
         "max_steps": max_steps,
         "max_seq_len": max_seq_len,
-        "emit_id": num_conventions,
-        "stop_id": num_conventions + 1,
-        "start_token": num_conventions + 2,
+        "emit_id": emit_id,
+        "stop_id": stop_id,
+        "start_token": num_output_ids,  # index after last opcode, = size of op_emb - 1
         "parameter_count": param_count,
         "plugins": plugins or [],
         "training": {

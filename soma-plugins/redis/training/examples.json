@@ -1,0 +1,351 @@
+{
+  "schema_version": "1.0",
+  "plugin": "redis",
+  "plugin_version": "0.1.0",
+  "examples": [
+    {
+      "id": "redis_get_001",
+      "intents": [
+        "get the value of {key}",
+        "what is {key}",
+        "read {key} from cache",
+        "fetch {key}",
+        "look up {key}",
+        "retrieve {key} from redis",
+        "check the value of {key}"
+      ],
+      "program": [
+        {"convention": "redis.get", "args": [{"name": "key", "type": "span", "extract": "key"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "key": ["user:123", "session:abc", "counter", "config:app", "cache:contacts"]
+      },
+      "tags": ["redis", "get", "read"]
+    },
+    {
+      "id": "redis_set_001",
+      "intents": [
+        "set {key} to {value}",
+        "store {value} as {key}",
+        "cache {value} under {key}",
+        "save {key} with value {value}",
+        "put {value} in {key}",
+        "write {value} to {key}",
+        "assign {value} to {key}"
+      ],
+      "program": [
+        {"convention": "redis.set", "args": [{"name": "key", "type": "span", "extract": "key"}, {"name": "value", "type": "span", "extract": "value"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "key": ["user:123", "session:abc", "counter", "config:app", "cache:result"],
+        "value": ["hello", "42", "active", "true", "cached_data"]
+      },
+      "tags": ["redis", "set", "write"]
+    },
+    {
+      "id": "redis_set_ttl_001",
+      "intents": [
+        "set {key} to {value} with {ttl} second ttl",
+        "cache {value} as {key} for {ttl} seconds",
+        "store {value} in {key} expiring in {ttl} seconds",
+        "set {key} to {value} with expiry {ttl}",
+        "save {value} as {key} for {ttl}s"
+      ],
+      "program": [
+        {"convention": "redis.set", "args": [{"name": "key", "type": "span", "extract": "key"}, {"name": "value", "type": "span", "extract": "value"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "key": ["session:abc", "cache:result", "token:xyz", "temp:data", "lock:process"],
+        "value": ["session_data", "cached_response", "auth_token", "temp_value", "locked"],
+        "ttl": [60, 300, 3600, 86400, 120]
+      },
+      "tags": ["redis", "set", "ttl", "expiry"]
+    },
+    {
+      "id": "redis_delete_001",
+      "intents": [
+        "delete {key}",
+        "remove {key}",
+        "clear {key} from cache",
+        "drop key {key}",
+        "erase {key}",
+        "remove {key} from redis",
+        "delete the key {key}"
+      ],
+      "program": [
+        {"convention": "redis.delete", "args": [{"name": "key", "type": "span", "extract": "key"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "key": ["user:123", "session:abc", "counter", "cache:stale", "temp:data"]
+      },
+      "tags": ["redis", "delete", "remove"]
+    },
+    {
+      "id": "redis_exists_001",
+      "intents": [
+        "does {key} exist",
+        "check if {key} is in cache",
+        "is {key} set",
+        "is there a {key} key",
+        "does redis have {key}",
+        "check for key {key}",
+        "verify {key} exists"
+      ],
+      "program": [
+        {"convention": "redis.exists", "args": [{"name": "key", "type": "span", "extract": "key"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "key": ["user:123", "session:abc", "counter", "config:app", "lock:process"]
+      },
+      "tags": ["redis", "exists", "check"]
+    },
+    {
+      "id": "redis_incr_001",
+      "intents": [
+        "increment {key}",
+        "increase {key} by one",
+        "bump {key} counter",
+        "count up {key}",
+        "add one to {key}",
+        "increment the counter {key}",
+        "tick {key}"
+      ],
+      "program": [
+        {"convention": "redis.incr", "args": [{"name": "key", "type": "span", "extract": "key"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "key": ["counter", "visits:page1", "api:calls", "user:123:logins", "rate:limit:ip"]
+      },
+      "tags": ["redis", "incr", "counter"]
+    },
+    {
+      "id": "redis_expire_001",
+      "intents": [
+        "set ttl on {key} to {seconds} seconds",
+        "expire {key} in {seconds} seconds",
+        "make {key} expire after {seconds}s",
+        "set expiry on {key} to {seconds}",
+        "add {seconds} second timeout to {key}"
+      ],
+      "program": [
+        {"convention": "redis.expire", "args": [{"name": "key", "type": "span", "extract": "key"}, {"name": "seconds", "type": "span", "extract": "seconds"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "key": ["session:abc", "cache:result", "lock:process", "temp:data", "token:xyz"],
+        "seconds": [60, 300, 3600, 86400, 120]
+      },
+      "tags": ["redis", "expire", "ttl"]
+    },
+    {
+      "id": "redis_hget_001",
+      "intents": [
+        "get field {field} from hash {key}",
+        "read {field} of {key}",
+        "get the {field} field from {key}",
+        "look up {field} in hash {key}",
+        "what is {field} in {key}"
+      ],
+      "program": [
+        {"convention": "redis.hget", "args": [{"name": "key", "type": "span", "extract": "key"}, {"name": "field", "type": "span", "extract": "field"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "key": ["user:123", "config:app", "product:456", "settings:global", "profile:admin"],
+        "field": ["name", "email", "status", "count", "value"]
+      },
+      "tags": ["redis", "hget", "hash"]
+    },
+    {
+      "id": "redis_hset_001",
+      "intents": [
+        "set field {field} of {key} to {value}",
+        "update {field} in hash {key} to {value}",
+        "store {value} as {field} in {key}",
+        "write {field}={value} in hash {key}",
+        "set {key} field {field} to {value}"
+      ],
+      "program": [
+        {"convention": "redis.hset", "args": [{"name": "key", "type": "span", "extract": "key"}, {"name": "field", "type": "span", "extract": "field"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "key": ["user:123", "config:app", "product:456", "settings:global", "profile:admin"],
+        "field": ["name", "email", "status", "count", "value"],
+        "value": ["Alice", "alice@example.com", "active", "42", "enabled"]
+      },
+      "tags": ["redis", "hset", "hash"]
+    },
+    {
+      "id": "redis_hgetall_001",
+      "intents": [
+        "get all fields of {key}",
+        "show all fields in hash {key}",
+        "dump hash {key}",
+        "read entire hash {key}",
+        "list all fields of {key}",
+        "what is in hash {key}"
+      ],
+      "program": [
+        {"convention": "redis.hgetall", "args": [{"name": "key", "type": "span", "extract": "key"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "key": ["user:123", "config:app", "product:456", "settings:global", "profile:admin"]
+      },
+      "tags": ["redis", "hgetall", "hash"]
+    },
+    {
+      "id": "redis_lpush_001",
+      "intents": [
+        "push {value} to list {key}",
+        "add {value} to the front of list {key}",
+        "prepend {value} to {key}",
+        "insert {value} at head of {key}",
+        "lpush {value} onto {key}"
+      ],
+      "program": [
+        {"convention": "redis.lpush", "args": [{"name": "key", "type": "span", "extract": "key"}, {"name": "value", "type": "span", "extract": "value"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "key": ["queue:tasks", "log:events", "recent:items", "notifications:user1", "inbox:messages"],
+        "value": ["task_123", "event_data", "new_item", "alert_message", "job_456"]
+      },
+      "tags": ["redis", "lpush", "list"]
+    },
+    {
+      "id": "redis_lrange_001",
+      "intents": [
+        "get items from list {key}",
+        "show elements of {key}",
+        "get all items in list {key}",
+        "read list {key}",
+        "list elements in {key}"
+      ],
+      "program": [
+        {"convention": "redis.lrange", "args": [{"name": "key", "type": "span", "extract": "key"}, {"name": "start", "type": "literal", "value": 0}, {"name": "stop", "type": "literal", "value": -1}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "key": ["queue:tasks", "log:events", "recent:items", "notifications:user1", "inbox:messages"]
+      },
+      "tags": ["redis", "lrange", "list"]
+    },
+    {
+      "id": "redis_publish_001",
+      "intents": [
+        "publish {message} to channel {channel}",
+        "send {message} on {channel}",
+        "broadcast {message} to {channel}",
+        "emit {message} on channel {channel}",
+        "post {message} to {channel}"
+      ],
+      "program": [
+        {"convention": "redis.publish", "args": [{"name": "channel", "type": "span", "extract": "channel"}, {"name": "message", "type": "span", "extract": "message"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "channel": ["events", "notifications", "updates", "alerts", "chat:room1"],
+        "message": ["hello", "user_joined", "data_updated", "alert_triggered", "new_message"]
+      },
+      "tags": ["redis", "publish", "pubsub"]
+    },
+    {
+      "id": "redis_subscribe_001",
+      "intents": [
+        "subscribe to channel {channel}",
+        "listen on {channel}",
+        "watch channel {channel}",
+        "start listening to {channel}",
+        "monitor channel {channel}"
+      ],
+      "program": [
+        {"convention": "redis.subscribe", "args": [{"name": "channel", "type": "span", "extract": "channel"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "channel": ["events", "notifications", "updates", "alerts", "chat:room1"]
+      },
+      "tags": ["redis", "subscribe", "pubsub"]
+    },
+    {
+      "id": "redis_keys_001",
+      "intents": [
+        "find keys matching {pattern}",
+        "search for keys like {pattern}",
+        "list keys with pattern {pattern}",
+        "show all keys matching {pattern}",
+        "what keys match {pattern}",
+        "find redis keys {pattern}"
+      ],
+      "program": [
+        {"convention": "redis.keys", "args": [{"name": "pattern", "type": "span", "extract": "pattern"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "pattern": ["user:*", "session:*", "cache:*", "counter:*", "*"]
+      },
+      "tags": ["redis", "keys", "search"]
+    },
+    {
+      "id": "redis_set_then_get_001",
+      "intents": [
+        "store {value} in {key} then read it back",
+        "set {key} to {value} and get it",
+        "write {value} to {key} then fetch it"
+      ],
+      "program": [
+        {"convention": "redis.set", "args": [{"name": "key", "type": "span", "extract": "key"}, {"name": "value", "type": "span", "extract": "value"}]},
+        {"convention": "redis.get", "args": [{"name": "key", "type": "span", "extract": "key"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "key": ["user:123", "session:abc", "counter", "config:app", "cache:result"],
+        "value": ["hello", "42", "active", "true", "cached_data"]
+      },
+      "tags": ["redis", "multi-step", "set", "get"]
+    },
+    {
+      "id": "redis_incr_then_publish_001",
+      "intents": [
+        "increment {key} and publish an update to {channel}",
+        "bump {key} counter and notify on {channel}",
+        "count up {key} then broadcast to {channel}"
+      ],
+      "program": [
+        {"convention": "redis.incr", "args": [{"name": "key", "type": "span", "extract": "key"}]},
+        {"convention": "redis.publish", "args": [{"name": "channel", "type": "span", "extract": "channel"}, {"name": "message", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "key": ["counter", "visits:page1", "api:calls", "user:123:logins", "rate:limit:ip"],
+        "channel": ["events", "notifications", "updates", "alerts", "analytics"]
+      },
+      "tags": ["redis", "multi-step", "incr", "publish"]
+    }
+  ]
+}

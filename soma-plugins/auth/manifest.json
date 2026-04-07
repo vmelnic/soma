@@ -1,0 +1,19 @@
+{
+  "plugin": {
+    "name": "auth",
+    "version": "0.1.0",
+    "description": "Authentication: OTP verification, session management, token hashing"
+  },
+  "conventions": [
+    {"name": "generate_otp", "description": "Generate OTP for phone verification"},
+    {"name": "verify_otp", "description": "Verify OTP code"},
+    {"name": "create_session", "description": "Create authenticated session"},
+    {"name": "validate_session", "description": "Validate session token"},
+    {"name": "revoke_session", "description": "Revoke a session"},
+    {"name": "revoke_all_sessions", "description": "Revoke all user sessions"},
+    {"name": "list_sessions", "description": "List active sessions for user"},
+    {"name": "hash_token", "description": "Hash a token for secure storage"},
+    {"name": "generate_totp_secret", "description": "Generate TOTP 2FA secret"},
+    {"name": "verify_totp", "description": "Verify TOTP 2FA code"}
+  ]
+}

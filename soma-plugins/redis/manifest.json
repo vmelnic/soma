@@ -1,0 +1,23 @@
+{
+  "plugin": {
+    "name": "redis",
+    "version": "0.1.0",
+    "description": "Redis key-value store: strings, hashes, lists, pub/sub"
+  },
+  "conventions": [
+    {"name": "get", "description": "Get string value by key"},
+    {"name": "set", "description": "Set string value with optional TTL"},
+    {"name": "delete", "description": "Delete a key"},
+    {"name": "exists", "description": "Check if key exists"},
+    {"name": "incr", "description": "Atomic increment"},
+    {"name": "expire", "description": "Set TTL on existing key"},
+    {"name": "hget", "description": "Get hash field value"},
+    {"name": "hset", "description": "Set hash field value"},
+    {"name": "hgetall", "description": "Get all hash fields"},
+    {"name": "lpush", "description": "Push to list head"},
+    {"name": "lrange", "description": "Get list range"},
+    {"name": "publish", "description": "Publish message to channel"},
+    {"name": "subscribe", "description": "Subscribe to channel (streaming)"},
+    {"name": "keys", "description": "Find keys matching pattern"}
+  ]
+}

@@ -1,0 +1,53 @@
+[soma]
+id = "helperbook-backend"
+log_level = "info"
+trace_verbosity = "normal"
+plugins_directory = "../soma-plugins/target/release"
+
+[mind]
+model_dir = "../models"
+max_program_steps = 32
+temperature = 0.8
+
+[mind.lora]
+adaptation_enabled = true
+
+[memory]
+checkpoint_dir = "./checkpoints"
+auto_checkpoint = true
+max_checkpoints = 5
+
+[protocol]
+bind = "127.0.0.1:9999"
+
+[mcp]
+transport = "stdio"
+enabled = true
+
+[security]
+require_auth = false
+
+[plugins.postgres]
+host = "localhost"
+port = 5432
+database = "helperbook"
+username = "soma"
+password_env = "SOMA_PG_PASSWORD"
+max_connections = 10
+
+[plugins.redis]
+url = "redis://localhost:6379/0"
+max_connections = 5
+
+[plugins.auth]
+session_ttl_hours = 720
+otp_ttl_minutes = 5
+otp_length = 6
+db_host = "localhost"
+db_port = 5432
+db_name = "helperbook"
+db_user = "soma"
+db_password_env = "SOMA_PG_PASSWORD"
+
+[plugins.crypto]
+# Self-contained, no config needed

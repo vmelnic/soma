@@ -1,0 +1,241 @@
+{
+  "schema_version": "1.0",
+  "plugin": "auth",
+  "plugin_version": "0.1.0",
+  "examples": [
+    {
+      "id": "auth_generate_otp_001",
+      "intents": [
+        "send OTP to {phone}",
+        "authenticate with phone {phone}",
+        "verify phone {phone}",
+        "start login for {phone}",
+        "send code to {phone}",
+        "generate OTP for {phone}",
+        "begin phone authentication for {phone}",
+        "request a login code for {phone}"
+      ],
+      "program": [
+        {"convention": "auth.generate_otp", "args": [{"name": "phone", "type": "span", "extract": "phone"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "phone": ["+40712345678", "+1234567890", "+447911123456", "+33612345678", "+491701234567"]
+      },
+      "tags": ["auth", "otp", "generate"]
+    },
+    {
+      "id": "auth_verify_otp_001",
+      "intents": [
+        "verify code {code} for {phone}",
+        "check OTP {code}",
+        "confirm code {code} for {phone}",
+        "validate code {code}",
+        "enter code {code}",
+        "submit OTP {code} for {phone}",
+        "check verification code {code} for {phone}"
+      ],
+      "program": [
+        {"convention": "auth.verify_otp", "args": [{"name": "phone", "type": "span", "extract": "phone"}, {"name": "code", "type": "span", "extract": "code"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "phone": ["+40712345678", "+1234567890", "+447911123456", "+33612345678", "+491701234567"],
+        "code": ["123456", "654321", "000000", "111111", "999999"]
+      },
+      "tags": ["auth", "otp", "verify"]
+    },
+    {
+      "id": "auth_create_session_001",
+      "intents": [
+        "create session for {user_id}",
+        "log in {user_id}",
+        "start session for {user_id}",
+        "authenticate {user_id}",
+        "issue session token for {user_id}",
+        "begin session for user {user_id}",
+        "generate auth token for {user_id}"
+      ],
+      "program": [
+        {"convention": "auth.create_session", "args": [{"name": "user_id", "type": "span", "extract": "user_id"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": ["user_001", "user_abc", "user_xyz", "admin_01", "provider_123"]
+      },
+      "tags": ["auth", "session", "create"]
+    },
+    {
+      "id": "auth_validate_session_001",
+      "intents": [
+        "check if session is valid",
+        "validate session",
+        "is session active",
+        "verify authentication",
+        "check login status",
+        "is the user still logged in",
+        "verify session validity"
+      ],
+      "program": [
+        {"convention": "auth.validate_session", "args": []},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["auth", "session", "validate"]
+    },
+    {
+      "id": "auth_revoke_session_001",
+      "intents": [
+        "log out",
+        "revoke session",
+        "sign out",
+        "invalidate session",
+        "end session",
+        "terminate session",
+        "log out from this device"
+      ],
+      "program": [
+        {"convention": "auth.revoke_session", "args": []},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["auth", "session", "revoke"]
+    },
+    {
+      "id": "auth_revoke_all_sessions_001",
+      "intents": [
+        "log out {user_id} from all devices",
+        "revoke all sessions for {user_id}",
+        "sign out {user_id} everywhere",
+        "invalidate all sessions for {user_id}",
+        "force logout {user_id}"
+      ],
+      "program": [
+        {"convention": "auth.revoke_all_sessions", "args": [{"name": "user_id", "type": "span", "extract": "user_id"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": ["user_001", "user_abc", "user_xyz", "admin_01", "provider_123"]
+      },
+      "tags": ["auth", "session", "revoke_all"]
+    },
+    {
+      "id": "auth_list_sessions_001",
+      "intents": [
+        "show sessions for {user_id}",
+        "list active sessions for {user_id}",
+        "how many devices is {user_id} logged in on",
+        "show login sessions for {user_id}",
+        "what devices is {user_id} using",
+        "display active sessions for {user_id}"
+      ],
+      "program": [
+        {"convention": "auth.list_sessions", "args": [{"name": "user_id", "type": "span", "extract": "user_id"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": ["user_001", "user_abc", "user_xyz", "admin_01", "provider_123"]
+      },
+      "tags": ["auth", "session", "list"]
+    },
+    {
+      "id": "auth_hash_token_001",
+      "intents": [
+        "hash this token",
+        "compute token hash",
+        "hash a token for storage",
+        "generate token hash",
+        "securely hash token"
+      ],
+      "program": [
+        {"convention": "auth.hash_token", "args": []},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["auth", "hash", "token"]
+    },
+    {
+      "id": "auth_generate_totp_secret_001",
+      "intents": [
+        "set up two-factor auth for {user_id}",
+        "generate TOTP secret for {user_id}",
+        "enable 2FA for {user_id}",
+        "create authenticator secret for {user_id}",
+        "set up authenticator app for {user_id}"
+      ],
+      "program": [
+        {"convention": "auth.generate_totp_secret", "args": [{"name": "user_id", "type": "span", "extract": "user_id"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": ["user_001", "user_abc", "user_xyz", "admin_01", "provider_123"]
+      },
+      "tags": ["auth", "totp", "2fa"]
+    },
+    {
+      "id": "auth_verify_totp_001",
+      "intents": [
+        "verify 2FA code {code}",
+        "check TOTP code {code}",
+        "validate authenticator code {code}",
+        "confirm 2FA with code {code}",
+        "verify authenticator code {code}"
+      ],
+      "program": [
+        {"convention": "auth.verify_totp", "args": [{"name": "code", "type": "span", "extract": "code"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "code": ["123456", "654321", "000000", "111111", "999999"]
+      },
+      "tags": ["auth", "totp", "2fa", "verify"]
+    },
+    {
+      "id": "auth_verify_then_session_001",
+      "intents": [
+        "authenticate {phone} with code {code}",
+        "complete login for {phone} with code {code}",
+        "verify {phone} with OTP {code} and create session"
+      ],
+      "program": [
+        {"convention": "auth.verify_otp", "args": [{"name": "phone", "type": "span", "extract": "phone"}, {"name": "code", "type": "span", "extract": "code"}]},
+        {"convention": "auth.create_session", "args": [{"name": "user_id", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "phone": ["+40712345678", "+1234567890", "+447911123456", "+33612345678", "+491701234567"],
+        "code": ["123456", "654321", "000000", "111111", "999999"]
+      },
+      "tags": ["auth", "multi-step", "login"]
+    },
+    {
+      "id": "auth_revoke_then_list_001",
+      "intents": [
+        "log out {user_id} from all devices then check sessions",
+        "revoke all sessions for {user_id} and list remaining",
+        "force logout {user_id} then show sessions"
+      ],
+      "program": [
+        {"convention": "auth.revoke_all_sessions", "args": [{"name": "user_id", "type": "span", "extract": "user_id"}]},
+        {"convention": "auth.list_sessions", "args": [{"name": "user_id", "type": "span", "extract": "user_id"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": ["user_001", "user_abc", "user_xyz", "admin_01", "provider_123"]
+      },
+      "tags": ["auth", "multi-step", "revoke", "list"]
+    }
+  ]
+}

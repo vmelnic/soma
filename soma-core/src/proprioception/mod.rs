@@ -19,6 +19,13 @@ pub struct Proprioception {
     pub active_connections: u64,
     pub total_signals_processed: u64,
     pub total_decisions_recorded: u64,
+    /// Names of currently loaded plugins.
+    pub loaded_plugins: Vec<String>,
+    /// Current LoRA adapter magnitude.
+    pub lora_magnitude: f32,
+    /// Current CPU usage percentage.
+    /// CPU tracking requires platform-specific implementation.
+    pub cpu_usage_percent: f32,
 }
 
 impl Proprioception {
@@ -40,6 +47,9 @@ impl Proprioception {
             active_connections: 0,
             total_signals_processed: 0,
             total_decisions_recorded: 0,
+            loaded_plugins: Vec::new(),
+            lora_magnitude: 0.0,
+            cpu_usage_percent: 0.0,
         }
     }
 
@@ -102,13 +112,21 @@ impl Proprioception {
 
     /// Generate a human-readable status report.
     pub fn report(&self) -> String {
+        let plugins_str = if self.loaded_plugins.is_empty() {
+            "none".to_string()
+        } else {
+            self.loaded_plugins.join(", ")
+        };
         format!(
             "Uptime: {}\n\
              Inferences: {} total ({} ok, {} err, {:.1}% success)\n\
              Adaptations: {}\n\
              Experiences: {}\n\
              Checkpoints: {}\n\
-             Decisions: {}",
+             Decisions: {}\n\
+             Plugins: {}\n\
+             LoRA magnitude: {:.6}\n\
+             CPU usage: {:.1}%",
             self.format_uptime(),
             self.total_inferences,
             self.successful_inferences,
@@ -118,11 +136,21 @@ impl Proprioception {
             self.experience_count,
             self.checkpoints_saved,
             self.total_decisions_recorded,
+            plugins_str,
+            self.lora_magnitude,
+            self.cpu_usage_percent,
         )
     }
 
-    /// Get current process RSS in bytes (macOS via libc::getrusage).
-    pub fn current_rss_bytes() -> u64 {
+    /// Get peak RSS in bytes via `getrusage(2)`.
+    ///
+    /// Note: `ru_maxrss` reports **peak** (high-water-mark) RSS, not the
+    /// *current* resident set size.  Retrieving current RSS on macOS would
+    /// require `mach_task_basic_info` via the Mach kernel API, which adds
+    /// significant platform-specific complexity.  On Linux, `/proc/self/statm`
+    /// could be used instead.  For now this function is named `peak_rss_bytes`
+    /// to accurately reflect what it measures.
+    pub fn peak_rss_bytes() -> u64 {
         let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
         let rc = unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
         if rc == 0 {
@@ -134,6 +162,23 @@ impl Proprioception {
         } else {
             0
         }
+    }
+
+    /// Set the list of currently loaded plugin names.
+    pub fn set_plugins(&mut self, names: Vec<String>) {
+        self.loaded_plugins = names;
+    }
+
+    /// Set the current LoRA adapter magnitude.
+    pub fn set_lora_magnitude(&mut self, mag: f32) {
+        self.lora_magnitude = mag;
+    }
+
+    /// Update CPU usage estimate.
+    /// CPU tracking requires platform-specific implementation.
+    pub fn update_cpu(&mut self) {
+        // CPU tracking requires platform-specific implementation.
+        self.cpu_usage_percent = 0.0;
     }
 
     /// Serialize for MCP health endpoint.
@@ -152,7 +197,10 @@ impl Proprioception {
             "checkpoints_saved": self.checkpoints_saved,
             "consolidations": self.consolidations,
             "decisions_recorded": self.total_decisions_recorded,
-            "memory_rss_bytes": Self::current_rss_bytes(),
+            "memory_peak_rss_bytes": Self::peak_rss_bytes(),
+            "loaded_plugins": self.loaded_plugins,
+            "lora_magnitude": self.lora_magnitude,
+            "cpu_usage_percent": self.cpu_usage_percent,
         })
     }
 }

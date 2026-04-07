@@ -1,0 +1,20 @@
+{
+  "plugin": {
+    "name": "postgres",
+    "version": "0.1.0",
+    "description": "PostgreSQL database operations: queries, DDL, schema inspection, connection pooling"
+  },
+  "conventions": [
+    {"name": "query", "description": "Execute SELECT query, return rows as list of maps"},
+    {"name": "execute", "description": "Execute INSERT/UPDATE/DELETE, return rows affected"},
+    {"name": "query_one", "description": "Execute query returning a single row or null"},
+    {"name": "begin", "description": "Begin a transaction (returns handle)"},
+    {"name": "commit", "description": "Commit a transaction"},
+    {"name": "rollback", "description": "Rollback a transaction"},
+    {"name": "create_table", "description": "Create a new table with specified columns"},
+    {"name": "alter_table", "description": "Alter an existing table structure"},
+    {"name": "table_exists", "description": "Check if a table exists"},
+    {"name": "list_tables", "description": "List all tables in the database"},
+    {"name": "table_schema", "description": "Get column information for a table"}
+  ]
+}
