@@ -7,6 +7,7 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 
 use super::connection::SynapseConnection;
+use super::router::SignalRouter;
 use super::signal::{Signal, SignalType};
 
 /// Backoff schedule for auto-reconnect (Spec Section 14.2):
@@ -19,6 +20,15 @@ const BACKOFF_SCHEDULE: &[Duration] = &[
 ];
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 
+/// Record of an active subscription, kept for replay on reconnect (Section 14.3).
+#[derive(Clone)]
+pub struct SubscriptionRecord {
+    pub topic: String,
+    pub channel_id: u32,
+    pub durable: bool,
+    pub last_seen_sequence: Option<u32>,
+}
+
 /// Client for sending signals to peer SOMA nodes using the binary
 /// Synaptic Protocol v2 wire format.
 pub struct SynapseClient {
@@ -26,6 +36,8 @@ pub struct SynapseClient {
     pub capabilities: Vec<String>,
     pub plugins: Vec<String>,
     pub max_signal_size: u32,
+    /// Active subscriptions for replay on reconnect (Section 14.3).
+    active_subscriptions: Vec<SubscriptionRecord>,
 }
 
 impl SynapseClient {
@@ -36,6 +48,7 @@ impl SynapseClient {
             capabilities: vec!["streaming".into(), "chunked".into()],
             plugins: vec!["posix".into()],
             max_signal_size: 10_485_760,
+            active_subscriptions: Vec::new(),
         }
     }
 
@@ -134,6 +147,35 @@ impl SynapseClient {
         }
     }
 
+    /// Send an intent to a peer and wait for the response with timeout (Section 14.3).
+    /// Uses the SignalRouter for request-response correlation by sequence number.
+    pub async fn send_intent_and_wait(
+        addr: &str,
+        sender: &str,
+        text: &str,
+        router: &SignalRouter,
+    ) -> Result<Signal> {
+        let mut intent = Signal::new(SignalType::Intent, sender.to_string());
+        intent.payload = text.as_bytes().to_vec();
+
+        // Register pending before sending
+        let sequence = intent.sequence;
+        let rx = router.register_pending(sequence);
+
+        // Send the intent
+        Self::send(addr, sender, &intent).await?;
+
+        // Wait for correlated response
+        match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+            Ok(Ok(response)) => Ok(response),
+            Ok(Err(_)) => bail!("Response channel closed"),
+            Err(_) => {
+                router.cancel(sequence);
+                bail!("Intent response timed out after 30s")
+            }
+        }
+    }
+
     /// Send an Intent signal and wait for the Result/Error response.
     pub async fn send_intent(
         addr: &str,
@@ -148,5 +190,39 @@ impl SynapseClient {
             Some(resp) => Ok(resp),
             None => bail!("No response received from peer"),
         }
+    }
+
+    /// Track a subscription for replay on reconnect.
+    pub fn track_subscription(&mut self, topic: String, channel_id: u32, durable: bool) {
+        self.active_subscriptions.push(SubscriptionRecord {
+            topic,
+            channel_id,
+            durable,
+            last_seen_sequence: None,
+        });
+    }
+
+    /// Remove a tracked subscription.
+    pub fn untrack_subscription(&mut self, topic: &str) {
+        self.active_subscriptions.retain(|s| s.topic != topic);
+    }
+
+    /// Replay all tracked subscriptions on a connection (after reconnect).
+    pub async fn replay_subscriptions(&self, conn: &Arc<SynapseConnection>) -> Result<()> {
+        for sub in &self.active_subscriptions {
+            let mut signal = Signal::new(SignalType::Subscribe, self.local_id.clone());
+            signal.payload = sub.topic.as_bytes().to_vec();
+            if let serde_json::Value::Object(ref mut map) = signal.metadata {
+                map.insert("topic".to_string(), serde_json::json!(sub.topic));
+                map.insert("durable".to_string(), serde_json::json!(sub.durable));
+                if let Some(seq) = sub.last_seen_sequence {
+                    map.insert("last_seen_sequence".to_string(), serde_json::json!(seq));
+                }
+            }
+            signal.channel_id = sub.channel_id;
+            conn.send(&signal).await?;
+            tracing::debug!(topic = %sub.topic, "Replayed subscription on reconnect");
+        }
+        Ok(())
     }
 }

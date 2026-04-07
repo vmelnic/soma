@@ -159,7 +159,10 @@ pub fn encode_frame(signal: &Signal) -> Vec<u8> {
 
 /// Decode a complete binary frame into a Signal.
 /// `data` must contain the entire frame including checksum.
-pub fn decode_frame(data: &[u8]) -> Result<Signal> {
+///
+/// Returns `Ok(None)` for frames with unknown signal types per Spec Section 12.3:
+/// "Unknown signal type received → Ignore signal. Log warning. Do NOT close connection."
+pub fn decode_frame(data: &[u8]) -> Result<Option<Signal>> {
     if data.len() < MIN_FRAME_SIZE {
         bail!(
             "Frame too small: {} bytes (minimum {})",
@@ -190,9 +193,17 @@ pub fn decode_frame(data: &[u8]) -> Result<Signal> {
     // Parse flags
     let flags = SignalFlags::from_bits_truncate(data[3]);
 
-    // Parse signal type
-    let signal_type = SignalType::from_u8(data[4])
-        .ok_or_else(|| anyhow::anyhow!("Unknown signal type: 0x{:02X}", data[4]))?;
+    // Parse signal type — unknown types are silently ignored per Spec Section 12.3
+    let signal_type = match SignalType::from_u8(data[4]) {
+        Some(st) => st,
+        None => {
+            tracing::warn!(
+                signal_type_byte = format_args!("0x{:02X}", data[4]),
+                "Unknown signal type received, ignoring frame (Spec Sec 12.3)"
+            );
+            return Ok(None);
+        }
+    };
 
     // Channel ID
     let channel_id = u32::from_be_bytes([data[5], data[6], data[7], data[8]]);
@@ -305,7 +316,7 @@ pub fn decode_frame(data: &[u8]) -> Result<Signal> {
         .unwrap_or("")
         .to_string();
 
-    Ok(Signal {
+    Ok(Some(Signal {
         signal_type,
         flags,
         channel_id,
@@ -314,7 +325,7 @@ pub fn decode_frame(data: &[u8]) -> Result<Signal> {
         metadata,
         payload,
         trace_id,
-    })
+    }))
 }
 
 /// Read a complete frame from an async reader.
@@ -416,7 +427,9 @@ mod tests {
         signal.trace_id = "abc123".to_string();
 
         let encoded = encode_frame(&signal);
-        let decoded = decode_frame(&encoded).expect("decode should succeed");
+        let decoded = decode_frame(&encoded)
+            .expect("decode should succeed")
+            .expect("known signal type should return Some");
 
         assert_eq!(decoded.signal_type, SignalType::Intent);
         assert_eq!(decoded.channel_id, 1);
@@ -430,7 +443,9 @@ mod tests {
     fn test_empty_signal() {
         let signal = Signal::new(SignalType::Ping, "s".to_string());
         let encoded = encode_frame(&signal);
-        let decoded = decode_frame(&encoded).expect("decode should succeed");
+        let decoded = decode_frame(&encoded)
+            .expect("decode should succeed")
+            .expect("known signal type should return Some");
         assert_eq!(decoded.signal_type, SignalType::Ping);
         assert_eq!(decoded.sender_id, "s");
         assert!(decoded.payload.is_empty());
@@ -485,7 +500,7 @@ mod tests {
         for st in types {
             let signal = Signal::new(st, "test".to_string());
             let encoded = encode_frame(&signal);
-            let decoded = decode_frame(&encoded).unwrap();
+            let decoded = decode_frame(&encoded).unwrap().unwrap();
             assert_eq!(decoded.signal_type, st);
         }
     }
@@ -497,7 +512,7 @@ mod tests {
         // Set a large enough payload so compression actually engages
         signal.payload = vec![0x42; 512];
         let encoded = encode_frame(&signal);
-        let decoded = decode_frame(&encoded).unwrap();
+        let decoded = decode_frame(&encoded).unwrap().unwrap();
         assert!(decoded.flags.contains(SignalFlags::COMPRESSED));
         assert!(decoded.flags.contains(SignalFlags::PRIORITY));
         assert!(!decoded.flags.contains(SignalFlags::ENCRYPTED));
@@ -522,7 +537,7 @@ mod tests {
             "Encoded frame ({} bytes) should be noticeably smaller than raw payload ({} bytes)",
             encoded.len(), payload.len());
 
-        let decoded = decode_frame(&encoded).unwrap();
+        let decoded = decode_frame(&encoded).unwrap().unwrap();
         assert_eq!(decoded.payload, payload, "Payload must survive compression roundtrip");
         assert_eq!(decoded.signal_type, SignalType::Data);
         assert_eq!(decoded.sender_id, "compress-test");
@@ -537,7 +552,7 @@ mod tests {
         signal.flags = SignalFlags::COMPRESSED; // request compression
 
         let encoded = encode_frame(&signal);
-        let decoded = decode_frame(&encoded).unwrap();
+        let decoded = decode_frame(&encoded).unwrap().unwrap();
         // Compression should be cleared because payload is too small
         assert!(!decoded.flags.contains(SignalFlags::COMPRESSED));
         assert_eq!(decoded.payload, b"tiny");
@@ -550,9 +565,31 @@ mod tests {
         signal.flags = SignalFlags::COMPRESSED;
 
         let encoded = encode_frame(&signal);
-        let decoded = decode_frame(&encoded).unwrap();
+        let decoded = decode_frame(&encoded).unwrap().unwrap();
         // StreamData should never be compressed
         assert!(!decoded.flags.contains(SignalFlags::COMPRESSED));
         assert_eq!(decoded.payload, vec![0xAB; 2048]);
+    }
+
+    #[test]
+    fn test_unknown_signal_type_returns_none() {
+        // Spec Section 12.3: unknown signal type should be ignored, not error
+        let signal = Signal::new(SignalType::Ping, "s".to_string());
+        let mut encoded = encode_frame(&signal);
+
+        // Replace the signal type byte (offset 4) with an unknown value
+        encoded[4] = 0xBB;
+
+        // Recompute CRC32 since we changed the frame content
+        let crc_offset = encoded.len() - 4;
+        let mut hasher = Hasher::new();
+        hasher.update(&encoded[..crc_offset]);
+        let crc = hasher.finalize();
+        encoded[crc_offset..].copy_from_slice(&crc.to_be_bytes());
+
+        // decode_frame should succeed with None (not error)
+        let result = decode_frame(&encoded);
+        assert!(result.is_ok(), "Unknown signal type should not return Err");
+        assert!(result.unwrap().is_none(), "Unknown signal type should return None");
     }
 }

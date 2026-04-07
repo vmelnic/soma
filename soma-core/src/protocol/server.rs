@@ -1,5 +1,10 @@
 //! Synaptic Protocol v2 server — TCP listener with binary wire format,
 //! handshake negotiation, heartbeat, and signal routing.
+//!
+// Future: SignalRouter struct with DashMap for pending_requests,
+// stream_handlers, chunk_buffers (Section 14.2). Currently routing
+// is inline per-connection. Will be extracted when inter-SOMA
+// request-response correlation is needed.
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -12,7 +17,7 @@ use super::connection::{
     DEFAULT_PONG_TIMEOUT,
 };
 use super::pubsub::PubSubManager;
-use super::signal::{Signal, SignalType};
+use super::signal::{Signal, SignalFlags, SignalType};
 
 /// Handler trait for incoming signals. Implementations decide how to
 /// respond to each signal type.
@@ -46,7 +51,7 @@ impl SignalHandler for DefaultHandler {
 pub struct SomaSignalHandler {
     pub name: String,
     pub mind: Arc<std::sync::RwLock<crate::mind::onnx_engine::OnnxMindEngine>>,
-    pub plugins: Arc<crate::plugin::manager::PluginManager>,
+    pub plugins: Arc<std::sync::RwLock<crate::plugin::manager::PluginManager>>,
     pub max_program_steps: usize,
 }
 
@@ -87,6 +92,8 @@ impl SignalHandler for SomaSignalHandler {
                     Ok(program) => {
                         let result = self
                             .plugins
+                            .read()
+                            .unwrap()
                             .execute_program(&program.steps, self.max_program_steps);
 
                         tracing::info!(
@@ -376,10 +383,13 @@ impl SynapseServer {
                         _ => {}
                     }
 
+                    // PRIORITY signals bypass capability checks (Sec 9.2)
+                    let is_priority = signal.flags.contains(SignalFlags::PRIORITY);
+
                     // Capability enforcement (Spec Section 12.4):
                     // reject signals whose type requires a capability that
                     // was not negotiated during handshake.
-                    if !conn.is_signal_allowed(signal.signal_type).await {
+                    if !is_priority && !conn.is_signal_allowed(signal.signal_type).await {
                         tracing::warn!(
                             peer = %peer_id,
                             signal_type = ?signal.signal_type,
@@ -401,6 +411,14 @@ impl SynapseServer {
                             break;
                         }
                         continue;
+                    }
+
+                    // Relay capability gating (Sec 12.4)
+                    if super::relay::should_relay(&signal, &server_name) {
+                        if !conn.is_capability_negotiated("relay").await {
+                            tracing::warn!(peer = %peer_id, "Relay rejected: capability not negotiated");
+                            continue;
+                        }
                     }
 
                     // Dispatch to handler

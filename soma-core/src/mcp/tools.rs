@@ -273,6 +273,15 @@ pub fn build_tool_list(conventions: &[(String, crate::plugin::interface::Convent
         }),
     });
 
+    tools.push(McpTool {
+        name: "soma.shutdown".into(),
+        description: "Trigger graceful shutdown. Requires admin access.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {},
+        }),
+    });
+
     // -- Plugin convention tools --
     // Each loaded convention is exposed as soma.{plugin}.{convention} (Section 12.2)
     for (plugin_name, conv) in conventions {
@@ -280,12 +289,7 @@ pub fn build_tool_list(conventions: &[(String, crate::plugin::interface::Convent
         let mut required = Vec::new();
 
         for arg in &conv.args {
-            let json_type = match arg.arg_type.as_str() {
-                "int" => "integer",
-                "bool" => "boolean",
-                "handle" => "integer",
-                _ => "string",
-            };
+            let json_type = arg.arg_type.json_type();
             properties.insert(arg.name.clone(), serde_json::json!({
                 "type": json_type,
                 "description": arg.description,

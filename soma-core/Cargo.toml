@@ -49,8 +49,21 @@ rmp-serde = "1"
 # SHA-256 for chunked transfer verification
 sha2 = "0.10"
 
+# Protocol encryption (Section 8)
+chacha20poly1305 = "0.10"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+
 # Signal compression (Spec Section 19)
 zstd = "0.13"
+
+# Dynamic plugin loading (Section 5.3)
+libloading = "0.8"
+
+# WebSocket transport (Section 3.1)
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
 
 [[bin]]
 name = "soma"

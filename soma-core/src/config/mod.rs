@@ -29,6 +29,10 @@ fn default_max_steps() -> usize {
     32
 }
 
+fn default_max_inference_time_secs() -> u64 {
+    5
+}
+
 fn default_rank() -> usize {
     8
 }
@@ -65,6 +69,30 @@ fn default_max_exp() -> usize {
     1000
 }
 
+fn default_checkpoint_interval_secs() -> u64 {
+    3600
+}
+
+fn default_consolidation_trigger() -> String {
+    "experience_count".to_string()
+}
+
+fn default_consolidation_threshold() -> u64 {
+    500
+}
+
+fn default_min_lora_magnitude() -> f32 {
+    0.01
+}
+
+fn default_connection_timeout_secs() -> u64 {
+    60
+}
+
+fn default_plugins_directory() -> String {
+    "plugins".to_string()
+}
+
 fn default_bind() -> String {
     "127.0.0.1:9999".to_string()
 }
@@ -79,6 +107,14 @@ fn default_max_infer() -> usize {
 
 fn default_max_plugin() -> usize {
     8
+}
+
+fn default_max_plugins_loaded() -> usize {
+    50
+}
+
+fn default_max_lora_layers() -> usize {
+    64
 }
 
 fn default_mcp_transport() -> String {
@@ -124,6 +160,9 @@ pub struct SomaSection {
     /// Program trace verbosity: "terse", "normal", "verbose" (Section 11.5)
     #[serde(default = "default_trace_verbosity")]
     pub trace_verbosity: String,
+    /// Directory to search for plugin libraries (Section 15.1)
+    #[serde(default = "default_plugins_directory")]
+    pub plugins_directory: String,
 }
 
 fn default_temperature() -> f32 {
@@ -141,11 +180,17 @@ pub struct MindSection {
     /// Softmax temperature for inference (Section 2.3). Lower = more deterministic.
     #[serde(default = "default_temperature")]
     pub temperature: f32,
+    /// Maximum wall-clock time allowed for a single inference call, in seconds.
+    /// Currently advisory: the sync decoder loop in onnx_engine.rs is bounded by
+    /// max_steps which provides an implicit time cap. True tokio::time::timeout
+    /// enforcement requires async infer(), tracked as a future change.
+    #[serde(default = "default_max_inference_time_secs")]
+    pub max_inference_time_secs: u64,
     #[serde(default)]
     pub lora: LoraConfig,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct LoraConfig {
     #[serde(default = "default_rank")]
     pub default_rank: usize,
@@ -159,6 +204,66 @@ pub struct LoraConfig {
     pub adapt_batch_size: usize,
     #[serde(default = "default_lr")]
     pub adapt_learning_rate: f32,
+    /// Maximum number of LoRA adapter layers (Section 20.1).
+    /// Checked at configuration/init time.
+    #[serde(default = "default_max_lora_layers")]
+    pub max_lora_layers: usize,
+}
+
+impl Default for LoraConfig {
+    fn default() -> Self {
+        Self {
+            default_rank: default_rank(),
+            default_alpha: default_alpha(),
+            adaptation_enabled: default_true(),
+            adapt_every_n_successes: default_adapt_every(),
+            adapt_batch_size: default_batch(),
+            adapt_learning_rate: default_lr(),
+            max_lora_layers: default_max_lora_layers(),
+        }
+    }
+}
+
+/// Consolidation configuration (Spec Section 15.1).
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConsolidationConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_consolidation_trigger")]
+    pub trigger: String,
+    #[serde(default = "default_consolidation_threshold")]
+    pub threshold: u64,
+    #[serde(default = "default_min_lora_magnitude")]
+    pub min_lora_magnitude: f32,
+}
+
+impl Default for ConsolidationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+            trigger: default_consolidation_trigger(),
+            threshold: default_consolidation_threshold(),
+            min_lora_magnitude: default_min_lora_magnitude(),
+        }
+    }
+}
+
+/// Encryption configuration (Spec Section 15.1).
+#[derive(Debug, Clone, Deserialize)]
+pub struct EncryptionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub key_file: String,
+}
+
+impl Default for EncryptionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            key_file: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -171,6 +276,10 @@ pub struct MemorySection {
     pub max_checkpoints: usize,
     #[serde(default = "default_max_exp")]
     pub max_experience_buffer: usize,
+    #[serde(default = "default_checkpoint_interval_secs")]
+    pub checkpoint_interval_secs: u64,
+    #[serde(default)]
+    pub consolidation: ConsolidationConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -181,6 +290,10 @@ pub struct ProtocolSection {
     pub max_connections: usize,
     #[serde(default)]
     pub peers: HashMap<String, String>,
+    #[serde(default = "default_connection_timeout_secs")]
+    pub connection_timeout_secs: u64,
+    #[serde(default)]
+    pub encryption: EncryptionConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -189,6 +302,10 @@ pub struct ResourceSection {
     pub max_concurrent_inferences: usize,
     #[serde(default = "default_max_plugin")]
     pub max_concurrent_plugin_calls: usize,
+    /// Maximum number of plugins that can be loaded simultaneously (Section 20.1).
+    /// Checked at plugin registration time.
+    #[serde(default = "default_max_plugins_loaded")]
+    pub max_plugins_loaded: usize,
 }
 
 /// MCP Server configuration (Whitepaper Section 8).
@@ -219,15 +336,33 @@ impl Default for McpSection {
     }
 }
 
+fn default_admin_token_env() -> String {
+    "SOMA_MCP_ADMIN_TOKEN".to_string()
+}
+
+fn default_builder_token_env() -> String {
+    "SOMA_MCP_BUILDER_TOKEN".to_string()
+}
+
+fn default_viewer_token_env() -> String {
+    "SOMA_MCP_VIEWER_TOKEN".to_string()
+}
+
 /// Security configuration (Whitepaper Sections 8.3, 12.2).
 #[derive(Debug, Clone, Deserialize)]
 pub struct SecuritySection {
     /// Require auth tokens for MCP connections
     #[serde(default)]
     pub require_auth: bool,
-    /// Pre-configured admin token (if empty, one is generated on startup)
-    #[serde(default)]
-    pub admin_token: String,
+    /// Environment variable holding the admin token
+    #[serde(default = "default_admin_token_env")]
+    pub admin_token_env: String,
+    /// Environment variable holding the builder token
+    #[serde(default = "default_builder_token_env")]
+    pub builder_token_env: String,
+    /// Environment variable holding the viewer token
+    #[serde(default = "default_viewer_token_env")]
+    pub viewer_token_env: String,
     /// Destructive actions require two-step confirmation
     #[serde(default = "default_true")]
     pub require_confirmation: bool,
@@ -237,7 +372,9 @@ impl Default for SecuritySection {
     fn default() -> Self {
         Self {
             require_auth: false,
-            admin_token: String::new(),
+            admin_token_env: default_admin_token_env(),
+            builder_token_env: default_builder_token_env(),
+            viewer_token_env: default_viewer_token_env(),
             require_confirmation: true,
         }
     }
@@ -263,6 +400,7 @@ impl Default for SomaSection {
             id: default_id(),
             log_level: default_log_level(),
             trace_verbosity: default_trace_verbosity(),
+            plugins_directory: default_plugins_directory(),
         }
     }
 }
@@ -274,6 +412,7 @@ impl Default for MindSection {
             model_dir: default_model_dir(),
             max_program_steps: default_max_steps(),
             temperature: default_temperature(),
+            max_inference_time_secs: default_max_inference_time_secs(),
             lora: LoraConfig::default(),
         }
     }
@@ -286,6 +425,8 @@ impl Default for MemorySection {
             auto_checkpoint: default_true(),
             max_checkpoints: default_max_ckpt(),
             max_experience_buffer: default_max_exp(),
+            checkpoint_interval_secs: default_checkpoint_interval_secs(),
+            consolidation: ConsolidationConfig::default(),
         }
     }
 }
@@ -296,6 +437,8 @@ impl Default for ProtocolSection {
             bind: default_bind(),
             max_connections: default_max_conn(),
             peers: HashMap::new(),
+            connection_timeout_secs: default_connection_timeout_secs(),
+            encryption: EncryptionConfig::default(),
         }
     }
 }
@@ -305,6 +448,7 @@ impl Default for ResourceSection {
         Self {
             max_concurrent_inferences: default_max_infer(),
             max_concurrent_plugin_calls: default_max_plugin(),
+            max_plugins_loaded: default_max_plugins_loaded(),
         }
     }
 }
@@ -321,6 +465,34 @@ impl SomaConfig {
         let config: SomaConfig = toml::from_str(&content)?;
         tracing::info!("Loaded config from {}", path.display());
         Ok(config)
+    }
+
+    /// Apply environment variable overrides (Section 15.3).
+    /// Format: SOMA_SECTION_KEY maps to [section].key.
+    /// Examples: SOMA_MIND_TEMPERATURE=0.5, SOMA_PROTOCOL_BIND=0.0.0.0:9001
+    pub fn apply_env_overrides(&mut self) {
+        if let Ok(v) = std::env::var("SOMA_MIND_TEMPERATURE") {
+            if let Ok(t) = v.parse::<f32>() {
+                self.mind.temperature = t;
+            }
+        }
+        if let Ok(v) = std::env::var("SOMA_MIND_MAX_PROGRAM_STEPS") {
+            if let Ok(s) = v.parse::<usize>() {
+                self.mind.max_program_steps = s;
+            }
+        }
+        if let Ok(v) = std::env::var("SOMA_PROTOCOL_BIND") {
+            self.protocol.bind = v;
+        }
+        if let Ok(v) = std::env::var("SOMA_SOMA_ID") {
+            self.soma.id = v;
+        }
+        if let Ok(v) = std::env::var("SOMA_SOMA_LOG_LEVEL") {
+            self.soma.log_level = v;
+        }
+        if let Ok(v) = std::env::var("SOMA_MEMORY_CHECKPOINT_DIR") {
+            self.memory.checkpoint_dir = v;
+        }
     }
 }
 

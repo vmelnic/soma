@@ -9,6 +9,7 @@
 //! indicates per-signal encryption status.
 
 use anyhow::Result;
+use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce, aead::{Aead, KeyInit}};
 
 /// Ed25519 identity keypair for a SOMA instance (Section 12.3).
 /// Used for peer authentication and plugin signing.
@@ -26,45 +27,41 @@ pub struct SomaIdentity {
 impl SomaIdentity {
     /// Generate a new random identity.
     pub fn generate() -> Self {
-        // Use OS random for key generation
-        let mut seed = [0u8; 32];
-        getrandom(&mut seed);
+        use ed25519_dalek::SigningKey;
+        use rand::rngs::OsRng;
 
-        // In a full implementation, these would be proper Ed25519/X25519 keys.
-        // For now, we use the seed directly to establish the structure.
-        let mut verify = [0u8; 32];
-        // Simple derivation: verify = hash(seed) (placeholder for Ed25519 keygen)
-        for (i, b) in seed.iter().enumerate() {
-            verify[i] = b.wrapping_mul(137).wrapping_add(i as u8);
-        }
+        let signing = SigningKey::generate(&mut OsRng);
+        let verify = signing.verifying_key();
 
-        let mut x_secret = [0u8; 32];
-        let mut x_public = [0u8; 32];
-        // Derive X25519 from Ed25519 seed (placeholder)
-        for i in 0..32 {
-            x_secret[i] = seed[i] ^ 0x5A;
-            x_public[i] = verify[i] ^ 0xA5;
-        }
+        // Derive X25519 from Ed25519 seed
+        let x_secret = x25519_dalek::StaticSecret::from(signing.to_bytes());
+        let x_public = x25519_dalek::PublicKey::from(&x_secret);
 
         Self {
-            signing_key: seed,
-            verify_key: verify,
-            x25519_secret: x_secret,
-            x25519_public: x_public,
+            signing_key: signing.to_bytes(),
+            verify_key: verify.to_bytes(),
+            x25519_secret: x_secret.to_bytes(),
+            x25519_public: x_public.to_bytes(),
         }
     }
 
-    /// Load identity from a file (32-byte seed).
+    /// Load identity from a 32-byte seed (deterministic key derivation).
     pub fn from_seed(seed: [u8; 32]) -> Self {
-        let mut id = Self::generate();
-        id.signing_key = seed;
-        // Re-derive public keys from seed
-        for (i, b) in seed.iter().enumerate() {
-            id.verify_key[i] = b.wrapping_mul(137).wrapping_add(i as u8);
-            id.x25519_secret[i] = seed[i] ^ 0x5A;
-            id.x25519_public[i] = id.verify_key[i] ^ 0xA5;
+        use ed25519_dalek::SigningKey;
+
+        let signing = SigningKey::from_bytes(&seed);
+        let verify = signing.verifying_key();
+
+        // Derive X25519 from Ed25519 seed
+        let x_secret = x25519_dalek::StaticSecret::from(seed);
+        let x_public = x25519_dalek::PublicKey::from(&x_secret);
+
+        Self {
+            signing_key: signing.to_bytes(),
+            verify_key: verify.to_bytes(),
+            x25519_secret: x_secret.to_bytes(),
+            x25519_public: x_public.to_bytes(),
         }
-        id
     }
 }
 
@@ -77,17 +74,13 @@ pub struct SessionKeys {
 }
 
 impl SessionKeys {
-    /// Derive session keys from our secret and peer's public key.
-    /// In full implementation: X25519 ECDH → HKDF → encrypt_key.
+    /// Derive session keys from our secret and peer's public key via X25519 ECDH.
     pub fn derive(our_secret: &[u8; 32], peer_public: &[u8; 32]) -> Self {
-        let mut shared = [0u8; 32];
-        // Placeholder ECDH: XOR (real implementation would use X25519)
-        for i in 0..32 {
-            shared[i] = our_secret[i] ^ peer_public[i];
-        }
-
+        let secret = x25519_dalek::StaticSecret::from(*our_secret);
+        let public = x25519_dalek::PublicKey::from(*peer_public);
+        let shared = secret.diffie_hellman(&public);
         Self {
-            encrypt_key: shared,
+            encrypt_key: shared.to_bytes(),
             nonce_counter: 0,
         }
     }
@@ -102,100 +95,49 @@ impl SessionKeys {
     }
 }
 
-/// Encrypt a signal payload using ChaCha20-Poly1305.
-/// Returns (ciphertext, 16-byte auth tag).
-///
-/// In full implementation: uses `chacha20poly1305` crate.
-/// Current placeholder uses XOR cipher for structure validation.
+/// Encrypt a signal payload using ChaCha20-Poly1305 AEAD.
+/// Returns ciphertext with appended 16-byte authentication tag.
 pub fn encrypt_payload(
     key: &[u8; 32],
     nonce: &[u8; 12],
     plaintext: &[u8],
     aad: &[u8], // additional authenticated data (signal header)
 ) -> Result<Vec<u8>> {
-    // Structure: ciphertext || 16-byte auth tag
-    let mut output = Vec::with_capacity(plaintext.len() + 16);
-
-    // Placeholder XOR cipher (real: ChaCha20-Poly1305 AEAD)
-    for (i, &byte) in plaintext.iter().enumerate() {
-        output.push(byte ^ key[i % 32] ^ nonce[i % 12]);
-    }
-
-    // Placeholder auth tag (real: Poly1305 MAC over ciphertext + AAD)
-    let mut tag = [0u8; 16];
-    for (i, &b) in aad.iter().enumerate() {
-        tag[i % 16] ^= b;
-    }
-    for (i, &b) in output.iter().enumerate() {
-        tag[i % 16] = tag[i % 16].wrapping_add(b);
-    }
-    output.extend_from_slice(&tag);
-
-    Ok(output)
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+    let nonce = Nonce::from_slice(nonce);
+    cipher.encrypt(nonce, chacha20poly1305::aead::Payload { msg: plaintext, aad })
+        .map_err(|e| anyhow::anyhow!("encryption failed: {}", e))
 }
 
-/// Decrypt a signal payload using ChaCha20-Poly1305.
-/// Input is (ciphertext || 16-byte auth tag).
-/// Returns plaintext if auth tag verifies.
+/// Decrypt a signal payload using ChaCha20-Poly1305 AEAD.
+/// Input is ciphertext with appended authentication tag.
+/// Returns plaintext if authentication succeeds.
 pub fn decrypt_payload(
     key: &[u8; 32],
     nonce: &[u8; 12],
-    ciphertext_with_tag: &[u8],
+    ciphertext: &[u8],
     aad: &[u8],
 ) -> Result<Vec<u8>> {
-    if ciphertext_with_tag.len() < 16 {
-        anyhow::bail!("ciphertext too short for auth tag");
-    }
-
-    let ciphertext = &ciphertext_with_tag[..ciphertext_with_tag.len() - 16];
-    let received_tag = &ciphertext_with_tag[ciphertext_with_tag.len() - 16..];
-
-    // Verify auth tag (placeholder)
-    let mut expected_tag = [0u8; 16];
-    for (i, &b) in aad.iter().enumerate() {
-        expected_tag[i % 16] ^= b;
-    }
-    for (i, &b) in ciphertext.iter().enumerate() {
-        expected_tag[i % 16] = expected_tag[i % 16].wrapping_add(b);
-    }
-
-    if received_tag != expected_tag {
-        anyhow::bail!("authentication failed: invalid tag");
-    }
-
-    // Decrypt (placeholder XOR)
-    let mut plaintext = Vec::with_capacity(ciphertext.len());
-    for (i, &byte) in ciphertext.iter().enumerate() {
-        plaintext.push(byte ^ key[i % 32] ^ nonce[i % 12]);
-    }
-
-    Ok(plaintext)
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+    let nonce = Nonce::from_slice(nonce);
+    cipher.decrypt(nonce, chacha20poly1305::aead::Payload { msg: ciphertext, aad })
+        .map_err(|e| anyhow::anyhow!("decryption failed: {}", e))
 }
 
-/// Sign data with Ed25519 (placeholder).
-pub fn sign(_signing_key: &[u8; 32], data: &[u8]) -> [u8; 64] {
-    // Placeholder: real implementation would use Ed25519
-    let mut sig = [0u8; 64];
-    for (i, &b) in data.iter().take(64).enumerate() {
-        sig[i] = b ^ 0x42;
-    }
-    sig
+/// Sign data with Ed25519.
+pub fn sign(signing_key: &[u8; 32], data: &[u8]) -> [u8; 64] {
+    use ed25519_dalek::{SigningKey, Signer};
+    let key = SigningKey::from_bytes(signing_key);
+    let sig = key.sign(data);
+    sig.to_bytes()
 }
 
-/// Verify an Ed25519 signature (placeholder).
-pub fn verify(_verify_key: &[u8; 32], data: &[u8], signature: &[u8; 64]) -> bool {
-    // Placeholder: real implementation would use Ed25519
-    let expected = sign(&[0; 32], data);
-    signature == &expected
-}
-
-// OS random bytes
-fn getrandom(buf: &mut [u8]) {
-    // Use /dev/urandom on Unix
-    use std::io::Read;
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        let _ = f.read_exact(buf);
-    }
+/// Verify an Ed25519 signature.
+pub fn verify(verify_key: &[u8; 32], data: &[u8], signature: &[u8; 64]) -> bool {
+    use ed25519_dalek::{VerifyingKey, Verifier, Signature};
+    let Ok(key) = VerifyingKey::from_bytes(verify_key) else { return false };
+    let sig = Signature::from_bytes(signature);
+    key.verify(data, &sig).is_ok()
 }
 
 #[cfg(test)]

@@ -1,0 +1,22 @@
+[project]
+name = "soma-synthesizer"
+version = "0.1.0"
+description = "SOMA Synthesizer — trains the Mind, exports ONNX models"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0",
+    "onnx>=1.14",
+    "onnxruntime>=1.16",
+    "toml>=0.10",
+    "tqdm>=4.60",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.1"]
+
+[project.scripts]
+soma-synthesize = "soma_synthesizer.cli:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"

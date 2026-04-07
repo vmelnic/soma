@@ -65,11 +65,20 @@ impl ConnectionQuality {
     }
 }
 
+/// Default receive window size: 1 MB (Spec Section 9.2).
+pub const DEFAULT_RECV_WINDOW: u64 = 1_048_576;
+
 /// State for a multiplexed channel on a connection.
 #[derive(Debug, Clone)]
 pub struct ChannelState {
     pub id: u32,
     pub active: bool,
+    /// Bytes remaining in the receive window (flow control).
+    pub recv_window: u64,
+    /// Maximum window size (default 1 MB).
+    pub recv_window_max: u64,
+    /// Unacknowledged bytes sent on this channel.
+    pub bytes_in_flight: u64,
 }
 
 /// A managed Synaptic Protocol v2 connection. Owns the TCP read/write halves
@@ -102,6 +111,8 @@ pub struct SynapseConnection {
     pub alive: std::sync::atomic::AtomicBool,
     /// Session token for reconnect identification (Spec Section 14.5).
     pub session_token: Mutex<String>,
+    /// When the current session token was created (for expiry checks, Spec Section 14.5).
+    pub session_token_created: Mutex<Option<Instant>>,
     /// Connection quality metrics (RTT, jitter).
     pub quality: Mutex<ConnectionQuality>,
     /// Timestamp of the last PING we sent, keyed by sequence number,
@@ -135,6 +146,7 @@ impl SynapseConnection {
             local_id,
             alive: std::sync::atomic::AtomicBool::new(true),
             session_token: Mutex::new(String::new()),
+            session_token_created: Mutex::new(None),
             quality: Mutex::new(ConnectionQuality::default()),
             ping_sent_at: Mutex::new(None),
             created_at: now,
@@ -173,15 +185,23 @@ impl SynapseConnection {
             bail!("Connection to {} is dead", self.peer_id);
         }
         let mut reader = self.reader.lock().await;
-        let frame =
-            codec::read_frame(&mut *reader, self.negotiated_max_signal_size as usize).await?;
-        let signal = codec::decode_frame(&frame)?;
+        loop {
+            let frame =
+                codec::read_frame(&mut *reader, self.negotiated_max_signal_size as usize).await?;
 
-        // Any received signal resets the heartbeat counter (Spec Section 18.3)
-        *self.last_received.lock().await = Instant::now();
-        self.missed_pong_count.store(0, Ordering::Relaxed);
+            // Any received frame resets the heartbeat counter (Spec Section 18.3)
+            *self.last_received.lock().await = Instant::now();
+            self.missed_pong_count.store(0, Ordering::Relaxed);
 
-        Ok(signal)
+            match codec::decode_frame(&frame)? {
+                Some(signal) => return Ok(signal),
+                None => {
+                    // Unknown signal type — skip frame per Spec Sec 12.3
+                    // (warning already logged by decode_frame)
+                    continue;
+                }
+            }
+        }
     }
 
     /// Get a clone of the Arc'd writer for shared access (e.g., heartbeat task).
@@ -189,10 +209,19 @@ impl SynapseConnection {
         self.writer.clone()
     }
 
-    /// Register a channel as active.
+    /// Register a channel as active with default flow-control window.
     pub async fn open_channel(&self, id: u32) {
         let mut channels = self.channels.lock().await;
-        channels.insert(id, ChannelState { id, active: true });
+        channels.insert(
+            id,
+            ChannelState {
+                id,
+                active: true,
+                recv_window: DEFAULT_RECV_WINDOW,
+                recv_window_max: DEFAULT_RECV_WINDOW,
+                bytes_in_flight: 0,
+            },
+        );
     }
 
     /// Close a channel.
@@ -211,6 +240,17 @@ impl SynapseConnection {
     /// Check if the connection is still alive.
     pub fn is_alive(&self) -> bool {
         self.alive.load(Ordering::Relaxed)
+    }
+
+    /// Check if the session token is still valid (not expired).
+    /// Default expiry: 24 hours (Section 14.5).
+    pub async fn is_session_valid(&self) -> bool {
+        const SESSION_EXPIRY: Duration = Duration::from_secs(24 * 3600);
+        let created = self.session_token_created.lock().await;
+        match *created {
+            Some(t) => t.elapsed() < SESSION_EXPIRY,
+            None => false, // no session established
+        }
     }
 
     /// Check if a signal type is allowed by negotiated capabilities
@@ -255,6 +295,13 @@ impl SynapseConnection {
                 caps.iter().any(|c| c == "pubsub")
             }
         }
+    }
+
+    /// Check if a specific capability was negotiated during handshake
+    /// (Spec Section 12.4).
+    pub async fn is_capability_negotiated(&self, cap: &str) -> bool {
+        let caps = self.negotiated_capabilities.lock().await;
+        caps.iter().any(|c| c == cap)
     }
 
     /// Record a PONG response and compute RTT if we have a matching
@@ -340,6 +387,7 @@ impl SynapseConnection {
         // Generate session token (Spec Section 14.5)
         let session_token = uuid::Uuid::new_v4().to_string();
         *self.session_token.lock().await = session_token.clone();
+        *self.session_token_created.lock().await = Some(Instant::now());
 
         // Check if the peer sent a previous session token (reconnect)
         let peer_session_token = hs

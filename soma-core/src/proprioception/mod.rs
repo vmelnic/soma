@@ -121,6 +121,21 @@ impl Proprioception {
         )
     }
 
+    /// Get current process RSS in bytes (macOS via libc::getrusage).
+    pub fn current_rss_bytes() -> u64 {
+        let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+        let rc = unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
+        if rc == 0 {
+            // macOS: ru_maxrss is in bytes. Linux: in KB.
+            #[cfg(target_os = "macos")]
+            { usage.ru_maxrss as u64 }
+            #[cfg(not(target_os = "macos"))]
+            { (usage.ru_maxrss as u64) * 1024 }
+        } else {
+            0
+        }
+    }
+
     /// Serialize for MCP health endpoint.
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
@@ -137,6 +152,7 @@ impl Proprioception {
             "checkpoints_saved": self.checkpoints_saved,
             "consolidations": self.consolidations,
             "decisions_recorded": self.total_decisions_recorded,
+            "memory_rss_bytes": Self::current_rss_bytes(),
         })
     }
 }

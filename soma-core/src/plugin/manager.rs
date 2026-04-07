@@ -20,6 +20,15 @@ pub struct TraceEntry {
     pub summary: String,
 }
 
+/// Per-convention execution statistics (Section 19.3).
+#[derive(Debug, Default)]
+pub struct ConventionStats {
+    pub call_count: u64,
+    pub total_time_ms: u64,
+    pub error_count: u64,
+    pub timeout_count: u64,
+}
+
 pub struct PluginManager {
     plugins: Vec<Box<dyn SomaPlugin>>,
     /// Maps convention ID (from catalog) -> (plugin_index, plugin_convention_id)
@@ -27,8 +36,13 @@ pub struct PluginManager {
     /// Tracks crashed plugins via interior mutability — execute_step(&self) can mark
     /// crashed plugins without &mut self (Section 11.3).
     crashed_plugins: std::sync::RwLock<std::collections::HashSet<usize>>,
+    /// Name-based convention lookup (Section 5.4). Maps "plugin.convention" → global_id.
+    /// Used for future name-based model predictions. Currently populated alongside ID routing.
+    name_routing: std::collections::HashMap<String, u32>,
     /// Optional metrics reference for tracking plugin calls
     metrics: Option<std::sync::Arc<crate::metrics::SomaMetrics>>,
+    /// Per-convention stats: global_id -> stats (Section 19.3)
+    convention_stats: std::sync::RwLock<std::collections::HashMap<u32, ConventionStats>>,
 }
 
 impl PluginManager {
@@ -36,8 +50,10 @@ impl PluginManager {
         Self {
             plugins: Vec::new(),
             routing: std::collections::HashMap::new(),
+            name_routing: std::collections::HashMap::new(),
             crashed_plugins: std::sync::RwLock::new(std::collections::HashSet::new()),
             metrics: None,
+            convention_stats: std::sync::RwLock::new(std::collections::HashMap::new()),
         }
     }
 
@@ -48,6 +64,8 @@ impl PluginManager {
 
     /// Register a plugin. Checks dependencies are satisfied before registering
     /// (Whitepaper Section 6.7 — topological sort).
+    // Future: libloading-based dynamic plugin loading from .so/.dylib files (Section 5.3).
+    // Currently only built-in plugins are supported.
     pub fn register(&mut self, plugin: Box<dyn SomaPlugin>) {
         // Check dependencies are satisfied
         let deps = plugin.dependencies();
@@ -81,6 +99,8 @@ impl PluginManager {
                 continue;
             }
             self.routing.insert(global_id, (plugin_idx, conv.id));
+            let full_name = format!("{}.{}", plugin.name(), conv.name);
+            self.name_routing.insert(full_name, global_id);
             registered += 1;
         }
         tracing::info!(
@@ -160,7 +180,8 @@ impl PluginManager {
             }
         }
 
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let start = std::time::Instant::now();
+        let outcome = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.plugins[idx].execute(cid, args)
         })) {
             Ok(result) => {
@@ -184,7 +205,20 @@ impl PluginManager {
                 }
                 Err(PluginError::Failed(msg))
             }
+        };
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+
+        // Track per-convention stats (Section 19.3)
+        if let Ok(mut stats_map) = self.convention_stats.write() {
+            let stats = stats_map.entry(conv_id).or_default();
+            stats.call_count += 1;
+            stats.total_time_ms += elapsed_ms;
+            if outcome.is_err() {
+                stats.error_count += 1;
+            }
         }
+
+        outcome
     }
 
     // mark_crashed is handled automatically by execute_step via interior mutability.
@@ -313,7 +347,8 @@ impl PluginManager {
                         // Look up the convention's cleanup action
                         let convs = self.conventions();
                         if let Some(conv) = convs.iter().find(|c| c.id == prev_step.conv_id as u32) {
-                            if let Some(cleanup_id) = conv.cleanup_convention {
+                            if let Some(ref cleanup_spec) = conv.cleanup {
+                                let cleanup_id = cleanup_spec.convention_id;
                                 if j < results.len() {
                                     let cleanup_args = vec![results[j].clone()];
                                     tracing::debug!(
@@ -375,6 +410,12 @@ impl PluginManager {
         self.execute_step_with_retry(global_id, args)
     }
 
+    /// Resolve a convention by name (Section 5.4).
+    /// Format: "plugin_name.convention_name" → global routing ID.
+    pub fn resolve_by_name(&self, name: &str) -> Option<u32> {
+        self.name_routing.get(name).copied()
+    }
+
     pub fn conventions(&self) -> Vec<Convention> {
         self.plugins.iter().flat_map(|p| p.conventions()).collect()
     }
@@ -406,6 +447,23 @@ impl PluginManager {
         }
     }
 
+    /// Get plugin manifest — list of (name, version) for all loaded plugins.
+    pub fn plugin_manifest(&self) -> Vec<(String, String)> {
+        self.plugins.iter().map(|p| (p.name().to_string(), p.version().to_string())).collect()
+    }
+
+    /// Get per-convention execution stats snapshot (Section 19.3).
+    pub fn get_convention_stats(&self) -> std::collections::HashMap<u32, ConventionStats> {
+        self.convention_stats.read()
+            .map(|s| s.iter().map(|(k, v)| (*k, ConventionStats {
+                call_count: v.call_count,
+                total_time_ms: v.total_time_ms,
+                error_count: v.error_count,
+                timeout_count: v.timeout_count,
+            })).collect())
+            .unwrap_or_default()
+    }
+
     /// Get conventions with plugin name prefix for namespacing (Section 12.2).
     pub fn namespaced_conventions(&self) -> Vec<(String, Convention)> {
         self.plugins.iter()
@@ -417,12 +475,14 @@ impl PluginManager {
     }
 
     /// Call on_unload for all plugins during shutdown (Section 11.4).
+    /// Unloads in reverse registration order (Whitepaper Section 16.2 step 6).
     pub fn unload_all(&mut self) {
-        for plugin in self.plugins.iter_mut() {
-            if let Err(e) = plugin.on_unload() {
-                tracing::warn!(plugin = plugin.name(), error = %e, "Plugin unload error");
+        for i in (0..self.plugins.len()).rev() {
+            let name = self.plugins[i].name().to_string();
+            if let Err(e) = self.plugins[i].on_unload() {
+                tracing::warn!(plugin = %name, error = %e, "Plugin unload error");
             } else {
-                tracing::debug!(plugin = plugin.name(), "Plugin unloaded");
+                tracing::debug!(plugin = %name, "Plugin unloaded");
             }
         }
     }

@@ -62,15 +62,48 @@ impl PosixPlugin {
                 vec![], "string", 1, None),
             conv(15, "get_uname",       "Get system info",
                 vec![], "map", 1, None),
+            // High-level filesystem operations (Catalog Section 4)
+            conv(16, "read_file",       "Read entire file contents",
+                vec![arg("path", "string", true, "File path")],
+                "string", 10, None),
+            conv(17, "write_file",      "Write content to file (create/overwrite)",
+                vec![arg("path", "string", true, "File path"),
+                     arg("content", "string", true, "Content to write")],
+                "void", 10, None),
+            conv(18, "list_dir_simple", "List directory contents (single call)",
+                vec![arg("path", "string", true, "Directory path")],
+                "list", 15, None),
+            conv(19, "copy_file",       "Copy file from source to destination",
+                vec![arg("from", "string", true, "Source path"),
+                     arg("to", "string", true, "Destination path")],
+                "void", 15, None),
+            conv(20, "read_chunk",      "Read N bytes from file handle",
+                vec![arg("fd", "handle", true, "File descriptor"),
+                     arg("size", "int", true, "Bytes to read")],
+                "bytes", 5, None),
+            conv(21, "append_file",     "Append content to file",
+                vec![arg("path", "string", true, "File path"),
+                     arg("content", "string", true, "Content to append")],
+                "void", 10, None),
         ];
         Self { conventions }
     }
 }
 
 fn arg(name: &str, arg_type: &str, required: bool, desc: &str) -> super::interface::ArgSpec {
+    use super::interface::ArgType;
+    let at = match arg_type {
+        "int" => ArgType::Int,
+        "float" => ArgType::Float,
+        "bool" => ArgType::Bool,
+        "bytes" => ArgType::Bytes,
+        "handle" => ArgType::Handle,
+        "any" => ArgType::Any,
+        _ => ArgType::String, // "string" and fallback
+    };
     super::interface::ArgSpec {
         name: name.to_string(),
-        arg_type: arg_type.to_string(),
+        arg_type: at,
         required,
         description: desc.to_string(),
     }
@@ -78,15 +111,36 @@ fn arg(name: &str, arg_type: &str, required: bool, desc: &str) -> super::interfa
 
 fn conv(id: u32, name: &str, desc: &str, args: Vec<super::interface::ArgSpec>, ret: &str,
         latency_ms: u32, cleanup: Option<u32>) -> Convention {
+    use super::interface::{ReturnSpec, CleanupSpec, SideEffect};
+    let returns = match ret {
+        "handle" => ReturnSpec::Handle,
+        "string" => ReturnSpec::Value("string".into()),
+        "int" => ReturnSpec::Value("int".into()),
+        "bool" => ReturnSpec::Value("bool".into()),
+        "list" => ReturnSpec::Value("list".into()),
+        "map" => ReturnSpec::Value("map".into()),
+        "bytes" => ReturnSpec::Value("bytes".into()),
+        _ => ReturnSpec::Void,
+    };
+    // Conventions with side effects: create/delete/rename/write/mkdir + high-level write/copy/append
+    let side_effects = match id {
+        1 | 3 | 8 | 9 | 10 | 17 | 19 | 21 => vec![SideEffect("filesystem".into())],
+        _ => vec![],
+    };
+    // Deterministic: stat, access, cwd, uname are deterministic-ish; reads depend on state
+    let is_deterministic = matches!(id, 11 | 13);
     Convention {
         id,
         name: name.to_string(),
         description: desc.to_string(),
         call_pattern: "builtin".to_string(),
         args,
-        return_type: ret.to_string(),
+        returns,
+        is_deterministic,
         estimated_latency_ms: latency_ms,
-        cleanup_convention: cleanup,
+        max_latency_ms: 30000,
+        side_effects,
+        cleanup: cleanup.map(|cid| CleanupSpec { convention_id: cid, pass_result_as: 0 }),
     }
 }
 
@@ -114,6 +168,7 @@ impl SomaPlugin for PosixPlugin {
             filesystem: vec!["/".to_string()],
             network: vec![],
             env_vars: vec!["HOME".to_string(), "PATH".to_string()],
+            process_spawn: false,
         }
     }
 
@@ -189,7 +244,7 @@ impl SomaPlugin for PosixPlugin {
                     }
                 }
                 entries.sort();
-                Ok(Value::List(entries))
+                Ok(Value::List(entries.into_iter().map(Value::String).collect()))
             }
             // close_dir
             7 => {
@@ -233,11 +288,11 @@ impl SomaPlugin for PosixPlugin {
                 let mut stat: libc::stat = unsafe { std::mem::zeroed() };
                 let rc = unsafe { libc::stat(path.as_ptr(), &mut stat) };
                 if rc != 0 { return Err(PluginError::NotFound(format!("stat failed: {}", args[0]))); }
-                Ok(Value::Map(vec![
-                    ("size".into(), stat.st_size.to_string()),
-                    ("mode".into(), format!("{:o}", stat.st_mode)),
-                    ("modified".into(), stat.st_mtime.to_string()),
-                ]))
+                Ok(Value::Map(std::collections::HashMap::from([
+                    ("size".to_string(), Value::Int(stat.st_size as i64)),
+                    ("mode".to_string(), Value::String(format!("{:o}", stat.st_mode))),
+                    ("modified".to_string(), Value::Int(stat.st_mtime as i64)),
+                ])))
             }
             // get_cwd
             13 => {
@@ -262,11 +317,68 @@ impl SomaPlugin for PosixPlugin {
                 let sysname = unsafe { std::ffi::CStr::from_ptr(uts.sysname.as_ptr()).to_string_lossy().to_string() };
                 let machine = unsafe { std::ffi::CStr::from_ptr(uts.machine.as_ptr()).to_string_lossy().to_string() };
                 let release = unsafe { std::ffi::CStr::from_ptr(uts.release.as_ptr()).to_string_lossy().to_string() };
-                Ok(Value::Map(vec![
-                    ("system".into(), sysname),
-                    ("machine".into(), machine),
-                    ("release".into(), release),
-                ]))
+                Ok(Value::Map(std::collections::HashMap::from([
+                    ("system".to_string(), Value::String(sysname)),
+                    ("machine".to_string(), Value::String(machine)),
+                    ("release".to_string(), Value::String(release)),
+                ])))
+            }
+            // High-level filesystem operations (Catalog Section 4)
+            // read_file — single-call: reads entire file to string
+            16 => {
+                let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
+                let content = std::fs::read_to_string(&path)
+                    .map_err(|e| PluginError::NotFound(format!("read_file failed: {}", e)))?;
+                Ok(Value::String(content))
+            }
+            // write_file — single-call: create/overwrite file
+            17 => {
+                let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
+                let content = match &args[1] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
+                std::fs::write(&path, &content)
+                    .map_err(|e| PluginError::Failed(format!("write_file failed: {}", e)))?;
+                Ok(Value::Null)
+            }
+            // list_dir_simple — single-call: list directory entries sorted
+            18 => {
+                let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
+                let mut entries = Vec::new();
+                for entry in std::fs::read_dir(&path).map_err(|e| PluginError::NotFound(format!("{}", e)))? {
+                    if let Ok(e) = entry {
+                        let name = e.file_name().to_string_lossy().to_string();
+                        entries.push(Value::String(name));
+                    }
+                }
+                entries.sort_by(|a, b| format!("{}", a).cmp(&format!("{}", b)));
+                Ok(Value::List(entries))
+            }
+            // copy_file — single-call: copy file
+            19 => {
+                let from = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
+                let to = match &args[1] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
+                std::fs::copy(&from, &to).map_err(|e| PluginError::Failed(format!("copy failed: {}", e)))?;
+                Ok(Value::Null)
+            }
+            // read_chunk — read N bytes from fd (low-level handle, high-level size)
+            20 => {
+                let fd = get_fd(&args[0])?;
+                let size = match &args[1] { Value::Int(n) => *n as usize, _ => return Err(PluginError::InvalidArg("expected int".into())) };
+                let mut buf = vec![0u8; size];
+                let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, size) };
+                if n < 0 { return Err(PluginError::Failed("read_chunk failed".into())); }
+                buf.truncate(n as usize);
+                Ok(Value::Bytes(buf))
+            }
+            // append_file — single-call: append to file (create if missing)
+            21 => {
+                let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
+                let content = match &args[1] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
+                use std::io::Write;
+                let mut file = std::fs::OpenOptions::new().append(true).create(true).open(&path)
+                    .map_err(|e| PluginError::Failed(format!("append failed: {}", e)))?;
+                file.write_all(content.as_bytes())
+                    .map_err(|e| PluginError::Failed(format!("append write failed: {}", e)))?;
+                Ok(Value::Null)
             }
             _ => Err(PluginError::NotFound(format!("unknown convention: {}", conv_id))),
         }

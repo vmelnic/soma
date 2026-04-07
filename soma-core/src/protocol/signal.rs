@@ -84,6 +84,13 @@ impl SignalType {
     pub fn to_u8(self) -> u8 {
         self as u8
     }
+
+    /// Whether this signal type is a control signal (must use channel 0).
+    pub fn is_control(&self) -> bool {
+        matches!(self, Self::Handshake | Self::HandshakeAck | Self::Close |
+                 Self::Ping | Self::Pong | Self::Error | Self::Control |
+                 Self::Discover | Self::DiscoverAck | Self::PeerQuery | Self::PeerList)
+    }
 }
 
 bitflags! {

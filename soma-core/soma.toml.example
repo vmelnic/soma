@@ -5,12 +5,14 @@
 # id = "soma-myhost"           # Instance ID (default: soma-{hostname})
 # log_level = "info"           # trace, debug, info, warn, error
 # trace_verbosity = "normal"   # terse, normal, verbose (program trace output)
+# plugins_directory = "plugins" # Directory for plugin libraries
 
 [mind]
 # backend = "onnx"             # Mind engine backend
 # model_dir = "models"         # Path to ONNX model directory
 # max_program_steps = 32       # Maximum steps per program execution
 # temperature = 1.0            # Softmax temperature (lower = more deterministic)
+# max_inference_time_secs = 5  # Max wall-clock seconds per inference (future enforcement)
 
 [mind.lora]
 # default_rank = 8             # LoRA adapter rank
@@ -19,24 +21,38 @@
 # adapt_every_n_successes = 10 # Adapt after N successful executions
 # adapt_batch_size = 8         # Experience batch size for adaptation
 # adapt_learning_rate = 0.001  # LoRA learning rate
+# max_lora_layers = 64         # Maximum LoRA adapter layers (Section 20.1)
 
 [memory]
 # checkpoint_dir = "checkpoints"   # Checkpoint storage directory
 # auto_checkpoint = true           # Auto-checkpoint on shutdown
 # max_checkpoints = 5              # Keep newest N checkpoints
 # max_experience_buffer = 1000     # Experience ring buffer size
+# checkpoint_interval_secs = 3600  # Periodic checkpoint interval (seconds)
+
+[memory.consolidation]
+# enabled = true                   # Enable experience consolidation
+# trigger = "experience_count"     # Consolidation trigger strategy
+# threshold = 500                  # Trigger threshold value
+# min_lora_magnitude = 0.01        # Minimum LoRA weight magnitude to retain
 
 [protocol]
 # bind = "127.0.0.1:9999"     # Synaptic Protocol server address
 # max_connections = 16          # Maximum concurrent connections
+# connection_timeout_secs = 60  # Connection timeout (seconds)
 
 [protocol.peers]
 # peer-a = "192.168.1.10:9999"  # Static peer configuration
 # peer-b = "192.168.1.11:9999"
 
+[protocol.encryption]
+# enabled = false              # Enable connection encryption
+# key_file = ""                # Path to encryption key file
+
 [resources]
 # max_concurrent_inferences = 4       # Concurrent inference limit
 # max_concurrent_plugin_calls = 8     # Plugin call parallelism
+# max_plugins_loaded = 50              # Max simultaneously loaded plugins (Section 20.1)
 
 [mcp]
 # transport = "stdio"          # MCP transport: "stdio" or "http"
@@ -45,6 +61,8 @@
 # max_execution_history = 500  # Execution history ring buffer
 
 [security]
-# require_auth = false         # Require auth tokens for MCP
-# admin_token = ""             # Pre-configured admin token
-# require_confirmation = true  # Two-step confirmation for destructive actions
+# require_auth = false                        # Require auth tokens for MCP
+# admin_token_env = "SOMA_MCP_ADMIN_TOKEN"    # Env var holding admin token
+# builder_token_env = "SOMA_MCP_BUILDER_TOKEN" # Env var holding builder token
+# viewer_token_env = "SOMA_MCP_VIEWER_TOKEN"  # Env var holding viewer token
+# require_confirmation = true                 # Two-step confirmation for destructive actions

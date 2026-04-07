@@ -78,13 +78,14 @@ impl JsonRpcResponse {
 pub struct McpServer {
     pub config: SomaConfig,
     pub mind: Arc<RwLock<OnnxMindEngine>>,
-    pub plugins: Arc<PluginManager>,
+    pub plugins: Arc<RwLock<PluginManager>>,
     pub proprio: Arc<RwLock<Proprioception>>,
     pub experience: Arc<RwLock<ExperienceBuffer>>,
     pub state: Arc<RwLock<SomaState>>,
     pub metrics: Arc<SomaMetrics>,
     pub peers: Arc<RwLock<PeerRegistry>>,
     pub auth: Arc<RwLock<AuthManager>>,
+    pub shutdown_requested: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl McpServer {
@@ -177,7 +178,7 @@ impl McpServer {
 
     /// Handle tools/list — return all available tools.
     fn handle_tools_list(&self, id: &serde_json::Value) -> JsonRpcResponse {
-        let conventions = self.plugins.namespaced_conventions();
+        let conventions = self.plugins.read().unwrap().namespaced_conventions();
         let tool_list = tools::build_tool_list(&conventions);
         JsonRpcResponse::success(id.clone(), serde_json::json!({
             "tools": tool_list,
@@ -268,9 +269,11 @@ impl McpServer {
             || call.name == "soma.record_decision"
             || call.name == "soma.install_plugin"
             || call.name == "soma.restore_checkpoint"
+            || call.name == "soma.shutdown"
             || call.name.starts_with("soma.posix.");
         let is_admin = call.name == "soma.install_plugin"
-            || call.name == "soma.restore_checkpoint";
+            || call.name == "soma.restore_checkpoint"
+            || call.name == "soma.shutdown";
 
         {
             let auth = self.auth.read().unwrap();
@@ -322,6 +325,7 @@ impl McpServer {
             "soma.confirm" => self.tool_confirm(&call.arguments),
             "soma.install_plugin" => self.tool_install_plugin(&call.arguments),
             "soma.restore_checkpoint" => self.tool_restore_checkpoint(&call.arguments),
+            "soma.shutdown" => self.tool_shutdown(),
 
             // Plugin convention tools — dynamically namespaced: soma.{plugin}.{convention}
             name if name.starts_with("soma.") && name.matches('.').count() >= 2 => {
@@ -367,7 +371,7 @@ impl McpServer {
                 "name": p.name,
                 "addr": p.addr,
             })).collect::<Vec<_>>(),
-            "plugins": self.plugins.conventions().iter().map(|c| &c.name).collect::<Vec<_>>(),
+            "plugins": self.plugins.read().unwrap().conventions().iter().map(|c| &c.name).collect::<Vec<_>>(),
         });
 
         McpToolResult::json(result)
@@ -375,7 +379,7 @@ impl McpServer {
 
     fn tool_get_plugins(&self) -> McpToolResult {
         // Show namespaced conventions with full metadata including cleanup
-        let namespaced = self.plugins.namespaced_conventions();
+        let namespaced = self.plugins.read().unwrap().namespaced_conventions();
         let mut plugins_map: std::collections::HashMap<String, Vec<serde_json::Value>> =
             std::collections::HashMap::new();
 
@@ -386,9 +390,12 @@ impl McpServer {
                 "full_name": format!("soma.{}.{}", plugin_name, c.name),
                 "description": c.description,
                 "call_pattern": c.call_pattern,
-                "return_type": c.return_type,
+                "returns": c.returns,
+                "is_deterministic": c.is_deterministic,
                 "estimated_latency_ms": c.estimated_latency_ms,
-                "cleanup_convention": c.cleanup_convention,
+                "max_latency_ms": c.max_latency_ms,
+                "side_effects": c.side_effects,
+                "cleanup": c.cleanup,
                 "args": c.args,
             });
             plugins_map.entry(plugin_name.clone()).or_default().push(entry);
@@ -411,7 +418,7 @@ impl McpServer {
     }
 
     fn tool_get_conventions(&self) -> McpToolResult {
-        let conventions = self.plugins.conventions();
+        let conventions = self.plugins.read().unwrap().conventions();
         McpToolResult::json(serde_json::to_value(&conventions).unwrap_or_default())
     }
 
@@ -456,12 +463,18 @@ impl McpServer {
 
     fn tool_get_experience(&self) -> McpToolResult {
         let exp = self.experience.read().unwrap();
+        let mind_info = self.mind.read().unwrap().info();
+        let proprio = self.proprio.read().unwrap();
         McpToolResult::json(serde_json::json!({
             "buffer_size": exp.len(),
             "max_size": self.config.memory.max_experience_buffer,
             "total_seen": exp.total_seen(),
             "success_count": exp.success_count(),
             "failure_count": exp.failure_count(),
+            "lora_magnitude": mind_info.lora_magnitude,
+            "lora_layers": mind_info.lora_layers,
+            "adaptation_count": proprio.total_adaptations,
+            "consolidation_count": proprio.consolidations,
         }))
     }
 
@@ -500,6 +513,7 @@ impl McpServer {
                 "model_dir": self.config.mind.model_dir,
                 "max_program_steps": self.config.mind.max_program_steps,
                 "temperature": self.config.mind.temperature,
+                "max_inference_time_secs": self.config.mind.max_inference_time_secs,
                 "lora": {
                     "default_rank": self.config.mind.lora.default_rank,
                     "default_alpha": self.config.mind.lora.default_alpha,
@@ -624,7 +638,7 @@ impl McpServer {
         let mind_guard = self.mind.read().unwrap();
         match mind_guard.infer(text) {
             Ok(program) => {
-                let result = self.plugins.execute_program(
+                let result = self.plugins.read().unwrap().execute_program(
                     &program.steps,
                     self.config.mind.max_program_steps,
                 );
@@ -664,13 +678,16 @@ impl McpServer {
                     (s.conv_id, a0, a1)
                 }).collect();
                 if let Ok(mut buf) = self.experience.write() {
-                    buf.record(crate::memory::experience::Experience {
-                        intent_tokens: tokens,
-                        program: prog_data,
-                        success: result.success,
-                        execution_time_ms,
-                        timestamp: std::time::Instant::now(),
-                    });
+                    // Section 17.1: Only successful executions are recorded
+                    if result.success {
+                        buf.record(crate::memory::experience::Experience {
+                            intent_tokens: tokens,
+                            program: prog_data,
+                            success: result.success,
+                            execution_time_ms,
+                            timestamp: std::time::Instant::now(),
+                        });
+                    }
                     // Update experience buffer gauge
                     self.metrics.experience_buffer_size.store(
                         buf.len() as u64,
@@ -722,7 +739,7 @@ impl McpServer {
         };
 
         // Collect plugin state (same as do_checkpoint in main.rs)
-        let plugin_states = self.plugins.collect_plugin_states();
+        let plugin_states = self.plugins.read().unwrap().collect_plugin_states();
         let plugin_state_entries: Vec<crate::memory::checkpoint::PluginStateEntry> = plugin_states
             .into_iter()
             .map(|(name, state)| crate::memory::checkpoint::PluginStateEntry {
@@ -738,6 +755,12 @@ impl McpServer {
             adapt_count,
         );
         ckpt.plugin_states = plugin_state_entries;
+        if let Ok(m) = self.mind.read() {
+            ckpt.base_model_hash = m.model_hash.clone();
+        }
+        ckpt.plugin_manifest = self.plugins.read().unwrap().plugin_manifest().into_iter()
+            .map(|(name, version)| crate::memory::checkpoint::PluginManifestEntry { name, version })
+            .collect();
 
         // Persist decisions and execution history
         if let Ok(st) = self.state.read() {
@@ -821,14 +844,38 @@ impl McpServer {
             None => return McpToolResult::error("Missing required argument: name".into()),
         };
 
-        // Plugin installation requires the plugin registry (future feature).
-        // For now, return informative error about available plugins.
-        McpToolResult::json(serde_json::json!({
-            "success": false,
-            "error": format!("Plugin registry not yet available. Cannot install '{}'.", name),
-            "available_builtin": ["posix"],
-            "note": "Dynamic plugin loading will be available when .soma-plugin archive format is implemented.",
-        }))
+        // Look for plugin .so/.dylib in plugins directory
+        let plugins_dir = std::path::Path::new(&self.config.soma.plugins_directory);
+        let ext = if cfg!(target_os = "macos") { "dylib" } else { "so" };
+        let plugin_path = plugins_dir.join(format!("lib{}.{}", name, ext));
+
+        if !plugin_path.exists() {
+            return McpToolResult::json(serde_json::json!({
+                "success": false,
+                "error": format!("Plugin file not found: {}", plugin_path.display()),
+                "searched": plugins_dir.display().to_string(),
+                "expected_filename": format!("lib{}.{}", name, ext),
+            }));
+        }
+
+        match crate::plugin::dynamic::load_plugin_from_path(&plugin_path) {
+            Ok(plugin) => {
+                let pname = plugin.name().to_string();
+                let pversion = plugin.version().to_string();
+                let conv_count = plugin.conventions().len();
+                // Register dynamically via write lock
+                let mut pm = self.plugins.write().unwrap();
+                pm.register(plugin);
+                McpToolResult::json(serde_json::json!({
+                    "success": true,
+                    "plugin": pname,
+                    "version": pversion,
+                    "conventions": conv_count,
+                    "note": "Plugin loaded and registered at runtime",
+                }))
+            }
+            Err(e) => McpToolResult::error(format!("Failed to load plugin: {}", e)),
+        }
     }
 
     fn tool_restore_checkpoint(&self, args: &serde_json::Value) -> McpToolResult {
@@ -898,6 +945,15 @@ impl McpServer {
         }
     }
 
+    fn tool_shutdown(&self) -> McpToolResult {
+        tracing::info!(component = "mcp", action = "shutdown", "Graceful shutdown requested via MCP");
+        self.shutdown_requested.store(true, std::sync::atomic::Ordering::SeqCst);
+        McpToolResult::json(serde_json::json!({
+            "success": true,
+            "message": "Shutdown requested. SOMA will terminate gracefully.",
+        }))
+    }
+
     fn tool_plugin_call(&self, tool_name: &str, args: &serde_json::Value) -> McpToolResult {
         // Dynamic plugin namespacing: soma.{plugin}.{convention} (Section 12.2)
         let parts: Vec<&str> = tool_name.splitn(3, '.').collect();
@@ -907,7 +963,7 @@ impl McpServer {
         let plugin_name = parts[1]; // e.g. "posix"
         let conv_name = parts[2]; // e.g. "open_read"
 
-        let conventions = self.plugins.conventions();
+        let conventions = self.plugins.read().unwrap().conventions();
         let conv = match conventions.iter().find(|c| c.name == conv_name) {
             Some(c) => c,
             None => return McpToolResult::error(format!("Unknown convention: {}", conv_name)),
@@ -917,11 +973,15 @@ impl McpServer {
         let mut plugin_args = Vec::new();
         for arg_spec in &conv.args {
             if let Some(val) = args.get(&arg_spec.name) {
-                let pval = match arg_spec.arg_type.as_str() {
-                    "int" | "handle" => {
+                use crate::plugin::interface::ArgType;
+                let pval = match arg_spec.arg_type {
+                    ArgType::Int | ArgType::Handle => {
                         crate::plugin::interface::Value::Int(val.as_i64().unwrap_or(0))
                     }
-                    "bool" => {
+                    ArgType::Float => {
+                        crate::plugin::interface::Value::Float(val.as_f64().unwrap_or(0.0))
+                    }
+                    ArgType::Bool => {
                         crate::plugin::interface::Value::Bool(val.as_bool().unwrap_or(false))
                     }
                     _ => {
@@ -938,7 +998,7 @@ impl McpServer {
             }
         }
 
-        match self.plugins.execute_by_plugin(plugin_name, conv.id, plugin_args) {
+        match self.plugins.read().unwrap().execute_by_plugin(plugin_name, conv.id, plugin_args) {
             Ok(val) => McpToolResult::json(serde_json::json!({
                 "success": true,
                 "result": format!("{}", val),

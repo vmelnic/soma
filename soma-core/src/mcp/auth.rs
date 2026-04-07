@@ -97,8 +97,23 @@ impl AuthManager {
         token
     }
 
-    /// Register a pre-configured admin token (from config).
+    /// Register a pre-configured admin token (from config or env).
     pub fn register_admin_token(&mut self, token: String) {
+        self.register_token(token, AuthLevel::Admin);
+    }
+
+    /// Register a pre-configured builder token (from env).
+    pub fn register_builder_token(&mut self, token: String) {
+        self.register_token(token, AuthLevel::Builder);
+    }
+
+    /// Register a pre-configured viewer token (from env).
+    pub fn register_viewer_token(&mut self, token: String) {
+        self.register_token(token, AuthLevel::Viewer);
+    }
+
+    /// Register a token with a given auth level.
+    fn register_token(&mut self, token: String, level: AuthLevel) {
         let session_id = "config".to_string();
         let created_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -107,7 +122,7 @@ impl AuthManager {
 
         self.tokens.insert(token.clone(), AuthToken {
             token,
-            level: AuthLevel::Admin,
+            level,
             session_id,
             created_at,
         });

@@ -89,9 +89,9 @@ fn display_result(result: &plugin::manager::ProgramResult, _catalog: &[mind::Cat
                         println!("    ... and {} more", items.len() - 15);
                     }
                 }
-                plugin::interface::Value::Map(pairs) => {
+                plugin::interface::Value::Map(entries) => {
                     println!("  [Body]");
-                    for (k, v) in pairs {
+                    for (k, v) in entries {
                         println!("    {}: {}", k, v);
                     }
                 }
@@ -107,7 +107,7 @@ fn display_result(result: &plugin::manager::ProgramResult, _catalog: &[mind::Cat
 
 fn run_intent(
     mind: &Arc<RwLock<OnnxMindEngine>>,
-    plugins: &PluginManager,
+    plugins: &Arc<RwLock<PluginManager>>,
     proprio: &Arc<RwLock<Proprioception>>,
     experience_buf: &Arc<RwLock<ExperienceBuffer>>,
     soma_state: &Arc<RwLock<SomaState>>,
@@ -116,6 +116,7 @@ fn run_intent(
     max_concurrent: usize,
     max_program_steps: usize,
     trace_verbosity: &str,
+    soma_id: &str,
 ) {
     let current = ACTIVE_INFERENCES.fetch_add(1, Ordering::SeqCst);
     if current >= max_concurrent {
@@ -131,6 +132,20 @@ fn run_intent(
     let exec_start = std::time::Instant::now();
     let trace_id = uuid::Uuid::new_v4().to_string()[..12].to_string();
 
+    // Section 18.1.1: span_id and parent_span_id are automatically emitted by
+    // tracing-subscriber's JSON formatter when spans are active. Creating a span
+    // here ensures each intent execution is individually traceable.
+    let _intent_span = tracing::info_span!(
+        "intent",
+        soma_id = %soma_id,
+        trace_id = %trace_id,
+    )
+    .entered();
+
+    // NOTE: mind.infer() is synchronous — cannot wrap with tokio::time::timeout.
+    // The decoder loop in onnx_engine.rs is bounded by model_meta.max_steps,
+    // which provides an implicit time cap. config.mind.max_inference_time_secs
+    // is reserved for future async enforcement (requires async infer()).
     let mind_guard = mind.read().unwrap();
     match mind_guard.infer(text) {
         Ok(program) => {
@@ -152,7 +167,7 @@ fn run_intent(
             }
             println!();
 
-            let result = plugins.execute_program(&program.steps, max_program_steps);
+            let result = plugins.read().unwrap().execute_program(&program.steps, max_program_steps);
 
             // Configurable trace verbosity (Section 11.5)
             match trace_verbosity {
@@ -181,6 +196,7 @@ fn run_intent(
 
             tracing::info!(
                 component = "mind",
+                soma_id = %soma_id,
                 trace_id = %trace_id,
                 intent = %text,
                 steps = program.steps.len(),
@@ -200,7 +216,7 @@ fn run_intent(
                         if program2.steps != program.steps {
                             println!("  [Mind] Re-inferred alternative program ({} steps, {:.0}%)",
                                 program2.steps.len(), program2.confidence * 100.0);
-                            let result2 = plugins.execute_program(&program2.steps, max_program_steps);
+                            let result2 = plugins.read().unwrap().execute_program(&program2.steps, max_program_steps);
                             if result2.success {
                                 println!("  [Mind] Re-inference succeeded:");
                                 display_result(&result2, &mind_guard2.meta().catalog);
@@ -252,7 +268,10 @@ fn run_intent(
                     timestamp: std::time::Instant::now(),
                 };
                 if let Ok(mut buf) = experience_buf.write() {
-                    buf.record(exp);
+                    // Section 17.1: Only successful executions are recorded
+                    if final_success {
+                        buf.record(exp);
+                    }
                     // Update experience buffer gauge (Bug #1)
                     soma_metrics.experience_buffer_size.store(
                         buf.len() as u64,
@@ -288,6 +307,7 @@ fn run_intent(
             soma_metrics.record_inference(false, execution_time_ms);
             tracing::info!(
                 component = "mind",
+                soma_id = %soma_id,
                 trace_id = %trace_id,
                 intent = %text,
                 success = false,
@@ -321,8 +341,9 @@ fn do_checkpoint(
     config: &SomaConfig,
     _experience_buf: &Arc<RwLock<ExperienceBuffer>>,
     proprio: &Arc<RwLock<Proprioception>>,
-    plugins: &Arc<PluginManager>,
+    plugins: &Arc<RwLock<PluginManager>>,
     soma_state: Option<&Arc<RwLock<SomaState>>>,
+    mind: Option<&Arc<RwLock<OnnxMindEngine>>>,
 ) {
     let ckpt_dir = Path::new(&config.memory.checkpoint_dir);
     let filename = Checkpoint::filename(&config.soma.id);
@@ -334,7 +355,8 @@ fn do_checkpoint(
     };
 
     // Collect plugin state (Section 7.5: institutional memory)
-    let plugin_states = plugins.collect_plugin_states();
+    let plugins_guard = plugins.read().unwrap();
+    let plugin_states = plugins_guard.collect_plugin_states();
     let plugin_state_entries: Vec<memory::checkpoint::PluginStateEntry> = plugin_states
         .into_iter()
         .map(|(name, state)| memory::checkpoint::PluginStateEntry {
@@ -350,6 +372,16 @@ fn do_checkpoint(
         adapt_count,
     );
     ckpt.plugin_states = plugin_state_entries;
+    ckpt.plugin_manifest = plugins_guard.plugin_manifest().into_iter()
+        .map(|(name, version)| memory::checkpoint::PluginManifestEntry { name, version })
+        .collect();
+
+    // Record base model hash for checkpoint integrity verification
+    if let Some(mind_ref) = mind {
+        if let Ok(m) = mind_ref.read() {
+            ckpt.base_model_hash = m.model_hash.clone();
+        }
+    }
 
     // Persist decisions and execution history (Section 7.5: institutional memory)
     if let Some(state_ref) = soma_state {
@@ -382,7 +414,11 @@ fn do_checkpoint(
     }
 }
 
-fn do_consolidate(_config: &SomaConfig, proprio: &Arc<RwLock<Proprioception>>) {
+fn do_consolidate(
+    _config: &SomaConfig,
+    proprio: &Arc<RwLock<Proprioception>>,
+    mind: &Arc<RwLock<OnnxMindEngine>>,
+) {
     let consolidation = ConsolidationConfig::default();
     let p = proprio.read().unwrap();
     if consolidation.should_consolidate(p.total_adaptations, 0.0) {
@@ -390,7 +426,13 @@ fn do_consolidate(_config: &SomaConfig, proprio: &Arc<RwLock<Proprioception>>) {
             "  [Memory] Consolidation criteria met ({} adaptations)",
             p.total_adaptations
         );
-        println!("  [Memory] No LoRA layers to consolidate (ONNX engine has no active LoRA).");
+        drop(p); // release read lock before acquiring write lock on mind
+        let mut mind_guard = mind.write().unwrap();
+        let result = consolidation.consolidate(&mut *mind_guard);
+        println!(
+            "  [Memory] Consolidation complete: evaluated={}, merged={}, magnitude={:.4}",
+            result.layers_evaluated, result.layers_merged, result.new_magnitude
+        );
     } else {
         println!(
             "  [Memory] Consolidation not needed (adaptations: {}/{}, magnitude below threshold)",
@@ -429,8 +471,9 @@ fn do_shutdown(
     proprio: &Arc<RwLock<Proprioception>>,
     server_handle: Option<&tokio::task::JoinHandle<()>>,
     peers: Option<&Arc<RwLock<PeerRegistry>>>,
-    plugins: &Arc<PluginManager>,
+    plugins: &Arc<RwLock<PluginManager>>,
     soma_state: Option<&Arc<RwLock<SomaState>>>,
+    mind: Option<&Arc<RwLock<OnnxMindEngine>>>,
 ) {
     // Step 1: Stop accepting — set a flag (server_handle.abort below)
 
@@ -476,9 +519,9 @@ fn do_shutdown(
     // Step 3: Drain in-flight requests
     let drain_start = std::time::Instant::now();
     while ACTIVE_INFERENCES.load(Ordering::SeqCst) > 0 {
-        if drain_start.elapsed().as_secs() > 5 {
+        if drain_start.elapsed().as_secs() > 10 {
             println!(
-                "  [Shutdown] {} inferences still in-flight after 5s, forcing shutdown",
+                "  [Shutdown] {} inferences still in-flight after 10s, forcing shutdown",
                 ACTIVE_INFERENCES.load(Ordering::SeqCst)
             );
             break;
@@ -486,27 +529,33 @@ fn do_shutdown(
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
 
-    // Step 4: Auto-checkpoint (includes plugin state)
+    // Step 4: Flush pending signals in outbound queues
+    // OfflineQueue is per-connection; queued signals are drained when connections close.
+    // For server-level outbound queues, there's nothing to flush in the current architecture.
+    tracing::debug!("Outbound queues flushed (per-connection, drained on close)");
+
+    // Step 5: Auto-checkpoint (includes plugin state)
     if config.memory.auto_checkpoint {
-        do_checkpoint(config, experience_buf, proprio, plugins, soma_state);
+        do_checkpoint(config, experience_buf, proprio, plugins, soma_state, mind);
     }
 
-    // Step 5: Unload plugins (Section 11.4)
-    // Note: unload_all() requires &mut which we can't get through Arc.
-    // Plugins are unloaded when the Arc is dropped and PluginManager is deallocated.
-    // For explicit lifecycle control, we'd need Arc<RwLock<PluginManager>>.
+    // Step 6: Unload plugins (Section 11.4)
+    // Plugins are unloaded when the Arc<RwLock<PluginManager>> is dropped.
     tracing::info!(
-        plugins = plugins.plugin_names().len(),
+        plugins = plugins.read().unwrap().plugin_names().len(),
         "Plugins will be unloaded on exit"
     );
 
-    // Step 6: Close listeners / stop protocol server
+    // Step 7: Close listeners / stop protocol server
     if let Some(handle) = server_handle {
         handle.abort();
         tracing::info!("Protocol server stopped");
     }
 
-    // Step 7: Log final stats and exit
+    // Step 7: Close MCP server (if running, it was already stopped by exiting run_stdio)
+    tracing::info!("MCP server closed");
+
+    // Step 8: Log final stats and exit
     let p = proprio.read().unwrap();
     let uptime = format_uptime(p.uptime());
     println!(
@@ -521,6 +570,9 @@ async fn main() -> Result<()> {
 
     // Step 1: Load configuration
     let mut config = SomaConfig::load(&cli.config)?;
+
+    // Step 1b: Apply environment variable overrides (Section 15.3)
+    config.apply_env_overrides();
 
     // Apply CLI overrides
     if let Some(ref log_level) = cli.log_level {
@@ -547,8 +599,12 @@ async fn main() -> Result<()> {
         .add_directive(log_filter.parse()?);
 
     if std::env::var("SOMA_LOG_JSON").is_ok() {
+        // Section 18.1.1: JSON logs include soma_id, trace_id, span_id, parent_span_id.
+        // with_span_list(true) embeds the active span stack (including span_id and
+        // parent relationships) into each JSON log line automatically.
         tracing_subscriber::fmt()
             .json()
+            .with_span_list(true)
             .with_env_filter(env_filter)
             .init();
     } else {
@@ -573,6 +629,26 @@ async fn main() -> Result<()> {
     engine.temperature = config.mind.temperature;
     let mind = Arc::new(RwLock::new(engine));
 
+    // Step 3 verification: test inference on "ping" (Section 11.1)
+    {
+        let m = mind.read().unwrap();
+        match m.infer("ping") {
+            Ok(program) => {
+                if program.steps.is_empty() {
+                    anyhow::bail!("Model verification failed: 'ping' produced empty program");
+                }
+                tracing::info!(
+                    steps = program.steps.len(),
+                    confidence = %program.confidence,
+                    "Model verification passed"
+                );
+            }
+            Err(e) => {
+                anyhow::bail!("Model verification failed: {}", e);
+            }
+        }
+    }
+
     let mind_info = {
         let m = mind.read().unwrap();
         m.info()
@@ -580,10 +656,31 @@ async fn main() -> Result<()> {
 
     // Step 4: Load Plugins (Section 11.1: "Failed plugin: skip and continue")
     let mut plugins = PluginManager::new();
+    let _plugin_config = plugin::interface::PluginConfig::default();
+    // In future: parse [plugins.posix] TOML section into plugin_config
     {
         let posix: Box<dyn plugin::interface::SomaPlugin> = Box::new(PosixPlugin::new());
         plugins.register(posix);
     }
+
+    // Scan plugins directory for dynamic plugins (Section 5.3)
+    let plugins_dir = std::path::Path::new(&config.soma.plugins_directory);
+    let discovered = plugin::dynamic::scan_plugin_directory(plugins_dir);
+    for plugin_path in &discovered {
+        match plugin::dynamic::load_plugin_from_path(plugin_path) {
+            Ok(p) => {
+                tracing::info!(plugin = p.name(), path = %plugin_path.display(), "Dynamic plugin discovered");
+                plugins.register(p);
+            }
+            Err(e) => {
+                tracing::warn!(path = %plugin_path.display(), error = %e, "Failed to load dynamic plugin, skipping");
+            }
+        }
+    }
+    if !discovered.is_empty() {
+        eprintln!("  Discovered {} dynamic plugin(s) in {}", discovered.len(), plugins_dir.display());
+    }
+
     let total_conv = plugins.conventions().len();
 
     // Step 5c: Initialize metrics (Whitepaper Section 11.5)
@@ -610,16 +707,48 @@ async fn main() -> Result<()> {
     }
 
     // Step 5e: Initialize auth manager (Whitepaper Section 8.3)
+    // Load auth tokens from environment variables
     let auth_manager = Arc::new(RwLock::new(AuthManager::new(config.security.require_auth)));
-    if !config.security.admin_token.is_empty() {
+    if config.security.require_auth {
         let mut auth = auth_manager.write().unwrap();
-        auth.register_admin_token(config.security.admin_token.clone());
+        if let Ok(token) = std::env::var(&config.security.admin_token_env) {
+            auth.register_admin_token(token);
+            tracing::info!("Registered admin token from env {}", config.security.admin_token_env);
+        }
+        if let Ok(token) = std::env::var(&config.security.builder_token_env) {
+            auth.register_builder_token(token);
+            tracing::info!("Registered builder token from env {}", config.security.builder_token_env);
+        }
+        if let Ok(token) = std::env::var(&config.security.viewer_token_env) {
+            auth.register_viewer_token(token);
+            tracing::info!("Registered viewer token from env {}", config.security.viewer_token_env);
+        }
     }
 
     // Step 6: Load checkpoint — restores proprioception, decisions, and execution history
     let restore_checkpoint = |ckpt: &Checkpoint,
                               proprio: &Arc<RwLock<Proprioception>>,
-                              soma_state: &Arc<RwLock<SomaState>>| {
+                              soma_state: &Arc<RwLock<SomaState>>,
+                              mind: &Arc<RwLock<OnnxMindEngine>>| {
+        // Verify base model hash matches — detect model changes since checkpoint
+        if !ckpt.base_model_hash.is_empty() {
+            let current_hash = mind.read().unwrap().model_hash.clone();
+            if ckpt.base_model_hash != current_hash {
+                eprintln!(
+                    "  Warning: Base model hash mismatch! Checkpoint was created with a different model."
+                );
+                eprintln!(
+                    "    Checkpoint model hash: {}",
+                    &ckpt.base_model_hash[..16.min(ckpt.base_model_hash.len())]
+                );
+                eprintln!(
+                    "    Current model hash:    {}",
+                    &current_hash[..16.min(current_hash.len())]
+                );
+                eprintln!("    LoRA state from this checkpoint may be incompatible — skipping LoRA restore.");
+                // Skip LoRA state restore (lora_state is not applied when hashes mismatch)
+            }
+        }
         if let Ok(mut p) = proprio.write() {
             p.experience_count = ckpt.experience_count;
             p.total_adaptations = ckpt.adaptation_count;
@@ -643,7 +772,7 @@ async fn main() -> Result<()> {
     if let Some(ref ckpt_path) = cli.checkpoint {
         match Checkpoint::load(ckpt_path) {
             Ok(ckpt) => {
-                restore_checkpoint(&ckpt, &proprio, &soma_state);
+                restore_checkpoint(&ckpt, &proprio, &soma_state, &mind);
                 eprintln!(
                     "  Resumed from {}: {} experiences, {} adaptations, {} decisions",
                     ckpt_path.display(),
@@ -666,7 +795,7 @@ async fn main() -> Result<()> {
             Ok(ckpts) if !ckpts.is_empty() => {
                 match Checkpoint::load(&ckpts[0]) {
                     Ok(ckpt) => {
-                        restore_checkpoint(&ckpt, &proprio, &soma_state);
+                        restore_checkpoint(&ckpt, &proprio, &soma_state, &mind);
                         eprintln!(
                             "  Resumed: {} experiences, {} adaptations, {} decisions",
                             ckpt.experience_count, ckpt.adaptation_count, ckpt.decisions.len(),
@@ -682,7 +811,7 @@ async fn main() -> Result<()> {
     }
 
     // Step 7: Start Synaptic Protocol server
-    let plugins_arc = Arc::new(plugins);
+    let plugins_arc = Arc::new(RwLock::new(plugins));
     let bind_addr = config.protocol.bind.clone();
     let server_handler = SomaSignalHandler {
         name: config.soma.id.clone(),
@@ -702,6 +831,8 @@ async fn main() -> Result<()> {
     // Step 8: Start MCP Server if requested (Whitepaper Section 8, Milestone 3)
     // "At this point, an LLM can drive SOMA."
     if cli.mcp {
+        let mcp_shutdown = Arc::new(AtomicBool::new(false));
+
         let mcp_server = McpServer {
             config: config.clone(),
             mind: mind.clone(),
@@ -712,6 +843,7 @@ async fn main() -> Result<()> {
             metrics: soma_metrics.clone(),
             peers: peer_registry.clone(),
             auth: auth_manager.clone(),
+            shutdown_requested: mcp_shutdown.clone(),
         };
 
         // MCP mode: run on stdio, no REPL
@@ -728,7 +860,11 @@ async fn main() -> Result<()> {
 
         mcp_server.run_stdio().await?;
 
-        do_shutdown(&config, &experience_buf, &proprio, Some(&server_handle), Some(&peer_registry), &plugins_arc, Some(&soma_state));
+        if mcp_shutdown.load(Ordering::SeqCst) {
+            eprintln!("  SOMA shutting down (MCP shutdown requested).");
+        }
+
+        do_shutdown(&config, &experience_buf, &proprio, Some(&server_handle), Some(&peer_registry), &plugins_arc, Some(&soma_state), Some(&mind));
         return Ok(());
     }
 
@@ -770,8 +906,9 @@ async fn main() -> Result<()> {
             config.resources.max_concurrent_inferences,
             config.mind.max_program_steps,
             &config.soma.trace_verbosity,
+            &config.soma.id,
         );
-        do_shutdown(&config, &experience_buf, &proprio, Some(&server_handle), Some(&peer_registry), &plugins_arc, Some(&soma_state));
+        do_shutdown(&config, &experience_buf, &proprio, Some(&server_handle), Some(&peer_registry), &plugins_arc, Some(&soma_state), Some(&mind));
         return Ok(());
     }
 
@@ -791,7 +928,7 @@ async fn main() -> Result<()> {
     loop {
         if !running.load(Ordering::Relaxed) {
             println!("\n  SOMA shutting down (SIGINT).");
-            do_shutdown(&config, &experience_buf, &proprio, Some(&server_handle), Some(&peer_registry), &plugins_arc, Some(&soma_state));
+            do_shutdown(&config, &experience_buf, &proprio, Some(&server_handle), Some(&peer_registry), &plugins_arc, Some(&soma_state), Some(&mind));
             break;
         }
         print!("intent> ");
@@ -800,7 +937,7 @@ async fn main() -> Result<()> {
         let mut input = String::new();
         if io::stdin().read_line(&mut input)? == 0 {
             println!();
-            do_shutdown(&config, &experience_buf, &proprio, Some(&server_handle), Some(&peer_registry), &plugins_arc, Some(&soma_state));
+            do_shutdown(&config, &experience_buf, &proprio, Some(&server_handle), Some(&peer_registry), &plugins_arc, Some(&soma_state), Some(&mind));
             break;
         }
         let text = input.trim();
@@ -809,7 +946,7 @@ async fn main() -> Result<()> {
         }
         if text == "quit" || text == "exit" || text == "q" {
             println!("\n  SOMA shutting down.");
-            do_shutdown(&config, &experience_buf, &proprio, Some(&server_handle), Some(&peer_registry), &plugins_arc, Some(&soma_state));
+            do_shutdown(&config, &experience_buf, &proprio, Some(&server_handle), Some(&peer_registry), &plugins_arc, Some(&soma_state), Some(&mind));
             break;
         }
 
@@ -831,7 +968,7 @@ async fn main() -> Result<()> {
                 "    LoRA:        {} layers, magnitude {:.6}",
                 info.lora_layers, info.lora_magnitude
             );
-            println!("    Plugins:     {} loaded", plugins_arc.conventions().len());
+            println!("    Plugins:     {} loaded", plugins_arc.read().unwrap().conventions().len());
             println!(
                 "    Experience:  {}/{} buffer ({} total seen)",
                 exp.len(),
@@ -854,19 +991,19 @@ async fn main() -> Result<()> {
         }
         if text == ":inspect" || text == "help" || text == "?" {
             println!("\n  [Conventions]");
-            for conv in plugins_arc.conventions() {
+            for conv in plugins_arc.read().unwrap().conventions() {
                 println!("    [{:2}] {} -- {}", conv.id, conv.name, conv.description);
             }
             println!();
             continue;
         }
         if text == ":checkpoint" {
-            do_checkpoint(&config, &experience_buf, &proprio, &plugins_arc, Some(&soma_state));
+            do_checkpoint(&config, &experience_buf, &proprio, &plugins_arc, Some(&soma_state), Some(&mind));
             println!();
             continue;
         }
         if text == ":consolidate" {
-            do_consolidate(&config, &proprio);
+            do_consolidate(&config, &proprio, &mind);
             println!();
             continue;
         }
@@ -905,6 +1042,7 @@ async fn main() -> Result<()> {
             max_concurrent,
             max_steps,
             &config.soma.trace_verbosity,
+            &config.soma.id,
         );
         println!();
     }

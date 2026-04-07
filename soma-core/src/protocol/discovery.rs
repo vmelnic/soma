@@ -185,6 +185,12 @@ impl PeerRegistry {
             "capacity": capacity,
         }))
         .unwrap_or_default();
+
+        // Default TTL for discovery forwarding (chemical gradient, Spec 7.1)
+        if let serde_json::Value::Object(ref mut map) = signal.metadata {
+            map.insert("ttl".to_string(), serde_json::json!(3));
+        }
+
         signal
     }
 
@@ -195,6 +201,7 @@ impl PeerRegistry {
         plugins: &[String],
         conventions: &[String],
         load: f64,
+        capacity: u64,
     ) -> Signal {
         let mut signal = Signal::new(SignalType::DiscoverAck, soma_id.to_string());
         signal.channel_id = 0;
@@ -203,6 +210,7 @@ impl PeerRegistry {
             "plugins": plugins,
             "conventions": conventions,
             "load": load,
+            "capacity": capacity,
         }))
         .unwrap_or_default();
         signal
@@ -235,6 +243,7 @@ impl PeerRegistry {
                     "address": peer.addr,
                     "plugins": peer.plugins,
                     "load": peer.load,
+                    "reachable_via": soma_id,
                 })
             })
             .collect();
@@ -247,4 +256,38 @@ impl PeerRegistry {
         .unwrap_or_default();
         response
     }
+}
+
+/// Check if a DISCOVER signal should be forwarded (TTL > 0).
+/// Returns a new signal with decremented TTL for forwarding, or None.
+/// Implements the chemical-gradient decay from Spec Section 7.1.
+pub fn prepare_forward_discover(signal: &Signal, our_id: &str) -> Option<Signal> {
+    let ttl = signal
+        .metadata
+        .get("ttl")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    if ttl == 0 {
+        return None;
+    }
+
+    // Don't forward our own discoveries
+    if signal.sender_id == our_id {
+        return None;
+    }
+
+    let mut forwarded = signal.clone();
+    if let serde_json::Value::Object(ref mut map) = forwarded.metadata {
+        map.insert("ttl".to_string(), serde_json::json!(ttl - 1));
+        // Add forwarded_by to track gradient path
+        let mut path: Vec<String> = map
+            .get("forward_path")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        path.push(our_id.to_string());
+        map.insert("forward_path".to_string(), serde_json::json!(path));
+    }
+
+    Some(forwarded)
 }

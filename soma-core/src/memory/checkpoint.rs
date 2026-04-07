@@ -28,6 +28,13 @@ pub struct Checkpoint {
     /// Recent execution records
     #[serde(default)]
     pub recent_executions: Vec<serde_json::Value>,
+    /// SHA-256 hash of the base model (encoder+decoder) used when this checkpoint was created.
+    /// Used to detect model changes on restore and warn about LoRA state incompatibility.
+    #[serde(default)]
+    pub base_model_hash: String,
+    /// Plugin manifest — which plugins (and versions) were loaded at checkpoint time.
+    #[serde(default)]
+    pub plugin_manifest: Vec<PluginManifestEntry>,
 }
 
 /// Serialized plugin state for checkpoint.
@@ -35,6 +42,13 @@ pub struct Checkpoint {
 pub struct PluginStateEntry {
     pub plugin_name: String,
     pub state: serde_json::Value,
+}
+
+/// Plugin manifest entry — records which plugins (and versions) were active at checkpoint time.
+#[derive(Serialize, Deserialize)]
+pub struct PluginManifestEntry {
+    pub name: String,
+    pub version: String,
 }
 
 impl Checkpoint {
@@ -54,6 +68,8 @@ impl Checkpoint {
             plugin_states: Vec::new(),
             decisions: Vec::new(),
             recent_executions: Vec::new(),
+            base_model_hash: String::new(),
+            plugin_manifest: Vec::new(),
         }
     }
 

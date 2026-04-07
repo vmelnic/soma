@@ -4,9 +4,15 @@
 //! exceeded the limiter returns a suggested `retry_after` interval and
 //! escalates through warning / sustained / severe violation levels.
 
+use std::collections::HashMap;
 use std::time::Instant;
 
+use super::signal::{Signal, SignalType};
+
 /// Graduated violation levels for rate-limit enforcement.
+// CONTROL signal emission is implemented via `create_rate_limit_signal()`
+// (Section 20.3). Peer blacklisting after sustained violations is
+// handled by `PeerBlacklist` (Section 20.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViolationLevel {
     /// No active violation.
@@ -133,6 +139,53 @@ impl RateLimiter {
         if self.violation_start.is_none() {
             self.violation_start = Some(now);
         }
+    }
+}
+
+/// Create a CONTROL signal for rate limiting (Section 20.3).
+pub fn create_rate_limit_signal(sender: &str, retry_after_ms: u32) -> Signal {
+    let mut signal = Signal::new(SignalType::Control, sender.to_string());
+    signal.metadata = serde_json::json!({
+        "control_type": "rate_limit",
+        "retry_after_ms": retry_after_ms,
+    });
+    signal
+}
+
+/// Tracks blacklisted peers after sustained rate limit violations (Section 20.4).
+pub struct PeerBlacklist {
+    /// peer_addr → blacklist_until
+    entries: HashMap<String, Instant>,
+    /// Default blacklist duration
+    blacklist_duration: std::time::Duration,
+}
+
+impl PeerBlacklist {
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+            blacklist_duration: std::time::Duration::from_secs(300), // 5 minutes
+        }
+    }
+
+    /// Blacklist a peer for the configured duration.
+    pub fn blacklist(&mut self, peer_addr: String) {
+        let until = Instant::now() + self.blacklist_duration;
+        tracing::warn!(peer = %peer_addr, duration_secs = 300, "Peer blacklisted");
+        self.entries.insert(peer_addr, until);
+    }
+
+    /// Check if a peer is currently blacklisted.
+    pub fn is_blacklisted(&self, peer_addr: &str) -> bool {
+        self.entries.get(peer_addr)
+            .map(|until| Instant::now() < *until)
+            .unwrap_or(false)
+    }
+
+    /// Remove expired blacklist entries.
+    pub fn cleanup(&mut self) {
+        let now = Instant::now();
+        self.entries.retain(|_, until| now < *until);
     }
 }
 
