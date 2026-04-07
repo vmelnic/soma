@@ -1,46 +1,46 @@
-//! SOMA PostgreSQL Plugin — database operations via connection pool.
+//! SOMA PostgreSQL Plugin — database operations via synchronous postgres crate.
 //!
 //! Provides 11 conventions for PostgreSQL interaction: query, execute,
 //! query_one, begin/commit/rollback (MVP: unsupported), create_table,
 //! alter_table, table_exists, list_tables, table_schema.
 //!
-//! Uses `deadpool-postgres` for connection pooling and `tokio-postgres`
-//! for async database access. The sync `execute()` bridges to async via
-//! `tokio::runtime::Handle::current().block_on()`.
+//! Uses the synchronous `postgres` crate for blocking database access.
+//! No tokio runtime required — avoids reactor TLS issues in cdylib plugins.
 
 use soma_plugin_sdk::prelude::*;
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::OnceLock;
 
-use deadpool_postgres::{Config as DeadpoolConfig, Pool, Runtime};
-use tokio_postgres::types::Type;
-use tokio_postgres::Row;
+use postgres::types::Type;
 
 // ---------------------------------------------------------------------------
 // Plugin struct
 // ---------------------------------------------------------------------------
 
 pub struct PostgresPlugin {
-    pool: OnceLock<Pool>,
+    conn_string: OnceLock<String>,
 }
 
 impl PostgresPlugin {
     pub fn new() -> Self {
         Self {
-            pool: OnceLock::new(),
+            conn_string: OnceLock::new(),
         }
     }
 
-    fn pool(&self) -> Result<&Pool, PluginError> {
-        self.pool
-            .get()
-            .ok_or_else(|| PluginError::Failed("postgres pool not initialised — call on_load first".into()))
+    /// Get a fresh database connection.
+    /// Each call creates a new connection — simple but sufficient for SOMA's
+    /// request-per-intent model.
+    fn connect(&self) -> Result<postgres::Client, PluginError> {
+        let conn_str = self.conn_string.get()
+            .ok_or_else(|| PluginError::Failed("postgres not configured — call on_load first".into()))?;
+        let client = postgres::Client::connect(conn_str, postgres::NoTls)
+            .map_err(|e| PluginError::ConnectionRefused(format!("PostgreSQL: {}", e)))?;
+        Ok(client)
     }
 
-    /// Convert a `tokio_postgres::Row` into `Value::Map`.
-    fn row_to_value(row: &Row) -> Value {
+    /// Convert a `postgres::Row` into `Value::Map`.
+    fn row_to_value(row: &postgres::Row) -> Value {
         let mut map = HashMap::new();
         for (i, col) in row.columns().iter().enumerate() {
             let name = col.name().to_string();
@@ -51,9 +51,7 @@ impl PostgresPlugin {
     }
 
     /// Extract a single column value, mapping PG types to `Value`.
-    fn column_value(row: &Row, idx: usize, ty: &Type) -> Value {
-        // Check for SQL NULL first — try getting as Option<String> since
-        // everything can be represented as text via to_string.
+    fn column_value(row: &postgres::Row, idx: usize, ty: &Type) -> Value {
         match *ty {
             Type::BOOL => match row.try_get::<_, Option<bool>>(idx) {
                 Ok(Some(v)) => Value::Bool(v),
@@ -135,60 +133,57 @@ impl PostgresPlugin {
 }
 
 // ---------------------------------------------------------------------------
-// Async implementation helpers
+// Synchronous implementation helpers
 // ---------------------------------------------------------------------------
 
 impl PostgresPlugin {
-    async fn do_query(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    fn do_query(&self, args: Vec<Value>) -> Result<Value, PluginError> {
         let sql = args.first()
             .ok_or_else(|| PluginError::InvalidArg("missing sql argument".into()))?
             .as_str()?;
         let params = Self::extract_params(&args);
-        let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
-            params.iter().map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+        let param_refs: Vec<&(dyn postgres::types::ToSql + Sync)> =
+            params.iter().map(|s| s as &(dyn postgres::types::ToSql + Sync)).collect();
 
-        let pool = self.pool()?;
-        let client = pool.get().await.map_err(|e| PluginError::ConnectionRefused(e.to_string()))?;
+        let mut client = self.connect()?;
+
         let rows = client
             .query(sql, &param_refs)
-            .await
             .map_err(|e| PluginError::Failed(e.to_string()))?;
 
         let values: Vec<Value> = rows.iter().map(Self::row_to_value).collect();
         Ok(Value::List(values))
     }
 
-    async fn do_execute(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    fn do_execute(&self, args: Vec<Value>) -> Result<Value, PluginError> {
         let sql = args.first()
             .ok_or_else(|| PluginError::InvalidArg("missing sql argument".into()))?
             .as_str()?;
         let params = Self::extract_params(&args);
-        let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
-            params.iter().map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+        let param_refs: Vec<&(dyn postgres::types::ToSql + Sync)> =
+            params.iter().map(|s| s as &(dyn postgres::types::ToSql + Sync)).collect();
 
-        let pool = self.pool()?;
-        let client = pool.get().await.map_err(|e| PluginError::ConnectionRefused(e.to_string()))?;
+        let mut client = self.connect()?;
+
         let count = client
             .execute(sql, &param_refs)
-            .await
             .map_err(|e| PluginError::Failed(e.to_string()))?;
 
         Ok(Value::Int(count as i64))
     }
 
-    async fn do_query_one(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    fn do_query_one(&self, args: Vec<Value>) -> Result<Value, PluginError> {
         let sql = args.first()
             .ok_or_else(|| PluginError::InvalidArg("missing sql argument".into()))?
             .as_str()?;
         let params = Self::extract_params(&args);
-        let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
-            params.iter().map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+        let param_refs: Vec<&(dyn postgres::types::ToSql + Sync)> =
+            params.iter().map(|s| s as &(dyn postgres::types::ToSql + Sync)).collect();
 
-        let pool = self.pool()?;
-        let client = pool.get().await.map_err(|e| PluginError::ConnectionRefused(e.to_string()))?;
+        let mut client = self.connect()?;
+
         let row_opt = client
             .query_opt(sql, &param_refs)
-            .await
             .map_err(|e| PluginError::Failed(e.to_string()))?;
 
         match row_opt {
@@ -197,7 +192,7 @@ impl PostgresPlugin {
         }
     }
 
-    async fn do_create_table(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    fn do_create_table(&self, args: Vec<Value>) -> Result<Value, PluginError> {
         let name = args.first()
             .ok_or_else(|| PluginError::InvalidArg("missing table name".into()))?
             .as_str()?;
@@ -211,17 +206,16 @@ impl PostgresPlugin {
         }
 
         let sql = format!("CREATE TABLE IF NOT EXISTS {} ({})", name, columns);
-        let pool = self.pool()?;
-        let client = pool.get().await.map_err(|e| PluginError::ConnectionRefused(e.to_string()))?;
+        let mut client = self.connect()?;
+
         client
-            .execute(&sql, &[])
-            .await
+            .execute(&*sql, &[])
             .map_err(|e| PluginError::Failed(e.to_string()))?;
 
         Ok(Value::Null)
     }
 
-    async fn do_alter_table(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    fn do_alter_table(&self, args: Vec<Value>) -> Result<Value, PluginError> {
         let name = args.first()
             .ok_or_else(|| PluginError::InvalidArg("missing table name".into()))?
             .as_str()?;
@@ -234,40 +228,37 @@ impl PostgresPlugin {
         }
 
         let sql = format!("ALTER TABLE {} {}", name, changes);
-        let pool = self.pool()?;
-        let client = pool.get().await.map_err(|e| PluginError::ConnectionRefused(e.to_string()))?;
+        let mut client = self.connect()?;
+
         client
-            .execute(&sql, &[])
-            .await
+            .execute(&*sql, &[])
             .map_err(|e| PluginError::Failed(e.to_string()))?;
 
         Ok(Value::Null)
     }
 
-    async fn do_table_exists(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    fn do_table_exists(&self, args: Vec<Value>) -> Result<Value, PluginError> {
         let name = args.first()
             .ok_or_else(|| PluginError::InvalidArg("missing table name".into()))?
             .as_str()?;
 
         let sql = "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1)";
-        let pool = self.pool()?;
-        let client = pool.get().await.map_err(|e| PluginError::ConnectionRefused(e.to_string()))?;
+        let mut client = self.connect()?;
+
         let row = client
             .query_one(sql, &[&name])
-            .await
             .map_err(|e| PluginError::Failed(e.to_string()))?;
 
         let exists: bool = row.get(0);
         Ok(Value::Bool(exists))
     }
 
-    async fn do_list_tables(&self) -> Result<Value, PluginError> {
+    fn do_list_tables(&self) -> Result<Value, PluginError> {
         let sql = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name";
-        let pool = self.pool()?;
-        let client = pool.get().await.map_err(|e| PluginError::ConnectionRefused(e.to_string()))?;
+        let mut client = self.connect()?;
+
         let rows = client
             .query(sql, &[])
-            .await
             .map_err(|e| PluginError::Failed(e.to_string()))?;
 
         let tables: Vec<Value> = rows
@@ -281,7 +272,7 @@ impl PostgresPlugin {
         Ok(Value::List(tables))
     }
 
-    async fn do_table_schema(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    fn do_table_schema(&self, args: Vec<Value>) -> Result<Value, PluginError> {
         let name = args.first()
             .ok_or_else(|| PluginError::InvalidArg("missing table name".into()))?
             .as_str()?;
@@ -294,11 +285,10 @@ impl PostgresPlugin {
             ORDER BY ordinal_position
         "#;
 
-        let pool = self.pool()?;
-        let client = pool.get().await.map_err(|e| PluginError::ConnectionRefused(e.to_string()))?;
+        let mut client = self.connect()?;
+
         let rows = client
             .query(sql, &[&name])
-            .await
             .map_err(|e| PluginError::Failed(e.to_string()))?;
 
         let columns: Vec<Value> = rows
@@ -342,7 +332,7 @@ impl SomaPlugin for PostgresPlugin {
     }
 
     fn description(&self) -> &str {
-        "PostgreSQL database operations: queries, DDL, schema inspection, connection pooling"
+        "PostgreSQL database operations: queries, DDL, schema inspection"
     }
 
     fn trust_level(&self) -> TrustLevel {
@@ -586,31 +576,7 @@ impl SomaPlugin for PostgresPlugin {
     }
 
     fn execute(&self, convention_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
-        // Bridge sync → async via the current tokio runtime handle.
-        // The SOMA runtime runs inside tokio, so Handle::current() should exist.
-        let handle = tokio::runtime::Handle::try_current().map_err(|_| {
-            PluginError::Failed("no tokio runtime — postgres plugin requires async runtime".into())
-        })?;
-
-        // Catch panics INSIDE the plugin (same cdylib) before they cross the FFI
-        // boundary.  Panics that escape a cdylib on macOS are "foreign exceptions"
-        // and cause an unconditional abort — the host's catch_unwind cannot help.
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            tokio::task::block_in_place(|| handle.block_on(self.dispatch(convention_id, args)))
-        })) {
-            Ok(result) => result,
-            Err(_) => Err(PluginError::Failed(
-                "postgres plugin panicked during execution".into(),
-            )),
-        }
-    }
-
-    fn execute_async(
-        &self,
-        convention_id: u32,
-        args: Vec<Value>,
-    ) -> Pin<Box<dyn Future<Output = Result<Value, PluginError>> + Send + '_>> {
-        Box::pin(self.dispatch(convention_id, args))
+        self.dispatch(convention_id, args)
     }
 
     fn on_load(&mut self, config: &PluginConfig) -> Result<(), PluginError> {
@@ -636,25 +602,14 @@ impl SomaPlugin for PostgresPlugin {
             std::env::var("SOMA_POSTGRES_PASSWORD").ok()
         };
 
-        let mut cfg = DeadpoolConfig::new();
-        cfg.host = Some(host);
-        cfg.port = Some(port);
-        cfg.dbname = Some(database);
-        cfg.user = Some(username);
-        cfg.password = password;
+        let conn_string = format!(
+            "host={} port={} dbname={} user={} password={}",
+            host, port, database, username, password.as_deref().unwrap_or("")
+        );
 
-        // Catch panics inside the plugin to prevent FFI abort on macOS.
-        let pool = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            cfg.create_pool(Some(Runtime::Tokio1), tokio_postgres::NoTls)
-        })) {
-            Ok(Ok(pool)) => pool,
-            Ok(Err(e)) => return Err(PluginError::Failed(format!("failed to create connection pool: {}", e))),
-            Err(_) => return Err(PluginError::Failed("postgres plugin panicked during pool creation".into())),
-        };
-
-        self.pool
-            .set(pool)
-            .map_err(|_| PluginError::Failed("pool already initialised".into()))?;
+        self.conn_string
+            .set(conn_string)
+            .map_err(|_| PluginError::Failed("postgres already configured".into()))?;
 
         Ok(())
     }
@@ -689,25 +644,25 @@ impl SomaPlugin for PostgresPlugin {
 }
 
 // ---------------------------------------------------------------------------
-// Dispatch — routes convention_id to the right async method
+// Dispatch — routes convention_id to the right sync method
 // ---------------------------------------------------------------------------
 
 impl PostgresPlugin {
-    async fn dispatch(&self, convention_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
+    fn dispatch(&self, convention_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
         match convention_id {
-            0 => self.do_query(args).await,
-            1 => self.do_execute(args).await,
-            2 => self.do_query_one(args).await,
+            0 => self.do_query(args),
+            1 => self.do_execute(args),
+            2 => self.do_query_one(args),
             3 | 4 | 5 => Err(PluginError::Failed(
                 "transactions (begin/commit/rollback) are not yet supported in this MVP; \
                  use execute(\"BEGIN; ...; COMMIT\") for multi-statement transactions"
                     .into(),
             )),
-            6 => self.do_create_table(args).await,
-            7 => self.do_alter_table(args).await,
-            8 => self.do_table_exists(args).await,
-            9 => self.do_list_tables().await,
-            10 => self.do_table_schema(args).await,
+            6 => self.do_create_table(args),
+            7 => self.do_alter_table(args),
+            8 => self.do_table_exists(args),
+            9 => self.do_list_tables(),
+            10 => self.do_table_schema(args),
             _ => Err(PluginError::NotFound(format!(
                 "unknown convention id: {}",
                 convention_id

@@ -420,14 +420,17 @@ impl PluginManager {
                     conv_id, &self.crashed_plugins, idx,
                 )
             }
-        } else if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            // No timeout but tokio available — use async path to avoid reactor issues
-            let plugin = &self.plugins[idx];
-            tokio::task::block_in_place(|| {
-                handle.block_on(plugin.execute_async(cid, args))
-            })
+        } else if let Ok(_handle) = tokio::runtime::Handle::try_current() {
+            // Tokio available — use sync execute with catch_unwind.
+            // The async path (execute_async) requires running on a tokio worker thread
+            // with reactor access. For sync callers like execute_program, we use the
+            // plugin's sync execute() which handles the sync→async bridge internally.
+            Self::execute_with_catch_unwind(
+                &self.plugins[idx], &plugin_name, cid, args,
+                conv_id, &self.crashed_plugins, idx,
+            )
         } else {
-            // No timeout, no tokio — sync execution with panic catching
+            // No tokio — sync fallback
             Self::execute_with_catch_unwind(
                 &self.plugins[idx], &plugin_name, cid, args,
                 conv_id, &self.crashed_plugins, idx,

@@ -1205,12 +1205,24 @@ async fn main() -> Result<()> {
         print!("intent> ");
         io::stdout().flush()?;
 
-        let mut input = String::new();
-        if io::stdin().read_line(&mut input)? == 0 {
-            println!();
-            do_shutdown(&config, &experience_buf, &proprio, Some(&server_handle), Some(&peer_registry), &plugins_arc, Some(&soma_state), Some(&mind));
-            break;
-        }
+        // Read stdin in a blocking task so the tokio runtime thread remains free
+        // for I/O operations (postgres, redis, http plugins need the reactor).
+        let input = tokio::task::spawn_blocking(|| {
+            let mut buf = String::new();
+            match io::stdin().read_line(&mut buf) {
+                Ok(0) => None,
+                Ok(_) => Some(buf),
+                Err(_) => None,
+            }
+        }).await?;
+        let input = match input {
+            Some(s) => s,
+            None => {
+                println!();
+                do_shutdown(&config, &experience_buf, &proprio, Some(&server_handle), Some(&peer_registry), &plugins_arc, Some(&soma_state), Some(&mind));
+                break;
+            }
+        };
         let text = input.trim();
         if text.is_empty() {
             continue;
@@ -1341,3 +1353,5 @@ fn ctrlc_handler(running: Arc<AtomicBool>) {
         running.store(false, Ordering::Relaxed);
     });
 }
+// rebuild
+// rebuild
