@@ -399,7 +399,61 @@ impl SynapseConnection {
 - Payload: raw bytes (interpretation is signal-type dependent)
 - Debug mode: JSON metadata + hex payload dump for development
 
-### 11.3 Connection Pooling
+### 11.3 Metadata Naming Conventions
+
+Metadata is schema-free MessagePack, but standardized field names ensure interoperability between SOMAs from different authors.
+
+**Reserved metadata fields (protocol-level, used by Core):**
+
+| Field | Type | Used In | Description |
+|---|---|---|---|
+| `trace_id` | string | All | Distributed trace correlation ID |
+| `content_type` | string | DATA, BINARY | MIME type of payload (e.g., "application/json", "image/jpeg") |
+| `encoding` | string | DATA | Payload encoding ("json", "msgpack") |
+| `total_size` | uint | CHUNK_START | Total transfer size in bytes |
+| `chunk_size` | uint | CHUNK_START | Size per chunk |
+| `total_chunks` | uint | CHUNK_START | Total chunk count |
+| `resume_from` | uint | CHUNK_START | Resume chunked transfer from this sequence |
+| `checksum_sha256` | string | CHUNK_START | SHA-256 of complete data for verification |
+| `topic` | string | SUBSCRIBE | Pub/sub topic name |
+| `last_seen_sequence` | uint | SUBSCRIBE | For durable catch-up |
+| `codec` | string | STREAM_START | Media codec ("opus", "h264", etc.) |
+| `sample_rate` | uint | STREAM_START | Audio sample rate |
+| `relay_path` | list[string] | Any relayed | SOMAs that have relayed this signal |
+| `max_hops` | uint | Any relayed | TTL for relay |
+| `hop_count` | uint | Any relayed | Current hop count |
+| `retry_after_ms` | uint | CONTROL | Backpressure: retry delay suggestion |
+
+**Application-level metadata conventions:**
+
+Application-specific metadata uses namespaced keys to avoid collisions:
+
+```
+Correct:    metadata: { "helperbook.chat_id": "chat_5", "helperbook.msg_type": "text" }
+Wrong:      metadata: { "chat_id": "chat_5" }  ← could collide with another app
+```
+
+Protocol-reserved keys (above table) are NOT namespaced. Everything else should be.
+
+**Semantic signal conventions (for Interface SOMA):**
+
+Semantic signals (Backend → Interface) use standardized top-level fields in the payload:
+
+```json
+{
+  "view": "string — which view to render (contact_list, chat, calendar, ...)",
+  "data": "array or object — the actual data to display",
+  "actions": "array — available user actions",
+  "filters": "array — available filter options",
+  "pagination": "object — {page, per_page, total}",
+  "error": "object — {code, message} if request failed",
+  "loading": "bool — is data still being fetched"
+}
+```
+
+These field names are conventions, not enforced by the protocol. But consistent naming means Interface SOMAs can develop reusable rendering patterns.
+
+### 11.4 Connection Pooling
 
 A SOMA maintains a pool of connections to frequently-used peers. Signals are multiplexed across pooled connections. New channels reuse existing connections rather than opening new TCP streams.
 

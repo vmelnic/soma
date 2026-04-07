@@ -31,15 +31,25 @@ pub struct Signal {
     pub channel_id: u32,
     pub payload: Vec<u8>,
     pub timestamp: u64,
+    /// Trace ID for distributed tracing (Section 18.1.2).
+    /// Propagated across SOMA-to-SOMA signal chains.
+    #[serde(default)]
+    pub trace_id: String,
+    /// Span ID for hierarchical tracing within a trace.
+    #[serde(default)]
+    pub span_id: String,
 }
 
 impl Signal {
     /// Create a new signal with the given type and sender.
+    /// Generates a unique trace_id and span_id for distributed tracing.
     pub fn new(signal_type: SignalType, sender: String, recipient: String) -> Self {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
+        let trace_id = uuid::Uuid::new_v4().to_string()[..12].to_string();
+        let span_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
         Self {
             signal_type,
             sender,
@@ -48,6 +58,8 @@ impl Signal {
             channel_id: 0,
             payload: Vec::new(),
             timestamp: now,
+            trace_id,
+            span_id,
         }
     }
 

@@ -376,7 +376,88 @@ The schema is created conversationally, not in SQL migration files. The Backend 
 
 **contact_folder_members** — folder_id, contact_id
 
-### 4.3 AI Features via Plugins
+### 4.3 Data Migration and Schema Evolution
+
+The SOMA creates and modifies database schemas conversationally. In production with real data, schema changes must be safe.
+
+**How schema changes happen:**
+
+```
+You: "add a field for phone number to the bookings table"
+
+Mind generates:
+  $0 = postgres.execute("ALTER TABLE bookings ADD COLUMN phone VARCHAR(20)")
+  $1 = EMIT("done")
+  STOP
+```
+
+**Safety rules (encoded in Mind's training and experiential memory):**
+
+1. **Add column:** Always safe. New column is NULL for existing rows. Mind generates `ADD COLUMN ... DEFAULT NULL` unless a default is specified.
+
+2. **Rename column:** Mind generates a sequence: add new column, copy data, drop old column. Never renames in-place (PostgreSQL doesn't support it directly anyway).
+
+3. **Change type:** Mind checks for data compatibility before altering. If incompatible (e.g., TEXT → INT with non-numeric data), it reports the conflict instead of executing.
+
+4. **Drop column:** Mind ALWAYS asks for confirmation before dropping: "This will permanently remove the phone column and its data from 1,234 rows. Confirm?" This is encoded in training data — the Mind learns to never silently drop.
+
+5. **Create/drop table:** Same confirmation pattern for drops. Creates are always safe.
+
+**Migration tracking:**
+
+The SOMA records all schema changes in its experiential memory AND in a dedicated migrations table:
+
+```sql
+CREATE TABLE IF NOT EXISTS _soma_migrations (
+    id SERIAL PRIMARY KEY,
+    description TEXT NOT NULL,
+    sql_executed TEXT NOT NULL,
+    executed_at TIMESTAMP DEFAULT NOW(),
+    soma_id TEXT NOT NULL,
+    reversible BOOLEAN DEFAULT TRUE,
+    rollback_sql TEXT
+);
+```
+
+Every schema change is logged with the SQL executed and a rollback statement (where possible). This provides an audit trail equivalent to traditional migration files.
+
+**Rollback:**
+
+```
+You: "undo the last schema change"
+
+Mind:
+  $0 = postgres.query("SELECT rollback_sql FROM _soma_migrations ORDER BY id DESC LIMIT 1")
+  $1 = postgres.execute($0.rollback_sql)
+  $2 = postgres.execute("DELETE FROM _soma_migrations WHERE id = $0.id")
+  STOP
+```
+
+**Zero-downtime migrations (production):**
+
+For large tables where ALTER TABLE would lock:
+
+1. Mind creates a new table with the updated schema
+2. Mind copies data in batches (not a single transaction)
+3. Mind sets up a trigger to sync new writes to both tables
+4. Mind swaps table names (rename old → backup, new → active)
+5. Mind drops the trigger and old table after verification
+
+The Mind learns this pattern from domain-specific training data. For simple changes (add nullable column), the Mind uses the simple path. For complex changes (type conversion on millions of rows), it uses the zero-downtime pattern.
+
+**Backup before migration:**
+
+For destructive changes, the Mind's training includes the pattern of creating a backup first:
+
+```
+Mind:
+  $0 = postgres.execute("CREATE TABLE bookings_backup AS SELECT * FROM bookings")
+  $1 = postgres.execute("ALTER TABLE bookings DROP COLUMN legacy_field")
+  $2 = EMIT("done. backup at bookings_backup")
+  STOP
+```
+
+### 4.4 AI Features via Plugins
 
 **Smart Replies (ai-inference plugin):**
 ```

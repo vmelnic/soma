@@ -1315,6 +1315,65 @@ Log output formats:
 - **Production:** JSON lines (for log aggregation — Loki, ELK, etc.)
 - **Embedded:** minimal, UART serial output
 
+### 18.1.1 Log Schema (JSON Lines Format)
+
+Every log event in production has these fields:
+
+```json
+{
+  "ts": "2026-04-07T14:30:01.234Z",
+  "level": "info",
+  "soma_id": "helperbook-backend",
+  "component": "mind",
+  "trace_id": "a1b2c3d4e5f6",
+  "span_id": "x1y2z3",
+  "parent_span_id": "p1q2r3",
+  "msg": "Intent processed",
+  "fields": {
+    "intent": "list all contacts near downtown",
+    "program_steps": 3,
+    "confidence": 0.968,
+    "inference_time_ms": 23,
+    "plugins_used": ["postgres", "geo"]
+  }
+}
+```
+
+| Field | Always Present | Description |
+|---|---|---|
+| `ts` | Yes | ISO 8601 timestamp with millisecond precision |
+| `level` | Yes | trace, debug, info, warn, error |
+| `soma_id` | Yes | Which SOMA emitted this log |
+| `component` | Yes | mind, protocol, plugin, memory, router |
+| `trace_id` | If in request context | Unique ID for the entire request chain |
+| `span_id` | If in request context | ID for this specific operation |
+| `parent_span_id` | If nested | Parent span for hierarchical tracing |
+| `msg` | Yes | Human-readable message |
+| `fields` | Optional | Structured key-value data specific to the event |
+
+### 18.1.2 Trace ID Propagation
+
+When SOMA-A sends an intent to SOMA-B, the trace_id propagates via Synaptic Protocol metadata:
+
+```
+SOMA-A: generates trace_id = "a1b2c3"
+SOMA-A → SOMA-B: INTENT {metadata: {trace_id: "a1b2c3"}, ...}
+SOMA-B: receives signal, extracts trace_id, uses it in all logs for this request
+SOMA-B → Plugin: logs with trace_id = "a1b2c3"
+SOMA-B → SOMA-A: RESULT {metadata: {trace_id: "a1b2c3"}, ...}
+```
+
+All logs across the entire SOMA network for a single user request share the same trace_id. This enables distributed tracing: find all logs for one request across all SOMAs.
+
+Span IDs create a tree:
+```
+trace_id: a1b2c3
+  └── span: interface-send (Interface SOMA)
+      └── span: backend-infer (Backend SOMA, Mind)
+          ├── span: postgres-query (Backend SOMA, postgres plugin)
+          └── span: redis-cache (Backend SOMA, redis plugin)
+```
+
 ### 18.2 Program Trace
 
 Every inference produces a trace that can be inspected:

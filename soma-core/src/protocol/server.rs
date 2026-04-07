@@ -62,7 +62,16 @@ impl SignalHandler for SomaSignalHandler {
                     }
                 };
 
+                // Propagate trace_id from incoming signal (Section 18.1.2)
+                let trace_id = if signal.trace_id.is_empty() {
+                    uuid::Uuid::new_v4().to_string()[..12].to_string()
+                } else {
+                    signal.trace_id.clone()
+                };
+
                 tracing::info!(
+                    component = "router",
+                    trace_id = %trace_id,
                     sender = %signal.sender,
                     intent = %intent_text,
                     "Processing remote intent"
@@ -72,10 +81,20 @@ impl SignalHandler for SomaSignalHandler {
                 let mind_guard = self.mind.read().unwrap();
                 match mind_guard.infer(&intent_text) {
                     Ok(program) => {
-                        // Execute the program via plugin manager
                         let result = self.plugins.execute_program(&program.steps, self.max_program_steps);
 
+                        tracing::info!(
+                            component = "mind",
+                            trace_id = %trace_id,
+                            steps = program.steps.len(),
+                            confidence = %program.confidence,
+                            success = result.success,
+                            "Remote intent processed"
+                        );
+
                         let mut resp = Signal::new(SignalType::Data, self.name.clone(), signal.sender.clone());
+                        // Propagate trace_id in response
+                        resp.trace_id = trace_id;
 
                         if result.success {
                             // Serialize the output as the response payload

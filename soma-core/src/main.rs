@@ -112,6 +112,8 @@ fn run_intent(
     }
 
     let exec_start = std::time::Instant::now();
+    // Generate trace_id for this request (Section 18.1.2)
+    let trace_id = uuid::Uuid::new_v4().to_string()[..12].to_string();
 
     let mind_guard = mind.read().unwrap();
     match mind_guard.infer(text) {
@@ -137,8 +139,10 @@ fn run_intent(
 
             let execution_time_ms = exec_start.elapsed().as_millis() as u64;
 
-            // --- Gap 8: Structured logging ---
+            // --- Structured logging (Section 18.1.1) ---
             tracing::info!(
+                component = "mind",
+                trace_id = %trace_id,
                 intent = %text,
                 steps = program.steps.len(),
                 confidence = %program.confidence,
@@ -179,6 +183,8 @@ fn run_intent(
         }
         Err(e) => {
             tracing::info!(
+                component = "mind",
+                trace_id = %trace_id,
                 intent = %text,
                 success = false,
                 "Intent failed: {}", e
@@ -305,14 +311,24 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Initialize logging with configured level
+    // Initialize logging with configured level (Section 18.1)
+    // Development: pretty-print. Production (SOMA_LOG_JSON=1): JSON lines with soma_id.
     let log_filter = format!("soma={}", config.soma.log_level);
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(log_filter.parse()?)
-        )
-        .init();
+    let env_filter = tracing_subscriber::EnvFilter::from_default_env()
+        .add_directive(log_filter.parse()?);
+
+    if std::env::var("SOMA_LOG_JSON").is_ok() {
+        // Production: JSON lines format (Section 18.1.1)
+        tracing_subscriber::fmt()
+            .json()
+            .with_env_filter(env_filter)
+            .init();
+    } else {
+        // Development: pretty-print
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .init();
+    }
 
     // --- Step 2: Initialize proprioception (Spec Section 7) ---
     let proprio = Arc::new(RwLock::new(Proprioception::new()));
