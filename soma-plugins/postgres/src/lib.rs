@@ -138,9 +138,24 @@ impl PostgresPlugin {
 
 impl PostgresPlugin {
     fn do_query(&self, args: Vec<Value>) -> Result<Value, PluginError> {
-        let sql = args.first()
+        let raw_sql = args.first()
             .ok_or_else(|| PluginError::InvalidArg("missing sql argument".into()))?
             .as_str()?;
+
+        // If the argument looks like a bare table name (no SQL keywords),
+        // auto-wrap it in SELECT * FROM. This handles the common case where
+        // the Mind extracts just the table name from an intent like "find all users".
+        let sql = if !raw_sql.trim().is_empty()
+            && !raw_sql.trim_start().to_uppercase().starts_with("SELECT")
+            && !raw_sql.trim_start().to_uppercase().starts_with("WITH")
+            && !raw_sql.contains(' ')
+            && raw_sql.chars().all(|c| c.is_alphanumeric() || c == '_')
+        {
+            format!("SELECT * FROM {}", raw_sql)
+        } else {
+            raw_sql.to_string()
+        };
+
         let params = Self::extract_params(&args);
         let param_refs: Vec<&(dyn postgres::types::ToSql + Sync)> =
             params.iter().map(|s| s as &(dyn postgres::types::ToSql + Sync)).collect();
@@ -148,7 +163,7 @@ impl PostgresPlugin {
         let mut client = self.connect()?;
 
         let rows = client
-            .query(sql, &param_refs)
+            .query(&*sql, &param_refs)
             .map_err(|e| PluginError::Failed(e.to_string()))?;
 
         let values: Vec<Value> = rows.iter().map(Self::row_to_value).collect();
