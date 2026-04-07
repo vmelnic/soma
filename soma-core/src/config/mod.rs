@@ -81,6 +81,18 @@ fn default_max_plugin() -> usize {
     8
 }
 
+fn default_mcp_transport() -> String {
+    "stdio".to_string()
+}
+
+fn default_mcp_http_bind() -> String {
+    "127.0.0.1:3000".to_string()
+}
+
+fn default_max_executions() -> usize {
+    500
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct SomaConfig {
     #[serde(default)]
@@ -93,6 +105,14 @@ pub struct SomaConfig {
     pub protocol: ProtocolSection,
     #[serde(default)]
     pub resources: ResourceSection,
+    #[serde(default)]
+    pub mcp: McpSection,
+    #[serde(default)]
+    pub security: SecuritySection,
+}
+
+fn default_trace_verbosity() -> String {
+    "normal".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -101,6 +121,13 @@ pub struct SomaSection {
     pub id: String,
     #[serde(default = "default_log_level")]
     pub log_level: String,
+    /// Program trace verbosity: "terse", "normal", "verbose" (Section 11.5)
+    #[serde(default = "default_trace_verbosity")]
+    pub trace_verbosity: String,
+}
+
+fn default_temperature() -> f32 {
+    1.0
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -111,6 +138,9 @@ pub struct MindSection {
     pub model_dir: String,
     #[serde(default = "default_max_steps")]
     pub max_program_steps: usize,
+    /// Softmax temperature for inference (Section 2.3). Lower = more deterministic.
+    #[serde(default = "default_temperature")]
+    pub temperature: f32,
     #[serde(default)]
     pub lora: LoraConfig,
 }
@@ -161,6 +191,58 @@ pub struct ResourceSection {
     pub max_concurrent_plugin_calls: usize,
 }
 
+/// MCP Server configuration (Whitepaper Section 8).
+#[derive(Debug, Clone, Deserialize)]
+pub struct McpSection {
+    /// Transport: "stdio" or "http"
+    #[serde(default = "default_mcp_transport")]
+    pub transport: String,
+    /// HTTP bind address (only used when transport = "http")
+    #[serde(default = "default_mcp_http_bind")]
+    pub http_bind: String,
+    /// Enable MCP server on startup
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Maximum execution history entries
+    #[serde(default = "default_max_executions")]
+    pub max_execution_history: usize,
+}
+
+impl Default for McpSection {
+    fn default() -> Self {
+        Self {
+            transport: default_mcp_transport(),
+            http_bind: default_mcp_http_bind(),
+            enabled: default_true(),
+            max_execution_history: default_max_executions(),
+        }
+    }
+}
+
+/// Security configuration (Whitepaper Sections 8.3, 12.2).
+#[derive(Debug, Clone, Deserialize)]
+pub struct SecuritySection {
+    /// Require auth tokens for MCP connections
+    #[serde(default)]
+    pub require_auth: bool,
+    /// Pre-configured admin token (if empty, one is generated on startup)
+    #[serde(default)]
+    pub admin_token: String,
+    /// Destructive actions require two-step confirmation
+    #[serde(default = "default_true")]
+    pub require_confirmation: bool,
+}
+
+impl Default for SecuritySection {
+    fn default() -> Self {
+        Self {
+            require_auth: false,
+            admin_token: String::new(),
+            require_confirmation: true,
+        }
+    }
+}
+
 impl Default for SomaConfig {
     fn default() -> Self {
         Self {
@@ -169,6 +251,8 @@ impl Default for SomaConfig {
             memory: MemorySection::default(),
             protocol: ProtocolSection::default(),
             resources: ResourceSection::default(),
+            mcp: McpSection::default(),
+            security: SecuritySection::default(),
         }
     }
 }
@@ -178,6 +262,7 @@ impl Default for SomaSection {
         Self {
             id: default_id(),
             log_level: default_log_level(),
+            trace_verbosity: default_trace_verbosity(),
         }
     }
 }
@@ -188,6 +273,7 @@ impl Default for MindSection {
             backend: default_backend(),
             model_dir: default_model_dir(),
             max_program_steps: default_max_steps(),
+            temperature: default_temperature(),
             lora: LoraConfig::default(),
         }
     }

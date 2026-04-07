@@ -52,6 +52,14 @@ sha2 = "0.10"
 # Signal compression (Spec Section 19)
 zstd = "0.13"
 
+[[bin]]
+name = "soma"
+path = "src/main.rs"
+
+[[bin]]
+name = "soma-dump"
+path = "src/bin/soma_dump.rs"
+
 [profile.release]
 opt-level = 3
 lto = true

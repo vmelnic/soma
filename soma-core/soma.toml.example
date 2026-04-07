@@ -1,0 +1,50 @@
+# SOMA Configuration — soma.toml
+# All fields have sensible defaults. Only override what you need.
+
+[soma]
+# id = "soma-myhost"           # Instance ID (default: soma-{hostname})
+# log_level = "info"           # trace, debug, info, warn, error
+# trace_verbosity = "normal"   # terse, normal, verbose (program trace output)
+
+[mind]
+# backend = "onnx"             # Mind engine backend
+# model_dir = "models"         # Path to ONNX model directory
+# max_program_steps = 32       # Maximum steps per program execution
+# temperature = 1.0            # Softmax temperature (lower = more deterministic)
+
+[mind.lora]
+# default_rank = 8             # LoRA adapter rank
+# default_alpha = 16.0         # LoRA scaling factor
+# adaptation_enabled = true    # Enable runtime LoRA adaptation
+# adapt_every_n_successes = 10 # Adapt after N successful executions
+# adapt_batch_size = 8         # Experience batch size for adaptation
+# adapt_learning_rate = 0.001  # LoRA learning rate
+
+[memory]
+# checkpoint_dir = "checkpoints"   # Checkpoint storage directory
+# auto_checkpoint = true           # Auto-checkpoint on shutdown
+# max_checkpoints = 5              # Keep newest N checkpoints
+# max_experience_buffer = 1000     # Experience ring buffer size
+
+[protocol]
+# bind = "127.0.0.1:9999"     # Synaptic Protocol server address
+# max_connections = 16          # Maximum concurrent connections
+
+[protocol.peers]
+# peer-a = "192.168.1.10:9999"  # Static peer configuration
+# peer-b = "192.168.1.11:9999"
+
+[resources]
+# max_concurrent_inferences = 4       # Concurrent inference limit
+# max_concurrent_plugin_calls = 8     # Plugin call parallelism
+
+[mcp]
+# transport = "stdio"          # MCP transport: "stdio" or "http"
+# http_bind = "127.0.0.1:3000" # HTTP bind address (when transport = "http")
+# enabled = true               # Enable MCP server
+# max_execution_history = 500  # Execution history ring buffer
+
+[security]
+# require_auth = false         # Require auth tokens for MCP
+# admin_token = ""             # Pre-configured admin token
+# require_confirmation = true  # Two-step confirmation for destructive actions

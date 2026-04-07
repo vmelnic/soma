@@ -7,9 +7,10 @@ use std::path::Path;
 use crate::mind::lora::LoRALayerState;
 
 pub const CHECKPOINT_MAGIC: &[u8; 4] = b"SOMA";
-pub const CHECKPOINT_VERSION: u32 = 1;
+pub const CHECKPOINT_VERSION: u32 = 2;
 
 /// A serializable checkpoint of the SOMA's learned state.
+/// Includes LoRA state, experience metadata, plugin state, and decision log (Section 7.5).
 #[derive(Serialize, Deserialize)]
 pub struct Checkpoint {
     pub version: u32,
@@ -18,6 +19,22 @@ pub struct Checkpoint {
     pub lora_state: Vec<LoRALayerState>,
     pub experience_count: u64,
     pub adaptation_count: u64,
+    /// Plugin-specific state snapshots (Section 7.5: plugin state is part of institutional memory)
+    #[serde(default)]
+    pub plugin_states: Vec<PluginStateEntry>,
+    /// Decision log — what was built, why, when (Section 7.5: institutional memory)
+    #[serde(default)]
+    pub decisions: Vec<serde_json::Value>,
+    /// Recent execution records
+    #[serde(default)]
+    pub recent_executions: Vec<serde_json::Value>,
+}
+
+/// Serialized plugin state for checkpoint.
+#[derive(Serialize, Deserialize)]
+pub struct PluginStateEntry {
+    pub plugin_name: String,
+    pub state: serde_json::Value,
 }
 
 impl Checkpoint {
@@ -34,6 +51,9 @@ impl Checkpoint {
             lora_state,
             experience_count,
             adaptation_count,
+            plugin_states: Vec::new(),
+            decisions: Vec::new(),
+            recent_executions: Vec::new(),
         }
     }
 
@@ -82,11 +102,11 @@ impl Checkpoint {
             ));
         }
 
-        // Read version
+        // Read version — accept current and previous versions for backwards compat
         let version = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-        if version != CHECKPOINT_VERSION {
+        if version == 0 || version > CHECKPOINT_VERSION {
             return Err(anyhow::anyhow!(
-                "Unsupported checkpoint version: {} (expected {})",
+                "Unsupported checkpoint version: {} (supported: 1-{})",
                 version,
                 CHECKPOINT_VERSION
             ));

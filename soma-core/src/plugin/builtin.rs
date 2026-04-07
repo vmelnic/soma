@@ -13,33 +13,80 @@ pub struct PosixPlugin {
 impl PosixPlugin {
     pub fn new() -> Self {
         let conventions = vec![
-            conv(0,  "open_read",       "Open file for reading"),
-            conv(1,  "create_file",     "Create/truncate file for writing"),
-            conv(2,  "read_content",    "Read content from fd"),
-            conv(3,  "write_content",   "Write data to fd"),
-            conv(4,  "close_fd",        "Close file descriptor"),
-            conv(5,  "open_dir",        "Open directory"),
-            conv(6,  "read_dir_entries","Read directory entries"),
-            conv(7,  "close_dir",       "Close directory"),
-            conv(8,  "delete_file",     "Delete file"),
-            conv(9,  "create_dir",      "Create directory"),
-            conv(10, "rename_path",     "Rename/move file"),
-            conv(11, "check_access",    "Check file exists"),
-            conv(12, "file_stat",       "Get file metadata"),
-            conv(13, "get_cwd",         "Get working directory"),
-            conv(14, "get_time",        "Get current time"),
-            conv(15, "get_uname",       "Get system info"),
+            // File operations — cleanup convention 4 (close_fd) for open handles
+            conv(0,  "open_read",       "Open file for reading",
+                vec![arg("path", "string", true, "File path")],
+                "handle", 1, Some(4)),  // cleanup: close_fd
+            conv(1,  "create_file",     "Create/truncate file for writing",
+                vec![arg("path", "string", true, "File path")],
+                "handle", 1, Some(4)),  // cleanup: close_fd
+            conv(2,  "read_content",    "Read content from fd",
+                vec![arg("fd", "handle", true, "File descriptor")],
+                "string", 5, None),
+            conv(3,  "write_content",   "Write data to fd",
+                vec![arg("fd", "handle", true, "File descriptor"),
+                     arg("data", "string", true, "Data to write")],
+                "int", 5, None),
+            conv(4,  "close_fd",        "Close file descriptor",
+                vec![arg("fd", "handle", true, "File descriptor")],
+                "int", 1, None),
+            // Directory operations — cleanup convention 7 (close_dir) for open handles
+            conv(5,  "open_dir",        "Open directory",
+                vec![arg("path", "string", true, "Directory path")],
+                "handle", 1, Some(7)),  // cleanup: close_dir
+            conv(6,  "read_dir_entries","Read directory entries",
+                vec![arg("dirp", "handle", true, "Directory handle")],
+                "list", 10, None),
+            conv(7,  "close_dir",       "Close directory",
+                vec![arg("dirp", "handle", true, "Directory handle")],
+                "int", 1, None),
+            conv(8,  "delete_file",     "Delete file",
+                vec![arg("path", "string", true, "File path")],
+                "int", 1, None),
+            conv(9,  "create_dir",      "Create directory",
+                vec![arg("path", "string", true, "Directory path")],
+                "int", 1, None),
+            conv(10, "rename_path",     "Rename/move file",
+                vec![arg("old", "string", true, "Source path"),
+                     arg("new", "string", true, "Destination path")],
+                "int", 1, None),
+            conv(11, "check_access",    "Check file exists",
+                vec![arg("path", "string", true, "File path")],
+                "bool", 1, None),
+            conv(12, "file_stat",       "Get file metadata",
+                vec![arg("path", "string", true, "File path")],
+                "map", 2, None),
+            conv(13, "get_cwd",         "Get working directory",
+                vec![], "string", 1, None),
+            conv(14, "get_time",        "Get current time",
+                vec![], "string", 1, None),
+            conv(15, "get_uname",       "Get system info",
+                vec![], "map", 1, None),
         ];
         Self { conventions }
     }
 }
 
-fn conv(id: u32, name: &str, desc: &str) -> Convention {
+fn arg(name: &str, arg_type: &str, required: bool, desc: &str) -> super::interface::ArgSpec {
+    super::interface::ArgSpec {
+        name: name.to_string(),
+        arg_type: arg_type.to_string(),
+        required,
+        description: desc.to_string(),
+    }
+}
+
+fn conv(id: u32, name: &str, desc: &str, args: Vec<super::interface::ArgSpec>, ret: &str,
+        latency_ms: u32, cleanup: Option<u32>) -> Convention {
     Convention {
         id,
         name: name.to_string(),
         description: desc.to_string(),
         call_pattern: "builtin".to_string(),
+        args,
+        return_type: ret.to_string(),
+        estimated_latency_ms: latency_ms,
+        cleanup_convention: cleanup,
     }
 }
 
@@ -61,6 +108,14 @@ fn get_fd(val: &Value) -> Result<i32, PluginError> {
 
 impl SomaPlugin for PosixPlugin {
     fn name(&self) -> &str { "posix" }
+
+    fn permissions(&self) -> super::interface::PluginPermissions {
+        super::interface::PluginPermissions {
+            filesystem: vec!["/".to_string()],
+            network: vec![],
+            env_vars: vec!["HOME".to_string(), "PATH".to_string()],
+        }
+    }
 
     fn conventions(&self) -> Vec<Convention> {
         self.conventions.clone()

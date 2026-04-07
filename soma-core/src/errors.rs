@@ -1,4 +1,4 @@
-//! SOMA error types (Spec Section 13).
+//! SOMA error types (Whitepaper Section 11.3).
 
 use thiserror::Error;
 
@@ -23,6 +23,15 @@ pub enum SomaError {
 
     #[error("convention not found: {0}")]
     Convention(String),
+
+    #[error("MCP error: {0}")]
+    Mcp(String),
+
+    #[error("state error: {0}")]
+    State(String),
+
+    #[error("auth error: {0}")]
+    Auth(String),
 
     #[error("{0}")]
     Other(#[from] anyhow::Error),

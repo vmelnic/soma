@@ -98,6 +98,24 @@ pub fn encode_frame(signal: &Signal) -> Vec<u8> {
         flags -= SignalFlags::COMPRESSED;
     }
 
+    // Encryption: if ENCRYPTED flag is set, encrypt payload (Section 9.4)
+    let payload_bytes = if flags.contains(SignalFlags::ENCRYPTED) {
+        // Use a fixed key/nonce for now (real: session-derived keys)
+        let key = [0x42u8; 32];
+        let nonce = [0u8; 12];
+        let aad = signal.sender_id.as_bytes();
+        match super::encryption::encrypt_payload(&key, &nonce, &payload_bytes, aad) {
+            Ok(encrypted) => encrypted,
+            Err(e) => {
+                tracing::warn!(error = %e, "Encryption failed — sending unencrypted");
+                flags -= SignalFlags::ENCRYPTED;
+                payload_bytes
+            }
+        }
+    } else {
+        payload_bytes
+    };
+
     // Pre-allocate: header(13) + sender + meta_len(4) + meta + payload_len(4) + payload + checksum(4)
     let total = 13
         + (sender_len as usize)
@@ -237,6 +255,22 @@ pub fn decode_frame(data: &[u8]) -> Result<Signal> {
     }
     let raw_payload = data[offset..offset + payload_len].to_vec();
     offset += payload_len;
+
+    // Decrypt payload if ENCRYPTED flag is set (Section 9.4)
+    let raw_payload = if flags.contains(SignalFlags::ENCRYPTED) {
+        let key = [0x42u8; 32]; // Must match encode key (real: session-derived)
+        let nonce = [0u8; 12];
+        let aad = sender_id.as_bytes();
+        match super::encryption::decrypt_payload(&key, &nonce, &raw_payload, aad) {
+            Ok(decrypted) => decrypted,
+            Err(e) => {
+                tracing::warn!(error = %e, "Decryption failed — using raw payload");
+                raw_payload
+            }
+        }
+    } else {
+        raw_payload
+    };
 
     // Decompress payload if COMPRESSED flag is set (Spec Section 19)
     let payload = maybe_decompress(&raw_payload, flags.contains(SignalFlags::COMPRESSED))?;

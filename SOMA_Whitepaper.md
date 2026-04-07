@@ -1,745 +1,506 @@
-# SOMA: Toward a Universal Self-Adaptive Neural Architecture for Direct Intent-to-Execution Computing
+# SOMA: A Universal Neural Architecture for Direct Intent-to-Execution Computing
 
-**Version 0.1 — Draft for Discussion**
-**April 2026**
+**Version 0.3 — April 2026**
 
 ---
 
 ## Abstract
 
-The current paradigm of software development — whether manual or AI-assisted — relies on generating human-readable source code as an intermediate representation between intent and execution. This paper proposes **SOMA** (from Greek *σῶμα*, "body"), a fundamentally new computational paradigm in which a neural architecture is synthesized directly onto a hardware target (or host environment), forming an embodied computational organism that maps human intent to hardware execution without programming languages, compilers, or traditional software as intermediaries. A SOMA instance knows its own body — registers, ports, interrupts, memory, APIs — and orchestrates it directly in response to natural intent. We present the theoretical foundations, architectural principles, synthesis model, and a research roadmap toward realizing this vision.
+SOMA (from Greek σῶμα, "body") is a computational paradigm in which a neural architecture IS the program. No application source code is written, compiled, or interpreted. A trained neural mind receives structured intents, generates execution programs, and orchestrates plugins (body parts) that interface with hardware, databases, networks, and other systems.
+
+SOMA is a pure executor — small, deterministic, and capable of running on hardware ranging from ESP32 microcontrollers (50K parameters, 168KB RAM) to cloud servers (50M+ parameters). It does not converse or reason in natural language. Conversational intelligence is provided by external LLMs (Claude, ChatGPT, Ollama, or any other) that connect to SOMA via the Model Context Protocol (MCP). The LLM brings understanding. SOMA brings state, memory, and execution.
+
+The runtime is a single Rust binary with zero dependencies. Python is used only for the Synthesizer (the build tool that trains the Mind). At runtime, no Python, no Node, no JVM — just the Rust binary, ONNX models (or quantized embedded models), and plugin shared libraries.
+
+This paper presents the architecture, demonstrates three proofs of work validating core claims, and describes the path to building real-world applications — including HelperBook, a multi-feature messaging and networking platform built entirely through SOMA.
 
 ---
 
 ## 1. Introduction
 
-### 1.1 The Problem
+### 1.1 The Problem with Software
 
-For seven decades, software development has evolved by stacking abstraction layers: machine code, assembly, high-level languages, frameworks, and now AI-assisted code generation. Each layer exists because humans cannot efficiently think at the layer below. The latest iteration — using large language models to generate source code — does not break this pattern. It merely automates the production of an intermediate artifact (code) that must still be compiled, debugged, deployed, and maintained.
+Every program ever written follows the same pattern: a human understands what needs to happen, then translates that understanding into code. The code is an intermediate artifact — a lossy encoding of the human's intent in a formal language that the machine can execute.
 
-This approach suffers from fundamental inefficiencies:
+This translation has defined computing for seventy years. It requires specialized training. It produces artifacts (codebases) that grow in complexity, accumulate technical debt, and eventually become unmaintainable. The gap between "what I want" and "what the machine does" is bridged by millions of developers writing billions of lines of code.
 
-- **Translation loss.** A system that understands human intent produces an artifact (source code) that does not understand intent, only to feed it into a dumb executor (compiler/interpreter). Information is lost at every boundary.
-- **Fragility.** AI-generated code frequently fails because the model's understanding of the desired behavior does not survive the translation into syntax and semantics of a programming language.
-- **Redundancy.** If a system can understand what a human wants, requiring it to express that understanding as Java or Python before anything happens is an unnecessary detour.
-- **Human bottleneck.** Developers remain in the loop not because their judgment is needed at every step, but because the artifacts (code) require human-legible form for debugging and maintenance.
+SOMA eliminates this gap. Not by generating code more efficiently — but by removing application code from the equation entirely.
 
-### 1.2 The Thesis
+### 1.2 The SOMA Paradigm
 
-We propose eliminating the intermediate artifact entirely. In the SOMA paradigm:
+A SOMA is not a program. It is a computational organism:
 
-1. A **base neural architecture** is **synthesized** (not trained in the LLM sense, but compiled/fitted) onto a specific hardware target or host environment.
-2. The resulting **SOMA instance** possesses intimate knowledge of its own computational body — every capability, constraint, I/O channel, and resource.
-3. At runtime, a human provides **intent** via any natural interface (text, voice, or future neural interfaces).
-4. The SOMA instance **directly orchestrates** its hardware/environment to produce the desired output, using internal representations that are emergent from the synthesis process — not human-designed programming languages.
+- **Mind**: A trained neural model (BiLSTM encoder + GRU decoder, or Transformer) that maps structured intents to execution programs — sequences of plugin operations with resolved arguments.
+- **Body**: Plugins that interface with the physical and digital world — databases, filesystems, sensors, network protocols, user interfaces. Everything outside the Mind is a plugin.
+- **Memory**: Experiential LoRA (Low-Rank Adaptation) layers that accumulate over time, allowing the SOMA to improve from experience without full retraining. Inspired by neuroscience research on hippocampal consolidation and complementary learning systems.
+- **Protocol**: The Synaptic Protocol, a binary wire protocol enabling SOMA-to-SOMA communication. A network of SOMAs cooperates to accomplish tasks no single SOMA can handle alone.
+- **State**: The complete truth of what exists — database schema, plugin configurations, business rule decisions, execution history, experiential memory. Permanent, queryable, and transferable across LLM sessions.
 
-No code is written. No code is generated. No code exists. The SOMA **is** the program.
+### 1.3 The Interaction Model
 
-### 1.3 Terminology
+The human does not interact with SOMA directly. They speak to any LLM (Claude, ChatGPT, Ollama, a local Llama), which understands their intent and translates it into structured calls to SOMA via MCP. SOMA executes deterministically. The LLM explains the results in human terms. SOMA holds all state permanently — when a new LLM session starts, it calls `soma.get_state()` and has complete context in one second.
 
-| Term | Definition |
+### 1.4 Why This Matters
+
+| Today | SOMA |
 |---|---|
-| **SOMA** | A neural computational organism synthesized onto a specific hardware or environment target, capable of directly executing human intent. |
-| **Synthesis** | The process of compiling/fitting a base neural architecture to a specific target, producing a SOMA instance. Analogous to compiler backend code generation, but producing a neural execution structure rather than machine instructions. |
-| **Body** | The complete hardware and/or environment a SOMA inhabits — registers, memory, I/O ports, OS APIs, network interfaces, peripherals. |
-| **Proprioception** | A SOMA's knowledge of its own body, capabilities, and constraints. |
-| **Neuronal Language** | The internal representational structure a SOMA uses to orchestrate execution. Emergent from synthesis, not human-designed. Not intended to be human-readable. |
-| **Intent Interface** | The boundary where human intent enters the SOMA — text, voice, gesture, neural signal. |
-| **Soma Network** | Multiple SOMA instances communicating and composing to accomplish distributed tasks. |
-| **Synthesizer** | The system that performs synthesis — compiling the base architecture onto a target body. |
+| LLM is brain AND memory | LLM is brain, SOMA is memory |
+| Context degrades over time | State is permanent and queryable |
+| LLM generates code artifacts | SOMA executes directly, no application code |
+| Code must be maintained | SOMA adapts through experience |
+| Platform lock-in (React, iOS, Android) | Same SOMA, different body plugins |
+| LLM switching loses all context | Any LLM queries same SOMA state |
+| 200K-line codebase to maintain | Neural weights encode decisions, not boilerplate |
 
 ---
 
 ## 2. Foundational Principles
 
-### 2.1 The Model Is the Program
+### 2.1 No Application Code
 
-In traditional computing, a program is a static sequence of instructions that a processor executes. In SOMA, the neural structure **is** the execution logic. There is no separation between "the software" and "the thing that runs the software." The SOMA does not interpret instructions — it **is** the instruction.
+SOMA does not generate application source code — no Python files, no JavaScript bundles, no compiled binaries. The Mind generates **programs**: sequences of plugin convention calls with resolved arguments. These programs are ephemeral internal data structures, never serialized to a human-readable programming language.
 
-This mirrors biological systems. A human brain does not execute a "walking program." The neural structure that produces walking **is** the walking. Motor patterns, sensory feedback, balance correction — all are embedded in the architecture itself, not in an external script the brain reads.
+**Clarification on embedded strings.** Programs may contain domain-specific strings as convention arguments — SQL queries (`"SELECT * FROM contacts WHERE ..."`), file paths (`"/tmp/data.csv"`), email templates. These are data values within the program, not source code. The Mind learns to compose these strings from training data. No human writes or maintains them.
 
-### 2.2 Embodiment
+### 2.2 Everything Is a Plugin
 
-Every SOMA is synthesized for a specific body. A SOMA on an ESP32 with 520KB of SRAM and GPIO pins is a fundamentally different organism than a SOMA on an M4 MacBook with 32GB of unified memory and macOS system calls. They share a common base architecture, but synthesis produces a body-aware instance.
+The SOMA Core contains exactly six components: Mind Engine, Plugin Manager, Memory System, Synaptic Protocol, MCP Server, and Proprioception. Every capability — filesystem, database, email, rendering, authentication, image processing, GPIO, Bluetooth — is a plugin. An ESP32 SOMA loads GPIO and I2C plugins. A web backend SOMA loads PostgreSQL, Redis, and Auth plugins. Same core, different body.
 
-This is analogous to how a single genome produces radically different organisms depending on environmental signals during development — or, in the compiler analogy, how the same C program produces different machine code for ARM versus x86.
+### 2.3 Deterministic Execution
 
-A SOMA knows:
-- What computational resources it has (memory, processing units, clock speeds).
-- What I/O is available (GPIO, USB, network, display, audio, file system).
-- What environment it operates in (bare metal, RTOS, Linux, macOS, Android).
-- What it **cannot** do — resource boundaries are part of proprioception.
+Given the same intent, the same model weights, and the same softmax temperature, the Mind produces the same program. Plugins execute deterministically where the underlying operation is deterministic. This separates SOMA from LLMs, which are inherently non-deterministic. The LLM layer can be creative and exploratory. SOMA is reliable and predictable.
 
-### 2.3 Synthesis, Not Training
+### 2.4 SOMA Is a Pure Executor
 
-Current neural networks are trained on datasets to minimize a loss function. SOMA synthesis is a different process, closer to compilation:
+SOMA does not converse. It does not ask questions. It does not understand product specifications or generate natural language. It receives structured intents, generates programs, executes them, and returns structured results. Conversational intelligence — understanding, reasoning, explaining — belongs to the external LLM layer.
 
-- **Input:** Base neural architecture + target body specification (hardware manifest, OS API surface, peripheral map, resource constraints).
-- **Process:** The base architecture is specialized, pruned, and fitted to the target. Internal pathways are established that map operational primitives to the target's actual capabilities. This is deterministic and repeatable for a given base + target pair.
-- **Output:** A SOMA instance — a neural execution structure ready to inhabit its target and receive intent.
+This is a deliberate design choice, not a limitation. Conversational understanding requires 1B+ parameters. SOMA must run on ESP32 with 50K parameters. Keeping conversation external keeps SOMA small, universal, and focused on what it does best: execute.
 
-The synthesis process may itself use learning-based techniques internally (architecture search, weight optimization against hardware simulation), but from the outside it behaves like compilation: same input, same output, every time.
+### 2.5 The LLM Is the Companion, Not the Core
 
-### 2.4 Intent as Input, Execution as Output
+Any LLM can drive any SOMA via MCP. Claude can build HelperBook on Monday. ChatGPT can maintain it on Wednesday. A local Ollama model can operate it on Friday. All connect to the same SOMA, all see the same state, all use the same capabilities. The human chooses their LLM. SOMA doesn't care which one talks to it.
 
-A SOMA's interface to the human is **intent**. Not code. Not configuration. Not parameters (unless the human chooses to be that specific). The SOMA's responsibility is to:
+### 2.6 SOMA Is the Permanent Memory
 
-1. Receive intent through the intent interface.
-2. Disambiguate. If intent is ambiguous, the SOMA asks — like a competent colleague would.
-3. Plan execution using its knowledge of its own body.
-4. Execute directly on its hardware/environment.
-5. Return results or effects.
-
-This loop has no intermediate code generation step. The SOMA's internal neuronal language orchestrates hardware directly.
+LLMs lose context. Conversations end. Context windows overflow. SOMA holds the truth permanently: database schema, plugin state, business rules, decision log, experience statistics. When any LLM starts a new session, it calls `soma.get_state()` via MCP and receives the complete state of the world in one call. This fundamentally solves the LLM context loss problem by moving the source of truth from the LLM (ephemeral) to SOMA (permanent).
 
 ---
 
 ## 3. Architecture
 
-### 3.1 Layered Internal Structure
-
-Although a SOMA has no human-readable code, it is not an opaque black box. Internally, it has a layered structure, each layer with a distinct role:
-
-**Layer 1 — Intent Reception and Parsing.**
-Receives raw human input (text, audio, neural signal). Produces a structured internal representation of the desired outcome. Handles ambiguity resolution, clarification dialogue, and intent validation.
-
-**Layer 2 — Planning and Decomposition.**
-Takes parsed intent and decomposes it into operational sub-goals. This layer understands causality, sequencing, dependencies, and resource requirements. It is aware of the body's capabilities and constraints.
-
-**Layer 3 — Neuronal Execution Core.**
-The deepest layer. Maps operational sub-goals to direct hardware/environment actions. This is where the neuronal language lives — an emergent internal representation that encodes operations in terms native to the target body. On bare metal, this means register manipulation, interrupt handling, signal timing. On an OS-hosted body, this means system calls, API invocations, process management.
-
-**Layer 4 — Feedback and Correction.**
-Monitors execution outcomes. Compares results against the original intent. If divergence is detected, this layer can retry with different strategies, adjust parameters, or escalate to the human via the intent interface. This is the SOMA's equivalent of error handling — but adaptive rather than predefined.
-
-**Layer 5 — Proprioception and Self-Model.**
-A continuous background layer that maintains the SOMA's knowledge of its own state — memory usage, thermal conditions, I/O status, peripheral availability, network connectivity. Informs all other layers.
-
-### 3.2 Deterministic Mode
-
-Certain operations require absolute precision: arithmetic, cryptographic functions, transaction processing, timing-critical control loops. For these, the neuronal execution core enters a **deterministic mode** where:
-
-- Execution follows verified, invariant pathways synthesized during the compilation phase.
-- These pathways are functionally equivalent to traditional compiled machine code but are embedded within the neural structure as fixed circuits.
-- Deterministic pathways are formally verifiable — synthesis can generate proofs of correctness for critical operations, similar to how compilers can guarantee certain optimizations preserve semantics.
-- The SOMA knows which operations require deterministic mode and activates it automatically based on the nature of the task.
-
-This is not a contradiction of the SOMA paradigm. The human brain also has "deterministic" circuits — reflexes, autonomic functions — alongside flexible cognition. A SOMA similarly has hardened pathways for operations that demand exactness.
-
-### 3.3 The Neuronal Language
-
-A SOMA's internal language is not designed by humans. It emerges from the synthesis process as the most efficient way to represent operations on the specific target body. However, it shares structural properties with both neural activation patterns and traditional instruction sets:
-
-- It has **opcodes** — atomic operations the target can perform.
-- It has **composition rules** — how atomic operations combine.
-- It has **state representations** — how memory, registers, and I/O are modeled internally.
-- It has **optimization patterns** — learned or synthesized shortcuts for common operation sequences.
-
-This language is unique per synthesis target. Two SOMA instances on different hardware will have different neuronal languages, just as ARM and x86 have different machine codes. But both can fulfill the same human intent.
-
----
-
-## 4. Intent Complexity and the Planning Layer
-
-### 4.1 The Two Classes of Intent
-
-Not all human intents are equal in complexity. A critical architectural distinction exists between two classes:
-
-**Class 1 — Operational Intent.** Direct, concrete commands that map to one or a few body operations. "List files in /tmp." "Blink the LED every 2 seconds." "Send a confirmation email to Maria." The neuronal execution core handles these directly — intent in, execution out. A small neural network (sub-1M parameters) can classify intent, extract parameters, and generate a program of primitive operations. This is what the SOMA POC demonstrates.
-
-**Class 2 — Creative/Architectural Intent.** Complex, multi-step, design-level commands. "Add a waitlist feature." "Monitor soil moisture and alert when dry." "Add support for recurring appointments." These require understanding existing state, reasoning about design, decomposing into a sequence of operations, and executing them in order. No single operation sequence suffices.
-
-The neuronal execution core (Layer 3) is designed for Class 1. Class 2 requires a more capable planning layer.
-
-### 4.2 Scaling the Planning Layer
-
-Layer 2 (Planning and Decomposition) scales with the complexity of the SOMA's domain:
-
-**Minimal SOMA (ESP32, sensor node).** The planning layer is trivially small or absent. Intents are simple ("read sensor," "blink LED") and map directly to primitives. The neuronal execution core handles everything.
-
-**Mid-range SOMA (home automation, web application).** The planning layer can be implemented as a small language model (1B–3B parameters) running locally as part of the SOMA's body. The key insight: decomposing complex intent into a sequence of known operations is a **constrained task**, not an open-ended generation task. The small model needs to understand the SOMA's current capabilities and its accumulated memory (Section 12) — what it has built, what structures exist, what it has learned. This context comes from the SOMA's own neural memory, not from an external document.
-
-**Large SOMA (enterprise, cloud).** The planning layer may be a larger model or a hierarchy of models, but it remains part of the SOMA — not an external service.
+### 3.1 System Overview
 
 ```
-Human: "Add a waitlist feature for when time slots are full"
-                    │
-        [Layer 2: Planning — uses SOMA's own memory
-         to understand current state, decomposes 
-         into operation sequence]
-                    │
-                    ▼
-Decomposed plan:
-  1. CREATE_TABLE waitlist (slot_id, client_name, email, position)
-  2. ADD_ROUTE POST /waitlist/join (slot_id, name, email)
-  3. ADD_ROUTE GET /waitlist/{slot_id}
-  4. ADD_TRIGGER on_slot_cancel → notify_first_waitlist
-  5. MODIFY_ROUTE GET /booking/{slot_id} → show waitlist when full
-                    │
-        [Neuronal Execution Core — Layer 3]
-                    │
-                    ▼
-        [Body operations → memory updates]
+┌──────────────────────────────────────────────┐
+│  Human (builder, user, operator)              │
+└────────────────────┬─────────────────────────┘
+                     │ natural language
+                     ▼
+┌──────────────────────────────────────────────┐
+│  LLM (Claude, ChatGPT, Ollama, etc.)          │
+│  Understands human → decomposes into calls    │
+└────────────────────┬─────────────────────────┘
+                     │ MCP (tool calls + state queries)
+                     ▼
+┌──────────────────────────────────────────────┐
+│  SOMA Core (single Rust binary)               │
+│  ┌──────────┐ ┌──────────┐ ┌──────────────┐ │
+│  │   Mind   │ │ Synaptic │ │ MCP Server   │ │
+│  │  Engine  │ │ Protocol │ │ (LLM ↔ SOMA) │ │
+│  └────┬─────┘ └────┬─────┘ └──────┬───────┘ │
+│  ┌────┴─────────────┴──────────────┴───────┐ │
+│  │  Plugin Manager                          │ │
+│  └────┬────────────────────────────────────┘ │
+│  ┌────┴──────┐  ┌──────────────┐            │
+│  │  Memory   │  │ Proprioception│           │
+│  │ (LoRA +   │  │ (self-model) │            │
+│  │ checkpoint)│  └──────────────┘            │
+│  └───────────┘                               │
+└──────────────────────────────────────────────┘
+         │                        │
+    ┌────┴────┐              ┌────┴────┐
+    │ Plugins │              │  Peer   │
+    │ (body)  │              │  SOMAs  │
+    └─────────┘              └─────────┘
 ```
 
-The planning model is **part of the SOMA**, not an external dependency. It draws context from the SOMA's own experiential memory (Section 12), not from a manifest file or configuration document. The SOMA knows what it has done because it remembers — the knowledge is in its weights, not in an external file.
+### 3.2 Why Rust
 
-### 4.3 Optional External Formalisms
+The SOMA runtime is a single Rust binary. No Python runtime. No Node.js. No JVM. No dependencies.
 
-For scenarios where a human needs to review, approve, or version a complex plan before execution, the SOMA can express its decomposed plan in any structured format the human prefers — Gherkin (BDD scenarios), plain language, tables, diagrams. These are **communication formats**, not architectural requirements. The SOMA's internal planning operates on its own neural representations. External formats are output, like HTML is output to a browser.
+- **Single binary deployment**: `./soma` — one file, copy and run
+- **Performance**: no garbage collector pauses during real-time signal processing
+- **True concurrency**: no GIL; tokio async runtime handles thousands of concurrent connections
+- **Memory safety**: no segfaults, no buffer overflows — critical for a system that controls hardware
+- **Cross-compilation**: same codebase compiles to x86-64, ARM64, RISC-V, and ESP32 (via no_std embedded Rust)
+- **Small binaries**: server ~15MB, embedded ~200KB-2MB
 
-Similarly, for behavioral verification (Section 8), the SOMA can generate test scenarios in any format — including Gherkin's Given/When/Then — and run them against itself. But this is an optional verification tool, not a mandatory architectural layer.
+Python remains only for the Synthesizer — the build tool that trains the Mind. Like how a compiler can be written in C while the programs it compiles don't need C.
 
-### 4.4 The Complete Intent Pipeline
+### 3.3 Dual Mind Engine
+
+The Mind Engine defines an abstract `MindEngine` trait. Two backends implement it:
+
+**ONNX Engine (server, desktop, Raspberry Pi):**
+- Uses ONNX Runtime via the `ort` Rust crate
+- Model files: `encoder.onnx` + `decoder.onnx` (float32 or float16)
+- RAM: 50MB - 8GB+ depending on model size
+- GPU/NPU acceleration: CoreML (macOS), CUDA (Linux), DirectML (Windows)
+- Full LoRA: rank 4-64 on all target layers
+- Dynamic plugin loading (.so/.dylib)
+
+**Embedded Engine (ESP32, microcontrollers):**
+- Custom inference in pure no_std Rust, zero external dependencies
+- Model file: `.soma-model` (int8 quantized, custom binary format)
+- Implements only the operations needed: matmul, sigmoid, tanh, softmax, argmax, embedding lookup — approximately 3-5K lines of Rust
+- RAM budget on ESP32 (520KB SRAM): ~168KB for inference + ~352KB for application
+- With PSRAM (4MB): supports larger models, more conventions, richer LoRA
+- LoRA: minimal rank 2-4, output heads only
+- Built-in plugins only (no dynamic loading)
+
+| Target | Parameters | Model Size | RAM for Inference | Conventions |
+|---|---|---|---|---|
+| ESP32 (no PSRAM) | ~50K | ~100KB | ~168KB | 8-16 |
+| ESP32 (PSRAM) | ~200K | ~400KB | ~135KB SRAM + 2MB PSRAM | 16-32 |
+| Raspberry Pi | ~800K | ~1.6MB | ~20MB | 32-64 |
+| Desktop/Server | ~800K-50M | 3MB-200MB | 50MB-2GB | 64-500+ |
+
+The SOMA Core doesn't know which backend is running. Both implement the same trait, produce the same output format.
+
+---
+
+## 4. Neural Architecture
+
+### 4.1 Mind Structure
+
+The Mind consists of an encoder and an autoregressive decoder:
+
+**Encoder (BiLSTM):** Bidirectional LSTM, 2 layers. Input: tokenized intent (BPE vocabulary, 2K-6K tokens). Output: contextualized encoding of the entire intent, plus a pooled representation used as the decoder's initial context.
+
+**Decoder (GRU):** Autoregressive GRU cell. At each step, it produces:
+- **Opcode logits**: which convention to call (softmax over all known conventions + EMIT + STOP)
+- **Argument type logits**: for each argument slot — is it a literal, a span (extracted from intent), or a ref (pointer to a previous step's result)?
+- **Span position logits**: if argument is a span, which tokens in the intent to extract (start and end positions)
+- **Ref logits**: if argument is a ref, which previous step's result to use (pointer attention)
+
+The decoder runs until it predicts STOP or reaches `max_program_steps` (default: 16).
+
+### 4.2 Program Structure
+
+A program is a sequence of steps. Each step:
 
 ```
-Intent arrives
-       │
-  [Layer 1: Intent Reception — parse and classify]
-       │
-  Simple (Class 1)?  → Layer 3 executes directly
-  Complex (Class 2)? → Layer 2 decomposes using own memory as context
-  Ambiguous?         → Ask human for clarification
-       │
-  [Layer 3: Execute operations]
-       │
-  [Memory updates — SOMA remembers what it did]
+(convention_name, arg0_type, arg0_value, arg1_type, arg1_value)
 ```
 
-### 4.5 Why This Is Not "AI-Assisted Development"
-
-A critical distinction: at no point in this pipeline does a programming language appear. The planning layer decomposes intent into operation sequences (opcodes), not source code. The operations are executed by the neuronal execution core directly on the body. No code is generated, parsed, compiled, or interpreted. This is also not "low-code" or "no-code" in the current industry sense — those platforms still produce code behind a visual interface. SOMA produces no code at any layer.
-
----
-
-## 5. Synthesis Process
-
-### 5.1 Overview
-
-Synthesis transforms a **base architecture** into a **target-specific SOMA instance**. The process is analogous to compilation but operates on neural structures rather than source code.
+Example — "list files in /tmp and cache the result":
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│  Base SOMA       │     │  Target Body     │     │  SOMA Instance   │
-│  Architecture    │ ──▶ │  Specification   │ ──▶ │  (ready to run)  │
-│  (universal)     │     │  (HW + ENV)      │     │  (target-native) │
-└─────────────────┘     └──────────────────┘     └──────────────────┘
-                              │
-                    ┌─────────┴──────────┐
-                    │ - CPU architecture  │
-                    │ - Memory map        │
-                    │ - Peripheral manifest│
-                    │ - OS API surface    │
-                    │ - Resource limits   │
-                    │ - I/O channels      │
-                    └────────────────────┘
+Step 0: fs.list_dir("/tmp")              ← arg is literal string
+Step 1: redis.set("files:tmp", $0, 300)  ← $0 is ref to step 0 result, 300 is literal TTL
+Step 2: EMIT($0)                         ← return step 0 result to caller
+Step 3: STOP
 ```
 
-### 5.2 Phases of Synthesis
+### 4.3 Intent Complexity
 
-**Phase 1 — Body Discovery.**
-The synthesizer ingests the target body specification. This can be provided as a formal hardware description (device tree, datasheet-derived manifest), an OS API surface definition, or discovered through probing a live system.
+**Class 1 — Direct mapping.** One intent, one or two program steps. "Read file hello.txt" → `fs.read_file("hello.txt"), EMIT, STOP`. The vast majority of operations.
 
-**Phase 2 — Architecture Specialization.**
-The base neural architecture is pruned and adapted for the target. A SOMA on a microcontroller with 520KB RAM gets a radically smaller, more focused architecture than a SOMA on a server with 256GB. Layers are scaled, pathways are allocated, and the proprioception layer is populated with the body model.
+**Class 2 — Multi-step.** Complex intents requiring multiple plugins. "Upload this photo, generate a thumbnail, store both, and update the user's profile" → 4-5 steps across image-proc, s3, and postgres plugins.
 
-**Phase 3 — Neuronal Language Generation.**
-The synthesizer generates the target's neuronal language — the internal operational vocabulary. This is derived from the intersection of "what operations the base architecture can express" and "what operations the target body can physically perform." For bare metal, this grounds out in register operations and timing. For OS-hosted targets, it grounds out in system calls and API patterns.
+**Class 3 — Planning.** Intents requiring reasoning and conditional logic. With the LLM+MCP architecture, the LLM handles this. It decomposes complex requests into multiple `soma.intent()` calls, each of which is Class 1 or 2. The Mind stays simple.
 
-**Phase 4 — Deterministic Pathway Hardening.**
-Critical operations (arithmetic, crypto, timing-critical loops) are identified and synthesized as fixed, verifiable circuits within the neural structure. These pathways are tested and proven correct during synthesis.
+### 4.4 Transformer Variant (for large SOMAs)
 
-**Phase 5 — Integration and Validation.**
-The complete SOMA instance is assembled, loaded onto the target (or its simulator), and validated against a suite of intent-execution pairs. This is the SOMA equivalent of compiler test suites.
-
-### 5.3 Synthesis Properties
-
-- **Deterministic.** Same base + same target = same SOMA instance, every time.
-- **Incremental.** If the target body changes (new peripheral added, OS updated), re-synthesis can be partial.
-- **Portable.** The base architecture is universal. Only synthesis is target-specific.
+For SOMAs with 100+ conventions (web applications), a Transformer encoder/decoder may perform better. The MindEngine trait supports this transparently — a Transformer backend implements the same `infer()` method. The rest of the SOMA Core doesn't change.
 
 ---
 
-## 6. The Bootstrap Problem
+## 5. The Synthesizer
 
-### 6.1 The Paradox
+The Synthesizer is a Python + PyTorch build tool. It is the ONLY component that uses Python. Everything it produces is consumed by the Rust SOMA Core at runtime.
 
-SOMA proposes to replace programming. But the first synthesizer — the system that produces SOMA instances — must itself be built using traditional programming. This is not a flaw; it is a necessary starting condition, identical to the bootstrap problem in compiler history.
+### 5.1 Pipeline
 
-The first C compiler was written in assembly. The first assembly was written in machine code. Every new paradigm must be born inside the paradigm it seeks to replace.
+```
+Inputs:                              Outputs:
+  Plugin training data    ──────→    encoder.onnx (server)
+  Architecture config     ──────→    decoder.onnx (server)
+  Target specification    ──────→    model.soma-model (embedded, int8)
+                                     vocab.json (tokenizer)
+                                     catalog.json (conventions)
+                                     *.lora (per-plugin LoRA weights)
+```
 
-### 6.2 The Bootstrap Path
+1. **Collect** training data from all plugins. Each plugin provides `training/examples.json` with (intent, program) pairs.
+2. **Build tokenizer** — BPE with character-level fallback. Trained on all intent text. Handles multilingual input (en/ro/ru for HelperBook), SQL strings, file paths, URLs.
+3. **Expand** training pairs via parameter pools (substitute different table names, values, paths) and data augmentation (synonym replacement, word dropout, typo injection, paraphrasing).
+4. **Train** the Mind model. Combined cross-entropy loss over: opcode prediction, argument type prediction, span position, ref pointers. Training metrics target: >95% opcode accuracy, >85% end-to-end program match.
+5. **Train plugin LoRA** (optional): freeze base weights, attach LoRA adapters, train on single-plugin data. Produces per-plugin `.lora` files.
+6. **Export**: ONNX for server (float32), `.soma-model` for embedded (int8 quantized with calibration).
 
-**Stage 0 — Traditional Implementation.**
-The first SOMA synthesizer is written in a conventional language (likely Rust, C++, or a combination) using traditional tools. It is a compiler — it takes the base architecture and a target specification and produces a SOMA instance. This synthesizer is itself conventional software: version-controlled, tested, debugged in the traditional way.
+### 5.2 Quantization for Embedded
 
-**Stage 1 — Self-Hosting.**
-A critical milestone: the synthesizer produces a SOMA instance capable of performing synthesis. At this point, the SOMA paradigm can produce itself. This is equivalent to a compiler compiling itself — the moment the new paradigm becomes self-sustaining.
-
-**Stage 2 — Divergence.**
-Once self-hosting is achieved, the SOMA-synthesized synthesizer can evolve independently of its traditional-code ancestor. Improvements to the synthesizer are made by instructing the synthesizer-SOMA, not by editing source code.
-
-### 6.3 The Significance of Self-Hosting
-
-Self-hosting is not just a technical milestone — it is the philosophical proof point. If a SOMA can synthesize other SOMAs, the paradigm is complete. It no longer depends on traditional programming for its continued existence. Every computing paradigm that achieved self-hosting (compilers, operating systems, virtual machines) became permanent. This is the threshold SOMA must cross.
-
----
-
-## 7. The Synthesizer
-
-### 7.1 What Is the Synthesizer?
-
-The synthesizer is the most critical component of the SOMA ecosystem. It is the bridge between the universal base architecture and every possible target body. It occupies the same position in SOMA that the compiler occupies in traditional computing — but its output is a neural execution structure rather than machine code.
-
-### 7.2 Synthesizer Architecture
-
-The synthesizer itself has several subsystems:
-
-**Body Analyzer.**
-Ingests the target specification. For bare metal targets, this means parsing hardware datasheets, device trees, and register maps. For OS-hosted targets, this means cataloging available system calls, APIs, libraries, drivers, and resource limits. For live systems, this may involve active probing — testing what the target can actually do.
-
-**Architecture Mapper.**
-Maps the base neural architecture onto the target's capabilities. This is the core intellectual challenge: how to transform a universal, abstract neural structure into one that can directly orchestrate specific hardware. The mapper must decide which layers to scale, which pathways to create, and how to ground abstract operations into physical ones.
-
-**Pathway Compiler.**
-Generates deterministic pathways for critical operations. This subsystem is closest to a traditional compiler — it produces verified, fixed execution circuits for arithmetic, cryptography, and other exactness-requiring operations.
-
-**Validator.**
-Runs the synthesized SOMA instance against a test suite of intent-execution pairs in a simulated or sandboxed environment before releasing it for deployment.
-
-### 7.3 The Synthesizer as a SOMA
-
-After self-hosting (Section 6), the synthesizer becomes a SOMA instance whose body is the synthesis environment — its I/O is "receive base architecture + target spec" and its output is "produce SOMA instance." It knows its own computational resources, can optimize its own synthesis strategies, and can adapt to new target types through runtime adaptation. The synthesizer-SOMA's intent interface accepts requests like: "Synthesize a SOMA for this ESP32 board" or "Re-synthesize the living room sensor SOMA with updated firmware support."
+Post-training quantization with calibration dataset. Int8 asymmetric quantization with per-tensor scale and zero-point. The `.soma-model` format stores quantization metadata alongside weights. Expected accuracy impact: 1-3% for int8 vs float32, validated per-plugin before deployment.
 
 ---
 
-## 8. Verification and Trust
+## 6. Plugins — The Body
 
-### 8.1 The Problem of Opaque Execution
+### 6.1 What a Plugin Is
 
-Without source code, traditional code review is impossible. A SOMA's internal neuronal language is not intended to be human-readable. This raises the question: how do you trust it?
+A plugin provides two things:
 
-### 8.2 Test-Driven Verification
+1. **Calling conventions**: operations the Mind can invoke — `query(sql, params)`, `send_email(to, subject, body)`, `gpio.write(pin, value)`. Each convention has a name, argument spec, return type, estimated latency, and optional cleanup action.
+2. **LoRA knowledge** (optional): pre-trained weight adaptations that teach the Mind HOW to use the conventions effectively. Installing a plugin with LoRA is like gaining a skill — you get the tool AND the expertise.
 
-The primary verification mechanism is **behavioral testing** — the same approach used to verify any system whose internals are opaque (hardware chips, biological systems, black-box certified systems).
+### 6.2 Plugin Trait (Rust)
 
-- The user or a verification framework provides **intent-output pairs**: "given this intent, this output (or behavior) must result."
-- The SOMA is tested against these pairs after synthesis and periodically during operation.
-- Deterministic pathways are additionally subject to **formal verification** during synthesis.
+Every plugin implements the `SomaPlugin` trait: `name()`, `version()`, `conventions()`, `execute()`, `on_load()`, `on_unload()`. Optional: `lora_weights()`, `training_data()`, `execute_stream()`, `checkpoint_state()`, `restore_state()`.
 
-This is not fundamentally different from how compiled binaries are trusted today — nobody reads the machine code; they test the behavior.
+### 6.3 Distribution
 
-### 8.3 Introspection
+Plugins are packaged as `.soma-plugin` archives: compiled binary (.so/.dylib), manifest.toml, LoRA weights, and training data. Distributed via a registry (`soma plugin install postgres`).
 
-A SOMA maintains a **self-model** (proprioception layer) that can be queried. A human can ask:
-- "What are you doing right now?"
-- "Why did you produce that result?"
-- "What resources are you using?"
+### 6.4 Categories (40 plugins specified)
 
-The SOMA can explain its actions in natural language through the intent interface, providing transparency without requiring the human to read internal representations.
+- **Core (T0)**: MCP bridge, PostgreSQL, Redis, filesystem, crypto
+- **Foundation (T1)**: HTTP bridge, S3, SMTP, Twilio, push notifications, auth, image processing, SQLite, geolocation, text search, DOM renderer, design knowledge, timer
+- **Features (T2)**: audio/video processing, WebRTC, calendar, messaging, reviews, analytics, localization, AI inference, ID verification, offline cache, MQTT, job queue, webhooks
+- **Specialized (T3)**: SPI, UART, BLE, PDF generation, data export
+- **Embedded**: GPIO, I2C, WiFi, BLE (built-in, not dynamically loaded)
 
----
+### 6.5 MCP Bridge Plugin
 
-## 9. Versioning, Checkpoint, and Rollback
+The most strategically important plugin. Connects SOMA to the entire MCP ecosystem — hundreds of existing MCP servers (GitHub, Slack, Google Drive, Stripe, etc.) become SOMA body capabilities without writing per-service plugins. Each MCP tool is dynamically registered as a SOMA convention. Also exposes SOMA as an MCP server, allowing external AI to orchestrate SOMAs.
 
-### 9.1 The Problem
+### 6.6 LoRA Plugin Knowledge — Mixture of Experts
 
-Traditional software uses version control (git) to track changes in source code. No source code means no diffs, no branches, no pull requests. How do you manage the lifecycle of a SOMA that grows and changes over time?
+Multiple plugin LoRAs are active simultaneously. A gating network (part of the Mind) dynamically weights which plugin's LoRA to activate per operation. Consistent with MoE research: X-LoRA (Buehler, 2024), L-MoE (2025), LoRA-Mixer (2025), MoLoRA (2025) — all demonstrating that focused LoRAs can be trained independently and composed at inference time without retraining.
 
-### 9.2 Two Layers of Versioning
+### 6.7 Dependencies and Lifecycle
 
-A SOMA's state has two distinct layers, each versioned differently:
-
-**Synthesis inputs (static).** The base architecture version and target body specification are version-controlled traditionally. Any SOMA instance can be exactly reproduced by re-running synthesis with the same base + target pair (synthesis is deterministic). This is analogous to how Docker images are versioned by their Dockerfile.
-
-**Experiential state (dynamic).** After deployment, a SOMA accumulates experiential memory through LoRA-like adaptations (Section 12). This state cannot be reproduced by re-synthesis — it is the product of the SOMA's lived experience. It must be versioned through checkpointing.
-
-### 9.3 Mind Checkpointing (CRIU-Inspired)
-
-CRIU (Checkpoint/Restore In Userspace) is a Linux tool that freezes a running process and serializes its complete state — memory contents, open file descriptors, network connections — to disk, then restores it exactly. SOMA adopts this principle for neural state:
-
-A **mind checkpoint** captures the complete state of a running SOMA at a point in time: base weights (frozen, from synthesis), all LoRA adaptation layers (experiential memory), current working memory state, and proprioception data. One snapshot. One serializable artifact. The complete mind.
-
-**Restore** loads a checkpoint back — on the same hardware, on different hardware (re-synthesize base, apply LoRA layers), or as a fork (run two instances from the same checkpoint).
-
-**Rollback** means loading an earlier checkpoint. If a recent adaptation caused problems, restore to the checkpoint before that adaptation. The SOMA loses the problematic experience but retains everything before it.
-
-### 9.4 Checkpoint Properties
-
-- **Layered.** Checkpoints can be incremental — store only the LoRA delta since the last checkpoint, not the full base weights every time.
-- **Portable.** A checkpoint from one hardware target can be partially applied to another (the LoRA layers represent learned behavior that may transfer, even if the base weights differ per target).
-- **Forkable.** A single checkpoint can seed multiple SOMA instances, each diverging from the same experiential base.
-- **Diffable.** Two checkpoints can be compared by examining their LoRA layer differences, providing visibility into what the SOMA learned between snapshots.
-
-### 9.5 Version History as Checkpoint History
-
-The application's history is the history of its checkpoints. No code to version. No manifests to maintain. The SOMA's mind IS the application, and the checkpoint IS the version.
+Plugins declare dependencies (required, optional, conflicts) in their manifest. The Plugin Manager resolves via topological sort. Each convention can declare a cleanup action for error recovery — if step 3 fails and step 1 opened a database transaction, the cleanup convention (rollback) is called automatically.
 
 ---
 
-## 10. Multi-SOMA Communication — The Soma Network
+## 7. Memory Architecture
 
-### 10.1 The Need for Composition
+### 7.1 Four-Tier Memory (Neuroscience-Inspired)
 
-Real-world systems involve multiple devices: a sensor on an ESP32, a gateway on a Raspberry Pi, a backend on a cloud server, a UI on a phone. Each hosts its own SOMA instance. They must communicate.
+Inspired by complementary learning systems theory (McClelland et al., 1995) and sleep consolidation research (Diekelmann & Born, 2010; Klinzing et al., 2019):
 
-### 10.2 Synaptic Protocol
+| Tier | Biological Analogy | Implementation | Lifetime |
+|---|---|---|---|
+| **Permanent** | Neocortical long-term | Base model weights (ONNX / .soma-model) | Immutable until re-synthesis |
+| **Experiential** | Hippocampal recent memory | LoRA A/B matrices | Grows at runtime, checkpointable |
+| **Working** | Active neural firing | Decoder hidden states, inference context | Per-execution, transient |
+| **Diffuse** | Asking a colleague | Synaptic queries to peer SOMAs | Network-dependent |
 
-We propose **Synaptic Protocol** — a communication model inspired by biological neural signaling and proven distributed systems principles.
+### 7.2 Experiential Memory (LoRA)
 
-In biological systems, neurons communicate via synapses: a presynaptic neuron releases a signal, the synapse transmits it (with potential modulation), and the postsynaptic neuron receives and integrates it. This is simple, robust, and scales to billions of connections.
+After successful program executions, the SOMA records experience. Periodically, LoRA weights are updated via gradient descent (server) or received from a peer SOMA that computed the update (embedded). The SOMA gets measurably better at its specific workload over time.
 
-The Synaptic Protocol applies this model to SOMA networks:
+LoRA implementation: for `nn.Linear` layers, `y = W_frozen(x) + scale * (x @ A.T) @ B.T` where only A and B matrices are trainable. B is initialized to zero so LoRA has no initial effect. For `nn.GRUCell`, LoRA is applied to both W_ih and W_hh gate weights with reimplemented forward pass preserving correct gradient flow.
 
-- **Signal.** The fundamental unit of inter-SOMA communication. A signal carries intent, data, or feedback — encoded in a compact, self-describing format. Analogous to a neurotransmitter packet.
-- **Synapse.** A connection between two SOMA instances. Synapses can be direct (wired, Bluetooth, UART) or routed (TCP/IP, mesh network). The physical medium is abstracted — a SOMA knows it has a synapse to another SOMA, not the transport details.
-- **Transmission.** Signals are asynchronous by default, like biological synapses. Synchronous (request-response) mode is available when a SOMA needs to wait for a result.
-- **Modulation.** Synapses can modulate signals — compress, filter, prioritize, encrypt. This is configured during synthesis based on the network topology and security requirements.
-- **Discovery.** SOMA instances discover each other through a **chemical gradient** model — broadcasting presence signals that propagate through the network with diminishing strength, allowing nearby SOMAs to find each other organically. This is inspired by how biological cells find their neighbors through chemical signaling, and is technically similar to mDNS/service discovery but with adaptive, priority-aware propagation.
+### 7.3 Consolidation ("Sleep")
 
-### 10.3 Composition Patterns
+Periodically, high-magnitude LoRA adaptations are merged into permanent weights: `W_base += scale * B @ A`, then A and B reset. Proven patterns become permanent memory. The SOMA literally cannot un-learn consolidated knowledge. On embedded, consolidation writes to flash — infrequent (daily/weekly) to respect flash endurance limits (~100K write cycles).
 
-- **Delegation.** A SOMA receives intent it cannot fully fulfill (insufficient resources, missing I/O). It delegates sub-tasks to other SOMAs in its network via synaptic signals.
-- **Hierarchy.** A more capable SOMA (e.g., cloud-hosted) can orchestrate multiple smaller SOMAs (e.g., embedded sensors), forming a nervous-system-like hierarchy.
-- **Collective.** Peer SOMAs can form a collective to jointly handle tasks that exceed any individual's capacity — similar to a neural ensemble or a distributed computing cluster, but with synaptic coordination rather than programmatic orchestration.
+### 7.4 Checkpoint and Restore
+
+A checkpoint serializes: base model hash, all LoRA A/B matrices, experience statistics, plugin manifest, plugin critical state. Restore verifies model hash match, loads LoRA state. The checkpoint IS the mind at that moment.
+
+### 7.5 SOMA as Institutional Memory
+
+Beyond neural memory, SOMA stores permanent queryable state:
+- **Database state**: every table, row, and schema change
+- **Decision log**: what was built, why, when, by which LLM session
+- **Plugin state**: configurations, versions, health
+- **Execution history**: recent intents, results, errors
+
+This is exposed via MCP. When any LLM calls `soma.get_state()`, it receives ALL of this. No context is ever lost. This solves the fundamental LLM context problem: the LLM is ephemeral, SOMA is permanent.
+
+---
+
+## 8. Interaction Model — LLM + MCP + SOMA
+
+### 8.1 The Architecture
+
+```
+Human ←→ LLM (any) ←→ MCP ←→ SOMA (pure executor + permanent state)
+```
+
+The human talks to an LLM. The LLM connects to SOMA via MCP. MCP exposes two categories of tools:
+
+**State tools** (query what exists): `soma.get_state()`, `soma.get_schema()`, `soma.get_plugins()`, `soma.get_conventions()`, `soma.get_decisions()`, `soma.get_health()`, `soma.get_recent_activity(n)`, `soma.get_peers()`, `soma.get_render_state()`, `soma.get_experience()`, `soma.get_checkpoints()`, `soma.get_config()`, `soma.get_business_rules()`
+
+**Action tools** (do things): `soma.intent(text)`, plus every loaded plugin convention as an MCP tool (`soma.postgres.query(...)`, `soma.redis.set(...)`, etc.), plus admin actions (`soma.install_plugin(name)`, `soma.checkpoint()`, `soma.record_decision(what, why)`, `soma.confirm(action_id)`)
+
+### 8.2 Context Loss Solution
+
+```
+Session 1 (Monday, Claude):    Create users table → SOMA stores schema + decision
+Session 2 (Wednesday, ChatGPT): soma.get_state() → knows everything → continues
+Session 3 (Friday, local Ollama): soma.get_state() → knows everything → continues
+```
+
+Three LLMs, three sessions, zero context loss. SOMA is the continuity.
+
+### 8.3 Security
+
+MCP connections authenticate with tokens at three levels: admin (full access), builder (read + execute), viewer (read-only). Destructive actions (DROP TABLE, DELETE without WHERE, plugin uninstall, checkpoint restore) require two-step confirmation. Every MCP action is logged as an audit trail.
+
+---
+
+## 9. The Synaptic Protocol
+
+### 9.1 Purpose
+
+The Synaptic Protocol is how SOMAs communicate with each other. MCP is for LLM↔SOMA. Synaptic is for SOMA↔SOMA.
+
+### 9.2 Design
+
+Binary wire protocol with 22-byte overhead per signal (vs HTTP's 500-2000 bytes). Transport-agnostic: TCP, Unix Domain Socket, QUIC (future), in-process channel. Big-endian. CRC32 checksum.
+
+### 9.3 Signal Types
+
+- **Protocol**: HANDSHAKE, HANDSHAKE_ACK, CLOSE, PING, PONG, ERROR, CONTROL
+- **Data**: INTENT, RESULT, DATA, BINARY
+- **Streaming**: STREAM_START, STREAM_DATA, STREAM_END
+- **Chunked transfer**: CHUNK_START, CHUNK_DATA, CHUNK_END, CHUNK_ACK (resumable)
+- **Discovery**: DISCOVER, DISCOVER_ACK, PEER_QUERY, PEER_LIST
+- **Pub/Sub**: SUBSCRIBE, UNSUBSCRIBE
+
+### 9.4 Key Capabilities
+
+- **Multiplexed channels**: multiple streams on one connection
+- **Resumable uploads**: chunked file transfer resumes from last acknowledged chunk
+- **Audio/video streaming**: codec-agnostic frames on named channels; WebRTC signaling for peer-to-peer media
+- **Pub/Sub**: ephemeral and durable modes with catch-up on reconnect
+- **Peer discovery**: chemical gradient — nearby SOMAs discovered quickly via presence broadcasting with decaying TTL
+- **Connection recovery**: auto-reconnect with exponential backoff, subscription replay, session continuity across network transitions (WiFi↔cellular)
+- **Protocol versioning**: negotiated during handshake, mixed-version networks supported
+- **Encryption**: ChaCha20-Poly1305 per-signal, X25519 key exchange, Ed25519 identity
+
+---
+
+## 10. The Interface SOMA
+
+### 10.1 Pure Renderer
+
+The Interface SOMA runs on the user's device (browser, phone, tablet). It is a SOMA with a renderer plugin as its body (DOM for browsers, UIKit for iOS, Compose for Android). It receives semantic signals from Backend SOMAs via Synaptic Protocol and renders them into visual output using its design knowledge (absorbed from pencil.dev .pen files as LoRA).
+
+It does NOT converse. It does NOT understand "make that bigger." The human tells the LLM, the LLM updates the view specification via MCP, the Backend sends updated semantic signals, the Interface renders.
+
+### 10.2 Semantic Signals (Not HTML)
+
+Backend SOMAs send meaning, not markup:
+
+```json
+{
+  "view": "contact_list",
+  "data": [
+    {"name": "Ana M.", "service": "Hair Stylist", "rating": 4.8,
+     "online": true, "distance_km": 2.3, "badges": ["verified"]}
+  ],
+  "actions": ["chat", "book", "favorite"],
+  "filters": ["service", "location", "rating"]
+}
+```
+
+The Interface SOMA decides HOW to render based on proprioception (screen size, device type, accessibility settings) and design knowledge. Same signal renders as a grid on desktop, a list on phone, voice output on a speaker.
+
+### 10.3 Design Knowledge Absorption
+
+pencil.dev .pen files (JSON-based, containing design tokens — colors, typography, spacing, component patterns) are parsed, converted to training data, and trained as LoRA knowledge. The Interface SOMA renders consistently with the design language without anyone writing CSS.
+
+### 10.4 Event Flow
+
+DOM events (clicks, inputs, gestures) → Synaptic signals → Backend SOMA. The Mind generates event listeners that produce signals on specific channels. Bidirectional: Backend pushes data down, Interface pushes events up.
+
+### 10.5 Browser Deployment
+
+Compiles to WebAssembly (~1-3MB without conversation overhead). Synaptic Protocol over WebSocket transport. First meaningful paint: ~550ms after WASM cached.
 
 ---
 
 ## 11. Runtime Behavior
 
-### 11.1 The Execution Loop
+### 11.1 Startup Sequence
 
-A running SOMA operates in a continuous loop:
+1. Load config → 2. Load Mind model → 3. Load plugins → 4. Restore checkpoint → 5. Start Synaptic Protocol → 6. Start MCP Server → 7. Ready
 
-```
-┌──────────────┐
-│  IDLE /       │◀──────────────────────────────┐
-│  PROPRIOCEIVE │                               │
-└──────┬───────┘                               │
-       │ intent received                        │
-       ▼                                        │
-┌──────────────┐                               │
-│  PARSE       │                               │
-│  INTENT      │                               │
-└──────┬───────┘                               │
-       │                                        │
-       ▼                                        │
-┌──────────────┐    ambiguous    ┌────────────┐│
-│  DISAMBIGUATE │───────────────▶│ ASK HUMAN  ││
-│              │                └─────┬──────┘│
-└──────┬───────┘                      │        │
-       │ clear                        │ answer │
-       ▼                              ▼        │
-┌──────────────┐                               │
-│  PLAN        │                               │
-│              │                               │
-└──────┬───────┘                               │
-       │                                        │
-       ▼                                        │
-┌──────────────┐                               │
-│  EXECUTE     │                               │
-│  (neuronal)  │                               │
-└──────┬───────┘                               │
-       │                                        │
-       ▼                                        │
-┌──────────────┐    mismatch    ┌────────────┐│
-│  VERIFY      │───────────────▶│ RETRY /    ││
-│  RESULT      │                │ ADAPT      │┘
-└──────┬───────┘                └────────────┘
-       │ match
-       ▼
-┌──────────────┐
-│  RETURN      │
-│  RESULT      │
-└──────┬───────┘
-       │
-       ▼
-       ▲ (back to idle)
-```
+Failed plugin: skip and continue with reduced capabilities. Corrupt checkpoint: start fresh. Failed Synaptic bind: fatal on server, retry on embedded.
 
-### 11.2 Adaptive Error Handling
+### 11.2 Concurrency
 
-Traditional software crashes or throws exceptions. A SOMA handles failure differently:
+Per-request inference context. Encoder is stateless (sharable). Decoder hidden state is per-request. LoRA weights shared via `Arc<RwLock>` — read lock for inference (many concurrent), write lock for adaptation (brief pause, ~10ms). Embedded: sequential processing (single-threaded).
 
-- **Retry with variation.** If an operation fails, the SOMA tries alternative execution strategies — different pathways through its neuronal language to achieve the same goal.
-- **Degrade gracefully.** If a resource becomes unavailable, the SOMA adapts its plan to work within reduced capabilities and informs the human.
-- **Learn from failure.** Runtime failures feed back into the SOMA's feedback layer, allowing it to improve its strategies over time without re-synthesis. This is bounded, local adaptation — not open-ended learning.
-- **Escalate.** If the SOMA cannot resolve a failure, it reports to the human through the intent interface with an explanation of what went wrong and what it tried.
+### 11.3 Error Handling
 
-### 11.3 Evolution and Adaptation
+Retry-with-variation: retry same step → re-infer (may produce different program) → degrade to partial result → report error. Plugins that crash are caught at `catch_unwind` boundary, unloaded; SOMA continues with reduced capabilities. Cleanup conventions handle resource leaks (open transactions, file handles).
 
-A SOMA has two modes of change:
+### 11.4 Graceful Shutdown
 
-- **Synthesis-time (base).** The core structure, deterministic pathways, and body model are established during synthesis. This is the immutable foundation — analogous to the neocortex's consolidated knowledge.
-- **Runtime (adaptation).** The SOMA accumulates experiential memory through low-rank weight adaptations (LoRA), strengthening frequently-used patterns and adapting to changing conditions. This is analogous to hippocampal learning — fast, flexible, and layered on top of the stable base. Periodically, proven adaptations are consolidated into deeper weights during a "sleep" cycle (Section 12.3).
+Stop accepting → notify peers → drain in-flight → checkpoint → unload plugins → close listeners → exit. On embedded: save LoRA to flash with double-buffer for crash safety.
 
-The full memory architecture — including the biological foundations, the four-tier memory hierarchy, consolidation cycles, and checkpoint/restore mechanisms — is detailed in Section 12.
+### 11.5 Observability
 
-Re-synthesis is required for fundamental changes: new hardware, major OS updates, expanded capabilities.
+Structured logging via `tracing` (JSON lines for production). Trace ID propagation across SOMA networks via Synaptic Protocol metadata. Program trace at configurable verbosity. Prometheus-compatible metrics (16 metrics). Admin HTTP dashboard (optional, via http-bridge plugin). Signal capture via `soma-dump` CLI tool.
 
 ---
 
-## 12. Memory Architecture
+## 12. Security
 
-### 12.1 Biological Foundation
+### 12.1 MCP Security
 
-The human brain does not store memories in a single system. Cognitive neuroscience identifies distinct memory types involving different neural systems: working memory (transient, active manipulation of information in the prefrontal cortex), declarative/explicit memory (facts and events, dependent on the hippocampus), and non-declarative/implicit memory (skills and habits, distributed across basal ganglia and cerebellum) (Baddeley & Hitch, 1974; Squire, 2004).
+Role-based auth tokens (admin/builder/viewer). Destructive action two-step confirmation. Full audit trail of every MCP action.
 
-Critically, memory consolidation — the process by which temporary memories become permanent — occurs primarily during sleep. Systems consolidation theory proposes that the hippocampus temporarily stores new information and gradually transfers it to the neocortex during sleep through coordinated neural replay. This transfer is orchestrated by the triple coupling of neocortical slow oscillations (<1 Hz), thalamocortical spindles (~12–15 Hz), and hippocampal sharp-wave ripples (~100–300 Hz) (Klinzing et al., 2019; Diekelmann & Born, 2010). Recent research at NYU (Yang et al., 2024) demonstrated that daytime events followed by 5–20 sharp-wave ripples during waking pauses are selectively replayed during sleep and consolidated into permanent memories. Events without these ripples are forgotten.
+### 12.2 Plugin Security
 
-This biological architecture — fast temporary storage, slow permanent consolidation, sleep-based transfer — maps directly to SOMA's computational needs.
+Five trust levels: built-in (full trust), community (code review), vendor (signed), private (in-house), untrusted (WASM sandbox via wasmtime). Plugin signing with Ed25519. Least privilege declarations (network, filesystem, env var scoping). Convention namespacing prevents hijacking.
 
-### 12.2 The SOMA Memory Hierarchy
+### 12.3 Synaptic Protocol Security
 
-**Permanent Memory (Neocortex → Base Synthesis Weights).**
-The SOMA's foundational knowledge, established during synthesis: knowledge of its body, primitive operations, protocol formats, and core capabilities. This is the slow-learning, high-capacity, stable store — analogous to the neocortex's consolidated knowledge. It is frozen at synthesis time and does not change during normal operation. In implementation terms: the base model weights produced by the synthesizer.
-
-**Experiential Memory (Hippocampus → LoRA Adaptation Layers).**
-Everything the SOMA has done, learned, and built since synthesis. Tables created, routes established, patterns observed, errors encountered, behavioral adaptations. This accumulates over the SOMA's lifetime through **low-rank adaptation (LoRA)** — small, parameter-efficient weight updates that modify the base model's behavior without retraining it (Hu et al., 2021).
-
-Recent research in continual learning demonstrates that LoRA-based approaches can effectively accumulate knowledge across sequential tasks without catastrophic forgetting — the phenomenon where neural networks lose previously learned knowledge when acquiring new knowledge (McCloskey & Cohen, 1989). Methods such as InfLoRA (Liang & Li, 2024), SD-LoRA (Wu et al., 2025), and FM-LoRA (2025) use orthogonal low-rank subspaces to preserve prior knowledge while incorporating new information. Online-LoRA (Wei et al., 2024) demonstrates task-free continual adaptation in real time.
-
-In SOMA, each significant action or learned pattern produces a LoRA-like update. The SOMA literally becomes a slightly different neural structure after every meaningful experience. It grows. A SOMA that has been running a booking system for six months has different experiential weights than a freshly synthesized SOMA — it knows its users' patterns, the most common operations, and the structures it has built.
-
-**Working Memory (Prefrontal Cortex → Runtime Hidden States).**
-The current execution context: what intent is being processed, what steps have been taken, what intermediate results exist. This is transient — created at the start of each execution loop and destroyed when complete. In implementation terms: the hidden states of the decoder, attention context vectors, and the execution trace. The v0.2 POC already implements this as GRU decoder hidden states.
-
-**Diffuse Memory (Distributed Network → Soma Network Queries).**
-Knowledge that exists across a Soma Network, not in any single SOMA instance. "There is a humidity sensor in the greenhouse" — no single SOMA memorized this, but the network collectively knows it through Synaptic Protocol discovery. Accessing diffuse memory means querying other SOMAs, receiving approximate, confidence-weighted results. This is slow, fuzzy, and probabilistic — like vaguely remembering something someone mentioned. A dedicated **Memory SOMA** — a SOMA whose body is pure storage — can serve as a hippocampal node for the network, holding and indexing experiential knowledge that individual SOMAs can query.
-
-### 12.3 Consolidation ("Sleep")
-
-The biological brain consolidates memory during sleep: hippocampal memories are replayed and transferred to the neocortex, strengthening important connections and pruning irrelevant ones. SOMA implements an analogous process:
-
-**Consolidation cycle.** Periodically (triggered by time, by accumulated adaptation volume, or by explicit command), the SOMA enters a consolidation phase:
-
-1. **Replay.** Recent experiential adaptations (LoRA layers) are evaluated against the SOMA's operational history. Which adaptations improved performance? Which were rarely used? Which conflicted with each other?
-2. **Merge.** Proven, stable adaptations are merged into deeper weight layers — moving from ephemeral LoRA deltas toward more permanent representation. This is analogous to LoRA weight merging, a standard operation in the ML literature.
-3. **Prune.** Rarely-accessed or superseded adaptations are pruned, freeing capacity for new learning.
-4. **Checkpoint.** A mind checkpoint (Section 9.3) is created after consolidation, preserving the new consolidated state.
-
-After consolidation, the SOMA's permanent knowledge has grown, its experiential memory is compacted, and it has more capacity for new learning. This mirrors the biological finding that sleep restores hippocampal learning capacity (Yoo et al., 2007; Gais et al., 2007).
-
-### 12.4 Memory as Context for Planning
-
-The memory hierarchy directly solves the context problem for complex intent (Section 4). When a SOMA receives "add a waitlist feature," the planning layer does not read an external manifest. It accesses its own experiential memory — which contains LoRA-encoded knowledge of every table it has created, every route it handles, every pattern it has observed. The context is intrinsic, not documented. The SOMA knows what it has done because it remembers, the same way a human chef knows their kitchen — not by reading an inventory, but by having been there.
-
-### 12.5 Checkpoint as Mind Serialization
-
-The complete SOMA mind at any point in time is:
-
-```
-Base weights (frozen, from synthesis)
-  + LoRA layer 1 (from early operation)
-  + LoRA layer 2 (from recent operation)
-  + ... (accumulated experiential layers)
-  + Working memory state (current execution)
-  + Proprioception state (current body awareness)
-```
-
-This entire structure is serializable — inspired by CRIU (Checkpoint/Restore In Userspace), which serializes running Linux processes including memory contents, file descriptors, and connections, then restores them exactly (Emelyanov, 2011). A SOMA checkpoint captures the complete mind. Restore recreates it. Migrate moves it. Fork duplicates it. The checkpoint IS the SOMA at that moment in time.
-
-### 12.6 Growth Model
-
-```
-Day 1:   Base SOMA synthesized onto target
-         Permanent memory only: "I know my hardware and primitives"
-
-Week 1:  LoRA layer accumulates — basic application structure
-         "I know I serve a booking website with 3 stylists"
-
-Month 1: More LoRA layers — patterns and optimizations
-         "I know Tuesdays are busy, I pre-cache booking data"
-
-Month 3: Consolidation (sleep) — merge stable layers into base
-         "Booking management is now core to who I am"
-
-Month 4: New LoRA layers — waitlist feature
-         "I'm learning how waitlists interact with bookings"
-
-Year 1:  Multiple consolidation cycles completed
-         This SOMA is fundamentally different from Day 1
-         Same base architecture. Profoundly different mind.
-         Full checkpoint history available for any rollback.
-```
+ChaCha20-Poly1305 encryption. X25519 key exchange. Ed25519 identity. Rate limiting per connection with graduated response (throttle → reduce window → disconnect + blacklist).
 
 ---
 
-## 13. LoRA Plugin Architecture — Attachable Knowledge Modules
+## 13. The Bootstrap Problem
 
-### 13.1 The Scaling Problem
+### 13.1 The Paradox
 
-A SOMA for an LED controller needs to know GPIO operations — perhaps 10 calling conventions. A SOMA for a web application needs to know HTTP, SQL, caching, payments, email, file storage, authentication, and domain-specific business logic — potentially hundreds of calling conventions across dozens of protocols and services. Encoding all this knowledge into a single monolithic model is inefficient and unnecessary.
+SOMA replaces code. But the SOMA Core itself must be coded — in Rust. The Synthesizer must be coded — in Python. How can a paradigm that eliminates code require code to exist?
 
-Humans solve this problem with tools and references. A chef doesn't memorize every recipe — they have cookbooks, notebooks, and colleagues they consult. A surgeon doesn't know every procedure from memory — they have training on specific specializations, reference materials, and a team of specialists.
+### 13.2 The Resolution
 
-SOMA solves it the same way: **attachable LoRA knowledge plugins.**
+The same way a compiler must be written before it can compile: the first instance bootstraps the paradigm. The SOMA Core and Synthesizer are the last programs that need to be hand-written. Once operational, SOMAs can be used to evolve, maintain, and eventually replace the tools that created them.
 
-### 13.2 Mixture of LoRA Experts — Research Foundation
+### 13.3 Self-Hosting Path
 
-Recent research demonstrates that multiple pre-trained LoRA adapters can be dynamically composed at inference time without retraining. X-LoRA (Buehler & Buehler, 2024) mixes pre-trained LoRA experts using hidden-state-driven gating, producing novel layer-wise combinations to solve tasks that span multiple domains. L-MoE (2025) unifies Mixture of Experts with LoRA in an end-to-end trainable framework where task-specialized low-rank adapters are dynamically composed via differentiable routing. LoRA-Mixer (2025) routes task-specific LoRA experts at the token level, achieving fine-grained specialization while remaining compatible with any transformer or state-space model. MoLoRA (2025) demonstrates that focused LoRAs can be trained independently and combined at inference time by simply loading new adapters — enabling modular expertise without retraining.
-
-These findings establish that LoRA adapters function as composable, plug-and-play knowledge modules — precisely what SOMA needs.
-
-### 13.3 The Plugin Model
-
-A SOMA's knowledge is structured in three tiers:
-
-**Tier 1 — Base Mind (from synthesis).** The universal capabilities: intent parsing, program generation, argument extraction, execution flow control. This is the SOMA's core intelligence, synthesized for the target hardware. Frozen at synthesis time.
-
-**Tier 2 — Knowledge Plugins (pre-trained, attachable).** Domain-specific LoRA adapters that encode expertise about protocols, services, and tools:
-
-- **PostgreSQL Plugin** — Knows SQL syntax, schema design, query optimization, wire protocol patterns, migration strategies. Pre-trained on SQL corpora and PostgreSQL documentation.
-- **Redis Plugin** — Knows caching patterns, pub/sub, session management, TTL strategies, data structure selection.
-- **Stripe Plugin** — Knows payment intents, customer objects, webhook verification, subscription lifecycle, idempotency keys.
-- **S3 Plugin** — Knows bucket operations, presigned URLs, multipart uploads, lifecycle policies.
-- **SMTP Plugin** — Knows email composition, MIME types, delivery patterns, bounce handling.
-- **Auth Plugin** — Knows session management, token verification, OAuth flows, password hashing.
-
-Each plugin is a LoRA adapter (A and B matrices) trained independently and published as a downloadable artifact. Installing a plugin means loading its LoRA weights and registering it with the SOMA's gating network. No retraining. No re-synthesis.
-
-**Tier 3 — Experiential Adaptation (runtime LoRA).** The SOMA's own accumulated experience, as described in Section 12. This layer sits on top of the plugins, capturing THIS specific SOMA's learned patterns — "Tuesdays are busy," "user Maria always books with Ana," "the /api/bookings route gets 10x more traffic than /api/stylists."
-
-### 13.4 Dynamic Plugin Activation
-
-A gating network learns which plugin(s) to activate per operation:
-
-```
-"Process a payment of $50 for client Maria"
-         │
-  [Gating network examines intent]
-         │
-         ├── Stripe plugin: ACTIVATED (payment processing)
-         ├── PostgreSQL plugin: ACTIVATED (store transaction record)
-         ├── SMTP plugin: ACTIVATED (send receipt)
-         ├── Redis plugin: dormant (not needed)
-         ├── S3 plugin: dormant (not needed)
-         │
-  [Activated plugins compose to handle the operation]
-```
-
-Multiple plugins activate simultaneously when operations span domains. The gating weights are lightweight — the cost of routing is negligible compared to the cost of execution. This is consistent with MoE research showing that sparse activation maintains quality while reducing computation.
-
-### 13.5 Plugin Ecosystem
-
-The plugin model creates an ecosystem analogous to package managers (npm, pip) but for neural knowledge:
-
-- **Community plugins** — Pre-trained on public documentation, open-sourced. PostgreSQL, Redis, HTTP, SMTP, common protocols.
-- **Vendor plugins** — Trained and published by service providers. Stripe publishes their own LoRA plugin, ensuring accuracy. AWS publishes S3/DynamoDB/Lambda plugins.
-- **Domain plugins** — Trained on domain-specific knowledge. Healthcare scheduling, restaurant management, e-commerce, logistics.
-- **Private plugins** — Trained on proprietary data. A company's internal APIs, custom business rules, domain-specific patterns.
-
-A SOMA is assembled by selecting plugins: "I need PostgreSQL, Stripe, SMTP, and the healthcare-scheduling domain plugin." The base mind + selected plugins + runtime experience = the complete application.
-
-### 13.6 Economic Implications
-
-The plugin model fundamentally changes who does what:
-
-- **Plugin developers** replace library/framework authors. They train and publish knowledge modules instead of writing code.
-- **Application builders** select and compose plugins instead of writing integration code. "I need payments and email" → attach Stripe and SMTP plugins.
-- **The 200K-line codebase problem dissolves.** The base mind is maybe 50-200M parameters. Each plugin adds 1-5M parameters of LoRA weights. The total model is far smaller than the equivalent codebase — because neural weights encode decisions, not boilerplate.
+Phase 1: SOMA Core in hand-written Rust. Synthesizer in hand-written Python.
+Phase 2: SOMA assists in its own development (via MCP + LLM, driving test suites, generating training data).
+Phase 3: A SOMA that can synthesize other SOMAs — the Synthesizer becomes a SOMA with PyTorch as a plugin.
+Phase 4: Theoretical — a SOMA that can modify its own Core. This is research, not near-term.
 
 ---
 
-## 14. The Semantic Interface — Beyond Web 4.0
+## 14. Coexistence and Migration
 
-### 14.1 The Current Web Is a Translation Chain
+### 14.1 SOMA Alongside Traditional Software
 
-Every step in the current web is a translation:
+SOMA does not require replacing existing systems. Coexistence models:
 
-1. Human has intent → translates to clicks/keystrokes
-2. Browser translates interactions to HTTP requests
-3. Server translates HTTP to code execution
-4. Code translates logic to SQL queries
-5. Database translates queries to data retrieval
-6. Server translates data to HTML/CSS/JS
-7. Browser translates markup to pixels
-8. Human translates pixels to understanding
+**Model A — SOMA behind a traditional API.** The HTTP bridge plugin serves REST/GraphQL. Existing frontends call the API as before. The backend is a SOMA instead of a Node/Python/Java server. Transparent to clients.
 
-Eight translations. Information is lost at every boundary. The web development industry exists to build and maintain steps 3-6. The frontend development industry exists to build and maintain step 7. The UX industry exists to minimize loss at steps 1 and 8.
+**Model B — SOMA orchestrating legacy services.** The MCP bridge plugin connects to existing systems via their MCP servers. SOMA orchestrates Stripe, GitHub, Slack without replacing them.
 
-### 14.2 SOMA Eliminates the Middle
+**Model C — Gradual migration.** One microservice at a time becomes a SOMA. The MCP bridge maintains communication with remaining traditional services.
 
-With a backend SOMA, steps 3-6 collapse into one: intent arrives, SOMA's neural execution core orchestrates its body (database, email, storage), result emerges. No code at any layer. But steps 1, 2, 7, and 8 remain — the interface problem.
+### 14.2 When to Use SOMA vs Traditional Code
 
-The conventional answer is "the SOMA returns JSON, React/Vue renders it." This works. But it preserves the old paradigm at the interface layer: a human-designed, statically-coded frontend that must be updated manually whenever the backend changes.
-
-### 14.3 The Interface SOMA
-
-What if the interface is also a SOMA?
-
-An **Interface SOMA** runs on the user's device — phone, tablet, laptop, wearable. Its body is the device's display, input methods (touch, keyboard, voice, gesture), sensors (camera, GPS, accelerometer), and accessibility features. It knows its own body through proprioception: screen dimensions, color capability, input modalities, user preferences, accessibility needs.
-
-The Interface SOMA communicates with the Backend SOMA via Synaptic Protocol. But they don't exchange HTML. They exchange **semantic data** — meaning, not markup:
-
-```
-Backend SOMA → Interface SOMA (via Synaptic Protocol):
-
-{
-  "type": "booking_form",
-  "context": "new appointment",
-  "entities": {
-    "stylists": [
-      {"name": "Ana", "available": true, "specialty": "color"},
-      {"name": "Carlos", "available": false, "next": "2pm"}
-    ],
-    "slots": [
-      {"time": "10:00", "duration": 30, "status": "available"},
-      {"time": "10:30", "duration": 30, "status": "booked"}
-    ]
-  },
-  "constraints": {"max_per_day": 1, "advance_booking": "7 days"},
-  "actions": ["book", "waitlist", "cancel"]
-}
-```
-
-The Interface SOMA receives this semantic signal and decides HOW to render it based on its body:
-
-- **Desktop with large screen** → calendar grid with drag-to-book
-- **Small phone** → scrollable list with tap-to-select
-- **Voice-only device** → "Ana is available at 10am. Carlos is free at 2pm. Who would you like?"
-- **Screen reader** → structured, navigable announcement with ARIA semantics
-- **Elderly user with simple mode** → large buttons, minimal choices, explicit confirmation
-
-The interface is not designed by a developer. It **emerges** from the Interface SOMA's understanding of both the semantic data AND the user's context. The same backend signal produces radically different interfaces on different devices — without anyone writing CSS or choosing breakpoints.
-
-### 14.4 The Symbiotic Web
-
-Web 4.0 research describes the "Symbiotic Web" as a proactive, intelligent partnership between humans and machines. Current descriptions focus on AI-powered personalization layered on top of the existing web infrastructure. SOMA goes further: the infrastructure itself is neural.
-
-The SOMA web has no pages. No URLs (in the current sense). No static routes. The human expresses intent. The Backend SOMA processes it. The Interface SOMA renders the result. If the human's context changes (they switch from desktop to phone, their visual ability changes, they're in a noisy environment), the Interface SOMA adapts the rendering — not because a developer wrote responsive CSS, but because the Interface SOMA knows its body changed and re-renders from the same semantic signal.
-
-```
-The SOMA Web Stack:
-
-  Human ←→ Interface SOMA (device-native, adaptive)
-                │
-          Synaptic Protocol (semantic signals)
-                │
-          Backend SOMA (business logic, data, integrations)
-                │
-          Body: PostgreSQL plugin + Stripe plugin + SMTP plugin + ...
-```
-
-No HTML generated by the backend. No CSS maintained by anyone. No JavaScript frameworks. No responsive design breakpoints. No accessibility retrofitting. The Interface SOMA handles all of this because it knows its own body and the user's needs.
-
-### 14.5 Mobile Is Not a Separate Problem
-
-In this architecture, mobile is not a different platform requiring different code. It's a different body for the Interface SOMA. The same Backend SOMA serves both. The Interface SOMA synthesized onto an iPhone knows iOS's UIKit/SwiftUI as its rendering body. The one synthesized onto Android knows Jetpack Compose. The one running in a browser knows the DOM.
-
-They all receive the same semantic signals. They all render appropriately for their body. No React Native. No Flutter. No cross-platform framework. Each Interface SOMA is native to its device because it was synthesized for that device.
-
-### 14.6 Implications
-
-This model eliminates:
-- Frontend development as a separate discipline (the Interface SOMA IS the frontend)
-- Responsive design (the Interface SOMA adapts to its body)
-- Accessibility retrofitting (the Interface SOMA inherently knows its user's needs)
-- API design between frontend and backend (replaced by semantic Synaptic Protocol)
-- Platform-specific development (each Interface SOMA is native to its body)
-- UI/UX iteration cycles (the Interface SOMA evolves through experience, like the Backend SOMA)
-
-What remains is: defining the semantic vocabulary for a domain (what does "booking_form" mean, what entities does it contain) and training the Interface SOMA to render semantic signals effectively for each device class. These are one-time synthesis problems, not per-application development tasks.
+SOMA excels at: data-driven applications, CRUD, API orchestration, IoT, automation, multi-service coordination. Traditional code remains better for: performance-critical inner loops (game engines, codecs), UI frameworks themselves (though SOMA can use them as plugins), and systems where formal verification is required (until SOMA's verification story matures).
 
 ---
 
@@ -747,350 +508,138 @@ What remains is: defining the semantic vocabulary for a domain (what does "booki
 
 ### 15.1 The Challenge
 
-Embedded and industrial applications demand **hard real-time** guarantees: a motor control loop must execute within 10 microseconds, every time. A cardiac pacemaker signal must fire at precisely the right moment. "Adaptive retry" is unacceptable in these contexts. The result must be correct and on time, or people die.
+Embedded and industrial applications demand hard real-time guarantees: a motor control loop must execute within 10 microseconds. Neural inference has variable latency — softmax temperature, input length, and program complexity all affect timing.
 
-### 15.2 Real-Time Execution in SOMA
+### 15.2 The Approach
 
-Real-time guarantees are provided through the **deterministic mode** (Section 3.2) with additional timing constraints:
-
-**Timing-Bound Pathways.**
-During synthesis, the synthesizer identifies operations that require real-time guarantees (from the target body specification, which includes timing requirements). For these operations, it generates **timing-bound deterministic pathways** — fixed execution circuits that are not only functionally correct but have verified worst-case execution times (WCET).
-
-This is analogous to how real-time operating systems (RTOS) provide timing guarantees for critical tasks — but the guarantee is embedded in the neural structure itself, not enforced by a scheduler.
-
-**Priority Layers.**
-The neuronal execution core has priority levels. Timing-critical operations preempt all other execution, including intent parsing and adaptation. This is equivalent to hardware interrupt priority but implemented neurally.
-
-**Isolation.**
-Real-time pathways are isolated from adaptive pathways. No amount of runtime adaptation can modify or interfere with a timing-bound pathway. These circuits are, in effect, hardwired after synthesis — as immutable as a hardware timer peripheral.
-
-### 15.3 Verification of Real-Time Properties
-
-Timing-bound pathways are verified during synthesis using **static timing analysis** — the same family of techniques used to verify real-time properties in safety-critical embedded software (DO-178C in avionics, IEC 62304 in medical devices). The synthesizer proves that WCET is within the required bound for the specific target hardware before the SOMA instance is released.
+For hard real-time operations, SOMA uses **deterministic pathways**: pre-compiled programs with known timing bounds, bypassing Mind inference. The Mind generates and validates these programs at synthesis time. At runtime, they execute without inference — pure plugin convention calls at known latency. For soft real-time (web applications, IoT), inference latency (1-50ms on server, 50-500ms on ESP32) is acceptable.
 
 ---
 
-## 16. Energy and Power
+## 16. HelperBook — First Real-World Application
 
-### 16.1 The Challenge
+### 16.1 What It Is
 
-A SOMA on an ESP32 powered by a coin cell battery has a radically different energy budget than a SOMA on a plugged-in server. Neural execution is computationally expensive compared to simple compiled instruction sequences. If a SOMA consumes 10x the energy of compiled C for the same task, it is not viable for embedded/IoT applications.
+A messaging and networking app for connecting clients with service providers (hairdressers, plumbers, babysitters). Telegram-like chat with: dual-role users, connection requests, appointment cards in chat, calendar, reviews, AI smart replies, push notifications, offline support, multi-device sync. 32 features specified across 15+ database tables.
 
-### 16.2 Energy-Aware Synthesis
+### 16.2 SOMA Architecture
 
-The target body specification includes **power constraints**: battery capacity, maximum sustained power draw, thermal limits. The synthesizer uses these constraints to shape the SOMA instance:
+Interface SOMA (browser/mobile renderer) ↔ Synaptic Protocol ↔ Backend SOMA (20+ plugins: postgres, redis, auth, messaging, calendar, search, AI, push, SMS, email, image processing, storage, geolocation, reviews, analytics, localization, ID verification, crypto, webhooks, jobs).
 
-- **Architecture scaling.** A power-constrained target gets a smaller, sparser neural architecture — fewer pathways, simpler planning, more reliance on deterministic pathways (which are energy-cheap, equivalent to compiled code).
-- **Activation efficiency.** The neuronal execution core is synthesized to minimize active pathways per operation. For simple, repetitive tasks (sensor reading, LED control), only a tiny fraction of the neural structure activates — approaching the energy profile of traditional compiled code.
-- **Sleep integration.** Proprioception includes power state management. A SOMA on a battery target knows how to put its body into low-power modes, wake on relevant interrupts, and minimize active time — not because it was programmed to, but because power management is part of its body knowledge.
+### 16.3 How It's Built
 
-### 16.3 The Efficiency Spectrum
+A human talks to Claude (or any LLM). Claude connects to SOMA via MCP. Claude reads the product spec, installs plugins, creates the data model, configures auth, sets up messaging — all via MCP tool calls. Each change is recorded as a decision. Each new LLM session starts with `soma.get_state()` and has full context.
 
-Not every task needs the full neural execution stack. A SOMA intelligently allocates resources:
+### 16.4 Semantic Signal Example
 
-- **Simple, repetitive tasks** (toggle GPIO, read sensor) → deterministic pathways, near-zero neural overhead, energy cost approaches compiled code.
-- **Moderate tasks** (format data, communicate, schedule) → partial neural execution, moderate energy cost.
-- **Complex, novel tasks** (interpret ambiguous intent, plan multi-step operations, adapt to failure) → full neural execution, higher energy cost.
+```json
+{
+  "view": "chat",
+  "peer": {"name": "Ana M.", "online": true},
+  "messages": [
+    {"from": "ana", "type": "text", "content": "Can you come Thursday at 3?", "status": "read"},
+    {"type": "appointment_card", "data": {
+      "service": "Hair Styling", "date": "2026-04-10", "time": "15:00",
+      "rate": {"amount": 35, "currency": "EUR"}, "status": "proposed"
+    }, "actions": ["confirm", "dismiss"]}
+  ],
+  "input": {"ai_suggestions": ["Sounds good", "What time works?", "I'm not available"]}
+}
+```
 
-The SOMA itself decides where each task falls. This is proprioception applied to energy: the SOMA knows what it costs to think and chooses how hard to think.
-
----
-
-## 17. Performance Expectations
-
-### 17.1 Honest Assessment
-
-Will a SOMA be faster than compiled C? Sometimes. Will it be slower? Sometimes. The honest answer is that SOMA trades a different performance profile, not a universally better one.
-
-### 17.2 Where SOMA Is Likely Slower
-
-- **Tight loops and raw computation.** A `for` loop adding numbers will always be faster as compiled machine code than as a neural execution pathway. Deterministic mode narrows this gap but cannot eliminate it entirely due to the overhead of the neural substrate.
-- **Latency-sensitive single operations.** The intent-parsing and planning layers add latency before execution begins. For a single, simple operation, this overhead dominates.
-
-### 17.3 Where SOMA Is Likely Faster
-
-- **End-to-end task completion.** Traditional development: write code → debug → compile → deploy → discover bug → fix → redeploy. SOMA: state intent → done. The total time from human intent to working result is potentially orders of magnitude faster.
-- **Adaptive workloads.** Tasks that require runtime decision-making (failover, load balancing, protocol negotiation) are handled natively by the neural execution core, without the overhead of programmed conditional logic.
-- **Multi-device coordination.** Synaptic Protocol eliminates the need for explicit API design, serialization, protocol implementation. Coordination that takes weeks to program traditionally happens organically.
-
-### 17.4 The Right Comparison
-
-SOMA should not be benchmarked against compiled code for raw instruction throughput. It should be benchmarked against the **full lifecycle**: human intent → working system. By that measure, the performance gap favors SOMA overwhelmingly.
+The Interface SOMA renders this as a chat view with message bubbles and an interactive appointment card — styled per the pencil.dev design language, adapted to the device's screen size.
 
 ---
 
-## 18. Security Model
+## 17. Research Roadmap
 
-### 18.1 Threat Landscape
+Dependency-ordered, no timelines.
 
-A SOMA directly controls hardware. A compromised SOMA is as dangerous as a compromised compiler or firmware — potentially catastrophic. This is not a new class of risk; it is the same risk that exists in any system where software has hardware access.
-
-### 18.2 Security Architecture
-
-**Synthesis-Time Security.**
-- The synthesizer is the root of trust. A compromised synthesizer produces compromised SOMAs, exactly as a compromised compiler produces compromised binaries (cf. Ken Thompson's "Reflections on Trusting Trust").
-- Synthesis is deterministic: a given base + target must always produce the same SOMA instance. This allows third-party verification.
-- Deterministic pathways for security-critical operations (crypto, authentication) are formally verified during synthesis.
-
-**Runtime Security.**
-- **Capability boundaries.** A SOMA knows what it is allowed to do, not just what it can do. Permissions are part of the body specification and are enforced at the neuronal execution core level.
-- **Failure containment.** If the feedback layer detects anomalous behavior (unexpected hardware access patterns, resource usage outside normal bounds), it can halt execution and alert the human — similar to a hardware watchdog timer but neurally implemented.
-- **Network trust.** Synaptic Protocol connections between SOMAs use mutual authentication. A SOMA will not accept signals from unverified peers.
-
-### 18.3 The Compiler Analogy
-
-Users trust compilers today without reading the machine code they produce. The same trust model applies to SOMA:
-- The synthesizer is open, auditable, and deterministically reproducible.
-- SOMA instances are validated behaviorally.
-- Security-critical pathways are formally verified.
-- Runtime monitoring catches anomalies.
+| Milestone | What | Depends On |
+|---|---|---|
+| **1. SOMA Core** | Rust binary: embedded mind engine, plugin manager, filesystem plugin, config system | Nothing |
+| **2. MCP Server** | State exposure, action tools, plugin install via MCP. **At this point, an LLM can drive SOMA.** | Core |
+| **3. Data Layer** | PostgreSQL + Redis plugins. Schema exposure via MCP. Re-synthesize Mind. | Core, MCP |
+| **4. Memory** | LoRA in Rust, experience recording, adaptation, checkpoint/restore, consolidation, decision log | Core |
+| **5. Synaptic Protocol** | TCP transport, signal codec, routing, discovery. SOMA ↔ SOMA communication. | Core |
+| **6. HelperBook Core** | Crypto, auth, messaging plugins. Full data model. End-to-end business logic. | Data Layer, Memory |
+| **7. Web Frontend** | WebSocket bridge, semantic JS renderer, real-time updates. Pragmatic — not neural rendering. | Core, Synaptic |
+| **8. MCP Bridge** | Connect to external MCP servers. Instant ecosystem access. Can be built after Milestone 2. | Core, MCP |
+| **9. Remaining Features** | All HelperBook plugins (parallel, any order). Some replaceable by MCP Bridge. | Core, MCP, Data Layer |
+| **10. ONNX Engine** | ONNX Runtime integration for server performance. When EmbeddedMindEngine is bottleneck. | Core |
+| **11. Production** | Startup/shutdown handling, error retry, resource limits, auth, logging, metrics, rate limiting | All above |
+| **12. Self-Hosting** | SOMA that synthesizes other SOMAs | All above |
+| **13. Neuromorphic** | Synthesis onto Intel Loihi or equivalent | All above |
 
 ---
 
-## 19. Neuromorphic Hardware Affinity
+## 18. Comparison with Existing Paradigms
 
-### 19.1 The Natural Substrate
-
-SOMA's architecture — a neural execution structure directly orchestrating hardware — is a natural fit for **neuromorphic processors**: chips designed to execute neural computations natively, rather than simulating them on von Neumann architectures.
-
-### 19.2 Existing Neuromorphic Platforms
-
-**Intel Loihi (1 & 2).**
-A many-core neuromorphic research chip with on-chip learning. Loihi natively implements spiking neural networks — networks where neurons communicate through discrete spikes (events) rather than continuous values. A SOMA synthesized onto Loihi could use spiking patterns as its neuronal language, with hardware neurons directly implementing execution pathways. Loihi's on-chip learning capabilities map naturally to SOMA's runtime adaptation.
-
-**IBM TrueNorth.**
-A million-neuron, 256-million-synapse chip designed for ultra-low-power neural computation. TrueNorth's fixed architecture and extreme energy efficiency make it an ideal target for embedded SOMA instances — particularly for sensor processing and pattern recognition tasks where the SOMA needs to operate on minimal power.
-
-**BrainChip Akida.**
-A commercial neuromorphic processor targeting edge AI. Akida supports on-chip learning and event-driven processing. A SOMA on Akida could handle real-time sensor fusion and intent processing directly in neuromorphic silicon.
-
-**SpiNNaker (University of Manchester).**
-A massively parallel architecture designed to simulate large-scale spiking neural networks in real time. SpiNNaker's communication infrastructure — where cores communicate through small packets routed across a mesh network — is structurally similar to the Synaptic Protocol, making it a natural platform for multi-core SOMA instances.
-
-### 19.3 Why Neuromorphic Matters for SOMA
-
-On conventional hardware (CPU/GPU), a SOMA's neural execution must be simulated — the processor fetches instructions that simulate neural operations. This adds overhead. On neuromorphic hardware, neural execution is **native** — the silicon itself performs neural computation directly, the same way a GPU natively performs matrix operations.
-
-The implication: SOMA on neuromorphic hardware approaches the performance and energy efficiency of traditional compiled code on conventional hardware, while retaining the flexibility and adaptivity of neural execution. This is the long-term hardware trajectory that makes SOMA not just viable but potentially superior.
-
-### 19.4 Hybrid Targets
-
-In the near term, most SOMA instances will inhabit conventional hardware (x86, ARM, RISC-V) with neuromorphic accelerators where available. Synthesis must handle **hybrid targets**: conventional cores for deterministic pathways, neuromorphic accelerators for adaptive neural execution. This is analogous to how modern software uses CPUs for logic and GPUs for parallel computation — but with a SOMA orchestrating the split internally rather than a programmer making explicit decisions.
-
----
-
-## 20. Concrete Use Cases
-
-### 20.1 Use Case: Smart Agriculture Sensor Network
-
-**Traditional approach:**
-A developer writes C firmware for soil moisture sensors (ESP32), a Python backend for a Raspberry Pi gateway, a REST API in Node.js for the cloud server, and a React Native app for the farmer's phone. Four codebases, four languages, API contracts between them, deployment pipelines, OTA update mechanisms. Months of work. Any change in sensor hardware requires firmware rewrites.
-
-**SOMA approach:**
-Each device gets a synthesized SOMA instance. The farmer says to the phone SOMA: "Alert me when any field drops below 30% moisture." The phone SOMA signals the cloud SOMA, which signals the gateway SOMA, which configures the sensor SOMAs. The sensor SOMAs know their GPIO (moisture probe pin), their power constraints (solar + battery), and their synapse to the gateway. They read, transmit, sleep. If a sensor is replaced with a different model (different ADC, different pin), re-synthesis produces a new SOMA for that body in minutes. No code rewritten.
-
-### 20.2 Use Case: Personal Home Automation
-
-**Traditional approach:**
-Buy a smart home hub. Install apps. Configure automations through clunky UIs. Write YAML for Home Assistant. Debug Z-Wave/Zigbee pairing. Script complex automations in Python or Node-RED. Each new device type requires integration effort.
-
-**SOMA approach:**
-Each device in the home has a SOMA. They discover each other through chemical gradient signaling. The homeowner says: "When I leave for work, turn off the lights, lock the doors, and lower the heat." The home SOMAs coordinate through Synaptic Protocol. Adding a new device means synthesizing a SOMA for it; it joins the network and introduces its capabilities. No configuration. No integration code. No app.
-
-### 20.3 Use Case: Industrial Motor Controller
-
-**Traditional approach:**
-Embedded engineer writes a PID control loop in C, tunes parameters through extensive testing, implements safety shutoffs, handles edge cases for overtemperature, overcurrent, stall conditions. Each motor variant requires parameter re-tuning or code changes. Certification requires extensive documentation of every code path.
-
-**SOMA approach:**
-The SOMA is synthesized onto the motor controller board. It knows its PWM outputs, current sense ADC, temperature sensor, encoder input. Its deterministic pathways handle the real-time control loop with verified WCET. Its adaptive layer handles tuning — it adjusts control parameters based on actual motor behavior, like a human operator who learns the feel of a specific motor. The human says: "Run this motor at 1500 RPM, don't exceed 80°C." The SOMA does it, adapts to load changes, and reports anomalies. Replacing the motor with a different model? The SOMA adapts at runtime or gets re-synthesized. Certification tests behavior, not code.
-
-### 20.4 Use Case: Rapid Prototyping
-
-**Traditional approach:**
-Startup wants to prototype an IoT product. Hire embedded developer, backend developer, mobile developer. Three months minimum to a working demo. Any pivot requires significant rework.
-
-**SOMA approach:**
-Synthesize SOMAs onto prototype hardware. Describe the desired product behavior in natural language. Iterate by talking to the SOMAs: "Actually, make it send alerts every hour instead of on-change." "Add a battery level indicator to the phone." Changes take minutes, not sprints. The prototype is the product.
-
----
-
-## 21. Comparison with Existing Paradigms
-
-| Aspect | Traditional Development | AI-Assisted Development | SOMA |
+| Aspect | Traditional Software | AI Code Generation | SOMA |
 |---|---|---|---|
-| **Intermediate artifact** | Source code | AI-generated source code | None |
-| **Human reads/writes code** | Yes | Yes (reviews, fixes) | No |
-| **Hardware awareness** | Via compiler/OS abstraction | None (model unaware) | Intimate (proprioception) |
-| **Error handling** | Predefined (try/catch) | Predefined | Adaptive (retry, vary, degrade) |
-| **Determinism** | Full | Partial (AI generation is stochastic) | Hybrid (deterministic mode for critical paths) |
-| **Multi-device** | Protocols, APIs, middleware | Same | Synaptic Protocol (organic) |
-| **Developer role** | Write code | Write prompts, review code | Define intent; improve synthesizer |
-| **Deployment** | Compile, package, deploy | Same | Synthesize to target |
-| **Real-time capable** | Yes (with RTOS) | No | Yes (timing-bound pathways) |
-| **Energy profile** | Optimal for fixed tasks | Same as traditional | Adaptive (scales with task complexity) |
-| **Multi-device setup** | Weeks/months | Weeks | Minutes (Synaptic discovery) |
-| **Hardware change** | Rewrite/recompile | Regenerate/recompile | Re-synthesize |
+| Artifact | Source code | Source code (AI-generated) | Neural weights (no code) |
+| Maintenance | Manual | Regenerate (may break) | Adapts from experience |
+| Context | Developer's head | LLM context window (lost) | SOMA state (permanent) |
+| Platform | Framework-specific | Same | Plugin-based (swap renderer) |
+| Scaling | Rewrite/refactor | Regenerate (risky) | Add plugins, grow model |
+| Embedded | Separate toolchain | Poor embedded support | Same architecture, smaller model |
+| Collaboration | Git, PRs, meetings | Prompt sharing | Query same SOMA state |
 
 ---
 
-## 22. Coexistence and Migration Path
+## 19. Ethical and Societal Impact
 
-### 22.1 Reality Check
+### 19.1 Developer Displacement
 
-SOMA will not replace all software overnight. Billions of lines of existing code run the world. The transition must be gradual, and SOMA must coexist with traditional software during that transition.
+SOMA reduces the need for traditional software development. This is the explicit goal, not an unintended side effect. The ethical response: honest acknowledgment and focus on new roles (plugin developers, synthesizer specialists, domain knowledge trainers, SOMA operators).
 
-### 22.2 Coexistence Models
+### 19.2 Control and Transparency
 
-**Model A — SOMA as Peripheral.**
-A SOMA instance runs alongside traditional software on the same host. The traditional application handles its core logic; the SOMA handles specific tasks that benefit from adaptive, intent-driven execution (user interaction, device management, error recovery). They communicate through standard OS mechanisms (IPC, shared memory, sockets).
+SOMA executes what it's told via MCP. Destructive actions require confirmation. Every execution is logged. Every decision is recorded. Program traces show exactly what happened. There is no hidden logic.
 
-**Model B — SOMA as Orchestrator.**
-A SOMA instance manages and coordinates existing software systems. Rather than replacing a legacy backend, the SOMA learns to invoke it — treating the legacy system as part of its body. The SOMA's proprioception includes "I have a PostgreSQL database accessible on port 5432" and "I have a REST API at this endpoint." Intent from the human is translated into orchestration of these existing components.
+### 19.3 Autonomy Boundaries
 
-**Model C — Incremental Replacement.**
-Legacy systems are progressively replaced, component by component. A microservice is removed and its function is absorbed into the SOMA. The external interface remains the same; the internal implementation shifts from code to neural execution. Other components don't know the difference.
-
-### 22.3 The Migration Incentive
-
-Adoption will be driven by economics:
-- Reducing development time from months to minutes for new features.
-- Eliminating entire categories of bugs (integration errors, API contract violations, deployment failures).
-- Enabling hardware changes without software rewrites.
-- Reducing the need for specialized developers for each layer of the stack.
-
-Organizations won't adopt SOMA for ideology. They'll adopt it because it's cheaper and faster. The migration path must make the first step easy and the benefits immediate.
+SOMA does not make autonomous decisions. The LLM may suggest, but execution requires explicit MCP tool calls from the LLM, which in turn requires human approval for critical actions. The human remains in control.
 
 ---
 
-## 23. Research Roadmap
+## 20. Open Questions
 
-### Phase 1 — Theoretical Foundation (Months 0–6)
-- Formalize the base neural architecture specification.
-- Define the synthesis process mathematically.
-- Define the neuronal language emergence model.
-- Publish this whitepaper and solicit peer feedback.
-- Survey existing neuromorphic hardware for synthesis target suitability.
+### 20.1 Model Capacity Limits
 
-### Phase 2 — Minimal Proof of Concept (Months 6–18)
-- ~~Build a SOMA synthesizer for a constrained target.~~ **Done (POW 1).** BiLSTM+GRU synthesized onto macOS ARM64 with 16 discovered libc conventions.
-- ~~Demonstrate: human says "blink LED every 2 seconds" → SOMA directly drives GPIO, no code generated.~~ **Done (POW 1).** Human says "list files in /tmp" → SOMA drives libc.opendir/readdir/closedir, no code generated.
-- ~~Demonstrate deterministic mode for basic arithmetic operations.~~ Pending.
-- ~~Demonstrate proprioception: SOMA reports its own resource usage and capabilities.~~ **Done (POW 1).** SOMA reports discovered catalog, parameter count, execution stats.
-- ~~Benchmark energy consumption against equivalent compiled C implementation.~~ Pending.
-- ~~Demonstrate experiential memory via LoRA adaptation.~~ **Done (POW 2).** Measurable confidence improvement on novel phrasings, checkpoint/restore, consolidation.
-- ~~Demonstrate multi-SOMA communication.~~ **Done (POW 3).** Two SOMAs exchanging data via Synaptic Protocol, neural routing decisions.
+How much complexity can a 50M parameter Mind encode? A 200K-line codebase represents ~5,000 unique decisions. Can 50M parameters capture this? Empirical testing on HelperBook will answer this.
 
-### Phase 3 — OS-Hosted SOMA (Months 18–30)
-- Synthesize a SOMA onto a macOS/Linux environment.
-- Demonstrate: SOMA uses OS APIs (file I/O, networking, process management) to fulfill intent.
-- Demonstrate adaptive error handling: SOMA retries with alternative strategies on failure.
-- Demonstrate coexistence Model A: SOMA running alongside a traditional application.
-- Demonstrate coexistence Model B: SOMA orchestrating a legacy REST API.
+### 20.2 LoRA Scaling
 
-### Phase 4 — LoRA Plugin Ecosystem (Months 24–36)
-- Implement Mixture of LoRA Experts gating for dynamic plugin activation.
-- Train and publish first community plugins: PostgreSQL, Redis, SMTP.
-- Demonstrate: base SOMA + PostgreSQL plugin handles a data-driven web application from intent.
-- Demonstrate: adding a new plugin (Stripe) extends capabilities without re-synthesis.
-- Establish plugin format specification and distribution mechanism.
+How many plugin LoRAs can be composed before MoE gating degrades? Research shows 8-16 experts work well. Real-world applications may need 20+. This needs experimentation.
 
-### Phase 5 — Semantic Interface SOMA (Months 30–42)
-- Synthesize an Interface SOMA for browser (DOM as body).
-- Demonstrate: Backend SOMA sends semantic signals, Interface SOMA renders adaptive UI.
-- Demonstrate: same backend signal renders differently on desktop vs. mobile vs. voice.
-- Demonstrate: Interface SOMA adapts rendering based on user preferences and accessibility needs.
-- Define semantic signal vocabulary for common application domains.
+### 20.3 Formal Verification
 
-### Phase 6 — Soma Network (Months 36–48)
-- Implement full Synaptic Protocol with discovery, delegation, and hierarchy.
-- Demonstrate multi-SOMA coordination: sensor SOMA + backend SOMA + interface SOMA working together.
-- Demonstrate delegation, hierarchy, and collective composition.
-- Implement at least one concrete use case end-to-end (e.g., smart agriculture, clinic booking).
+Can SOMA programs be formally verified for correctness and safety? The deterministic execution model makes this easier than verifying LLM outputs, but the tools don't exist yet.
 
-### Phase 7 — Self-Hosting (Months 48–60)
-- Achieve bootstrap Stage 1: a SOMA that can synthesize other SOMAs.
-- Validate self-hosted synthesis produces identical output to traditional synthesizer.
-- Begin synthesizer development through intent rather than code.
+### 20.4 Training Data Quality
 
-### Phase 8 — Neuromorphic Targets (Months 54–66)
-- Synthesize SOMA onto Intel Loihi or equivalent neuromorphic hardware.
-- Benchmark neural-native execution against simulated execution on conventional hardware.
-- Demonstrate hybrid targets (conventional + neuromorphic).
+SOMA's Mind is only as good as its training data. Poor training examples produce poor programs. How to systematically ensure training data quality across hundreds of plugins?
 
-### Phase 9 — Open Research (Months 66+)
-- Formal verification tooling for deterministic and timing-bound pathways.
-- Runtime adaptation boundaries and safety proofs.
-- Intent interface expansion (voice, neural, brain-computer interfaces).
-- Community-contributed target body specifications and LoRA plugins.
-- Real-time certification pathway (DO-178C, IEC 62304 compatibility).
-- Performance benchmarking against traditional compiled software at scale.
-- Semantic interface standardization across device classes.
+### 20.5 Security of Neural Programs
+
+Can an adversary craft intents that cause SOMA to generate harmful programs? Input validation happens at the LLM layer (the LLM can refuse harmful requests), but SOMA itself has no ethical reasoning. This requires careful attention.
+
+### 20.6 Long-Term Experiential Drift
+
+After thousands of LoRA adaptations and consolidations, does the Mind's behavior drift from its original synthesis? How to detect and correct drift?
 
 ---
 
-## 24. Ethical and Societal Impact
+## 21. Conclusion
 
-### 24.1 Developer Displacement
+SOMA is a neural architecture that IS the program. It receives structured intents via MCP from any LLM, generates execution programs through a trained Mind, and orchestrates plugins that interface with the real world. Its state is permanent, queryable, and transferable across LLM sessions. Its memory grows from experience. Its body adapts through plugins.
 
-SOMA, if successful, renders traditional software development obsolete. This affects millions of professionals worldwide. The ethical responsibility of this project includes:
+The proofs of work demonstrate: intent-to-execution without code generation (POW 1), experiential learning via LoRA adaptation (POW 2), and multi-SOMA communication via Synaptic Protocol (POW 3).
 
-- **Honest communication.** Not claiming SOMA will "augment" developers when the long-term trajectory is replacement. The paradigm eliminates the need for humans to write, review, debug, and maintain code.
-- **Transition timeline.** Full displacement, if it happens, is decades away. During the transition, developers evolve into SOMA architects (designing base architectures), synthesis engineers (improving the synthesizer), verification specialists (testing SOMA behavior), and intent designers (crafting effective human-SOMA interaction patterns).
-- **Economic preparation.** The broader economic impact of eliminating an entire professional class must be addressed at a policy level, not just a technical one. This project should engage with economists and policymakers early.
+The implementation path is clear: Rust binary → Synaptic Protocol → MCP Server → plugins → HelperBook. At Milestone 3 (MCP Server), an LLM can drive SOMA. From there, building HelperBook is a conversation.
 
-### 24.2 Concentration of Power
-
-If a single entity controls the synthesizer and base architecture, they control all SOMA instances. This is an unacceptable concentration of power — worse than any current platform monopoly because SOMA would control hardware directly.
-
-Mitigation:
-- The synthesizer must be open source from day one.
-- The base architecture specification must be an open standard.
-- Multiple independent synthesizer implementations must be encouraged.
-- Deterministic synthesis enables independent verification: anyone can check that a synthesizer produces the expected SOMA for a given input.
-
-### 24.3 Autonomy and Control
-
-A SOMA directly controls hardware and adapts at runtime. This raises questions:
-
-- **Who is responsible** when a SOMA's adaptive behavior causes harm? The synthesizer creators? The intent provider? The SOMA itself?
-- **Can a SOMA refuse intent?** Should it? If a human instructs a SOMA to perform a harmful action, the capability boundary system (Section 16.2) provides a mechanism for refusal — but who defines the boundaries?
-- **Adaptation drift.** If runtime adaptation changes a SOMA's behavior beyond what synthesis intended, at what point has the SOMA become something no one authorized?
-
-These are not solved problems. They are active ethical questions that must be addressed as the technology develops, not after deployment.
-
-### 24.4 Access and Equity
-
-If SOMA delivers on its promise — anyone can create functional software by stating intent — it democratizes computing power in an unprecedented way. A farmer in a rural area, without coding skills, could configure their own automation system. A small business owner could build custom tools by describing what they need. This potential for equalization is one of SOMA's strongest ethical arguments.
-
-However, if synthesis requires expensive infrastructure or proprietary base architectures, this democratization fails. Open access to the synthesizer and base architecture is not just an ideological preference — it is an ethical requirement.
-
----
-
-## 25. Open Questions
-
-The following remain unsolved and are presented as challenges for the research community:
-
-1. **Synthesis convergence.** Can synthesis always produce a valid SOMA for any base + target pair, or are there target bodies too constrained for the base architecture?
-2. **Neuronal language interpretability.** Should the neuronal language be introspectable by researchers (for debugging synthesis), even if not human-readable in the programming sense?
-3. **Adaptation boundaries.** How far can runtime adaptation go before it constitutes unsafe drift from the synthesized base? Where is the line?
-4. **Intent formalism.** Is natural language sufficient as an intent interface, or will high-performance/safety-critical applications require a more structured intent language?
-5. **Synthesis performance.** Can synthesis be fast enough to be practical? Minutes? Hours? Days?
-6. **Economic model.** Who builds and maintains the base architecture? The synthesizer? Target body specifications? What is the open-source model for SOMA?
-7. **Liability framework.** When a SOMA causes harm through adaptive behavior, who is legally responsible?
-8. **Neuromorphic co-design.** Should future neuromorphic hardware be designed specifically as SOMA substrates, co-evolving silicon and architecture?
-9. **Formal equivalence.** Can it be proven that a SOMA instance is functionally equivalent to a traditional compiled program for a given specification? Is this even the right question?
-10. **The consciousness question.** As SOMAs become more complex, adaptive, and self-aware (proprioception), at what point — if ever — do ethical obligations toward the SOMA itself arise?
-
----
-
-## 26. Conclusion
-
-The SOMA paradigm proposes a fundamental shift: instead of writing programs that run on computers, we synthesize computational organisms that **are** the computation. The model is the program. The hardware is the body. Human intent is the only input. This is not an incremental improvement to software development — it is a replacement of the paradigm itself.
-
-The path from here to realization is long and requires contributions from neuromorphic computing, compiler theory, hardware design, neural architecture research, distributed systems, ethics, and public policy. But the direction is clear: the era of humans writing instructions for machines is ending. The era of machines understanding intent and acting directly is beginning.
-
-SOMA is a first step toward formalizing that future.
+SOMA is not a better way to write code. It is the end of writing code.
 
 ---
 
@@ -1199,18 +748,18 @@ Delta:         +22.3%
 Improved:      11/12 intents
 
 RESULT: LoRA adaptation IMPROVED confidence on novel phrasings.
-The SOMA learned from experience. Section 12.2 validated.
+The SOMA learned from experience. Section 7.2 validated.
 ```
 
 **What is proven:**
 
-The SOMA measurably improves on novel phrasings through LoRA adaptation. The improvement exists in the LoRA weights (rollback eliminates it). The memory hierarchy from Section 12 is operational: permanent memory (frozen base), experiential memory (LoRA), working memory (hidden states). Checkpoint/restore serializes and restores the complete experiential state. Consolidation merges experience into permanent memory.
+The SOMA measurably improves on novel phrasings through LoRA adaptation. The improvement exists in the LoRA weights (rollback eliminates it). The memory hierarchy from Section 7 is operational: permanent memory (frozen base), experiential memory (LoRA), working memory (hidden states). Checkpoint/restore serializes and restores the complete experiential state. Consolidation merges experience into permanent memory.
 
 ---
 
 ### A.3 POW 3 — SOMAs Communicate via Synaptic Protocol
 
-**Claim (Section 10):** Multiple SOMA instances can discover each other and exchange data through the Synaptic Protocol, with the neural mind deciding when and what to communicate.
+**Claim (Section 9):** Multiple SOMA instances can discover each other and exchange data through the Synaptic Protocol, with the neural mind deciding when and what to communicate.
 
 **Method:**
 
@@ -1251,8 +800,8 @@ Two SOMA instances communicate through a minimal Synaptic Protocol. The neural m
 | POW | Whitepaper Sections | Core Claim | Validated |
 |---|---|---|---|
 | 1 | §2.1, §3, §5 | Neural mind generates programs of discovered libc functions; generic bridge executes via ctypes with zero domain logic | Yes |
-| 2 | §9, §12 | LoRA experiential memory improves performance; checkpoint/restore serializes mind; consolidation merges to permanent memory | Yes |
-| 3 | §10 | SOMAs discover peers, exchange data via Synaptic Protocol; neural mind decides routing (EMIT vs SEND) | Yes |
+| 2 | §7.4, §7 | LoRA experiential memory improves performance; checkpoint/restore serializes mind; consolidation merges to permanent memory | Yes |
+| 3 | §9 | SOMAs discover peers, exchange data via Synaptic Protocol; neural mind decides routing (EMIT vs SEND) | Yes |
 
 **Combined, these experiments demonstrate:** A neural architecture (the mind) is synthesized onto a target system, discovers its body (libc + network), generates programs of body operations from natural language intent, accumulates experiential memory through LoRA adaptation, serializes/restores its complete state via checkpointing, and communicates with peer SOMAs through a synaptic protocol — all without generating, compiling, or interpreting code at any layer.
 

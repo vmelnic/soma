@@ -11,6 +11,7 @@ use super::connection::{
     SynapseConnection, DEFAULT_KEEPALIVE_INTERVAL, DEFAULT_MAX_MISSED_PONGS,
     DEFAULT_PONG_TIMEOUT,
 };
+use super::pubsub::PubSubManager;
 use super::signal::{Signal, SignalType};
 
 /// Handler trait for incoming signals. Implementations decide how to
@@ -145,6 +146,7 @@ impl SignalHandler for SomaSignalHandler {
 /// Configuration for the SynapseServer.
 pub struct ServerConfig {
     pub max_signal_size: u32,
+    pub max_connections: usize,
     pub keepalive_interval_secs: u64,
     pub pong_timeout_secs: u64,
     pub max_missed_pongs: u32,
@@ -156,12 +158,14 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             max_signal_size: 10_485_760,
+            max_connections: 16,
             keepalive_interval_secs: DEFAULT_KEEPALIVE_INTERVAL.as_secs(),
             pong_timeout_secs: DEFAULT_PONG_TIMEOUT.as_secs(),
             max_missed_pongs: DEFAULT_MAX_MISSED_PONGS,
             capabilities: vec![
                 "streaming".into(),
                 "chunked".into(),
+                "encryption".into(),
             ],
             plugins: vec!["posix".into()],
         }
@@ -174,6 +178,7 @@ pub struct SynapseServer {
     name: String,
     bind_addr: String,
     config: ServerConfig,
+    metrics: Option<Arc<crate::metrics::SomaMetrics>>,
 }
 
 impl SynapseServer {
@@ -182,6 +187,7 @@ impl SynapseServer {
             name,
             bind_addr,
             config: ServerConfig::default(),
+            metrics: None,
         }
     }
 
@@ -190,7 +196,13 @@ impl SynapseServer {
             name,
             bind_addr,
             config,
+            metrics: None,
         }
+    }
+
+    pub fn with_metrics(mut self, metrics: Arc<crate::metrics::SomaMetrics>) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 
     /// Start listening for incoming connections. Runs until the task is cancelled.
@@ -206,9 +218,28 @@ impl SynapseServer {
         );
 
         let handler = Arc::new(handler);
+        let pubsub = Arc::new(tokio::sync::Mutex::new(PubSubManager::new()));
+        let active_connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let connection_counter = Arc::new(std::sync::atomic::AtomicU64::new(1));
+        let max_conn_limit: usize = self.config.max_connections;
 
         loop {
             let (stream, addr) = listener.accept().await?;
+
+            // Enforce max connection limit (Section 11)
+            let current = active_connections.load(std::sync::atomic::Ordering::Relaxed);
+            if current >= max_conn_limit {
+                tracing::warn!(
+                    peer = %addr,
+                    active = current,
+                    limit = max_conn_limit,
+                    "Connection rejected: max connections reached"
+                );
+                drop(stream);
+                continue;
+            }
+            active_connections.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
             let handler = handler.clone();
             let server_name = self.name.clone();
             let max_signal_size = self.config.max_signal_size;
@@ -217,6 +248,10 @@ impl SynapseServer {
             let max_missed = self.config.max_missed_pongs;
             let capabilities: Vec<String> = self.config.capabilities.clone();
             let plugins: Vec<String> = self.config.plugins.clone();
+            let pubsub = pubsub.clone();
+            let active_conns = active_connections.clone();
+            let conn_id = connection_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let metrics = self.metrics.clone();
 
             tokio::spawn(async move {
                 tracing::debug!(peer = %addr, "TCP connection accepted");
@@ -237,6 +272,7 @@ impl SynapseServer {
                     Ok(id) => id,
                     Err(e) => {
                         tracing::warn!(peer = %addr, error = %e, "Handshake failed");
+                        active_conns.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                         return;
                     }
                 };
@@ -263,7 +299,12 @@ impl SynapseServer {
                     }
 
                     let signal = match conn.recv().await {
-                        Ok(s) => s,
+                        Ok(s) => {
+                            if let Some(ref m) = metrics {
+                                m.record_signal_received(s.payload.len() as u64);
+                            }
+                            s
+                        }
                         Err(e) => {
                             // Check if it's just a clean disconnect
                             let msg = e.to_string();
@@ -303,9 +344,33 @@ impl SynapseServer {
                             break;
                         }
                         SignalType::Pong => {
-                            // Record RTT from matching PING (Spec Section 18)
                             conn.record_pong_rtt(signal.sequence).await;
                             tracing::debug!(peer = %peer_id, seq = signal.sequence, "PONG received");
+                            continue;
+                        }
+                        SignalType::Subscribe => {
+                            // Pub/Sub subscribe (Section 9.4)
+                            let topic = String::from_utf8_lossy(&signal.payload).to_string();
+                            let durable = signal.metadata.get("durable")
+                                .and_then(|v| v.as_bool()).unwrap_or(false);
+                            let mut ps = pubsub.lock().await;
+                            let last_seen = signal.metadata.get("last_seen_sequence")
+                                .and_then(|v| v.as_u64()).map(|v| v as u32);
+                            ps.subscribe(
+                                &topic,
+                                signal.channel_id,
+                                conn_id,
+                                last_seen,
+                                durable,
+                            );
+                            tracing::info!(peer = %peer_id, topic = %topic, conn_id, "Subscribed");
+                            continue;
+                        }
+                        SignalType::Unsubscribe => {
+                            let topic = String::from_utf8_lossy(&signal.payload).to_string();
+                            let mut ps = pubsub.lock().await;
+                            ps.unsubscribe(&topic, conn_id);
+                            tracing::info!(peer = %peer_id, topic = %topic, "Unsubscribed");
                             continue;
                         }
                         _ => {}
@@ -341,6 +406,9 @@ impl SynapseServer {
                     // Dispatch to handler
                     if let Some(mut response) = handler.handle(signal) {
                         response.sequence = conn.next_sequence();
+                        if let Some(ref m) = metrics {
+                            m.record_signal_sent(response.payload.len() as u64);
+                        }
                         if let Err(e) = conn.send(&response).await {
                             tracing::warn!(
                                 peer = %peer_id,
@@ -353,6 +421,13 @@ impl SynapseServer {
                     }
                 }
 
+                // Clean up pub/sub subscriptions for this connection
+                {
+                    let mut ps = pubsub.lock().await;
+                    ps.remove_connection(conn_id);
+                }
+
+                active_conns.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                 tracing::debug!(peer = %addr, peer_id = %peer_id, "Connection handler exiting");
             });
         }

@@ -1,26 +1,45 @@
-//! Proprioception — self-knowledge and runtime statistics (Spec Section 7).
+//! Proprioception — self-knowledge and runtime statistics (Whitepaper Section 11).
+//!
+//! The SOMA's self-model: what it knows about itself, its capabilities,
+//! its current state, and its recent performance.
 
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Runtime statistics and self-knowledge for the SOMA instance.
 pub struct Proprioception {
     pub start_time: Instant,
+    pub start_timestamp: u64,
     pub total_inferences: u64,
     pub successful_inferences: u64,
     pub failed_inferences: u64,
     pub total_adaptations: u64,
     pub experience_count: u64,
+    pub checkpoints_saved: u64,
+    pub consolidations: u64,
+    pub active_connections: u64,
+    pub total_signals_processed: u64,
+    pub total_decisions_recorded: u64,
 }
 
 impl Proprioception {
     pub fn new() -> Self {
+        let start_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
         Self {
             start_time: Instant::now(),
+            start_timestamp,
             total_inferences: 0,
             successful_inferences: 0,
             failed_inferences: 0,
             total_adaptations: 0,
             experience_count: 0,
+            checkpoints_saved: 0,
+            consolidations: 0,
+            active_connections: 0,
+            total_signals_processed: 0,
+            total_decisions_recorded: 0,
         }
     }
 
@@ -41,6 +60,18 @@ impl Proprioception {
     /// Record that a LoRA adaptation was performed.
     pub fn record_adaptation(&mut self) {
         self.total_adaptations += 1;
+    }
+
+    pub fn record_checkpoint(&mut self) {
+        self.checkpoints_saved += 1;
+    }
+
+    pub fn record_consolidation(&mut self) {
+        self.consolidations += 1;
+    }
+
+    pub fn record_decision(&mut self) {
+        self.total_decisions_recorded += 1;
     }
 
     /// How long this SOMA instance has been running.
@@ -75,7 +106,9 @@ impl Proprioception {
             "Uptime: {}\n\
              Inferences: {} total ({} ok, {} err, {:.1}% success)\n\
              Adaptations: {}\n\
-             Experiences: {}",
+             Experiences: {}\n\
+             Checkpoints: {}\n\
+             Decisions: {}",
             self.format_uptime(),
             self.total_inferences,
             self.successful_inferences,
@@ -83,6 +116,27 @@ impl Proprioception {
             self.success_rate(),
             self.total_adaptations,
             self.experience_count,
+            self.checkpoints_saved,
+            self.total_decisions_recorded,
         )
+    }
+
+    /// Serialize for MCP health endpoint.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "uptime_secs": self.uptime().as_secs(),
+            "start_timestamp": self.start_timestamp,
+            "inferences": {
+                "total": self.total_inferences,
+                "successful": self.successful_inferences,
+                "failed": self.failed_inferences,
+                "success_rate": self.success_rate(),
+            },
+            "adaptations": self.total_adaptations,
+            "experience_count": self.experience_count,
+            "checkpoints_saved": self.checkpoints_saved,
+            "consolidations": self.consolidations,
+            "decisions_recorded": self.total_decisions_recorded,
+        })
     }
 }

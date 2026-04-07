@@ -18,6 +18,8 @@ pub struct OnnxMindEngine {
     decoder: TractModel,
     pub tokenizer: Tokenizer,
     model_meta: ModelMeta,
+    /// Softmax temperature for inference (Section 2.3). Lower = more deterministic.
+    pub temperature: f32,
 }
 
 impl OnnxMindEngine {
@@ -38,7 +40,7 @@ impl OnnxMindEngine {
 
         let tokenizer = Tokenizer::load(&model_dir.join("tokenizer.json"))?;
         tracing::info!(vocab = tokenizer.vocab_size(), conventions = model_meta.num_conventions, "OnnxMindEngine loaded");
-        Ok(Self { encoder, decoder, tokenizer, model_meta })
+        Ok(Self { encoder, decoder, tokenizer, model_meta, temperature: 1.0 })
     }
 }
 
@@ -82,7 +84,12 @@ impl MindEngine for OnnxMindEngine {
             ])?;
 
             let new_h = dr[0].to_array_view::<f32>()?;
-            let op_l: Vec<f32> = dr[1].to_array_view::<f32>()?.iter().cloned().collect();
+            // Apply temperature scaling to logits (Section 2.3: deterministic execution)
+            // Clamp to minimum 0.01 to prevent division by zero
+            let temp = self.temperature.max(0.01);
+            let op_l: Vec<f32> = dr[1].to_array_view::<f32>()?.iter()
+                .map(|x| x / temp)
+                .collect();
             let pred = argmax(&op_l);
 
             if t == 0 {

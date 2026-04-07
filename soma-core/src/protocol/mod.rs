@@ -13,3 +13,4 @@ pub mod pubsub;
 pub mod streaming;
 pub mod rate_limit;
 pub mod offline_queue;
+pub mod encryption;
