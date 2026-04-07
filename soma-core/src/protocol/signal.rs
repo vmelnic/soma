@@ -167,9 +167,11 @@ impl Signal {
     }
 
     /// Create a Handshake signal with negotiation metadata.
+    /// Includes a session_token for reconnect identification (Spec Section 14.5).
     pub fn handshake(soma_id: &str, capabilities: &[&str], plugins: &[&str]) -> Self {
         let mut s = Self::new(SignalType::Handshake, soma_id.to_string());
         s.channel_id = 0; // control channel
+        let session_token = uuid::Uuid::new_v4().to_string();
         let meta = serde_json::json!({
             "protocol_version": "2.0",
             "supported_versions": ["2.0"],
@@ -179,6 +181,7 @@ impl Signal {
             "plugins": plugins,
             "max_signal_size": 10_485_760u32,
             "max_channels": 256u32,
+            "session_token": session_token,
         });
         s.metadata = meta;
         s

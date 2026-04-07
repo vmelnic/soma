@@ -303,11 +303,39 @@ impl SynapseServer {
                             break;
                         }
                         SignalType::Pong => {
-                            // PONG resets are handled by recv() already
+                            // Record RTT from matching PING (Spec Section 18)
+                            conn.record_pong_rtt(signal.sequence).await;
                             tracing::debug!(peer = %peer_id, seq = signal.sequence, "PONG received");
                             continue;
                         }
                         _ => {}
+                    }
+
+                    // Capability enforcement (Spec Section 12.4):
+                    // reject signals whose type requires a capability that
+                    // was not negotiated during handshake.
+                    if !conn.is_signal_allowed(signal.signal_type).await {
+                        tracing::warn!(
+                            peer = %peer_id,
+                            signal_type = ?signal.signal_type,
+                            "Signal rejected: capability_not_negotiated"
+                        );
+                        let mut err = Signal::error(
+                            &server_name,
+                            "capability_not_negotiated",
+                        );
+                        err.sequence = conn.next_sequence();
+                        err.channel_id = signal.channel_id;
+                        if let Err(e) = conn.send(&err).await {
+                            tracing::warn!(
+                                peer = %peer_id,
+                                error = %e,
+                                "Failed to send capability error"
+                            );
+                            conn.mark_dead();
+                            break;
+                        }
+                        continue;
                     }
 
                     // Dispatch to handler

@@ -21,6 +21,50 @@ pub const DEFAULT_PONG_TIMEOUT: Duration = Duration::from_secs(10);
 /// Max missed pongs before declaring peer dead.
 pub const DEFAULT_MAX_MISSED_PONGS: u32 = 3;
 
+/// Connection quality metrics derived from RTT measurements (Spec Section 12.4).
+#[derive(Debug, Clone)]
+pub struct ConnectionQuality {
+    /// Smoothed round-trip time in milliseconds.
+    pub rtt_ms: f32,
+    /// RTT jitter (standard deviation) in milliseconds.
+    pub rtt_jitter_ms: f32,
+    /// How long this connection has been alive.
+    pub connection_age_secs: u64,
+    /// Recent RTT samples for computing averages.
+    rtt_samples: Vec<f32>,
+}
+
+impl Default for ConnectionQuality {
+    fn default() -> Self {
+        Self {
+            rtt_ms: 0.0,
+            rtt_jitter_ms: 0.0,
+            connection_age_secs: 0,
+            rtt_samples: Vec::new(),
+        }
+    }
+}
+
+impl ConnectionQuality {
+    /// Record a new RTT observation. Keeps the last 100 samples and
+    /// recomputes the smoothed RTT and jitter (stddev).
+    pub fn record_rtt(&mut self, rtt_ms: f32) {
+        self.rtt_samples.push(rtt_ms);
+        if self.rtt_samples.len() > 100 {
+            self.rtt_samples.remove(0);
+        }
+        self.rtt_ms =
+            self.rtt_samples.iter().sum::<f32>() / self.rtt_samples.len() as f32;
+        // Jitter = stddev of RTT
+        let mean = self.rtt_ms;
+        let variance = self.rtt_samples.iter()
+            .map(|x| (x - mean).powi(2))
+            .sum::<f32>()
+            / self.rtt_samples.len() as f32;
+        self.rtt_jitter_ms = variance.sqrt();
+    }
+}
+
 /// State for a multiplexed channel on a connection.
 #[derive(Debug, Clone)]
 pub struct ChannelState {
@@ -56,6 +100,15 @@ pub struct SynapseConnection {
     pub local_id: String,
     /// Whether the connection is alive.
     pub alive: std::sync::atomic::AtomicBool,
+    /// Session token for reconnect identification (Spec Section 14.5).
+    pub session_token: Mutex<String>,
+    /// Connection quality metrics (RTT, jitter).
+    pub quality: Mutex<ConnectionQuality>,
+    /// Timestamp of the last PING we sent, keyed by sequence number,
+    /// so we can compute RTT when the matching PONG arrives.
+    pub ping_sent_at: Mutex<Option<(u32, Instant)>>,
+    /// When this connection was established.
+    pub created_at: Instant,
 }
 
 impl SynapseConnection {
@@ -81,6 +134,10 @@ impl SynapseConnection {
             negotiated_capabilities: Mutex::new(Vec::new()),
             local_id,
             alive: std::sync::atomic::AtomicBool::new(true),
+            session_token: Mutex::new(String::new()),
+            quality: Mutex::new(ConnectionQuality::default()),
+            ping_sent_at: Mutex::new(None),
+            created_at: now,
         }
     }
 
@@ -156,6 +213,74 @@ impl SynapseConnection {
         self.alive.load(Ordering::Relaxed)
     }
 
+    /// Check if a signal type is allowed by negotiated capabilities
+    /// (Spec Section 12.4). Returns `true` if the signal may proceed.
+    pub async fn is_signal_allowed(&self, signal_type: SignalType) -> bool {
+        match signal_type {
+            // Always allowed (no capability needed)
+            SignalType::Handshake
+            | SignalType::HandshakeAck
+            | SignalType::Close
+            | SignalType::Ping
+            | SignalType::Pong
+            | SignalType::Error
+            | SignalType::Control
+            | SignalType::Intent
+            | SignalType::Result
+            | SignalType::Data
+            | SignalType::Discover
+            | SignalType::DiscoverAck
+            | SignalType::PeerQuery
+            | SignalType::PeerList
+            | SignalType::Binary => true,
+
+            // Requires "streaming" capability
+            SignalType::StreamStart | SignalType::StreamData | SignalType::StreamEnd => {
+                let caps = self.negotiated_capabilities.lock().await;
+                caps.iter().any(|c| c == "streaming")
+            }
+
+            // Requires "chunked" capability
+            SignalType::ChunkStart
+            | SignalType::ChunkData
+            | SignalType::ChunkEnd
+            | SignalType::ChunkAck => {
+                let caps = self.negotiated_capabilities.lock().await;
+                caps.iter().any(|c| c == "chunked")
+            }
+
+            // Requires "pubsub" capability
+            SignalType::Subscribe | SignalType::Unsubscribe => {
+                let caps = self.negotiated_capabilities.lock().await;
+                caps.iter().any(|c| c == "pubsub")
+            }
+        }
+    }
+
+    /// Record a PONG response and compute RTT if we have a matching
+    /// PING timestamp for the given sequence number.
+    pub async fn record_pong_rtt(&self, pong_sequence: u32) {
+        let mut ping_info = self.ping_sent_at.lock().await;
+        if let Some((seq, sent_at)) = ping_info.take() {
+            if seq == pong_sequence {
+                let rtt = sent_at.elapsed().as_secs_f32() * 1000.0;
+                let mut quality = self.quality.lock().await;
+                quality.connection_age_secs = self.created_at.elapsed().as_secs();
+                quality.record_rtt(rtt);
+                tracing::debug!(
+                    peer = %self.peer_id,
+                    rtt_ms = rtt,
+                    avg_rtt_ms = quality.rtt_ms,
+                    jitter_ms = quality.rtt_jitter_ms,
+                    "RTT recorded"
+                );
+            } else {
+                // Put it back if sequence doesn't match
+                *ping_info = Some((seq, sent_at));
+            }
+        }
+    }
+
     /// Perform the server side of the handshake: receive HANDSHAKE,
     /// negotiate, send HANDSHAKE_ACK. Returns the peer's SOMA ID.
     pub async fn server_handshake(
@@ -212,22 +337,48 @@ impl SynapseConnection {
         // Store negotiated params
         *self.negotiated_capabilities.lock().await = negotiated.clone();
 
+        // Generate session token (Spec Section 14.5)
+        let session_token = uuid::Uuid::new_v4().to_string();
+        *self.session_token.lock().await = session_token.clone();
+
+        // Check if the peer sent a previous session token (reconnect)
+        let peer_session_token = hs
+            .metadata
+            .get("session_token")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if !peer_session_token.is_empty() {
+            tracing::info!(
+                peer = %peer_soma_id,
+                prev_session = %peer_session_token,
+                "Peer reconnecting with previous session token"
+            );
+        }
+
         // Send HANDSHAKE_ACK
         let mut ack = Signal::handshake_ack(&self.local_id, &negotiated, negotiated_size);
-        // Include our plugins in the ack metadata
+        // Include our plugins and session token in the ack metadata
         if let serde_json::Value::Object(ref mut map) = ack.metadata {
             map.insert(
                 "plugins".to_string(),
                 serde_json::json!(our_plugins),
             );
+            map.insert(
+                "session_token".to_string(),
+                serde_json::json!(session_token),
+            );
         }
         ack.sequence = self.next_sequence();
         self.send(&ack).await?;
 
+        let session_display = self.session_token.lock().await.clone();
         tracing::info!(
             peer = %peer_soma_id,
             capabilities = ?negotiated,
             max_signal_size = negotiated_size,
+            session = %session_display,
             "Handshake completed (server side)"
         );
 
@@ -241,8 +392,17 @@ impl SynapseConnection {
         our_capabilities: &[&str],
         our_plugins: &[&str],
     ) -> Result<String> {
-        // Send HANDSHAKE
+        // Send HANDSHAKE (include previous session token if reconnecting)
         let mut hs = Signal::handshake(&self.local_id, our_capabilities, our_plugins);
+        let prev_token = self.session_token.lock().await.clone();
+        if !prev_token.is_empty() {
+            if let serde_json::Value::Object(ref mut map) = hs.metadata {
+                map.insert(
+                    "session_token".to_string(),
+                    serde_json::json!(prev_token),
+                );
+            }
+        }
         hs.sequence = self.next_sequence();
         self.send(&hs).await?;
 
@@ -276,9 +436,22 @@ impl SynapseConnection {
 
         *self.negotiated_capabilities.lock().await = negotiated.clone();
 
+        // Store session token from server (Spec Section 14.5)
+        let server_session_token = ack
+            .metadata
+            .get("session_token")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if !server_session_token.is_empty() {
+            *self.session_token.lock().await = server_session_token.clone();
+        }
+
+        let session_display = self.session_token.lock().await.clone();
         tracing::info!(
             peer = %peer_soma_id,
             capabilities = ?negotiated,
+            session = %session_display,
             "Handshake completed (client side)"
         );
 
@@ -312,9 +485,12 @@ impl SynapseConnection {
             };
 
             if elapsed_since_recv >= keepalive_interval {
-                // Send PING
+                // Send PING and record the send time for RTT measurement
                 let mut ping = Signal::ping(&conn.local_id);
                 ping.sequence = conn.next_sequence();
+                let ping_seq = ping.sequence;
+                // Store (sequence, Instant) so we can compute RTT when PONG arrives
+                *conn.ping_sent_at.lock().await = Some((ping_seq, Instant::now()));
                 if conn.send(&ping).await.is_err() {
                     tracing::warn!(peer = %conn.peer_id, "Failed to send PING, marking dead");
                     conn.mark_dead();

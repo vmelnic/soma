@@ -46,6 +46,12 @@ crc32fast = "1"
 bitflags = "2"
 rmp-serde = "1"
 
+# SHA-256 for chunked transfer verification
+sha2 = "0.10"
+
+# Signal compression (Spec Section 19)
+zstd = "0.13"
+
 [profile.release]
 opt-level = 3
 lto = true
