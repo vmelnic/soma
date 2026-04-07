@@ -20,6 +20,12 @@ checkpoint_dir = "./checkpoints"
 auto_checkpoint = true
 max_checkpoints = 5
 
+[memory.consolidation]
+enabled = true
+trigger = "experience_count"
+threshold = 3
+min_lora_magnitude = 0.00001
+
 [protocol]
 bind = "127.0.0.1:9999"
 

@@ -20,7 +20,7 @@ use config::SomaConfig;
 use mcp::auth::AuthManager;
 use mcp::server::McpServer;
 use memory::checkpoint::Checkpoint;
-use memory::consolidation::ConsolidationConfig;
+use memory::consolidation::ConsolidationConfig as ConsolidationEngine;
 use memory::experience::{Experience, ExperienceBuffer};
 use metrics::SomaMetrics;
 use mind::{ArgType, MindEngine, ProgramStep, STOP_ID};
@@ -500,7 +500,10 @@ fn do_consolidate(
     plugins: &Arc<RwLock<PluginManager>>,
     soma_state: Option<&Arc<RwLock<SomaState>>>,
 ) {
-    let consolidation = ConsolidationConfig::default();
+    let consolidation = ConsolidationEngine::new(
+        config.memory.consolidation.min_lora_magnitude,
+        config.memory.consolidation.threshold,
+    );
     let p = proprio.read().unwrap();
     let adaptation_count = p.total_adaptations;
     // Read current max LoRA magnitude from the mind engine

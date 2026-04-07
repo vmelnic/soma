@@ -1,0 +1,9 @@
+torch>=2.0
+onnx>=1.14
+onnxruntime>=1.16
+toml>=0.10
+tqdm>=4.60
+
+[dev]
+pytest>=7.0
+ruff>=0.1
