@@ -15,6 +15,10 @@
     {"name": "alter_table", "description": "Alter an existing table structure"},
     {"name": "table_exists", "description": "Check if a table exists"},
     {"name": "list_tables", "description": "List all tables in the database"},
-    {"name": "table_schema", "description": "Get column information for a table"}
+    {"name": "table_schema", "description": "Get column information for a table"},
+    {"name": "find", "description": "Structured SELECT query builder — accepts JSON spec with table, select, where, join, group_by, having, order_by, limit, offset"},
+    {"name": "find_one", "description": "Structured single-row query — same JSON spec as find but forces LIMIT 1, returns Map or Null"},
+    {"name": "count", "description": "Count rows matching conditions — accepts JSON spec with table and optional where clause"},
+    {"name": "aggregate", "description": "Aggregation query with GROUP BY — accepts JSON spec with select (aggregate expressions), group_by, having, order_by, limit"}
   ]
 }

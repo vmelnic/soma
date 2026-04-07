@@ -268,6 +268,399 @@
         "table": ["users", "contacts", "orders", "products", "sessions"]
       },
       "tags": ["postgres", "multi-step", "table_exists", "table_schema"]
+    },
+    {
+      "id": "postgres_find_001",
+      "intents": [
+        "find {role} users",
+        "find users who are {role}s",
+        "show me all {role} users",
+        "list {role}s from users",
+        "get users with role {role}",
+        "search for {role} users",
+        "find all users where role is {role}"
+      ],
+      "program": [
+        {"convention": "postgres.find", "args": [{"name": "spec", "type": "json", "value": {"table": "users", "where": {"role": "{role}"}}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "role": ["provider", "client", "admin", "moderator", "guest"]
+      },
+      "tags": ["postgres", "find", "query_builder", "where"]
+    },
+    {
+      "id": "postgres_find_002",
+      "intents": [
+        "find {role}s with rating above {rating}",
+        "show {role}s rated higher than {rating}",
+        "get {role}s with rating greater than {rating}",
+        "list {role}s where rating exceeds {rating}",
+        "find top rated {role}s above {rating}"
+      ],
+      "program": [
+        {"convention": "postgres.find", "args": [{"name": "spec", "type": "json", "value": {"table": "users", "where": {"role": "{role}", "rating": {">": "{rating}"}}, "order_by": [{"field": "rating", "dir": "desc"}]}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "role": ["provider", "client", "tutor", "freelancer"],
+        "rating": ["3", "4", "4.5"]
+      },
+      "tags": ["postgres", "find", "query_builder", "where", "order"]
+    },
+    {
+      "id": "postgres_find_003",
+      "intents": [
+        "find {entity} for user {id} this week",
+        "show {entity} for user {id}",
+        "get upcoming {entity} for user {id}",
+        "list recent {entity} for user {id}",
+        "find all {entity} belonging to user {id}"
+      ],
+      "program": [
+        {"convention": "postgres.find", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "where": {"user_id": "{id}"}, "order_by": [{"field": "created_at", "dir": "desc"}]}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "entity": ["appointments", "messages", "reviews", "orders", "tasks"],
+        "id": ["1", "42", "100"]
+      },
+      "tags": ["postgres", "find", "query_builder", "where", "order"]
+    },
+    {
+      "id": "postgres_find_004",
+      "intents": [
+        "find {role}s with reviews",
+        "find {role}s who have reviews",
+        "show {role}s that have been reviewed",
+        "get {role}s joined with reviews",
+        "list {role}s and their reviews"
+      ],
+      "program": [
+        {"convention": "postgres.find", "args": [{"name": "spec", "type": "json", "value": {"table": "users", "select": ["users.name", "users.email"], "where": {"role": "{role}"}, "join": [{"table": "reviews", "on": "reviews.reviewed_id = users.id", "type": "INNER"}], "group_by": ["users.id", "users.name", "users.email"]}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "role": ["provider", "tutor", "freelancer", "vendor"]
+      },
+      "tags": ["postgres", "find", "query_builder", "join", "group_by"]
+    },
+    {
+      "id": "postgres_find_005",
+      "intents": [
+        "find first {limit} {entity} ordered by {field}",
+        "show top {limit} {entity} by {field}",
+        "get {limit} most recent {entity}",
+        "list {limit} latest {entity}",
+        "find {limit} newest {entity}"
+      ],
+      "program": [
+        {"convention": "postgres.find", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "order_by": [{"field": "{field}", "dir": "desc"}], "limit": "{limit}"}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "entity": ["users", "appointments", "reviews", "messages"],
+        "field": ["created_at", "updated_at", "rating", "name"],
+        "limit": ["5", "10", "20"]
+      },
+      "tags": ["postgres", "find", "query_builder", "order", "limit"]
+    },
+    {
+      "id": "postgres_find_one_001",
+      "intents": [
+        "find one user with email {email}",
+        "look up user by email {email}",
+        "get user with email {email}",
+        "find the user whose email is {email}",
+        "find a single user matching email {email}"
+      ],
+      "program": [
+        {"convention": "postgres.find_one", "args": [{"name": "spec", "type": "json", "value": {"table": "users", "where": {"email": "{email}"}}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "email": ["alice@example.com", "bob@test.com", "admin@soma.dev"]
+      },
+      "tags": ["postgres", "find_one", "query_builder", "lookup"]
+    },
+    {
+      "id": "postgres_find_one_002",
+      "intents": [
+        "find one {entity} where id is {id}",
+        "get {entity} by id {id}",
+        "look up {entity} with id {id}",
+        "find a single {entity} with id {id}",
+        "fetch {entity} record {id}"
+      ],
+      "program": [
+        {"convention": "postgres.find_one", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "where": {"id": "{id}"}}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "entity": ["users", "appointments", "reviews", "contacts"],
+        "id": ["1", "42", "100", "999"]
+      },
+      "tags": ["postgres", "find_one", "query_builder", "lookup"]
+    },
+    {
+      "id": "postgres_find_one_003",
+      "intents": [
+        "find one {entity} where {field} is {value}",
+        "get a {entity} with {field} equal to {value}",
+        "look up {entity} by {field} {value}",
+        "find the first {entity} matching {field} {value}",
+        "find single {entity} where {field} equals {value}"
+      ],
+      "program": [
+        {"convention": "postgres.find_one", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "where": {"{field}": "{value}"}}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "entity": ["users", "contacts", "appointments", "messages"],
+        "field": ["name", "status", "role", "type"],
+        "value": ["active", "pending", "admin", "provider"]
+      },
+      "tags": ["postgres", "find_one", "query_builder", "lookup"]
+    },
+    {
+      "id": "postgres_find_one_004",
+      "intents": [
+        "find the latest {entity}",
+        "get most recent {entity}",
+        "find newest {entity}",
+        "show the last {entity} created",
+        "find the most recently added {entity}"
+      ],
+      "program": [
+        {"convention": "postgres.find_one", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "order_by": [{"field": "created_at", "dir": "desc"}]}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "entity": ["users", "appointments", "reviews", "messages", "orders"]
+      },
+      "tags": ["postgres", "find_one", "query_builder", "order", "latest"]
+    },
+    {
+      "id": "postgres_find_one_005",
+      "intents": [
+        "find the top rated {role}",
+        "who is the highest rated {role}",
+        "show the best {role}",
+        "get the {role} with highest rating",
+        "find number one {role}"
+      ],
+      "program": [
+        {"convention": "postgres.find_one", "args": [{"name": "spec", "type": "json", "value": {"table": "users", "where": {"role": "{role}"}, "order_by": [{"field": "rating", "dir": "desc"}]}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "role": ["provider", "tutor", "freelancer", "vendor"]
+      },
+      "tags": ["postgres", "find_one", "query_builder", "order", "top"]
+    },
+    {
+      "id": "postgres_count_001",
+      "intents": [
+        "count all {table}",
+        "how many {table} are there",
+        "total number of {table}",
+        "count {table}",
+        "how many {table} exist",
+        "get the count of {table}",
+        "count records in {table}"
+      ],
+      "program": [
+        {"convention": "postgres.count", "args": [{"name": "spec", "type": "json", "value": {"table": "{table}"}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "table": ["users", "contacts", "appointments", "messages", "reviews"]
+      },
+      "tags": ["postgres", "count", "query_builder"]
+    },
+    {
+      "id": "postgres_count_002",
+      "intents": [
+        "count {role} users",
+        "how many {role}s are there",
+        "count users by role {role}",
+        "number of {role} users",
+        "how many users are {role}s"
+      ],
+      "program": [
+        {"convention": "postgres.count", "args": [{"name": "spec", "type": "json", "value": {"table": "users", "where": {"role": "{role}"}}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "role": ["provider", "client", "admin", "moderator"]
+      },
+      "tags": ["postgres", "count", "query_builder", "where"]
+    },
+    {
+      "id": "postgres_count_003",
+      "intents": [
+        "count pending {entity}",
+        "how many {entity} are pending",
+        "count {entity} with status pending",
+        "number of pending {entity}",
+        "how many unresolved {entity}"
+      ],
+      "program": [
+        {"convention": "postgres.count", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "where": {"status": "pending"}}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "entity": ["connection_requests", "appointments", "orders", "tasks", "messages"]
+      },
+      "tags": ["postgres", "count", "query_builder", "where", "status"]
+    },
+    {
+      "id": "postgres_count_004",
+      "intents": [
+        "count verified users",
+        "how many verified users",
+        "count users that are verified",
+        "number of verified users",
+        "how many users have been verified"
+      ],
+      "program": [
+        {"convention": "postgres.count", "args": [{"name": "spec", "type": "json", "value": {"table": "users", "where": {"is_verified": true}}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["postgres", "count", "query_builder", "where", "boolean"]
+    },
+    {
+      "id": "postgres_count_005",
+      "intents": [
+        "count {entity} for user {id}",
+        "how many {entity} does user {id} have",
+        "number of {entity} belonging to user {id}",
+        "count {entity} owned by user {id}",
+        "total {entity} for user {id}"
+      ],
+      "program": [
+        {"convention": "postgres.count", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "where": {"user_id": "{id}"}}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "entity": ["appointments", "messages", "reviews", "orders"],
+        "id": ["1", "42", "100"]
+      },
+      "tags": ["postgres", "count", "query_builder", "where", "user"]
+    },
+    {
+      "id": "postgres_aggregate_001",
+      "intents": [
+        "top {limit} {role}s by average rating",
+        "best {limit} {role}s by rating",
+        "highest rated {limit} {role}s",
+        "show {limit} {role}s with best average rating",
+        "{limit} best {role}s by average review score"
+      ],
+      "program": [
+        {"convention": "postgres.aggregate", "args": [{"name": "spec", "type": "json", "value": {"table": "reviews", "select": ["reviewed_id", "AVG(rating) as avg_rating", "COUNT(*) as total_reviews"], "group_by": ["reviewed_id"], "order_by": [{"field": "avg_rating", "dir": "desc"}], "limit": "{limit}"}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "role": ["provider", "tutor", "freelancer", "vendor"],
+        "limit": ["5", "10", "20"]
+      },
+      "tags": ["postgres", "aggregate", "query_builder", "group_by", "order", "avg"]
+    },
+    {
+      "id": "postgres_aggregate_002",
+      "intents": [
+        "average rating per {entity}",
+        "show average rating for each {entity}",
+        "get average ratings grouped by {entity}",
+        "average score per {entity}",
+        "mean rating for every {entity}"
+      ],
+      "program": [
+        {"convention": "postgres.aggregate", "args": [{"name": "spec", "type": "json", "value": {"table": "reviews", "select": ["{entity}_id", "AVG(rating) as avg_rating"], "group_by": ["{entity}_id"], "order_by": [{"field": "avg_rating", "dir": "desc"}]}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "entity": ["provider", "product", "service", "vendor"]
+      },
+      "tags": ["postgres", "aggregate", "query_builder", "group_by", "avg"]
+    },
+    {
+      "id": "postgres_aggregate_003",
+      "intents": [
+        "count {entity} per {field}",
+        "how many {entity} per {field}",
+        "group {entity} by {field} and count",
+        "breakdown of {entity} by {field}",
+        "count {entity} grouped by {field}"
+      ],
+      "program": [
+        {"convention": "postgres.aggregate", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "select": ["{field}", "COUNT(*) as total"], "group_by": ["{field}"], "order_by": [{"field": "total", "dir": "desc"}]}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "entity": ["users", "appointments", "orders", "messages"],
+        "field": ["role", "status", "type", "category"]
+      },
+      "tags": ["postgres", "aggregate", "query_builder", "group_by", "count"]
+    },
+    {
+      "id": "postgres_aggregate_004",
+      "intents": [
+        "find {entity} with average rating above {threshold}",
+        "show {entity} rated above {threshold} on average",
+        "get {entity} where average rating exceeds {threshold}",
+        "list {entity} with avg rating higher than {threshold}",
+        "{entity} with average rating over {threshold}"
+      ],
+      "program": [
+        {"convention": "postgres.aggregate", "args": [{"name": "spec", "type": "json", "value": {"table": "reviews", "select": ["{entity}_id", "AVG(rating) as avg_rating", "COUNT(*) as total"], "group_by": ["{entity}_id"], "having": {"AVG(rating)": {">=": "{threshold}"}}, "order_by": [{"field": "avg_rating", "dir": "desc"}]}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "entity": ["provider", "product", "service"],
+        "threshold": ["3.5", "4", "4.5"]
+      },
+      "tags": ["postgres", "aggregate", "query_builder", "group_by", "having"]
+    },
+    {
+      "id": "postgres_aggregate_005",
+      "intents": [
+        "total revenue per {field}",
+        "sum amount grouped by {field}",
+        "total sales by {field}",
+        "revenue breakdown by {field}",
+        "sum of amounts per {field}"
+      ],
+      "program": [
+        {"convention": "postgres.aggregate", "args": [{"name": "spec", "type": "json", "value": {"table": "orders", "select": ["{field}", "SUM(amount) as total_amount", "COUNT(*) as order_count"], "group_by": ["{field}"], "order_by": [{"field": "total_amount", "dir": "desc"}]}}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "field": ["status", "category", "user_id", "product_id"]
+      },
+      "tags": ["postgres", "aggregate", "query_builder", "group_by", "sum"]
     }
   ]
 }
