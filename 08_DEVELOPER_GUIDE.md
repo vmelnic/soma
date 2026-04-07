@@ -19,11 +19,11 @@ This guide walks you from zero to a working SOMA that responds to intents, uses 
 
 ```bash
 # Linux x86_64
-curl -L https://github.com/vmelnic/soma/releases/latest/download/soma-linux-x86_64 -o soma
+curl -L https://github.com/soma-project/soma/releases/latest/download/soma-linux-x86_64 -o soma
 chmod +x soma
 
 # macOS Apple Silicon
-curl -L https://github.com/vmelnic/soma/releases/latest/download/soma-macos-aarch64 -o soma
+curl -L https://github.com/soma-project/soma/releases/latest/download/soma-macos-aarch64 -o soma
 chmod +x soma
 
 # Verify
@@ -34,7 +34,7 @@ chmod +x soma
 ### 2.2 From Source (Rust)
 
 ```bash
-git clone https://github.com/vmelnic/soma.git
+git clone https://github.com/soma-project/soma.git
 cd soma
 cargo build --release
 # Binary at target/release/soma
@@ -81,37 +81,50 @@ my-soma/
 ### 3.2 Run It
 
 ```bash
-soma --repl
+soma --config soma.toml
 ```
 
 ```
 SOMA v0.1.0 | Mind: 823K params | Plugins: filesystem (17 conv)
 Synaptic Protocol listening on :9001
+MCP Server listening on :3000
 Ready.
-
-soma> list files in the current directory
-  [Mind] Program (4 steps, 96.8%):
-    $0 = fs.list_dir(".")
-    $1 = EMIT($0)
-    STOP
-  [Body] soma.toml, models, plugins, checkpoints
-
-soma> create a file called hello.txt with content "Hello from SOMA"
-  [Mind] Program (2 steps, 94.1%):
-    $0 = fs.write_file("hello.txt", "Hello from SOMA")
-    $1 = EMIT("done")
-    STOP
-  [Body] done
-
-soma> read hello.txt
-  [Mind] Program (2 steps, 97.5%):
-    $0 = fs.read_file("hello.txt")
-    $1 = EMIT($0)
-    STOP
-  [Body] Hello from SOMA
 ```
 
-Your first SOMA is running. It understands filesystem operations and executes them from natural language.
+### 3.3 Connect an LLM
+
+Connect Claude, ChatGPT, or any MCP-compatible LLM to `localhost:3000`. In Claude Desktop, add to MCP config:
+
+```json
+{
+  "mcpServers": {
+    "my-soma": {
+      "url": "http://localhost:3000/mcp"
+    }
+  }
+}
+```
+
+Now talk to Claude:
+
+```
+You: "List files in the current directory"
+
+Claude: → soma.intent("list files in the current directory")
+Claude: "Here are the files: soma.toml, models, plugins, checkpoints"
+
+You: "Create a file called hello.txt with content Hello from SOMA"
+
+Claude: → soma.intent("create a file called hello.txt with content Hello from SOMA")
+Claude: "Done. hello.txt created."
+
+You: "Read hello.txt"
+
+Claude: → soma.intent("read hello.txt")
+Claude: "The file contains: Hello from SOMA"
+```
+
+Your first SOMA is running. You talk to your LLM. Your LLM drives SOMA. SOMA executes.
 
 ---
 
@@ -143,33 +156,32 @@ password_env = "SOMA_PG_PASSWORD"
 
 ```bash
 export SOMA_PG_PASSWORD=secret
-soma --repl
+soma --config soma.toml
 ```
 
 ```
 SOMA v0.1.0 | Plugins: filesystem (17), postgres (12) [+LoRA]
+MCP Server listening on :3000
 Ready.
+```
 
-soma> create a table called users with id, name, and email columns
-  [Mind] Program (2 steps, 93.4%):
-    $0 = postgres.create_table("users", {id: "SERIAL PRIMARY KEY", name: "TEXT NOT NULL", email: "TEXT"})
-    $1 = EMIT("done")
-    STOP
-  [Body] done
+Connect your LLM and talk:
 
-soma> insert a user named Alice with email alice@example.com
-  [Mind] Program (2 steps, 95.1%):
-    $0 = postgres.execute("INSERT INTO users (name, email) VALUES ($1, $2)", ["Alice", "alice@example.com"])
-    $1 = EMIT($0)
-    STOP
-  [Body] 1 row affected
+```
+You: "Create a table called users with id, name, and email columns"
 
-soma> list all users
-  [Mind] Program (2 steps, 97.8%):
-    $0 = postgres.query("SELECT * FROM users")
-    $1 = EMIT($0)
-    STOP
-  [Body] [{id: 1, name: "Alice", email: "alice@example.com"}]
+LLM: → soma.intent("create a table called users with id, name, and email columns")
+LLM: "Done. Users table created with id (SERIAL), name (TEXT), email (TEXT)."
+
+You: "Insert a user named Alice with email alice@example.com"
+
+LLM: → soma.intent("insert a user named Alice with email alice@example.com")
+LLM: "Inserted. 1 row affected."
+
+You: "List all users"
+
+LLM: → soma.intent("list all users")
+LLM: "One user found: {id: 1, name: Alice, email: alice@example.com}"
 ```
 
 ---
@@ -180,23 +192,23 @@ soma> list all users
 
 Terminal 1:
 ```bash
-soma --repl --bind 0.0.0.0:9001
+soma --bind 0.0.0.0:9001 --mcp 0.0.0.0:3000
 ```
 
 Terminal 2:
 ```bash
-soma --repl --bind 0.0.0.0:9002 --peer localhost:9001
+soma --bind 0.0.0.0:9002 --mcp 0.0.0.0:3001 --peer localhost:9001
 ```
 
 ### 5.2 Send a Signal
 
-On SOMA-B (port 9002):
+Connect your LLM to SOMA-B (port 3001):
+
 ```
-soma> send "hello from SOMA-B" to soma on port 9001
-  [Mind] Program:
-    $0 = synapse.send("soma-9001", "hello from SOMA-B")
-    STOP
-  [Body] sent
+You: "Send hello from SOMA-B to the peer SOMA"
+
+LLM: → soma.intent("send hello from SOMA-B to soma on port 9001")
+LLM: "Sent."
 ```
 
 On SOMA-A (port 9001), the message arrives as a Synaptic signal.
@@ -204,12 +216,11 @@ On SOMA-A (port 9001), the message arrives as a Synaptic signal.
 ### 5.3 Discover Peers
 
 ```
-soma> who is connected
-  [Proprioception]
-    Peers: 1
-    - soma-9002 at localhost:9002 (plugins: filesystem)
-      Latency: 1ms
-      Connected: 2m ago
+You: "Who is connected?"
+
+LLM: → soma.get_peers()
+LLM: "One peer: soma-9002 at localhost:9002, 
+      plugins: filesystem. Latency: 1ms."
 ```
 
 ---
@@ -259,6 +270,7 @@ impl SomaPlugin for MyPlugin {
                 returns: ReturnSpec::Value(ValueType::String),
                 is_deterministic: true,
                 estimated_latency: Duration::from_millis(1),
+                max_latency: Duration::from_secs(5),
                 side_effects: vec![],
                 cleanup: None,
             },
@@ -318,35 +330,91 @@ Edit `training/examples.json`:
 }
 ```
 
-### 6.4 Build and Load
+### 6.4 Write Manifest
+
+Create `manifest.toml`:
+
+```toml
+[plugin]
+name = "my-plugin"
+version = "0.1.0"
+description = "Greets people by name"
+author = "Your Name"
+
+[plugin.platform]
+targets = ["x86_64-linux", "x86_64-macos", "aarch64-linux"]
+
+[plugin.dependencies]
+# required = ["crypto"]    # if your plugin needs another plugin
+# optional = ["redis"]     # nice to have, works without
+
+# [plugin.config_schema]   # if your plugin needs config in soma.toml
+# No config needed for this simple plugin
+```
+
+See 03_PLUGINS.md Section 4 for full manifest format and 05_PLUGIN_CATALOG.md for examples.
+
+### 6.5 Build and Re-Synthesize
 
 ```bash
 cd plugins/my-plugin
 cargo build --release
-# Produces: target/release/libmy_plugin.so (or .dylib)
+# Produces: target/release/libmy_plugin.so (or .dylib on macOS)
 cp target/release/libmy_plugin.so ../../plugins/
 
-# Re-synthesize to include new plugin's training data
+# Re-synthesize Mind to include new plugin's training data
 cd ../..
 soma-synthesize train --plugins ./plugins --output ./models
 ```
 
-### 6.5 Use It
+**Important:** Without re-synthesis, the Mind doesn't know your plugin's conventions. It can't generate programs that call `my-plugin.greet`. Re-synthesis is required every time you add, remove, or change a plugin's conventions.
+
+### 6.6 Train Plugin LoRA (optional)
+
+If you want the Mind to use your plugin more effectively without full re-synthesis:
 
 ```bash
-soma --repl
+soma-synthesize train-lora \
+  --plugin my-plugin \
+  --base-model ./models/server \
+  --output ./lora
 ```
 
-```
-SOMA v0.1.0 | Plugins: filesystem (17), my-plugin (1)
-Ready.
+This produces `lora/my-plugin.lora`. Copy it into your plugin's `lora/` directory. The SOMA loads it alongside the plugin — the Mind immediately benefits from pre-trained knowledge of your conventions.
 
-soma> say hello to Alice
-  [Mind] Program (2 steps, 92.4%):
-    $0 = my-plugin.greet("Alice")
-    $1 = EMIT($0)
-    STOP
-  [Body] Hello, Alice!
+See 07_SYNTHESIZER.md Section 6 for LoRA training details.
+
+### 6.7 Package as .soma-plugin (optional, for distribution)
+
+```bash
+soma plugin package ./plugins/my-plugin
+# Produces: my-plugin-0.1.0.soma-plugin
+```
+
+This bundles: compiled binary, manifest, training data, and LoRA weights into a single archive. Other SOMA users can install it with `soma plugin install my-plugin`.
+
+See 03_PLUGINS.md Section 4 for the .soma-plugin format.
+
+### 6.8 Use It
+
+```bash
+soma --config soma.toml
+```
+
+Connect your LLM:
+
+```
+You: "Say hello to Alice"
+
+LLM: → soma.intent("say hello to Alice")
+LLM: "Hello, Alice!"
+```
+
+You can also call the convention directly (bypassing Mind inference):
+
+```
+LLM: → soma.my-plugin.greet("Alice")
+LLM: "Hello, Alice!"
 ```
 
 ---
@@ -361,8 +429,8 @@ A real application is:
 2. Configure them in `soma.toml`
 3. Synthesize a Mind that knows all their conventions
 4. Start the SOMA
-5. Describe your application via intents (schema, business rules, views)
-6. Connect an Interface SOMA for UI
+5. Build your application through an LLM via MCP (create schema, configure auth, set up messaging)
+6. Connect a web frontend (simple JS renderer via WebSocket)
 7. The application exists
 
 ### 7.2 Quick Example: Bookmark App
@@ -380,29 +448,65 @@ path = "./data/bookmarks.db"
 EOF
 
 # Run
-soma --repl
+soma --config soma.toml
+# Connect your LLM via MCP
 ```
 
 ```
-soma> create a table called bookmarks with id, url, title, tags, and created_at
+You: "Create a table called bookmarks with id, url, title, tags, and created_at"
 
-soma> add bookmark https://soma.local titled "SOMA Project" tagged "ai,neural"
+You: "Add bookmark https://soma-project.dev titled SOMA Project tagged ai,neural"
 
-soma> find all bookmarks tagged ai
+You: "Find all bookmarks tagged ai"
 
-soma> export all bookmarks as a csv file to bookmarks.csv
+You: "Export all bookmarks as a csv file to bookmarks.csv"
 ```
 
-Four intents. A working bookmark app with a database and file export. No code.
+Four requests to your LLM. A working bookmark app with database and file export. No code.
 
 ---
 
-## 8. Debug REPL Reference
+## 8. MCP Debugging Reference
 
-### 8.1 Commands
+### 8.1 State Query Tools
 
-| Command | Description |
+All debugging happens through MCP. Ask your LLM, or call tools directly:
+
+| MCP Tool | What It Shows |
 |---|---|
+| `soma.get_state()` | Full snapshot: plugins, schema, experience, health |
+| `soma.get_health()` | Memory, CPU, error rate, uptime, connections |
+| `soma.get_schema()` | All database tables with columns and row counts |
+| `soma.get_plugins()` | Loaded plugins, conventions, health status |
+| `soma.get_conventions()` | All callable conventions with arg specs |
+| `soma.get_experience()` | LoRA magnitude, adaptation count, recent changes |
+| `soma.get_decisions()` | Decision log: what was built and why |
+| `soma.get_recent_activity(n)` | Last N executions with results |
+| `soma.get_peers()` | Connected SOMAs and their capabilities |
+| `soma.get_config()` | Current configuration (secrets redacted) |
+
+### 8.2 Action Tools
+
+| MCP Tool | What It Does |
+|---|---|
+| `soma.intent(text)` | Send structured intent to Mind |
+| `soma.install_plugin(name)` | Install plugin from registry |
+| `soma.uninstall_plugin(name)` | Remove plugin |
+| `soma.checkpoint(label?)` | Save current state |
+| `soma.restore(checkpoint_id)` | Restore from checkpoint |
+| `soma.record_decision(what, why)` | Record a design decision |
+| `soma.confirm(action_id)` | Confirm destructive action |
+
+### 8.3 Signal Capture (CLI)
+
+```bash
+soma-dump --port 9001                          # Live traffic capture
+soma-dump --port 9001 --type INTENT,RESULT     # Filter by signal type
+soma-dump --port 9001 --output capture.synaptic # Save for replay
+soma-replay --input capture.synaptic --target localhost:9001 # Replay
+```
+
+---|---|
 | `:status` | SOMA health: mind, plugins, peers, memory |
 | `:inspect mind` | Model details, conventions, LoRA state |
 | `:inspect plugin <name>` | Plugin details, config, stats |
@@ -469,34 +573,36 @@ soma plugin install smtp
 # Add training data for email-related intents
 soma-synthesize train --plugins ./plugins --domain ./training/domain.json --output ./models
 # Restart SOMA
-soma --repl
-# "send an email to alice@example.com with subject Hello"
+soma --config soma.toml
+# Connect your LLM, then: "Send an email to alice@example.com with subject Hello"
 ```
 
 ### 10.2 Connecting Frontend and Backend
 
-```
+```bash
 # Terminal 1: Backend SOMA
-soma --bind 0.0.0.0:9001
+soma --bind 0.0.0.0:9001 --mcp 0.0.0.0:3000
 
-# Terminal 2: Interface SOMA (browser)
+# Terminal 2: Interface SOMA (browser renderer)
 soma-interface --backend localhost:9001 --port 8080
-# Open http://localhost:8080
-# Interface SOMA renders UI from Backend SOMA's semantic signals
+# Open http://localhost:8080 — Interface SOMA renders UI
+
+# Your LLM connects to the Backend SOMA MCP at localhost:3000
+# LLM sends view specs → Backend sends semantic signals → Interface renders
 ```
 
 ### 10.3 Deploying
 
 ```bash
-# Production
 soma \
   --config production.toml \
   --checkpoint ./checkpoints/latest.ckpt \
   --bind 0.0.0.0:9001 \
+  --mcp 0.0.0.0:3000 \
   --log-level info
 ```
 
-Single binary. One config file. One checkpoint. No Docker required (though works in Docker too).
+Single binary. One config file. One checkpoint. MCP for LLM access. No Docker required (though works in Docker too).
 
 ### 10.4 Monitoring
 
@@ -504,8 +610,13 @@ Single binary. One config file. One checkpoint. No Docker required (though works
 # Live signal capture
 soma-dump --port 9001
 
-# Metrics (if http-bridge loaded with metrics endpoint)
-curl http://localhost:8080/metrics
+# Ask your LLM
+"How is the SOMA doing?"
+→ LLM calls soma.get_health() via MCP
+→ "Healthy. 234MB RAM, 12% CPU, 3 peers connected, 0.2% error rate."
+
+# Admin dashboard (if http-bridge plugin loaded with --admin)
+open http://localhost:8080/admin
 ```
 
 ---
@@ -523,20 +634,23 @@ The Mind doesn't know how to handle the intent. Causes:
 
 Fix: add training examples that cover this intent pattern, then re-synthesize.
 
+Check SOMA logs (with `log_level = "trace"` in soma.toml) for details:
+
 ```
-soma> :trace full
-soma> list all contacts near me
-  [Trace] Tokens: [12, 45, 89, 2, 7, 1]  ← check for [UNK] tokens (indicates OOV)
-  [Trace] Encoder output: [...]
-  [Trace] Decoder step 0: STOP (confidence 0.78)  ← Mind chose STOP immediately
-  
-  Problem: "near" or "contacts" may be OOV, or no geo+contacts training examples
+[TRACE] Intent: "list all contacts near me"
+[TRACE] Tokens: [12, 45, 89, 2, 7, 1]  ← check for [UNK] tokens (indicates OOV)
+[TRACE] Encoder output: [...]
+[TRACE] Decoder step 0: STOP (confidence 0.78)  ← Mind chose STOP immediately
+
+Problem: "near" or "contacts" may be OOV, or no geo+contacts training examples
 ```
+
+Or ask your LLM: "Show me recent activity" → LLM calls `soma.get_recent_activity(5)` to see failed intents.
 
 **"Plugin not found: convention 'postgres.query' not available"**
 
 The Mind generated a program referencing a convention that isn't loaded. Causes:
-- Plugin isn't installed. Run `soma plugin list` to check.
+- Plugin isn't installed. Ask your LLM: "What plugins are loaded?" → `soma.get_plugins()`.
 - Plugin failed to load (config error, missing dependency). Check startup logs.
 - Model was synthesized with the plugin, but plugin isn't configured in `soma.toml`.
 - Convention name mismatch: model was trained with `postgres.query` but plugin registers `pg.query`. Convention names must match exactly.
@@ -590,13 +704,15 @@ Fix: check `:inspect plugin <name>` for stats. Look at p99 latency. For database
 ### 11.2 Debug Workflow
 
 ```
-1. Enable tracing:           soma> :trace full
-2. Reproduce the problem:    soma> [the failing intent]
-3. Check tokens:             are there [UNK] tokens? → vocabulary issue
-4. Check encoder output:     is it all zeros? → model didn't load correctly
-5. Check decoder steps:      did it predict wrong opcodes? → training data issue
-6. Check plugin execution:   did the right plugin receive the right args?
-7. Check plugin response:    did the plugin error or timeout?
+1. Set log_level = "trace" in soma.toml (or --log-level trace)
+2. Reproduce: send the failing intent via LLM → soma.intent("...")
+3. Check logs: are there [UNK] tokens? → vocabulary issue
+4. Check logs: encoder output all zeros? → model didn't load correctly
+5. Check logs: wrong opcodes predicted? → training data issue
+6. Ask LLM: "What happened with the last intent?"
+   → LLM calls soma.get_recent_activity(1) → sees error details
+7. Ask LLM: "Is the postgres plugin healthy?"
+   → LLM calls soma.get_plugins() → sees plugin status and error counts
 ```
 
 ---

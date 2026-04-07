@@ -10,9 +10,9 @@
 
 The SOMA Core is the minimal, universal kernel that makes a SOMA a SOMA. Everything domain-specific is a plugin. The core should be small enough to run on an ESP32 and powerful enough to orchestrate a cloud backend.
 
-**The core is NOT:** a web server, a database client, a renderer, a file handler, or anything application-specific.
+**The core is NOT:** a web server, a database client, a renderer, a file handler, a conversational AI, or anything application-specific.
 
-**The core IS:** a neural mind that generates programs, a protocol for communication, a plugin system for extensible capabilities, and a memory system that grows from experience.
+**The core IS:** a neural mind that generates programs, a protocol for SOMA-to-SOMA communication (Synaptic Protocol), an MCP server for LLM-to-SOMA communication, a plugin system for extensible capabilities, and a memory system that grows from experience. SOMA does not converse — conversational intelligence is provided by external LLMs via MCP.
 
 ---
 
@@ -48,47 +48,52 @@ The Synthesizer (training tool) remains Python + PyTorch. It is a BUILD tool, no
 | Crate | Purpose |
 |---|---|
 | `ort` | ONNX Runtime inference (replaces PyTorch at runtime) |
-| `tokio` | Async runtime for concurrent signal handling |
+| `tokio` | Async runtime for concurrent signal and MCP handling |
 | `serde` / `serde_json` / `rmp-serde` | Signal serialization (JSON + MessagePack) |
 | `libloading` | Dynamic plugin loading (.so/.dylib/.dll) |
 | `memmap2` | Memory-mapped model files for fast loading |
 | `tracing` | Structured logging and diagnostics |
+| `axum` | HTTP server for MCP (JSON-RPC over HTTP+SSE) |
+| `toml` | Configuration file parsing |
 
 ---
 
 ## 3. Core Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│  SOMA Core Binary                            │
-│                                              │
-│  ┌─────────────┐  ┌──────────────────────┐  │
-│  │  Mind Engine │  │  Synaptic Protocol   │  │
-│  │  (ONNX       │  │  Server + Client     │  │
-│  │   inference)  │  │  (TCP/Unix socket)   │  │
-│  └──────┬──────┘  └──────────┬───────────┘  │
-│         │                     │              │
-│  ┌──────┴─────────────────────┴───────────┐  │
-│  │  Plugin Manager                         │  │
-│  │  (discover, load, compose, route)       │  │
-│  └──────┬─────────────────────────────────┘  │
-│         │                                    │
-│  ┌──────┴──────┐  ┌──────────────────────┐  │
-│  │  Memory     │  │  Proprioception      │  │
-│  │  (LoRA +    │  │  (self-model,        │  │
-│  │  checkpoint) │  │   capabilities,      │  │
-│  │             │  │   state tracking)     │  │
-│  └─────────────┘  └──────────────────────┘  │
-│                                              │
-└─────────────────────────────────────────────┘
-         │
-    ┌────┴────┐
-    │ Plugins │  (.so/.dylib files OR built-in)
-    │ loaded  │
-    │ at      │
-    │ runtime │
-    └─────────┘
+┌──────────────────────────────────────────────────────┐
+│  SOMA Core Binary                                     │
+│                                                       │
+│  ┌─────────────┐  ┌───────────────┐  ┌────────────┐ │
+│  │  Mind Engine │  │  Synaptic     │  │  MCP       │ │
+│  │  (ONNX or   │  │  Protocol     │  │  Server    │ │
+│  │  Embedded)   │  │  Server+Client│  │  (LLM ↔   │ │
+│  │             │  │  (SOMA ↔ SOMA)│  │   SOMA)    │ │
+│  └──────┬──────┘  └──────┬────────┘  └─────┬──────┘ │
+│         │                │                  │        │
+│  ┌──────┴────────────────┴──────────────────┴──────┐ │
+│  │  Plugin Manager                                  │ │
+│  │  (discover, load, compose, route)                │ │
+│  └──────┬──────────────────────────────────────────┘ │
+│         │                                            │
+│  ┌──────┴──────┐  ┌──────────────────────┐          │
+│  │  Memory     │  │  Proprioception      │          │
+│  │  (LoRA +    │  │  (self-model,        │          │
+│  │  checkpoint) │  │   capabilities,      │          │
+│  │             │  │   state tracking)     │          │
+│  └─────────────┘  └──────────────────────┘          │
+│                                                      │
+└──────────────────────────────────────────────────────┘
+         │                              │
+    ┌────┴────┐                   ┌─────┴──────┐
+    │ Plugins │                   │ LLM        │
+    │ (.so or │                   │ (Claude,   │
+    │ built-in)│                  │  ChatGPT,  │
+    └─────────┘                   │  Ollama)   │
+                                  └────────────┘
 ```
+
+The MCP Server is a core component — not a plugin. It runs alongside the Synaptic Protocol server and exposes SOMA's complete state and all plugin conventions as MCP tools. Any LLM that supports MCP can connect and interact with SOMA. SOMA does not converse — the LLM provides the conversational layer.
 
 ---
 
@@ -452,7 +457,7 @@ The Plugin Manager routes each step to the correct plugin. Plugins don't know ab
 
 ## 6. Memory System
 
-### 6.1 Memory Hierarchy (from Whitepaper Section 12)
+### 6.1 Memory Hierarchy (from Whitepaper Section 7)
 
 | Type | Implementation | Lifetime |
 |---|---|---|
@@ -498,14 +503,20 @@ Process:
 - Connected peers (via Synaptic Protocol)
 - Uptime and execution stats (success/error counts)
 
-### 7.2 Queryable via Intent
+### 7.2 Queryable via MCP
+
+All proprioception data is exposed through the MCP plugin's state tools:
 
 ```
-"what can you do" → lists all loaded plugin conventions
-"how much have you learned" → LoRA magnitude + experience stats
-"who are you connected to" → peer list from Synaptic Protocol
-"how are you doing" → health metrics (memory, CPU, error rate)
+soma.get_state()        → full snapshot including self-model
+soma.get_health()       → memory, CPU, error rate, uptime
+soma.get_plugins()      → loaded plugins, conventions, health
+soma.get_conventions()  → all callable conventions with descriptions
+soma.get_experience()   → LoRA magnitude, adaptation stats
+soma.get_peers()        → connected SOMAs via Synaptic Protocol
 ```
+
+SOMAs do NOT respond to natural language proprioception queries. "What can you do" is not a SOMA intent — it's an MCP state query made by an LLM on behalf of a human. SOMA is a pure executor, not a conversational partner.
 
 ---
 
@@ -515,12 +526,12 @@ Process:
 
 | Target | Mind Backend | Plugins | Features | Binary Size (est.) |
 |---|---|---|---|---|
-| `soma-server` | OnnxMindEngine | Dynamic (.so) | Full async networking, ONNX Runtime, full LoRA | ~15MB |
-| `soma-desktop` | OnnxMindEngine | Dynamic (.dylib) | Full + GUI plugin support | ~20MB |
-| `soma-embedded` | EmbeddedMindEngine | Built-in only | no_std, int8 inference, minimal LoRA, minimal Synaptic | ~200KB-2MB |
-| `soma-rpi` | OnnxMindEngine (CPU) | Dynamic (.so) | Server variant, ARM-optimized, lighter ONNX | ~10MB |
+| `soma-server` | OnnxMindEngine | Dynamic (.so) | Full async networking, ONNX Runtime, full LoRA, MCP server, Synaptic Protocol | ~15MB |
+| `soma-desktop` | OnnxMindEngine | Dynamic (.dylib) | Full + GUI plugin support, MCP server | ~20MB |
+| `soma-embedded` | EmbeddedMindEngine | Built-in only | no_std, int8 inference, minimal LoRA, minimal Synaptic, no MCP | ~200KB-2MB |
+| `soma-rpi` | OnnxMindEngine (CPU) | Dynamic (.so) | Server variant, ARM-optimized, lighter ONNX, MCP server | ~10MB |
 
-The embedded variant compiles with `#![no_std]` and does not link ONNX Runtime, tokio, or any OS-dependent crate. It uses `embassy` or bare-metal async for the Synaptic Protocol listener.
+The embedded variant compiles with `#![no_std]` and does not link ONNX Runtime, tokio, MCP server, or any OS-dependent crate. It uses `embassy` or bare-metal async for the Synaptic Protocol listener. LLMs interact with embedded SOMAs indirectly — through a hub SOMA that has MCP.
 
 ### 8.2 Directory Structure
 
@@ -551,6 +562,11 @@ soma/
       consolidation.rs   # Sleep cycle (LoRA merge)
     proprioception/
       self_model.rs      # Self-knowledge queries
+    mcp/
+      server.rs          # MCP server (JSON-RPC over HTTP+SSE)
+      state_tools.rs     # get_state, get_schema, get_plugins, etc.
+      action_tools.rs    # intent, install_plugin, checkpoint, etc.
+      auth.rs            # Token-based auth (admin/builder/viewer)
   plugins/               # External plugin sources (each is its own crate)
     postgres/
     redis/
@@ -578,12 +594,16 @@ Options:
   --plugins <dir>       Plugin directory (default: ./plugins/)
   --model <dir>         Model directory (default: ./models/)
   --bind <addr:port>    Synaptic Protocol listen address
+  --mcp <addr:port>     MCP server listen address (default: :3000)
   --peer <addr:port>    Connect to peer SOMA
   --checkpoint <file>   Restore from checkpoint
+  --no-checkpoint       Start fresh, ignore existing checkpoints
   --config <file>       Configuration file
-  --repl                Interactive intent REPL
   --log-level <level>   Logging verbosity
+  --admin <addr:port>   HTTP admin dashboard (optional, via http-bridge plugin)
 ```
+
+Note: there is no `--repl` flag. SOMA does not have an interactive shell. Humans interact with SOMA through an LLM connected via MCP. For debugging, use `soma-dump` for signal capture or the admin HTTP dashboard for health monitoring.
 
 ---
 
@@ -611,7 +631,7 @@ Initially, plugins can be Python scripts called via subprocess or FFI. This allo
 
 ### 9.3 Phase 3: Native Rust Plugins
 
-Replace Python plugins one by one with native Rust implementations. PostgreSQL via `tokio-postgres`. Redis via `redis-rs`. DOM via WebAssembly. Each migration improves performance and removes Python dependency.
+Replace Python plugins one by one with native Rust implementations. PostgreSQL via `tokio-postgres`. Redis via `redis-rs`. Each migration improves performance and removes Python dependency.
 
 ### 9.4 Phase 4: Full Native
 
@@ -623,15 +643,22 @@ Remove Python runtime dependency entirely. The SOMA is a single Rust binary + ON
 
 ### 10.1 Unit Tests
 
-- Mind Engine: verify ONNX inference produces same output as PyTorch
+- Mind Engine: verify EmbeddedMindEngine produces same output as Python POW for identical inputs
+- Mind Engine: verify OnnxMindEngine produces same output as EmbeddedMindEngine (when both exist)
 - LoRA: verify merge/checkpoint/restore preserves weights exactly
 - Plugin Manager: verify convention routing, dynamic loading
 - Synaptic Protocol: verify signal encode/decode roundtrip
+- MCP Server: verify tool discovery returns all loaded plugin conventions
+- MCP Server: verify `soma.intent()` routes to Mind and returns result
+- MCP Server: verify state tools return accurate data (`get_state`, `get_plugins`, etc.)
 
 ### 10.2 Integration Tests
 
-- Full pipeline: intent → mind → plugin → result
+- Full pipeline: intent → mind → plugin → result (via both Synaptic and MCP paths)
 - Multi-plugin programs: steps spanning different plugins
+- MCP → Mind → multi-plugin: `soma.intent("create user and cache count")` → postgres + redis
+- MCP state accuracy: create table via MCP → `soma.get_schema()` reflects it immediately
+- Decision recording: `soma.record_decision()` → `soma.get_decisions()` → decision visible
 - Checkpoint cycle: execute → checkpoint → kill → restore → verify state
 - Consolidation: execute → adapt → consolidate → verify permanence
 
@@ -690,9 +717,14 @@ Remove Python runtime dependency entirely. The SOMA is a single Rust binary + ON
    ├── Broadcast discovery to peers
    └── Begin accepting incoming connections
          │
-7. Ready
-   ├── Log: "SOMA ready. Plugins: N, Conventions: M, Peers: P"
-   ├── If --repl: start interactive REPL
+7. Start MCP Server
+   ├── Bind listener on configured MCP address:port
+   ├── Register all state query tools (get_state, get_schema, etc.)
+   ├── Register all plugin convention tools
+   └── Begin accepting MCP connections
+         │
+8. Ready
+   ├── Log: "SOMA ready. Plugins: N, Conventions: M, Peers: P, MCP: addr:port"
    └── Enter main event loop
 ```
 
@@ -706,24 +738,29 @@ Remove Python runtime dependency entirely. The SOMA is a single Rust binary + ON
 | Checkpoint file corrupt | Warning. Start fresh (no experiential memory). Log that checkpoint was skipped. |
 | Checkpoint model hash mismatch | Warning. Checkpoint was for a different model version. Start fresh. |
 | Synaptic bind fails (port in use) | Fatal for server. Retry with backoff. For embedded, continue without networking if plugin doesn't require it. |
+| MCP bind fails (port in use) | Fatal for server/desktop. Without MCP, no LLM can connect. Embedded: N/A (no MCP). |
 | Peer connection fails | Warning. Retry in background. Not fatal — peers may come online later. |
 | Convention mismatch (model expects conventions not available) | Warning. Log missing conventions. Mind may generate programs with unavailable steps — these fail at execution time with clear error. |
 
 ### 11.3 Hot-Reload
 
-After initial boot, plugins can be loaded/unloaded at runtime:
+After initial boot, plugins can be loaded/unloaded at runtime via MCP:
 
 ```
-intent> "load the stripe plugin"
-  [Plugin Manager] Loading stripe.so...
-  [Plugin Manager] 8 conventions registered
-  [LoRA Manager] Attaching Stripe LoRA
-  [Catalog] Rebuilt: 24 → 32 conventions
+LLM: → soma.install_plugin("stripe")
 
-intent> "unload the redis plugin"
-  [Plugin Manager] Calling redis.on_unload()...
-  [Plugin Manager] 6 conventions removed
-  [Catalog] Rebuilt: 32 → 26 conventions
+[Plugin Manager] Loading stripe.so...
+[Plugin Manager] 8 conventions registered
+[LoRA Manager] Attaching Stripe LoRA
+[Catalog] Rebuilt: 24 → 32 conventions
+[MCP] 8 new tools registered
+
+LLM: → soma.uninstall_plugin("redis")
+
+[Plugin Manager] Calling redis.on_unload()...
+[Plugin Manager] 6 conventions removed
+[Catalog] Rebuilt: 32 → 26 conventions
+[MCP] 6 tools removed
 ```
 
 The Mind may generate programs referencing conventions that no longer exist after unload. These fail at execution time with a clear "convention unavailable" error, triggering the retry/adapt loop (Section 13).
@@ -773,6 +810,8 @@ async fn adapt(mind: Arc<RwLock<MindEngine>>, experiences: Vec<Experience>) {
 
 Multiple intents execute simultaneously. Adaptation briefly pauses inference (write lock). On a server handling 100 requests/sec, adaptation once per 5 seconds causes ~10ms pause — negligible.
 
+**Both MCP and Synaptic Protocol share the same Mind.** An MCP call (`soma.intent("...")`) and a Synaptic INTENT signal both go through `handle_intent()` with the same `Arc<RwLock<MindEngine>>`. A direct plugin call via MCP (`soma.postgres.query(...)`) bypasses the Mind entirely and goes straight to the Plugin Manager — no inference needed, no read lock on Mind.
+
 ### 12.4 Embedded Concurrency
 
 ESP32 is typically single-core (or dual-core with one core for WiFi). Intents are processed sequentially. No concurrent inference. The async runtime (embassy) handles Synaptic Protocol I/O concurrently, but Mind inference is single-threaded and blocking.
@@ -800,7 +839,8 @@ Plugin execution (database queries, network calls) is async. Multiple program st
 |---|---|---|
 | **Inference error** | Model produces invalid opcode, NaN in logits, decoder loop doesn't terminate | Return error signal to requester. Log diagnostics. Do NOT adapt from this experience. |
 | **Plugin error** | Database connection refused, file not found, network timeout | Retry with variation (Section 13.3). Report to requester if all retries fail. |
-| **Protocol error** | Malformed signal, checksum mismatch, unknown signal type | Drop signal. Log warning. Send ERROR signal to sender if identifiable. |
+| **Protocol error** | Malformed Synaptic signal, checksum mismatch, unknown signal type | Drop signal. Log warning. Send ERROR signal to sender if identifiable. |
+| **MCP error** | Invalid tool call, auth token rejected, malformed JSON-RPC | Return JSON-RPC error response to LLM. Log. Do not crash — LLM may retry or adjust. |
 | **Resource error** | Out of memory, disk full, too many connections | Reject new requests with backpressure signal. Continue serving existing connections. Alert via proprioception. |
 | **Panic** | Rust panic in plugin code, integer overflow, assertion failure | Catch at plugin boundary (catch_unwind). Unload crashed plugin. Log. Continue operating with reduced capabilities. |
 
@@ -810,7 +850,8 @@ Plugin execution (database queries, network calls) is async. Multiple program st
 pub enum SomaError {
     Inference(InferenceError),      // mind failed
     Plugin(String, PluginError),    // (plugin_name, error)
-    Protocol(ProtocolError),        // signal handling failed
+    Protocol(ProtocolError),        // Synaptic signal handling failed
+    Mcp(McpError),                  // MCP tool call failed
     Resource(ResourceError),        // system resource exhaustion
     Convention(ConventionError),    // requested convention not available
 }
@@ -825,7 +866,7 @@ pub struct PluginError {
 }
 ```
 
-### 13.3 Retry with Variation (Whitepaper Section 11.2)
+### 13.3 Retry with Variation (Whitepaper Section 11.3)
 
 When a program step fails and the error is retryable:
 
@@ -866,7 +907,7 @@ The SOMA never crashes entirely because a plugin failed. It degrades, adapts, an
 
 ### 14.1 The Problem
 
-Incoming Synaptic signals have different destinations:
+Incoming Synaptic Protocol signals have different destinations:
 
 - **INTENT** → needs Mind inference → produces a program → executes
 - **DATA** (response to a previous request) → goes to a waiting task
@@ -877,6 +918,8 @@ Incoming Synaptic signals have different destinations:
 - **PING** → immediate PONG response
 
 The Core needs a router that inspects signal type and dispatches correctly.
+
+**Note:** This router handles Synaptic Protocol signals (SOMA↔SOMA). MCP calls (LLM↔SOMA) arrive through the MCP Server, which routes tool calls to the Mind or directly to plugins via a separate path. Both paths share the same Mind Engine and Plugin Manager instances.
 
 ### 14.2 Router Architecture
 
@@ -1025,6 +1068,20 @@ key_file = "./soma_key.ed25519"     # auto-generated on first run if missing
 helperbook-interface = "localhost:9002"
 helperbook-worker = "10.0.1.5:9001"
 
+[mcp]
+enabled = true
+bind = "0.0.0.0:3000"
+
+[mcp.auth]
+# Tokens control what each connected LLM can do
+admin_token_env = "SOMA_MCP_ADMIN_TOKEN"       # full access
+builder_token_env = "SOMA_MCP_BUILDER_TOKEN"   # read + execute, no plugin install
+viewer_token_env = "SOMA_MCP_VIEWER_TOKEN"     # read-only state queries
+
+[mcp.safety]
+require_confirmation = ["DROP", "DELETE", "TRUNCATE", "uninstall_plugin", "restore_checkpoint"]
+confirmation_timeout = "60s"
+
 [plugins]
 directory = "./plugins"
 # Per-plugin config
@@ -1116,12 +1173,12 @@ Environment variables override config file. CLI overrides everything. This allow
 
 ### 16.1 Shutdown Trigger
 
-Shutdown is triggered by: SIGTERM, SIGINT (Ctrl+C), explicit intent ("shutdown"), or fatal error.
+Shutdown is triggered by: SIGTERM, SIGINT (Ctrl+C), MCP command (`soma.shutdown()`), or fatal error.
 
 ### 16.2 Shutdown Sequence
 
 ```
-1. Stop accepting new Synaptic connections
+1. Stop accepting new MCP and Synaptic connections
          │
 2. Signal all connected peers: CLOSE signal
    (peers know this SOMA is going away)
@@ -1141,12 +1198,14 @@ Shutdown is triggered by: SIGTERM, SIGINT (Ctrl+C), explicit intent ("shutdown")
    ├── Plugins close connections, flush buffers, release resources
    └── Log: "Plugin {name} unloaded"
          │
-7. Close Synaptic listeners
+7. Close MCP server
          │
-8. Final log: "SOMA shutdown complete. Uptime: {duration}, 
+8. Close Synaptic listeners
+         │
+9. Final log: "SOMA shutdown complete. Uptime: {duration}, 
    Executions: {count}, Experiences: {count}"
          │
-9. Exit
+10. Exit
 ```
 
 ### 16.3 Embedded Shutdown
@@ -1396,53 +1455,25 @@ Trace verbosity is configurable:
 - `trace_level = "steps"` — per-step results
 - `trace_level = "full"` — includes tensor values, LoRA activations, attention weights
 
-### 18.3 Debug REPL
+### 18.3 Debugging via MCP and Admin Dashboard
 
-When started with `--repl`, the SOMA provides an interactive shell:
+SOMA has no interactive shell (REPL). All debugging and inspection happens through two channels:
+
+**Channel 1: MCP State Queries (via any connected LLM)**
 
 ```
-soma> list files in /tmp
-  [Mind] Program (5 steps, 97.3%):
-    $0 = libc.opendir("/tmp")
-    ...
-  [Body] (12 items): ...
-
-soma> :status
-  Mind: 823,456 params, OnnxMindEngine
-  LoRA: 15,232 trainable, magnitude 0.023
-  Plugins: 5 loaded (postgres, redis, smtp, s3, dom-renderer)
-  Connections: 2 peers (soma-interface:9002, soma-worker:9003)
-  Experience: 142 recorded, 28 adaptations
-  Uptime: 2h 34m
-
-soma> :trace on
-  Trace level set to "steps"
-
-soma> :inspect mind
-  Encoder: BiLSTM 2-layer, hidden=128, bidirectional
-  Decoder: GRU, hidden=256
-  Conventions known: 32
-  LoRA layers: 10 (rank 8, alpha 2.0)
-  Top-5 most used conventions:
-    postgres.query (67 times)
-    synapse.send (45 times)
-    redis.cache_get (23 times)
-    ...
-
-soma> :inspect plugin postgres
-  Name: postgres
-  Version: 0.1.0
-  Conventions: 12
-  Config: host=localhost, port=5432, db=helperbook
-  Active connections: 3/10
-  Queries executed: 67
-  Avg query time: 12ms
-
-soma> :checkpoint
-  Checkpoint saved: ./checkpoints/soma-1712504400.ckpt
-  LoRA state: 15,232 params
-  Experience: 142 entries
+Human: "How is the SOMA doing?"
+LLM: → soma.get_health()
+LLM: "Healthy. 234MB RAM, 12% CPU, 0.2% error rate, uptime 2h 34m."
 ```
+
+**Channel 2: Admin HTTP Dashboard (optional)**
+
+If the http-bridge plugin is loaded with `--admin`, SOMA serves a simple web dashboard at the admin port showing: health metrics, loaded plugins, recent executions, active connections, LoRA state. This is a read-only monitoring interface — not an interactive shell. All actions (plugin install, checkpoint, config changes) go through MCP.
+
+**Signal capture (for protocol debugging):**
+
+Use the `soma-dump` CLI tool to capture and inspect live Synaptic Protocol traffic. See 02_SYNAPTIC_PROTOCOL.md Section 23.
 
 ### 18.4 Metrics Export
 
@@ -1558,6 +1589,7 @@ Checkpoint migration is best-effort. The worst case is losing experiential memor
 | Max signal payload size | 10MB | `protocol.max_signal_size` | 4KB |
 | Max chunk transfer size | 100MB | `protocol.max_chunk_size` | disabled |
 | Max Synaptic connections | 100 | `protocol.max_connections` | 3 |
+| Max MCP connections | 10 | `mcp.max_connections` | N/A (no MCP on embedded) |
 | Max experience buffer size | 1000 | `memory.max_experience_buffer` | 50 |
 | Max LoRA layers | 64 | `mind.lora.max_layers` | 4 |
 | Max plugin memory | 512MB total | `resources.max_memory` | 100KB total |

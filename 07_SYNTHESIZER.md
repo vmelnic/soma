@@ -153,11 +153,12 @@ Encoder: BiLSTM
 Decoder: Autoregressive GRU
   - Input: previous opcode embedding + attention context
   - Output per step: 
-    - Opcode logits (num_conventions + 2)
-    - Arg0 type logits (none/span/ref)
-    - Arg1 type logits (none/span/ref)
+    - Opcode logits (num_conventions + 2 for EMIT + STOP)
+    - Arg0 type logits (none/literal/span/ref)
+    - Arg1 type logits (none/literal/span/ref)
     - Span position logits (start/end for arg0 and arg1)
     - Ref logits (pointer to previous step for arg0 and arg1)
+    - Literal value logits (for literal arguments — decoded from vocabulary)
 ```
 
 ### 4.2 Alternative: Transformer (for larger SOMAs)
@@ -217,7 +218,11 @@ for step in range(max_steps):
     loss += masked_cross_entropy(span_e1[step], target_e1[step])
     loss += masked_cross_entropy(ref0[step], target_ref0[step])   # only where type=ref
     loss += masked_cross_entropy(ref1[step], target_ref1[step])
+    loss += masked_cross_entropy(lit0[step], target_lit0[step])   # only where type=literal
+    loss += masked_cross_entropy(lit1[step], target_lit1[step])
 ```
+
+`masked_cross_entropy` computes loss only where the arg type matches (e.g., span loss only on steps where the target arg type is "span"). Literal values are decoded from vocabulary tokens (same as the intent tokenizer).
 
 ### 5.2 Training Hyperparameters
 
@@ -254,7 +259,8 @@ oversample_zero_param = 8
 | Program exact match | Entire program matches target | >90% |
 | Span accuracy | All span positions correct | >90% |
 | Ref accuracy | All ref pointers correct | >95% |
-| End-to-end | Correct op + correct spans + correct refs | >85% |
+| Literal accuracy | Literal argument values match | >90% |
+| End-to-end | Correct op + correct args (all types) | >85% |
 | Novel intent accuracy | Accuracy on held-out intent phrasings | >75% |
 
 ### 5.4 Training Output

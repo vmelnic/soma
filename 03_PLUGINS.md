@@ -8,7 +8,9 @@
 
 ## 1. Principle
 
-Everything that is not Mind, Memory, Protocol, or Plugin Loading is a plugin. A SOMA with zero plugins is a brain in a jar — it can think but cannot act. Plugins are its body parts: eyes, hands, legs, voice.
+Everything that is not Mind, Memory, Synaptic Protocol, MCP Server, or Plugin Loading is a plugin. A SOMA with zero plugins is a brain in a jar — it can think but cannot act. Plugins are its body parts: eyes, hands, legs, voice.
+
+All plugin conventions are automatically exposed as MCP tools — this is how LLMs discover and use SOMA's capabilities.
 
 ---
 
@@ -67,6 +69,14 @@ pub trait SomaPlugin: Send + Sync {
         Err(PluginError::NotSupported)
     }
     
+    // === State Persistence (optional) ===
+    
+    /// Serialize plugin state for checkpoint
+    fn checkpoint_state(&self) -> Option<Vec<u8>> { None }
+    
+    /// Restore plugin state from checkpoint
+    fn restore_state(&mut self, _state: &[u8]) -> Result<(), PluginError> { Ok(()) }
+    
     // === Lifecycle ===
     fn on_load(&mut self, config: &PluginConfig) -> Result<(), PluginError>;
     fn on_unload(&mut self) -> Result<(), PluginError>;
@@ -79,12 +89,14 @@ pub trait SomaPlugin: Send + Sync {
 pub struct CallingConvention {
     pub id: u32,                          // unique within this plugin
     pub name: String,                      // "query", "cache_set", "render_element"
-    pub description: String,               // human-readable for proprioception
+    pub description: String,               // shown in MCP tool descriptions and proprioception
     pub args: Vec<ArgSpec>,                // argument schema
-    pub returns: ReturnSpec,               // return type
+    pub returns: ReturnSpec,               // return type (Value, Stream, Handle, Void)
     pub is_deterministic: bool,            // same input = same output?
-    pub estimated_latency: Duration,       // helps Mind plan
+    pub estimated_latency: Duration,       // helps Mind plan (prefer faster alternatives)
+    pub max_latency: Duration,             // timeout — Core kills execution if exceeded (Section 19)
     pub side_effects: Vec<SideEffect>,     // "writes_disk", "sends_network", etc.
+    pub cleanup: Option<CleanupSpec>,      // resource release on error (Section 15)
 }
 
 pub struct ArgSpec {
@@ -176,15 +188,24 @@ soma plugin list
 soma plugin remove redis
 ```
 
-Installed plugins are stored in the SOMA's plugin directory and loaded at startup (or dynamically at runtime via intent: "load the stripe plugin").
+Installed plugins are stored in the SOMA's plugin directory and loaded at startup (or dynamically at runtime via MCP: `soma.install_plugin("stripe")`).
 
 ---
 
 ## 5. Plugin Categories
 
-### 5.1 Renderer Plugins
+### 5.1 Bridge Plugins
 
-These give the Interface SOMA its "body" — the ability to produce visual/auditory output.
+| Plugin | Provides |
+|---|---|
+| `mcp-bridge` | Connects to external MCP servers (GitHub, Slack, Stripe, etc.) → their tools become SOMA conventions. One plugin = instant access to hundreds of services. |
+| `http-bridge` | HTTP server for browser compatibility. Converts HTTP requests to Synaptic signals. Also HTTP client for calling external REST APIs. |
+
+The MCP bridge is the most strategically important plugin. See 05_PLUGIN_CATALOG.md Section 1 for full specification.
+
+### 5.2 Renderer Plugins
+
+These give the frontend its visual body. Used by Interface SOMAs (neural rendering, future research) or simple frontend renderers (JS/TS apps that consume semantic signals).
 
 | Plugin | Body | Output |
 |---|---|---|
@@ -207,7 +228,7 @@ remove_element(handle)
 
 The Mind generates programs of these operations to compose interfaces.
 
-### 5.2 Storage Plugins
+### 5.3 Storage Plugins
 
 | Plugin | Provides |
 |---|---|
@@ -218,7 +239,7 @@ The Mind generates programs of these operations to compose interfaces.
 | `filesystem` | Local file I/O (read, write, list, delete) |
 | `memory-store` | In-process key-value (for transient state) |
 
-### 5.3 Communication Plugins
+### 5.4 Communication Plugins
 
 | Plugin | Provides |
 |---|---|
@@ -227,9 +248,8 @@ The Mind generates programs of these operations to compose interfaces.
 | `apns` | Apple Push Notifications |
 | `fcm` | Firebase Cloud Messaging (Android push) |
 | `webrtc` | Peer-to-peer media (signaling via Synaptic Protocol) |
-| `http-bridge` | HTTP server for legacy browser compatibility |
 
-### 5.4 Processing Plugins
+### 5.5 Processing Plugins
 
 | Plugin | Provides |
 |---|---|
@@ -240,7 +260,7 @@ The Mind generates programs of these operations to compose interfaces.
 | `ai-inference` | Run additional ML models (NLP, classification, embedding) |
 | `text-search` | Full-text search indexing and querying |
 
-### 5.5 Auth Plugins
+### 5.6 Auth Plugins
 
 | Plugin | Provides |
 |---|---|
@@ -250,7 +270,7 @@ The Mind generates programs of these operations to compose interfaces.
 | `totp-2fa` | Time-based one-time password for 2FA |
 | `id-verification` | Face matching, document verification |
 
-### 5.6 Domain Plugins
+### 5.7 Domain Plugins
 
 | Plugin | Provides |
 |---|---|
@@ -261,7 +281,7 @@ The Mind generates programs of these operations to compose interfaces.
 | `localization` | String translation, locale handling, currency formatting |
 | `analytics` | Event tracking, aggregation, dashboards |
 
-### 5.7 Design Knowledge Plugins
+### 5.8 Design Knowledge Plugins
 
 | Plugin | Provides |
 |---|---|
@@ -309,14 +329,14 @@ Mind generates program using combined knowledge:
 Plugins (and their LoRA knowledge) can be loaded at runtime:
 
 ```
-intent> "load the stripe plugin"
+LLM: → soma.install_plugin("stripe")
 
 [Plugin Manager] Loading stripe@0.1.0...
 [Plugin Manager] 8 conventions registered
 [LoRA Manager] Attaching Stripe LoRA (rank 8, 15K params)
 [Mind] Stripe knowledge integrated
 
-intent> "charge $50 to customer cus_abc123"
+LLM: → soma.intent("charge $50 to customer cus_abc123")
 
 [Mind] Program:
   $0 = stripe.create_payment_intent(amount=5000, currency="usd", customer="cus_abc123")
@@ -355,6 +375,8 @@ The Synthesizer merges training data from all target plugins and trains a model 
 
 ## 7. Plugin Development Guide
 
+**For the complete step-by-step plugin building flow** (scaffold → implement → training data → manifest → build → re-synthesize → LoRA → package → test), see 08_DEVELOPER_GUIDE.md Section 6. This section covers the Rust trait implementation in detail.
+
 ### 7.1 Creating a New Plugin (Rust)
 
 ```rust
@@ -378,10 +400,12 @@ impl SomaPlugin for MyPlugin {
                 args: vec![
                     ArgSpec { name: "input".into(), arg_type: ArgType::String, required: true, description: "The input".into() },
                 ],
-                returns: ReturnSpec::String,
+                returns: ReturnSpec::Value(ValueType::String),
                 is_deterministic: true,
                 estimated_latency: Duration::from_millis(10),
+                max_latency: Duration::from_secs(5),
                 side_effects: vec![],
+                cleanup: None,
             },
         ]
     }
@@ -709,7 +733,7 @@ Plugin load sequence:
 
 ### 12.3 Runtime Revalidation
 
-If config is changed at runtime (via intent "change postgres port to 5433"):
+If config is changed at runtime (via MCP: `soma.configure_plugin("postgres", {port: 5433})`):
 
 ```
 1. Validate new config against schema
@@ -721,9 +745,9 @@ If config is changed at runtime (via intent "change postgres port to 5433"):
 ### 12.4 Config Diagnostics
 
 ```
-intent> "check plugin configs"
+LLM: → soma.get_plugins()  (with config health)
 
-[Proprioception]
+Returns:
   postgres: ✓ all config valid
   redis: ✓ all config valid
   smtp: ⚠ password not set (SOMA_SMTP_PASS). Email sending will fail.
@@ -889,17 +913,9 @@ The database transaction is now open and uncommitted. Who rolls it back?
 
 ### 15.2 Cleanup Hooks
 
-Each convention can declare a cleanup action:
+Each convention declares a `cleanup` field (see CallingConvention in Section 3.2):
 
 ```rust
-pub struct CallingConvention {
-    // ... existing fields ...
-    
-    /// If this convention produces a resource that needs cleanup on error,
-    /// specify which convention to call and how.
-    pub cleanup: Option<CleanupSpec>,
-}
-
 pub struct CleanupSpec {
     pub convention_name: String,  // "postgres.rollback" or "close_fd"
     pub pass_result_as: u8,       // which arg position receives the step's result
@@ -1300,9 +1316,9 @@ pub struct ConventionStats {
 Queryable via proprioception:
 
 ```
-intent> "how is postgres performing"
+LLM: → soma.get_plugins()  (with performance stats)
 
-[Proprioception] postgres plugin performance:
+Returns for postgres plugin performance:
   query:          avg=8ms, p99=45ms, timeouts=0, errors=2 (of 1,234 calls)
   execute:        avg=3ms, p99=12ms, timeouts=0, errors=0 (of 456 calls)
   begin_txn:      avg=1ms, p99=3ms,  timeouts=0, errors=0 (of 89 calls)
@@ -1320,7 +1336,7 @@ Convention timeout rate > 50% over 60s window:
      a. Mark plugin as "degraded"
      b. Mind's feedback layer learns to avoid this plugin
      c. If alternative exists (sqlite instead of postgres): Mind routes there
-     d. If no alternative: report to human via Synaptic Protocol
+     d. If no alternative: report via proprioception (queryable by LLM via MCP)
 ```
 
 ### 19.5 Embedded Performance

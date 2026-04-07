@@ -8,9 +8,11 @@
 
 ## 1. Purpose
 
-The Synaptic Protocol is the ONLY way SOMAs communicate. Not HTTP. Not gRPC. Not MQTT. One protocol for everything: text intents, structured data, binary files, audio/video streaming, real-time bidirectional signals, chunked uploads, and peer discovery.
+The Synaptic Protocol is how SOMAs communicate with each other. It is the ONLY protocol for SOMA-to-SOMA communication. Not HTTP. Not gRPC. Not MQTT. One protocol for everything: structured intents, data responses, binary files, audio/video streaming, real-time bidirectional signals, chunked uploads, and peer discovery.
 
-It replaces HTTP, WebSocket, SSE, gRPC, and MQTT between SOMAs. HTTP exists only as a plugin for legacy browser compatibility — and even that is temporary until Interface SOMAs replace browsers.
+**Synaptic Protocol vs MCP:** The Synaptic Protocol handles SOMA↔SOMA communication. MCP (Model Context Protocol) handles LLM↔SOMA communication. They are separate protocols serving separate roles. An LLM talks to SOMA via MCP (JSON-RPC over HTTP). SOMAs talk to each other via Synaptic Protocol (binary over TCP/WebSocket/Unix socket). Both run simultaneously in the SOMA binary.
+
+Synaptic Protocol replaces HTTP, WebSocket, SSE, gRPC, and MQTT between SOMAs. HTTP exists only as a plugin for legacy browser compatibility.
 
 ---
 
@@ -33,11 +35,12 @@ It replaces HTTP, WebSocket, SSE, gRPC, and MQTT between SOMAs. HTTP exists only
 | Transport | Use Case |
 |---|---|
 | TCP | Default. Reliable, ordered. For most SOMA-to-SOMA communication. |
+| WebSocket | Browser-based renderers. Browsers cannot open raw TCP, so Synaptic signals are framed inside WebSocket binary messages. A thin WebSocket adapter on the server unwraps/wraps frames. |
 | Unix Domain Socket | Same-host SOMAs. Zero network overhead. |
 | QUIC (future) | Unreliable networks, mobile. Built-in multiplexing and resumption. |
 | In-process channel | SOMAs in same binary (cluster-in-one). Zero-copy. |
 
-The protocol is transport-agnostic. Signals are framed the same regardless of transport. A SOMA doesn't know (or care) whether a synapse is TCP, Unix socket, or in-process.
+The protocol is transport-agnostic. Signals are framed the same regardless of transport. A SOMA doesn't know (or care) whether a synapse is TCP, WebSocket, Unix socket, or in-process.
 
 ### 3.2 Connection Lifecycle
 
@@ -350,16 +353,19 @@ The PRIORITY flag allows critical signals (errors, control) to bypass the normal
 
 ## 10. Comparison with Existing Protocols
 
-| Feature | HTTP | WebSocket | gRPC | MQTT | Synaptic |
-|---|---|---|---|---|---|
-| Bidirectional | No | Yes | Yes | Yes | Yes |
-| Multiplexed | HTTP/2 only | No | Yes | No | Yes |
-| Binary-native | No | Yes | Yes | Yes | Yes |
-| Streaming | Chunked/SSE | Yes | Yes | No | Yes |
-| Resumable uploads | No | No | No | No | Yes |
-| Discovery | No | No | No | No | Yes |
-| Overhead per message | 500-2000B | 2-6B | ~20B | 2-5B | 22B + ids |
-| Semantic signals | No | No | No | No | Yes |
+| Feature | HTTP | WebSocket | gRPC | MQTT | MCP | Synaptic |
+|---|---|---|---|---|---|---|
+| Purpose | General web | Real-time web | Service-to-service | IoT messaging | LLM↔tool | SOMA↔SOMA |
+| Bidirectional | No | Yes | Yes | Yes | No (request-response) | Yes |
+| Multiplexed | HTTP/2 only | No | Yes | No | No | Yes |
+| Binary-native | No | Yes | Yes | Yes | No (JSON) | Yes |
+| Streaming | Chunked/SSE | Yes | Yes | No | SSE | Yes |
+| Resumable uploads | No | No | No | No | No | Yes |
+| Discovery | No | No | No | No | No | Yes |
+| Overhead per message | 500-2000B | 2-6B | ~20B | 2-5B | ~200B | 22B + ids |
+| Semantic signals | No | No | No | No | No | Yes |
+
+MCP and Synaptic Protocol coexist in the SOMA binary. They serve different roles and do not compete.
 
 ---
 
@@ -435,9 +441,9 @@ Wrong:      metadata: { "chat_id": "chat_5" }  ← could collide with another ap
 
 Protocol-reserved keys (above table) are NOT namespaced. Everything else should be.
 
-**Semantic signal conventions (for Interface SOMA):**
+**Semantic signal conventions (Backend → Interface/Renderer):**
 
-Semantic signals (Backend → Interface) use standardized top-level fields in the payload:
+Semantic signals (Backend SOMA → Interface SOMA or frontend renderer) use standardized top-level fields in the payload:
 
 ```json
 {
@@ -451,7 +457,7 @@ Semantic signals (Backend → Interface) use standardized top-level fields in th
 }
 ```
 
-These field names are conventions, not enforced by the protocol. But consistent naming means Interface SOMAs can develop reusable rendering patterns.
+These field names are conventions, not enforced by the protocol. Consistent naming enables reusable rendering patterns across different frontend implementations (simple JS renderer, React app, or future neural Interface SOMA).
 
 ### 11.4 Connection Pooling
 
@@ -1197,6 +1203,7 @@ soma-test-protocol --target localhost:9001
 #  ✓ Oversized signal (rejected)
 #  ✓ Concurrent channels
 #  ✓ Connection recovery after drop
+#  ✓ WebSocket transport (signals framed inside WS binary messages)
 ```
 
 ### 23.5 Embedded Protocol Testing

@@ -630,55 +630,63 @@ HelperBook doesn't process payments for services (off-platform). But subscriptio
 
 ---
 
-## 10. Building HelperBook — The Conversation
+## 10. Building HelperBook — LLM + MCP + SOMA
 
-This is how HelperBook comes to life. Not a sprint board. Not a Jira ticket. A conversation.
+This is how HelperBook comes to life. A human talks to an LLM. The LLM drives SOMA via MCP. SOMA executes and holds permanent memory.
 
 ```
-Phase 1: "I need a messaging app for service providers and clients..."
-  → Basic navigation, contact cards, chat UI, design language
+Human opens Claude (or any LLM) with SOMA connected via MCP.
 
-Phase 2: "Users authenticate with phone number + OTP..."
-  → Auth flow, session management, profile creation
+LLM: → soma.get_state()   [fresh SOMA, no data]
+LLM: "I see a fresh SOMA. What are we building?"
+Human: "Here's my product spec." [drops HelperBook.md]
 
-Phase 3: "Contacts can send connection requests..."
-  → Connection lifecycle, network discovery, search
+LLM reads the spec, understands 32 sections.
 
-Phase 4: "Chats support text, photos, voice messages..."
-  → Messaging, media upload, real-time delivery
+LLM: → soma.install_plugin("postgres")
+LLM: → soma.install_plugin("redis")
+LLM: → soma.install_plugin("auth")
+LLM: → soma.install_plugin("messaging")
+LLM: → soma.install_plugin("calendar")
+     ... installs all needed plugins
 
-Phase 5: "Add appointment cards in chat..."
-  → Calendar, scheduling, appointment lifecycle
+LLM: "I've set up the plugins. Starting with the data model."
+LLM: → soma.postgres.execute("CREATE TABLE users (...)")
+LLM: → soma.record_decision({what: "users table", why: "dual role model"})
+LLM: → soma.postgres.execute("CREATE TABLE connections (...)")
+     ... creates all tables from the spec
 
-Phase 6: "After completing a service, both parties review..."
-  → Reviews, ratings, service history
+LLM: "Data model is ready. Setting up authentication with Twilio OTP."
+LLM: → soma.configure_plugin("twilio", {account_sid: "...", ...})
+     ... configures auth flow
 
-Phase 7: "AI suggests replies and detects scheduling intent..."
-  → AI features, smart replies, intent detection
+LLM: "Now let me set up the Interface SOMA with your design."
+LLM: → soma.reload_design("helperbook.pen")
+LLM: → soma.render_view({view: "contact_list", ...})
+     ... renders each view
 
-Phase 8: "Push notifications when app is closed..."
-  → APNS, FCM, email fallback
-
-Phase 9: "The app works offline and syncs when back online..."
-  → Offline cache, queue, sync
-
-Phase 10: "Multiple devices stay in sync..."
-  → Multi-device, session management
-
-Each phase is a conversation with the SOMA. Each conversation 
-changes the SOMA's experiential memory. The application grows 
-as the SOMA grows. There is no "codebase" to maintain. 
-There is only the SOMA.
+The conversation continues across days, weeks, sessions.
+Each session: LLM calls soma.get_state() → has full context.
+The human never writes code. The LLM never loses context.
+SOMA grows with every session.
 ```
 
 ---
 
 ## 11. What Success Looks Like
 
-HelperBook exists. Users message, book, review, discover providers. The application is a network of SOMAs with plugins. Nobody wrote code. The Interface SOMA renders adaptive UI from semantic signals. The Backend SOMA orchestrates data, auth, messaging, scheduling, and AI through plugins.
+HelperBook exists as a network of SOMAs with plugins. Nobody wrote code.
 
-When a new feature is needed — "add group chat" — someone describes it to the SOMA. The SOMA extends itself. No developer. No sprint. No deploy. Just intent → the feature exists.
+- The Interface SOMA renders adaptive UI from semantic signals
+- The Backend SOMA orchestrates data, auth, messaging, scheduling through plugins
+- SOMA's permanent state holds everything — schema, data, decisions, experience
+- Any LLM can connect via MCP and continue building or maintaining the app
+- End users interact through the rendered UI without knowing SOMA exists
 
-When a new platform is needed — "make it work on Apple Watch" — a new Interface SOMA is synthesized with a WatchKit renderer plugin. The Backend SOMA doesn't change. The semantic signals are the same. The watch renders them in its own way.
+When a new feature is needed — "add group chat" — someone tells their LLM. The LLM calls SOMA via MCP. SOMA executes. The feature exists.
+
+When a new platform is needed — "make it work on Apple Watch" — a new Interface SOMA is synthesized with a WatchKit renderer plugin. The Backend SOMA doesn't change. The semantic signals are the same.
+
+When the original builder is unavailable — a new person connects their LLM to the same SOMA, calls `soma.get_state()`, reads the decision log, and continues from exactly where things left off. Zero knowledge transfer meetings. Zero onboarding documents. SOMA IS the documentation.
 
 HelperBook is not just an app. It's proof that SOMA replaces software development for real-world products.

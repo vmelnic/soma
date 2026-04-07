@@ -1,16 +1,31 @@
 # Interface SOMA — Specification
 
-**Status:** Design  
+**Status:** Future Research  
 **Depends on:** SOMA Core, Synaptic Protocol, Plugin System  
-**Blocks:** Any user-facing SOMA application
+**Priority:** After core product works with simple renderer
+
+---
+
+## 0. Pragmatic vs Neural Rendering
+
+**For Milestone 7 (getting HelperBook to users), build a simple JS/TS renderer.** It connects to the Backend SOMA via WebSocket (Synaptic Protocol), receives semantic JSON signals, and renders them with a component library styled by pencil.dev design tokens as CSS variables. No Mind. No neural inference. No WASM. Just a thin client. This works today, is fast, and is well-understood.
+
+**This spec describes the future neural Interface SOMA** — a SOMA instance that uses its Mind to compose visual output from semantic signals. This adds value when:
+
+- **Adaptive rendering** — the Mind makes layout decisions based on proprioception (screen size, input methods, accessibility) without explicit breakpoints or media queries
+- **Design absorption** — the Mind learns a design language from .pen files as LoRA knowledge, not just CSS variables
+- **Cross-platform from one model** — same Mind renders to DOM, UIKit, or Compose via different renderer plugins
+- **Self-improving** — the Mind adapts rendering quality from experience
+
+Until these capabilities are proven to outperform a well-built React app, the simple renderer is the pragmatic choice. This spec exists so the research direction is documented.
 
 ---
 
 ## 1. What the Interface SOMA Is
 
-The Interface SOMA is a SOMA instance that runs on the user's device. Its body is the display, input methods, and device sensors. Its purpose: receive semantic signals from Backend SOMAs and render adaptive, living interfaces — AND accept conversational input to reshape those interfaces.
+The Interface SOMA is a SOMA instance that runs on the user's device. Its body is the display, input methods, and device sensors. Its purpose: receive semantic signals from Backend SOMAs and render adaptive interfaces. It sends user events (taps, input, gestures) back as Synaptic signals.
 
-It is NOT a frontend framework. It is NOT a template engine. It is NOT a React replacement. It is a neural mind that composes visual (or auditory) output from intent and semantic data, using its device as its body.
+It is NOT a frontend framework. It is NOT a template engine. It is NOT a conversational partner. It is a neural mind that composes visual output from semantic data, using its device as its body. Humans talk to an LLM, not to the Interface SOMA. The LLM talks to Backend SOMAs via MCP. Backend SOMAs send semantic signals to the Interface SOMA. The Interface SOMA renders.
 
 ---
 
@@ -50,13 +65,9 @@ It is NOT a frontend framework. It is NOT a template engine. It is NOT a React r
 
 ---
 
-## 3. Dual Input: Semantic Signals + Conversational
+## 3. Input: Semantic Signals from Backend SOMAs
 
-The Interface SOMA has two input sources:
-
-### 3.1 Semantic Signals from Backend SOMAs
-
-Backend SOMAs send structured data via Synaptic Protocol. The Interface SOMA renders it. This is the runtime mode — the app is running, data flows, UI updates.
+The Interface SOMA has one input source: semantic signals arriving via Synaptic Protocol from Backend SOMAs.
 
 ```json
 {
@@ -69,39 +80,19 @@ Backend SOMAs send structured data via Synaptic Protocol. The Interface SOMA ren
 
 The Mind generates a program of renderer plugin conventions to display this data according to its design knowledge.
 
-### 3.2 Conversational Input from Human
-
-The human talks to the Interface SOMA to shape the interface. This is the design/build mode — the human describes what they want to see.
+**There is no conversational input on the Interface SOMA.** Humans who want to change the UI talk to an LLM (Claude, ChatGPT, etc.). The LLM sends updated view specifications to the Backend SOMA via MCP. The Backend SOMA sends updated semantic signals to the Interface SOMA. The Interface SOMA renders the changes.
 
 ```
-Human: "Show me a bottom navigation with 4 tabs: 
-        Contacts, Chats, Calendar, Profile"
-
-Mind generates program:
-  $0 = dom.create("nav", {class: "bottom-nav"})
-  $1 = dom.create("button", {text: "Contacts", icon: "people"})
-  $2 = dom.create("button", {text: "Chats", icon: "chat"})
-  $3 = dom.create("button", {text: "Calendar", icon: "calendar"})
-  $4 = dom.create("button", {text: "Profile", icon: "person"})
-  $5 = dom.append($0, $1)
-  $6 = dom.append($0, $2)
-  $7 = dom.append($0, $3)
-  $8 = dom.append($0, $4)
-  $9 = dom.append(root, $0)
-  STOP
-```
-
-The Mind applies design knowledge (from the design plugin LoRA) to choose colors, spacing, typography, icon style — the human doesn't specify CSS.
-
-### 3.3 Both Modes Simultaneously
-
-In production, both inputs are active. The human can talk to the Interface SOMA while it's rendering live data:
-
-```
-Human: "Make the online status dot bigger, it's hard to see"
-  → Mind generates: dom.set_style(status_dot, "width", "12px"), etc.
-  → The change persists in experiential memory
-  → Next time the contact list renders, the dot is bigger
+Human: "Make the online status dots bigger"
+    │
+    ▼
+LLM: → soma.render_view({..., style_overrides: {online_status: {size: "14px"}}})
+    │
+    ▼
+Backend SOMA → Interface SOMA: updated semantic signal via Synaptic Protocol
+    │
+    ▼
+Interface SOMA: renders with larger dots (doesn't know WHY — just renders)
 ```
 
 ---
@@ -205,10 +196,8 @@ When the designer updates the design in pencil.dev:
 Dark mode is a separate design LoRA (or a LoRA variant). The Interface SOMA switches by loading a different design LoRA:
 
 ```
-intent> "switch to dark mode"
-  → Detach light-mode design LoRA
-  → Attach dark-mode design LoRA
-  → Re-render current view with new design knowledge
+LLM: → soma.reload_design("helperbook-dark.pen")
+Interface SOMA: detaches light-mode LoRA, attaches dark-mode LoRA, re-renders
 ```
 
 ---
@@ -424,23 +413,6 @@ Browser Interface SOMA ←─ WebSocket ─→ Backend SOMA (ws-bridge plugin)
 
 The ws-bridge is a thin adapter on the Backend SOMA side. The Interface SOMA doesn't know it's using WebSocket — it sends Synaptic signals, and the transport layer handles the WebSocket wrapping.
 
-### 10.3 Conversational Input in Browser
-
-The Interface SOMA renders a persistent input field (like a chat input or command palette). The human types intents here:
-
-```
-┌────────────────────────────────────────────┐
-│                                            │
-│   [Rendered HelperBook interface]           │
-│   Contacts, chats, calendar, etc.          │
-│                                            │
-├────────────────────────────────────────────┤
-│ 🔧 "add a search bar at the top"     [⏎]  │
-└────────────────────────────────────────────┘
-```
-
-The input is always available (toggle with a keyboard shortcut or button). Intents typed here go to the Interface SOMA's Mind, which generates DOM manipulation programs. The conversational input can be hidden in production (end users don't need it) or exposed for administrators/builders.
-
 ---
 
 ## 11. Mobile Deployment
@@ -514,7 +486,7 @@ Back navigation, deep linking, and history are managed by the Mind's working mem
 ### 13.1 Initial Load
 
 ```
-1. Download WASM + model + design LoRA   (~5-10MB, cached after first load)
+1. Download WASM + model + design LoRA   (~1-3MB, cached after first load)
 2. Initialize SOMA Core                   (~200ms)
 3. Load design LoRA                        (~50ms)
 4. Connect to Backend SOMA                 (~100ms)
@@ -522,7 +494,10 @@ Back navigation, deep linking, and history are managed by the Mind's working mem
 6. Mind generates initial render program   (~100ms)
 7. DOM executes program                    (~50ms)
 Total first meaningful paint:              ~550ms (after WASM cached)
+First visit (uncached, fast connection):   ~2-3s (download + init)
 ```
+
+**Compare to simple JS renderer:** ~100ms first paint (no WASM, no Mind inference). The neural Interface SOMA trades initial speed for adaptive capabilities. For most applications, the simple renderer is sufficient.
 
 ### 13.2 Subsequent Renders
 
