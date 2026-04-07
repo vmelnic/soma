@@ -1,0 +1,10 @@
+{
+  "name": "soma-helperbook-frontend",
+  "version": "0.1.0",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18"
+  }
+}

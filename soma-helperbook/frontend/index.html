@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>HelperBook</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            display: ['Playfair Display', 'serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- App Styles -->
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body class="bg-gray-50 font-sans text-gray-900 antialiased">
+
+  <!-- App Shell -->
+  <div id="app" class="max-w-md mx-auto min-h-screen bg-gray-50 relative flex flex-col">
+
+    <!-- Header -->
+    <header id="header" class="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between z-10 sticky top-0">
+      <div class="flex items-center gap-2">
+        <h1 class="font-display text-xl font-bold text-indigo-600">HelperBook</h1>
+      </div>
+      <div id="soma-status" class="flex items-center gap-1.5 text-xs text-gray-400">
+        <span class="w-2 h-2 rounded-full bg-gray-300" id="soma-dot"></span>
+        <span id="soma-label">SOMA</span>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main id="main" class="flex-1 overflow-y-auto pb-20">
+      <!-- Views rendered here by JS -->
+    </main>
+
+    <!-- Bottom Navigation -->
+    <nav id="bottom-nav" class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-gray-100 z-20">
+      <!-- Rendered by nav.js -->
+    </nav>
+
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/api.js"></script>
+  <script src="js/components/provider-card.js"></script>
+  <script src="js/components/nav.js"></script>
+  <script src="js/components/contacts.js"></script>
+  <script src="js/components/chat.js"></script>
+  <script src="js/components/calendar.js"></script>
+  <script src="js/components/profile.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
