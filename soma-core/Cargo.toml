@@ -28,7 +28,9 @@ thiserror = "2"
 
 # System operations
 libc = "0.2"
-nix = { version = "0.30", features = ["fs", "dir"] }
+
+# Signal handling
+ctrlc = "3"
 
 [profile.release]
 opt-level = 3

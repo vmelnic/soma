@@ -650,3 +650,927 @@ Remove Python runtime dependency entirely. The SOMA is a single Rust binary + ON
 - Flash wear: consolidation (LoRA merge → flash write) frequency stays within flash endurance limits
 - LoRA weight transfer: receive LoRA update via Synaptic Protocol from peer SOMA, apply, verify behavior change
 - Minimal Synaptic Protocol: verify signal exchange works with reduced buffer sizes
+
+---
+
+## 11. Startup Sequence
+
+### 11.1 Boot Order
+
+```
+1. Parse CLI arguments and load config file
+         │
+2. Initialize logging (tracing subscriber)
+         │
+3. Load Mind Engine
+   ├── Detect target (server → Onnx, embedded → Embedded)
+   ├── Load model files (ONNX or .soma-model)
+   ├── Load tokenizer
+   └── Verify: model loads, test inference on "ping" → expect valid program
+         │
+4. Load Plugins
+   ├── Scan plugin directory (or use built-in list for embedded)
+   ├── For each plugin:
+   │   ├── Load .so/.dylib (or init built-in)
+   │   ├── Call plugin.on_load(config)
+   │   ├── Register conventions in catalog
+   │   └── If plugin has LoRA knowledge → attach to Mind
+   ├── Build global convention catalog (name → runtime ID mapping)
+   └── Verify: all conventions the model expects are available
+         │
+5. Restore Checkpoint (if --checkpoint flag or auto-checkpoint found)
+   ├── Load checkpoint file
+   ├── Verify base_model_hash matches loaded model
+   ├── Restore LoRA states to Mind
+   └── Log: restored experience stats
+         │
+6. Start Synaptic Protocol
+   ├── Bind listener on configured address:port
+   ├── Connect to known peers (from --peer flags or config)
+   ├── Broadcast discovery to peers
+   └── Begin accepting incoming connections
+         │
+7. Ready
+   ├── Log: "SOMA ready. Plugins: N, Conventions: M, Peers: P"
+   ├── If --repl: start interactive REPL
+   └── Enter main event loop
+```
+
+### 11.2 Failure Handling During Boot
+
+| Failure | Behavior |
+|---|---|
+| Model file missing/corrupt | Fatal. Exit with error. Cannot operate without a mind. |
+| Plugin fails to load | Warning. Skip plugin. Continue with remaining plugins. Log which conventions are unavailable. |
+| Plugin's LoRA weights incompatible | Warning. Load plugin without LoRA. Mind can still use conventions but without pre-trained knowledge. |
+| Checkpoint file corrupt | Warning. Start fresh (no experiential memory). Log that checkpoint was skipped. |
+| Checkpoint model hash mismatch | Warning. Checkpoint was for a different model version. Start fresh. |
+| Synaptic bind fails (port in use) | Fatal for server. Retry with backoff. For embedded, continue without networking if plugin doesn't require it. |
+| Peer connection fails | Warning. Retry in background. Not fatal — peers may come online later. |
+| Convention mismatch (model expects conventions not available) | Warning. Log missing conventions. Mind may generate programs with unavailable steps — these fail at execution time with clear error. |
+
+### 11.3 Hot-Reload
+
+After initial boot, plugins can be loaded/unloaded at runtime:
+
+```
+intent> "load the stripe plugin"
+  [Plugin Manager] Loading stripe.so...
+  [Plugin Manager] 8 conventions registered
+  [LoRA Manager] Attaching Stripe LoRA
+  [Catalog] Rebuilt: 24 → 32 conventions
+
+intent> "unload the redis plugin"
+  [Plugin Manager] Calling redis.on_unload()...
+  [Plugin Manager] 6 conventions removed
+  [Catalog] Rebuilt: 32 → 26 conventions
+```
+
+The Mind may generate programs referencing conventions that no longer exist after unload. These fail at execution time with a clear "convention unavailable" error, triggering the retry/adapt loop (Section 13).
+
+---
+
+## 12. Concurrency Model
+
+### 12.1 The Problem
+
+The Mind's GRU decoder maintains hidden state across program steps. If two intents arrive simultaneously, they cannot share decoder state — they'd corrupt each other's programs.
+
+### 12.2 Solution: Per-Request Inference Context
+
+Each incoming intent gets its own inference context:
+
+```rust
+pub struct InferenceContext {
+    encoder_output: Tensor,     // shared read-only after encoding
+    decoder_hidden: Tensor,     // per-request, mutable
+    program_steps: Vec<ProgramStep>,
+    results: Vec<Value>,        // step results for ref resolution
+}
+```
+
+The encoder is stateless (same input → same output) and can be shared. The decoder state is per-request. LoRA weights are shared (read-only during inference, written only during adaptation which holds a write lock).
+
+### 12.3 Server Concurrency
+
+```rust
+// Server: tokio async, multiple concurrent requests
+let mind = Arc<RwLock<MindEngine>>;
+
+async fn handle_intent(mind: Arc<RwLock<MindEngine>>, intent: String) -> Program {
+    let mind_read = mind.read().await;  // shared read lock
+    let context = mind_read.create_context();
+    let program = mind_read.infer_with_context(&context, &tokens);
+    program
+}
+
+// Adaptation takes a write lock (blocks inference briefly)
+async fn adapt(mind: Arc<RwLock<MindEngine>>, experiences: Vec<Experience>) {
+    let mut mind_write = mind.write().await;  // exclusive write lock
+    mind_write.apply_lora_update(&experiences);
+}
+```
+
+Multiple intents execute simultaneously. Adaptation briefly pauses inference (write lock). On a server handling 100 requests/sec, adaptation once per 5 seconds causes ~10ms pause — negligible.
+
+### 12.4 Embedded Concurrency
+
+ESP32 is typically single-core (or dual-core with one core for WiFi). Intents are processed sequentially. No concurrent inference. The async runtime (embassy) handles Synaptic Protocol I/O concurrently, but Mind inference is single-threaded and blocking.
+
+```
+[Synaptic signal arrives]
+  → [Queue intent]
+  → [Process queue: one intent at a time]
+  → [Send result]
+```
+
+This is acceptable because embedded SOMAs handle far fewer concurrent requests (typically one user, one device).
+
+### 12.5 Plugin Execution Concurrency
+
+Plugin execution (database queries, network calls) is async. Multiple program steps can execute concurrently IF they don't have dependencies (no ref chains between them). However, the initial implementation executes steps sequentially for simplicity. Parallel step execution is an optimization for later.
+
+---
+
+## 13. Error Handling Strategy
+
+### 13.1 Error Categories
+
+| Category | Examples | Response |
+|---|---|---|
+| **Inference error** | Model produces invalid opcode, NaN in logits, decoder loop doesn't terminate | Return error signal to requester. Log diagnostics. Do NOT adapt from this experience. |
+| **Plugin error** | Database connection refused, file not found, network timeout | Retry with variation (Section 13.3). Report to requester if all retries fail. |
+| **Protocol error** | Malformed signal, checksum mismatch, unknown signal type | Drop signal. Log warning. Send ERROR signal to sender if identifiable. |
+| **Resource error** | Out of memory, disk full, too many connections | Reject new requests with backpressure signal. Continue serving existing connections. Alert via proprioception. |
+| **Panic** | Rust panic in plugin code, integer overflow, assertion failure | Catch at plugin boundary (catch_unwind). Unload crashed plugin. Log. Continue operating with reduced capabilities. |
+
+### 13.2 Error Propagation
+
+```rust
+pub enum SomaError {
+    Inference(InferenceError),      // mind failed
+    Plugin(String, PluginError),    // (plugin_name, error)
+    Protocol(ProtocolError),        // signal handling failed
+    Resource(ResourceError),        // system resource exhaustion
+    Convention(ConventionError),    // requested convention not available
+}
+
+// Every error carries context for diagnostics
+pub struct PluginError {
+    pub convention: String,
+    pub step_index: usize,
+    pub message: String,
+    pub retryable: bool,
+    pub suggestion: Option<String>,  // "check database connection", etc.
+}
+```
+
+### 13.3 Retry with Variation (Whitepaper Section 11.2)
+
+When a program step fails and the error is retryable:
+
+```
+Step 2: postgres.query("SELECT * FROM contacts") → Error: connection refused
+
+Retry strategy:
+  1. Wait 100ms → retry same step
+  2. If still fails → Mind re-infers from the same intent 
+     (may produce a different program due to softmax temperature)
+  3. If still fails → degrade: skip the failed step, 
+     attempt to produce partial result
+  4. If nothing works → report error to requester with explanation:
+     "I tried to query the database but couldn't connect. 
+      Check if PostgreSQL is running."
+```
+
+The retry logic lives in the Core, not in plugins. Plugins return errors with `retryable: bool`. The Core decides the retry strategy.
+
+### 13.4 Graceful Degradation
+
+If a plugin becomes unavailable during operation:
+
+```
+Redis plugin crashes → 
+  Core catches panic, unloads plugin →
+  Subsequent programs that reference Redis conventions fail →
+  Mind's feedback layer (experiential memory) learns to avoid Redis-dependent programs →
+  SOMA continues operating with reduced capabilities →
+  Proprioception reports: "Redis plugin unavailable. Caching disabled."
+```
+
+The SOMA never crashes entirely because a plugin failed. It degrades, adapts, and reports.
+
+---
+
+## 14. Signal Routing
+
+### 14.1 The Problem
+
+Incoming Synaptic signals have different destinations:
+
+- **INTENT** → needs Mind inference → produces a program → executes
+- **DATA** (response to a previous request) → goes to a waiting task
+- **STREAM_DATA** → goes directly to the plugin handling that stream
+- **DISCOVER** → handled by protocol layer
+- **CHUNK_DATA** → goes to the chunk reassembly buffer
+- **SUBSCRIBE** → registers a channel subscription
+- **PING** → immediate PONG response
+
+The Core needs a router that inspects signal type and dispatches correctly.
+
+### 14.2 Router Architecture
+
+```rust
+pub struct SignalRouter {
+    mind: Arc<RwLock<MindEngine>>,
+    plugin_manager: Arc<PluginManager>,
+    pending_requests: DashMap<u64, oneshot::Sender<Signal>>,
+    stream_handlers: DashMap<u32, mpsc::Sender<Signal>>,  // channel_id → handler
+    chunk_buffers: DashMap<u32, ChunkReassembly>,
+    subscriptions: DashMap<u32, Vec<SynapseConnection>>,
+}
+
+impl SignalRouter {
+    pub async fn route(&self, signal: Signal, connection: &SynapseConnection) {
+        match signal.signal_type {
+            // Protocol-level: handle immediately
+            SignalType::Ping => connection.send(Signal::pong()).await,
+            SignalType::Discover => self.handle_discovery(signal, connection).await,
+            SignalType::DiscoverAck => self.update_peer_info(signal).await,
+            SignalType::Handshake => self.handle_handshake(signal, connection).await,
+            SignalType::Close => self.handle_close(connection).await,
+            
+            // Intent: needs Mind inference
+            SignalType::Intent => self.handle_intent(signal, connection).await,
+            
+            // Data: check if it's a response to a pending request
+            SignalType::Data | SignalType::Result => {
+                if let Some(waiter) = self.pending_requests.remove(&signal.sequence) {
+                    let _ = waiter.1.send(signal);
+                } else {
+                    // Unsolicited data — route to appropriate plugin
+                    self.handle_unsolicited_data(signal).await;
+                }
+            }
+            
+            // Streaming: route to channel handler
+            SignalType::StreamStart => self.open_stream(signal).await,
+            SignalType::StreamData => {
+                if let Some(handler) = self.stream_handlers.get(&signal.channel_id) {
+                    let _ = handler.send(signal).await;
+                }
+            }
+            SignalType::StreamEnd => self.close_stream(signal).await,
+            
+            // Chunked transfer: route to reassembly buffer
+            SignalType::ChunkStart => self.start_chunk_transfer(signal).await,
+            SignalType::ChunkData => self.receive_chunk(signal, connection).await,
+            SignalType::ChunkEnd => self.finalize_chunk(signal, connection).await,
+            
+            // Subscriptions
+            SignalType::Subscribe => self.add_subscription(signal, connection).await,
+            SignalType::Unsubscribe => self.remove_subscription(signal, connection).await,
+            
+            // Errors
+            SignalType::Error => self.handle_error(signal).await,
+            
+            _ => { /* log unknown signal type */ }
+        }
+    }
+    
+    async fn handle_intent(&self, signal: Signal, connection: &SynapseConnection) {
+        let intent_text = signal.payload_as_string();
+        let mind = self.mind.read().await;
+        
+        let program = mind.infer(&tokenize(&intent_text));
+        let result = self.plugin_manager.execute_program(program).await;
+        
+        let response = Signal::result(result, signal.sequence);
+        connection.send(response).await;
+    }
+}
+```
+
+### 14.3 Request-Response Correlation
+
+When a SOMA sends an intent to a peer and expects a result, it stores a one-shot channel keyed by sequence number:
+
+```rust
+// Sending side
+let (tx, rx) = oneshot::channel();
+router.pending_requests.insert(sequence_id, tx);
+connection.send(intent_signal).await;
+let response = rx.await?;  // blocks until response arrives
+```
+
+Timeout: if no response within a configurable duration (default 30s), the pending request is cancelled and an error is returned.
+
+### 14.4 Embedded Routing
+
+On embedded, the router is simpler — no DashMap, no tokio. A fixed-size array of pending requests. Signals processed one at a time. No concurrent routing.
+
+---
+
+## 15. Configuration System
+
+### 15.1 Config File Format (TOML)
+
+```toml
+# soma.toml
+
+[soma]
+id = "helperbook-backend"          # unique identifier
+log_level = "info"                  # trace, debug, info, warn, error
+
+[mind]
+backend = "onnx"                    # "onnx" or "embedded"
+model_dir = "./models/server"       # path to model files
+max_inference_time = "5s"           # timeout per inference
+max_program_steps = 16              # override default (8)
+softmax_temperature = 1.0           # for program generation diversity
+
+[mind.lora]
+default_rank = 8
+default_alpha = 2.0
+adaptation_enabled = true
+adapt_every_n_successes = 5         # trigger adaptation after N successful executions
+adapt_batch_size = 16
+adapt_learning_rate = 0.002
+
+[memory]
+checkpoint_dir = "./checkpoints"
+auto_checkpoint = true
+checkpoint_interval = "1h"          # or "every 100 executions"
+max_checkpoints = 10                # keep last N, delete older
+
+[memory.consolidation]
+enabled = true
+trigger = "experience_count"        # "experience_count", "schedule", "manual"
+threshold = 500                     # consolidate after 500 experiences
+min_lora_magnitude = 0.01           # only merge layers with magnitude > threshold
+
+[protocol]
+bind = "0.0.0.0:9001"
+max_connections = 100
+max_signal_size = "10MB"
+keepalive_interval = "30s"
+connection_timeout = "60s"
+
+[protocol.encryption]
+enabled = true
+key_file = "./soma_key.ed25519"     # auto-generated on first run if missing
+
+[protocol.peers]
+# Static peer list (also discovered dynamically)
+helperbook-interface = "localhost:9002"
+helperbook-worker = "10.0.1.5:9001"
+
+[plugins]
+directory = "./plugins"
+# Per-plugin config
+[plugins.postgres]
+host = "localhost"
+port = 5432
+database = "helperbook"
+username = "soma"
+password_env = "SOMA_PG_PASSWORD"   # read from environment variable
+max_connections = 10
+query_timeout = "30s"
+
+[plugins.redis]
+url = "redis://localhost:6379/0"
+max_connections = 5
+
+[plugins.smtp]
+host = "smtp.provider.com"
+port = 587
+username_env = "SOMA_SMTP_USER"
+password_env = "SOMA_SMTP_PASS"
+
+[plugins.s3]
+endpoint = "https://s3.amazonaws.com"
+bucket = "helperbook-media"
+region = "eu-west-1"
+access_key_env = "SOMA_S3_KEY"
+secret_key_env = "SOMA_S3_SECRET"
+
+[resources]
+max_memory = "512MB"                # total memory budget
+max_concurrent_inferences = 10
+max_concurrent_plugin_calls = 50
+```
+
+### 15.2 Embedded Config
+
+Embedded targets use a simplified config compiled into the binary or stored in flash:
+
+```toml
+# soma-embedded.toml (stored in flash)
+
+[soma]
+id = "greenhouse-sensor"
+
+[mind]
+backend = "embedded"
+max_program_steps = 8
+
+[mind.lora]
+default_rank = 2
+adaptation_enabled = false          # receive LoRA from peer instead
+
+[protocol]
+bind = "0.0.0.0:9001"
+max_connections = 3
+max_signal_size = "4KB"
+
+[protocol.peers]
+hub = "192.168.1.10:9001"
+
+[plugins]
+# Built-in only, no directory scanning
+builtin = ["gpio", "i2c", "timer", "adc"]
+
+[plugins.gpio]
+# ESP32-specific pin mapping
+led_pin = 2
+relay_pins = [12, 13, 14, 15]
+
+[plugins.i2c]
+sda_pin = 21
+scl_pin = 22
+clock_speed = 100000
+```
+
+### 15.3 Config Resolution Order
+
+1. Default values (compiled into binary)
+2. Config file (soma.toml)
+3. Environment variables (SOMA_* prefix)
+4. CLI arguments (highest priority)
+
+Environment variables override config file. CLI overrides everything. This allows the same config file to work across environments with secrets injected via env vars.
+
+---
+
+## 16. Graceful Shutdown
+
+### 16.1 Shutdown Trigger
+
+Shutdown is triggered by: SIGTERM, SIGINT (Ctrl+C), explicit intent ("shutdown"), or fatal error.
+
+### 16.2 Shutdown Sequence
+
+```
+1. Stop accepting new Synaptic connections
+         │
+2. Signal all connected peers: CLOSE signal
+   (peers know this SOMA is going away)
+         │
+3. Wait for in-flight inferences to complete (max 10s timeout)
+   (don't interrupt a program mid-execution)
+         │
+4. Flush pending signals in outbound queues
+         │
+5. Auto-checkpoint if enabled and there's unsaved experience
+   ├── Save LoRA state
+   ├── Save experience stats
+   └── Log: "Checkpoint saved: {path}"
+         │
+6. Unload plugins (in reverse load order)
+   ├── Call plugin.on_unload() for each
+   ├── Plugins close connections, flush buffers, release resources
+   └── Log: "Plugin {name} unloaded"
+         │
+7. Close Synaptic listeners
+         │
+8. Final log: "SOMA shutdown complete. Uptime: {duration}, 
+   Executions: {count}, Experiences: {count}"
+         │
+9. Exit
+```
+
+### 16.3 Embedded Shutdown
+
+On embedded, shutdown is typically a hardware reset or power-off. Before reset:
+
+1. Save LoRA state to flash (if changed since last save)
+2. Send CLOSE signal to connected peers (if connected)
+3. Set GPIO pins to safe states (all outputs low/high-impedance)
+
+Flash write during shutdown must complete — interrupted flash writes can corrupt data. Use a double-buffer strategy: write new state to alternate flash sector, then flip the "active" pointer. If power dies mid-write, the old state is still intact.
+
+### 16.4 Crash Recovery
+
+If a SOMA crashes without graceful shutdown:
+
+- On restart, the last checkpoint is restored automatically
+- Any experience since the last checkpoint is lost
+- Connected peers detect the disconnection (TCP keepalive timeout) and can reconnect when the SOMA comes back
+- Plugin state (database connections, etc.) is re-established during boot
+
+---
+
+## 17. Adaptation Loop
+
+### 17.1 Experience Recording
+
+After every successful program execution:
+
+```rust
+pub struct Experience {
+    pub intent_tokens: Vec<u32>,
+    pub intent_length: usize,
+    pub program: Program,        // the program that was executed
+    pub success: bool,           // did execution complete without error?
+    pub execution_time: Duration,
+    pub timestamp: Instant,
+}
+```
+
+Only successful executions are recorded. Failed executions are NOT recorded — the SOMA should not learn from its mistakes by reinforcing the wrong programs. (This may change with a more sophisticated adaptation strategy that includes negative examples.)
+
+### 17.2 When Adaptation Triggers
+
+Configurable via `[mind.lora]` config:
+
+| Trigger | Config Key | Default |
+|---|---|---|
+| Every N successes | `adapt_every_n_successes` | 5 |
+| Manual | intent: "adapt now" | — |
+| Scheduled | `adapt_schedule` | disabled |
+| Experience buffer full | `adapt_on_buffer_full` | true |
+
+### 17.3 Adaptation Flow (Server)
+
+```
+1. Trigger fires (e.g., 5 successful executions since last adaptation)
+         │
+2. Sample batch from experience buffer
+   (random sample, size = adapt_batch_size)
+         │
+3. Acquire write lock on Mind
+         │
+4. Forward pass: compute loss between
+   model's current prediction and recorded programs
+         │
+5. Backward pass: compute gradients
+   (ONLY on LoRA parameters — base weights frozen)
+         │
+6. Update LoRA parameters: A -= lr * grad_A, B -= lr * grad_B
+         │
+7. Release write lock
+         │
+8. Log: "Adapted. Loss: {loss:.4f}, Cycle: {count}, 
+   LoRA magnitude: {mag:.6f}"
+```
+
+During step 3-7, inference is paused (write lock). This takes ~10-50ms on a server — acceptable.
+
+### 17.4 Adaptation Flow (Embedded)
+
+Embedded SOMAs don't compute gradients locally (too expensive for ESP32). Instead:
+
+```
+1. Embedded SOMA records experiences locally
+         │
+2. Periodically (or when connected to a more powerful peer):
+   send experience batch to peer via Synaptic Protocol
+         │
+   Embedded → Peer: DATA {
+     type: "adaptation_request",
+     experiences: [{intent_tokens, program, ...}, ...]
+   }
+         │
+3. Peer SOMA (server-class) computes adaptation:
+   runs forward/backward pass, produces updated LoRA weights
+         │
+   Peer → Embedded: DATA {
+     type: "lora_update",
+     weights: {layer_name: {A: [...], B: [...]}, ...}
+   }
+         │
+4. Embedded SOMA applies received LoRA weights
+         │
+5. Embedded verifies: re-run a few experiences,
+   check that predictions improved
+```
+
+This is "learning by delegation" — the embedded SOMA delegates the expensive computation to a capable peer while retaining the experience.
+
+### 17.5 Consolidation Trigger
+
+Consolidation (LoRA merge into base weights) is triggered when:
+
+| Condition | Config Key |
+|---|---|
+| Experience count exceeds threshold | `consolidation.threshold` |
+| LoRA magnitude exceeds threshold | `consolidation.min_lora_magnitude` |
+| Manual command | intent: "consolidate" or ":consolidate" |
+| Scheduled | `consolidation.schedule` |
+
+Consolidation process:
+
+```
+1. Acquire write lock on Mind
+2. For each LoRA layer:
+   a. Check magnitude (skip if below threshold)
+   b. Merge: base_weight += scale * B @ A
+   c. Reset: A = randn(0.01), B = zeros
+3. Create checkpoint (new permanent state)
+4. Reset experience buffer
+5. Release write lock
+6. Log: "Consolidated. {N} layers merged. Permanent memory grew."
+```
+
+On embedded, step 2b writes to flash. This is a slow operation (~100ms per layer) and consumes a flash write cycle. Consolidation on embedded should be infrequent (daily or weekly, not hourly).
+
+---
+
+## 18. Observability
+
+### 18.1 Structured Logging
+
+All SOMA components emit structured log events via the `tracing` crate:
+
+```rust
+tracing::info!(
+    intent = %intent_text,
+    program_steps = program.len(),
+    confidence = %confidence,
+    inference_time_ms = %elapsed.as_millis(),
+    "Intent processed"
+);
+
+tracing::warn!(
+    plugin = %plugin_name,
+    convention = %conv_name,
+    error = %error_msg,
+    retryable = retryable,
+    "Plugin execution failed"
+);
+```
+
+Log output formats:
+- **Development:** pretty-printed, colored terminal output
+- **Production:** JSON lines (for log aggregation — Loki, ELK, etc.)
+- **Embedded:** minimal, UART serial output
+
+### 18.2 Program Trace
+
+Every inference produces a trace that can be inspected:
+
+```
+[Trace] Intent: "list files in /tmp and send to soma-b"
+[Trace] Confidence: 94.2%
+[Trace] Program:
+  [0] libc.opendir("/tmp")           → ok, handle=0x7f3a
+  [1] libc.readdir($0)              → ok, 12 entries
+  [2] libc.closedir($0)             → ok
+  [3] synapse.send("soma-b", $1)    → ok, sent to peer
+  [4] STOP
+[Trace] Total: 4 steps, 23ms, success
+```
+
+Trace verbosity is configurable:
+- `trace_level = "none"` — no tracing
+- `trace_level = "summary"` — one line per intent (confidence, steps, time, success)
+- `trace_level = "steps"` — per-step results
+- `trace_level = "full"` — includes tensor values, LoRA activations, attention weights
+
+### 18.3 Debug REPL
+
+When started with `--repl`, the SOMA provides an interactive shell:
+
+```
+soma> list files in /tmp
+  [Mind] Program (5 steps, 97.3%):
+    $0 = libc.opendir("/tmp")
+    ...
+  [Body] (12 items): ...
+
+soma> :status
+  Mind: 823,456 params, OnnxMindEngine
+  LoRA: 15,232 trainable, magnitude 0.023
+  Plugins: 5 loaded (postgres, redis, smtp, s3, dom-renderer)
+  Connections: 2 peers (soma-interface:9002, soma-worker:9003)
+  Experience: 142 recorded, 28 adaptations
+  Uptime: 2h 34m
+
+soma> :trace on
+  Trace level set to "steps"
+
+soma> :inspect mind
+  Encoder: BiLSTM 2-layer, hidden=128, bidirectional
+  Decoder: GRU, hidden=256
+  Conventions known: 32
+  LoRA layers: 10 (rank 8, alpha 2.0)
+  Top-5 most used conventions:
+    postgres.query (67 times)
+    synapse.send (45 times)
+    redis.cache_get (23 times)
+    ...
+
+soma> :inspect plugin postgres
+  Name: postgres
+  Version: 0.1.0
+  Conventions: 12
+  Config: host=localhost, port=5432, db=helperbook
+  Active connections: 3/10
+  Queries executed: 67
+  Avg query time: 12ms
+
+soma> :checkpoint
+  Checkpoint saved: ./checkpoints/soma-1712504400.ckpt
+  LoRA state: 15,232 params
+  Experience: 142 entries
+```
+
+### 18.4 Metrics Export
+
+For production monitoring, the SOMA exports metrics:
+
+| Metric | Type | Description |
+|---|---|---|
+| `soma_inferences_total` | Counter | Total intents processed |
+| `soma_inference_duration_ms` | Histogram | Inference latency |
+| `soma_inference_confidence` | Histogram | Model confidence distribution |
+| `soma_plugin_calls_total` | Counter (per plugin) | Plugin execution count |
+| `soma_plugin_errors_total` | Counter (per plugin) | Plugin error count |
+| `soma_plugin_duration_ms` | Histogram (per plugin) | Plugin execution latency |
+| `soma_lora_magnitude` | Gauge | Current LoRA adaptation magnitude |
+| `soma_experience_count` | Counter | Total experiences recorded |
+| `soma_adaptations_total` | Counter | LoRA adaptation cycles |
+| `soma_connections_active` | Gauge | Active Synaptic connections |
+| `soma_signals_sent_total` | Counter | Signals sent |
+| `soma_signals_received_total` | Counter | Signals received |
+| `soma_memory_bytes` | Gauge | Memory usage |
+
+Metrics exposed via a lightweight endpoint (if the http-bridge plugin is loaded) or via Synaptic Protocol to a monitoring SOMA.
+
+### 18.5 Embedded Observability
+
+On embedded targets, observability is limited:
+
+- UART serial logging (minimal format, key events only)
+- LED status codes (blink patterns indicating state: boot, ready, error, adapting)
+- Proprioception queries via Synaptic Protocol from a more capable peer
+
+---
+
+## 19. Versioning and Compatibility
+
+### 19.1 Version Components
+
+A SOMA instance has multiple version dimensions:
+
+| Component | Versioned How | Breaking Change Means |
+|---|---|---|
+| SOMA Core binary | Semantic versioning (0.1.0) | Plugin ABI changed, config format changed |
+| ONNX model format | Model metadata version field | New layer types, changed input/output schema |
+| .soma-model format | Header version byte | Changed binary layout, new quantization type |
+| Synaptic Protocol | Protocol version in HANDSHAKE | Changed wire format, new signal types |
+| Plugin ABI | Trait version + Rust edition | Changed SomaPlugin trait, changed Value enum |
+| Checkpoint format | Checkpoint header version | Changed LoRA serialization, new fields |
+| Config format | Config version field | Changed key names, removed options |
+
+### 19.2 Compatibility Matrix
+
+```
+SOMA Core 0.2.0 loads:
+  ├── Plugins compiled for Core 0.2.x  ✓
+  ├── Plugins compiled for Core 0.1.x  ✗ (ABI mismatch)
+  ├── ONNX models from Synthesizer 0.2.x  ✓
+  ├── ONNX models from Synthesizer 0.1.x  ✓ (forward compatible)
+  ├── Checkpoints from Core 0.2.x  ✓
+  ├── Checkpoints from Core 0.1.x  ⚠ (best-effort migration)
+  ├── Config from Core 0.2.x  ✓
+  ├── Config from Core 0.1.x  ⚠ (deprecated keys warned)
+  └── Peers running Core 0.1.x  ✓ (protocol negotiation)
+```
+
+### 19.3 Protocol Negotiation
+
+During HANDSHAKE, both SOMAs declare their protocol version. The connection uses the lower version's feature set. This allows mixed-version SOMA networks.
+
+```
+SOMA-A (protocol v2) ↔ SOMA-B (protocol v1)
+  → Connection uses v1 features only
+  → v2-only signal types are not sent
+```
+
+### 19.4 Model-Plugin Convention Mismatch
+
+The most common compatibility issue: the model was synthesized with plugin X providing conventions A, B, C — but at runtime, plugin X v2 provides conventions A, B, D (C was renamed/removed, D is new).
+
+Resolution:
+- Convention matching is by NAME, not by numeric ID
+- If model references convention "postgres.query" and the plugin provides it → match
+- If model references "redis.cache_get" but Redis plugin isn't loaded → fail at execution time with clear error
+- If plugin provides "redis.cache_getex" that the model doesn't know about → ignored (available for future synthesis)
+
+Re-synthesis is needed to take advantage of new plugin conventions. But old models continue working with old conventions.
+
+### 19.5 Checkpoint Migration
+
+When loading a checkpoint from an older version:
+
+1. Read checkpoint header version
+2. If same version → load directly
+3. If older version → attempt migration:
+   - LoRA weight dimensions match? → load
+   - LoRA weight dimensions changed? → discard LoRA, start fresh (warn user)
+   - Unknown fields in old checkpoint? → ignore
+   - Missing fields expected by new version? → use defaults
+
+Checkpoint migration is best-effort. The worst case is losing experiential memory — the SOMA starts fresh but with the correct base model. This is equivalent to "amnesia" — all permanent memory (base weights) is intact, only experience is lost.
+
+---
+
+## 20. Resource Limits
+
+### 20.1 Default Limits
+
+| Resource | Default | Configurable | Embedded Default |
+|---|---|---|---|
+| Max inference time | 5s | `mind.max_inference_time` | 2s |
+| Max program steps | 16 | `mind.max_program_steps` | 8 |
+| Max concurrent inferences | 10 | `resources.max_concurrent_inferences` | 1 |
+| Max concurrent plugin calls | 50 | `resources.max_concurrent_plugin_calls` | 4 |
+| Max signal payload size | 10MB | `protocol.max_signal_size` | 4KB |
+| Max chunk transfer size | 100MB | `protocol.max_chunk_size` | disabled |
+| Max Synaptic connections | 100 | `protocol.max_connections` | 3 |
+| Max experience buffer size | 1000 | `memory.max_experience_buffer` | 50 |
+| Max LoRA layers | 64 | `mind.lora.max_layers` | 4 |
+| Max plugin memory | 512MB total | `resources.max_memory` | 100KB total |
+| Max plugins loaded | 50 | `plugins.max_loaded` | 4 (built-in) |
+
+### 20.2 Enforcement
+
+Limits are enforced at the Core level, not by individual plugins:
+
+```rust
+// Before inference
+if active_inferences.count() >= config.max_concurrent_inferences {
+    return Err(SomaError::Resource(ResourceError::InferenceLimitReached));
+}
+
+// Before program step execution
+if step_index >= config.max_program_steps {
+    break;  // force STOP
+}
+
+// Before signal acceptance
+if signal.payload.len() > config.max_signal_size {
+    return Err(SomaError::Protocol(ProtocolError::PayloadTooLarge));
+}
+```
+
+### 20.3 Backpressure
+
+When resource limits are approached:
+
+1. **80% threshold:** Log warning. Proprioception reports "approaching limits."
+2. **95% threshold:** Reject new incoming intents with a backpressure signal. Continue serving in-flight requests.
+3. **100%:** Hard rejection. Error signal to all new requests. Existing requests continue to completion.
+
+Backpressure signal:
+
+```
+Signal {
+    type: CONTROL,
+    payload: {
+        control_type: "backpressure",
+        reason: "inference_limit",
+        retry_after_ms: 1000
+    }
+}
+```
+
+The sending SOMA can queue the intent and retry after the suggested delay.
+
+### 20.4 Embedded Resource Management
+
+On embedded, memory is the critical resource. The SOMA tracks heap usage and refuses operations that would exceed the budget:
+
+```rust
+// Embedded memory tracking
+static HEAP_USED: AtomicUsize = AtomicUsize::new(0);
+
+fn allocate(size: usize) -> Result<*mut u8> {
+    let current = HEAP_USED.load(Ordering::Relaxed);
+    if current + size > MAX_HEAP {
+        return Err(OutOfMemory);
+    }
+    HEAP_USED.fetch_add(size, Ordering::Relaxed);
+    // ... allocate
+}
+```
+
+Flash write cycles are also tracked. ESP32 flash endurance is ~100,000 write cycles per sector. Consolidation (which writes to flash) must respect this:
+
+```rust
+if flash_write_count > FLASH_ENDURANCE_LIMIT * 0.8 {
+    tracing::warn!("Flash wear at 80%. Reducing consolidation frequency.");
+    consolidation_interval *= 2;
+}
+```

@@ -47,16 +47,21 @@ pub enum PluginError {
     Failed(String),
 }
 
-/// The trait every SOMA plugin implements.
+/// The trait every SOMA plugin implements (Whitepaper Section 5.2).
 pub trait SomaPlugin: Send + Sync {
-    /// Plugin name
+    /// Plugin identity
     fn name(&self) -> &str;
+    fn version(&self) -> &str { "0.1.0" }
 
     /// Calling conventions this plugin provides
     fn conventions(&self) -> Vec<Convention>;
 
     /// Execute a calling convention by ID
     fn execute(&self, convention_id: u32, args: Vec<Value>) -> Result<Value, PluginError>;
+
+    /// Lifecycle
+    fn on_load(&mut self) -> Result<(), PluginError> { Ok(()) }
+    fn on_unload(&mut self) -> Result<(), PluginError> { Ok(()) }
 }
 
 /// A calling convention provided by a plugin.

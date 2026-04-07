@@ -9,7 +9,8 @@ use clap::Parser;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use mind::engine::{MindEngine, ProgramStep, EMIT_ID, STOP_ID};
+use mind::{MindEngine, ProgramStep, STOP_ID};
+use mind::onnx_engine::OnnxMindEngine;
 use plugin::builtin::PosixPlugin;
 use plugin::manager::PluginManager;
 
@@ -29,7 +30,7 @@ struct Cli {
     intent: Option<String>,
 }
 
-fn display_result(result: &plugin::manager::ProgramResult, catalog: &[mind::engine::CatalogEntry]) {
+fn display_result(result: &plugin::manager::ProgramResult, _catalog: &[mind::CatalogEntry]) {
     if result.success {
         if let Some(output) = &result.output {
             match output {
@@ -58,27 +59,26 @@ fn display_result(result: &plugin::manager::ProgramResult, catalog: &[mind::engi
     }
 }
 
-fn run_intent(mind: &MindEngine, plugins: &PluginManager, text: &str) {
-    match mind.predict(text) {
-        Ok((steps, confidence)) => {
-            let real: Vec<&ProgramStep> = steps.iter()
+fn run_intent(mind: &dyn MindEngine, plugins: &PluginManager, text: &str) {
+    match mind.infer(text) {
+        Ok(program) => {
+            let real: Vec<&ProgramStep> = program.steps.iter()
                 .filter(|s| s.conv_id != STOP_ID)
                 .collect();
-            println!("\n  [Mind] Program ({} steps, {:.0}%):", real.len(), confidence * 100.0);
-            for (i, step) in steps.iter().enumerate() {
-                println!("    {}", step.format(i, &mind.meta.catalog));
+            println!("\n  [Mind] Program ({} steps, {:.0}%):", real.len(), program.confidence * 100.0);
+            for (i, step) in program.steps.iter().enumerate() {
+                println!("    {}", step.format(i, &mind.meta().catalog));
                 if step.conv_id == STOP_ID { break; }
             }
             println!();
 
-            // Execute with trace
-            let result = plugins.execute_program(&steps);
+            let result = plugins.execute_program(&program.steps);
             for entry in &result.trace {
                 if entry.op != "STOP" && entry.op != "EMIT" && !entry.summary.is_empty() {
                     println!("    [{}] {} ... {}", entry.step, entry.op, entry.summary);
                 }
             }
-            display_result(&result, &mind.meta.catalog);
+            display_result(&result, &mind.meta().catalog);
         }
         Err(e) => {
             println!("  [Mind] Error: {}", e);
@@ -96,19 +96,23 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    // Load mind
-    let mind = MindEngine::load(&cli.model)?;
+    // --- Boot sequence (Spec Section 11) ---
 
-    // Register plugins
+    // Step 3: Load Mind Engine
+    let mind = OnnxMindEngine::load(&cli.model)?;
+    let mind_info = mind.info();
+
+    // Step 4: Load Plugins
     let mut plugins = PluginManager::new();
     plugins.register(Box::new(PosixPlugin::new()));
-
     let total_conv = plugins.conventions().len();
+
+    // Step 7: Ready
     eprintln!("============================================================");
-    eprintln!("  SOMA v0.1.0 — Rust Runtime");
+    eprintln!("  SOMA v0.1.0 -- Rust Runtime");
     eprintln!("  Neural mind drives libc directly. Single binary.");
     eprintln!("============================================================");
-    eprintln!("  Mind:     {} conventions, ONNX inference", mind.meta.num_conventions);
+    eprintln!("  Mind:     {} ({}conv)", mind_info.backend, mind_info.conventions_known);
     eprintln!("  Plugins:  posix ({} conventions)", total_conv);
     eprintln!("  Model:    {}", cli.model.display());
     eprintln!("============================================================");
@@ -118,26 +122,48 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // REPL
-    eprintln!("  Type intent. 'quit' to exit.\n");
+    // REPL (Spec Section 18.3)
+    eprintln!("  Type intent. :status :inspect  quit");
+    eprintln!();
+
+    // Ctrl+C handler for graceful shutdown (Spec Section 16)
+    let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc_handler(r);
+
     loop {
+        if !running.load(std::sync::atomic::Ordering::Relaxed) {
+            println!("\n  SOMA shutting down (SIGINT).");
+            break;
+        }
         print!("intent> ");
         io::stdout().flush()?;
 
         let mut input = String::new();
-        if io::stdin().read_line(&mut input)? == 0 {
-            break;
-        }
+        if io::stdin().read_line(&mut input)? == 0 { break; }
         let text = input.trim();
         if text.is_empty() { continue; }
         if text == "quit" || text == "exit" || text == "q" {
-            println!("\nSOMA shutting down.");
+            println!("\n  SOMA shutting down.");
             break;
         }
-        if text == "help" || text == "?" {
+
+        // Debug REPL commands (Spec Section 18.3)
+        if text == ":status" {
+            let info = mind.info();
             println!("\n  [Proprioception]");
+            println!("    Mind:        {}", info.backend);
+            println!("    Conventions: {}", info.conventions_known);
+            println!("    Max steps:   {}", info.max_steps);
+            println!("    LoRA:        {} layers, magnitude {:.6}", info.lora_layers, info.lora_magnitude);
+            println!("    Plugins:     {} loaded", plugins.conventions().len());
+            println!();
+            continue;
+        }
+        if text == ":inspect" || text == "help" || text == "?" {
+            println!("\n  [Conventions]");
             for conv in plugins.conventions() {
-                println!("    [{:2}] {} — {}", conv.id, conv.name, conv.description);
+                println!("    [{:2}] {} -- {}", conv.id, conv.name, conv.description);
             }
             println!();
             continue;
@@ -148,4 +174,10 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn ctrlc_handler(running: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+    let _ = ctrlc::set_handler(move || {
+        running.store(false, std::sync::atomic::Ordering::Relaxed);
+    });
 }

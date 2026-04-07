@@ -1,7 +1,7 @@
 //! Plugin Manager — loads plugins, routes program steps to the right plugin.
 
 use super::interface::{Convention, PluginError, SomaPlugin, Value};
-use crate::mind::engine::{ArgValue, ProgramStep, EMIT_ID, STOP_ID};
+use crate::mind::{ArgValue, ProgramStep, EMIT_ID, STOP_ID};
 
 /// Result of executing a full program.
 pub struct ProgramResult {
