@@ -1,2 +1,6 @@
-// Memory system — LoRA + checkpoint
-// Will be added for POW2 migration
+//! Memory system — experience tracking, checkpointing, and consolidation
+//! (Spec Sections 6 + 17).
+
+pub mod experience;
+pub mod checkpoint;
+pub mod consolidation;

@@ -32,6 +32,12 @@ libc = "0.2"
 # Signal handling
 ctrlc = "3"
 
+# Configuration
+toml = "0.8"
+
+# Concurrent maps
+dashmap = "6"
+
 [profile.release]
 opt-level = 3
 lto = true
