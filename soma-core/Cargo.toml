@@ -1,0 +1,36 @@
+[package]
+name = "soma"
+version = "0.1.0"
+edition = "2024"
+description = "SOMA: Neural mind generates programs, drives hardware directly"
+
+[dependencies]
+# ONNX inference (pure Rust, no C++ deps)
+tract-onnx = "0.21"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# System operations
+libc = "0.2"
+nix = { version = "0.30", features = ["fs", "dir"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
