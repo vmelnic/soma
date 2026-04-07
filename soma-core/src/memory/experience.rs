@@ -4,8 +4,10 @@
 #[derive(Debug, Clone)]
 pub struct Experience {
     pub intent_tokens: Vec<u32>,
-    pub program_steps: usize,
+    /// Full program: (conv_id, arg0_type, arg1_type) per step
+    pub program: Vec<(i32, u8, u8)>,
     pub success: bool,
+    pub execution_time_ms: u64,
     pub timestamp: std::time::Instant,
 }
 

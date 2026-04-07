@@ -4,10 +4,7 @@
 //! The mind decides what to call. This plugin just executes.
 
 use super::interface::{Convention, PluginError, SomaPlugin, Value};
-use std::collections::HashMap;
 use std::ffi::CString;
-use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
 
 pub struct PosixPlugin {
     conventions: Vec<Convention>,

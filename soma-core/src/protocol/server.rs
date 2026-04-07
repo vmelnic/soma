@@ -5,7 +5,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use std::sync::Arc;
 
-use super::signal::Signal;
+use super::signal::{Signal, SignalType};
+use crate::mind::MindEngine;
 
 /// Handler trait for incoming signals.
 pub trait SignalHandler: Send + Sync {
@@ -20,8 +21,82 @@ pub struct DefaultHandler {
 impl SignalHandler for DefaultHandler {
     fn handle(&self, signal: Signal) -> Option<Signal> {
         match signal.signal_type {
-            super::signal::SignalType::Ping => {
+            SignalType::Ping => {
                 Some(Signal::pong(&self.name, &signal.sender))
+            }
+            _ => {
+                tracing::debug!(
+                    signal_type = ?signal.signal_type,
+                    sender = %signal.sender,
+                    "Received signal (no handler)"
+                );
+                None
+            }
+        }
+    }
+}
+
+/// Handler that routes Intent signals to the mind engine and plugin manager.
+/// This enables inter-SOMA intent-to-result communication.
+pub struct SomaSignalHandler {
+    pub name: String,
+    pub mind: Arc<std::sync::RwLock<crate::mind::onnx_engine::OnnxMindEngine>>,
+    pub plugins: Arc<crate::plugin::manager::PluginManager>,
+    pub max_program_steps: usize,
+}
+
+impl SignalHandler for SomaSignalHandler {
+    fn handle(&self, signal: Signal) -> Option<Signal> {
+        match signal.signal_type {
+            SignalType::Ping => {
+                Some(Signal::pong(&self.name, &signal.sender))
+            }
+            SignalType::Intent => {
+                // Extract intent text from payload
+                let intent_text = match String::from_utf8(signal.payload.clone()) {
+                    Ok(text) => text,
+                    Err(_) => {
+                        let mut resp = Signal::new(SignalType::Error, self.name.clone(), signal.sender.clone());
+                        resp.payload = b"Invalid UTF-8 in intent payload".to_vec();
+                        return Some(resp);
+                    }
+                };
+
+                tracing::info!(
+                    sender = %signal.sender,
+                    intent = %intent_text,
+                    "Processing remote intent"
+                );
+
+                // Run inference via the mind engine
+                let mind_guard = self.mind.read().unwrap();
+                match mind_guard.infer(&intent_text) {
+                    Ok(program) => {
+                        // Execute the program via plugin manager
+                        let result = self.plugins.execute_program(&program.steps, self.max_program_steps);
+
+                        let mut resp = Signal::new(SignalType::Data, self.name.clone(), signal.sender.clone());
+
+                        if result.success {
+                            // Serialize the output as the response payload
+                            let output_str = match &result.output {
+                                Some(val) => format!("{}", val),
+                                None => "Done.".to_string(),
+                            };
+                            resp.payload = output_str.into_bytes();
+                        } else {
+                            resp.signal_type = SignalType::Error;
+                            resp.payload = result.error.unwrap_or_else(|| "unknown error".into()).into_bytes();
+                        }
+
+                        Some(resp)
+                    }
+                    Err(e) => {
+                        let mut resp = Signal::new(SignalType::Error, self.name.clone(), signal.sender.clone());
+                        resp.payload = format!("Inference error: {}", e).into_bytes();
+                        Some(resp)
+                    }
+                }
             }
             _ => {
                 tracing::debug!(

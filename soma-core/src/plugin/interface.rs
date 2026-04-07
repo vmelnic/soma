@@ -45,6 +45,21 @@ pub enum PluginError {
     InvalidArg(String),
     #[error("execution failed: {0}")]
     Failed(String),
+    #[error("connection refused: {0}")]
+    ConnectionRefused(String),
+}
+
+impl PluginError {
+    /// Whether this error is transient and the operation may succeed on retry.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            PluginError::NotFound(_) => false,
+            PluginError::PermissionDenied(_) => false,
+            PluginError::InvalidArg(_) => false,
+            PluginError::Failed(_) => true,
+            PluginError::ConnectionRefused(_) => true,
+        }
+    }
 }
 
 /// The trait every SOMA plugin implements (Whitepaper Section 5.2).
