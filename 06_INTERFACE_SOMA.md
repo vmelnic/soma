@@ -560,3 +560,359 @@ Same semantic signal rendered on: phone (375px), tablet (768px), desktop (1440px
 3. Navigate between views — all render from cache
 4. Send a message — queued
 5. Reconnect — message sends, data refreshes
+
+---
+
+## 15. Render State Tracking
+
+### 15.1 The Problem
+
+The Mind generates `dom.create("button", {text: "Book"})` and gets back Handle #42. Later the user says "make the book button bigger." The Mind needs to know: which handle is "the book button"?
+
+The Mind doesn't remember raw handle numbers across intents. It needs a semantic render tree — a mapping from meaning to DOM handles.
+
+### 15.2 Render Tree
+
+The Interface SOMA maintains a render tree in working memory:
+
+```rust
+pub struct RenderTree {
+    nodes: HashMap<String, RenderNode>,  // semantic_id → node
+}
+
+pub struct RenderNode {
+    pub semantic_id: String,       // "contact_card:ana", "nav:chats_tab", "chat:input"
+    pub dom_handle: Handle,        // from dom-renderer plugin
+    pub element_type: String,      // "button", "div", "input", etc.
+    pub children: Vec<String>,     // child semantic_ids
+    pub parent: Option<String>,    // parent semantic_id
+    pub data_binding: Option<String>, // "contacts[0].name" — what data this renders
+    pub metadata: HashMap<String, String>, // arbitrary tags
+}
+```
+
+### 15.3 How the Mind Uses It
+
+When the Mind generates rendering programs, it also updates the render tree:
+
+```
+Semantic signal: {view: "contact_list", data: [{id: "ana", name: "Ana", ...}]}
+
+Mind generates:
+  $0 = dom.create("div", {})           → render_tree.add("contact_card:ana", $0)
+  $1 = dom.create("span", {text: "Ana"}) → render_tree.add("contact_card:ana:name", $1)
+  $2 = dom.create("span", {class: "status online"}) → render_tree.add("contact_card:ana:status", $2)
+  $3 = dom.append($0, $1)
+  $4 = dom.append($0, $2)
+  ...
+```
+
+When the user says "make the online status dots bigger":
+
+```
+Mind queries render tree: find all nodes where semantic_id matches "*:status"
+  → finds ["contact_card:ana:status", "contact_card:ion:status", ...]
+  → gets their DOM handles
+  
+Mind generates:
+  for each status handle:
+    dom.set_style(handle, "width", "14px")
+    dom.set_style(handle, "height", "14px")
+```
+
+### 15.4 Render Tree Persistence
+
+The render tree is part of working memory (per-session, not checkpointed). On page reload, the entire render tree is rebuilt from the current semantic signals. This is fast because the Mind regenerates the full view from cached semantic data.
+
+### 15.5 Data Binding
+
+The `data_binding` field links render nodes to semantic data fields. When an incremental update arrives (e.g., "Ana is now offline"), the Mind can:
+
+1. Find all nodes bound to `contacts[id=ana].online`
+2. Update those specific nodes
+3. No full re-render needed
+
+This is SOMA's equivalent of React's virtual DOM diffing — but driven by the Mind's semantic understanding rather than a tree-diff algorithm.
+
+---
+
+## 16. Error, Loading, and Empty States
+
+### 16.1 Loading State
+
+When a semantic signal is requested but hasn't arrived yet:
+
+```
+User navigates to Contacts tab:
+  1. Mind sends INTENT to Backend: "get my contacts"
+  2. While waiting (Backend hasn't responded):
+     Mind knows: render loading state
+     
+     Mind generates:
+       $0 = dom.create("div", {class: "loading"})
+       $1 = dom.create("div", {class: "skeleton-card"})  × 3  // placeholder cards
+       $2 = dom.append(container, $0, $1, ...)
+       
+  3. Backend responds with semantic signal:
+     Mind generates: remove loading state, render real data
+```
+
+The Mind learns loading patterns from design LoRA (which includes skeleton/shimmer component patterns) and from training data that includes the "show loading while waiting" pattern.
+
+### 16.2 Error State
+
+When the Backend SOMA returns an error signal:
+
+```
+Backend → Interface: DATA {
+  error: { code: "DB_UNAVAILABLE", message: "Database connection failed" }
+}
+
+Mind generates:
+  $0 = dom.create("div", {class: "error-state"})
+  $1 = dom.create("span", {text: "Something went wrong"})
+  $2 = dom.create("p", {text: "Unable to load contacts. Check your connection."})
+  $3 = dom.create("button", {text: "Try Again"})
+  $4 = dom.on_event($3, "click", channel=70)  // retry channel
+  ...
+```
+
+Error rendering is a learned pattern — the design LoRA includes error state components, and training data includes error-handling examples.
+
+### 16.3 Empty State
+
+When data is valid but empty:
+
+```
+Backend → Interface: DATA {
+  view: "contact_list",
+  data: [],
+  empty_reason: "no_connections"
+}
+
+Mind generates:
+  $0 = dom.create("div", {class: "empty-state"})
+  $1 = dom.create("span", {text: "No contacts yet"})
+  $2 = dom.create("p", {text: "Search the network to find service providers."})
+  $3 = dom.create("button", {text: "Browse Network"})
+  ...
+```
+
+### 16.4 State Transitions
+
+The Mind handles transitions: loading → data, loading → error, data → loading (refresh), error → loading (retry). Each transition is an incremental DOM update (remove old state, render new state), not a full page rebuild.
+
+---
+
+## 17. Form Handling
+
+### 17.1 Form Rendering
+
+When a semantic signal describes a form:
+
+```json
+{
+  "view": "form",
+  "form_id": "create_appointment",
+  "fields": [
+    {"name": "service", "type": "select", "options": ["Hair Styling", "Coloring"], "required": true},
+    {"name": "date", "type": "date", "min": "2026-04-08", "required": true},
+    {"name": "time", "type": "time", "required": true},
+    {"name": "notes", "type": "textarea", "required": false, "placeholder": "Any special requests?"}
+  ],
+  "submit_action": "create_appointment"
+}
+```
+
+The Mind generates input elements with appropriate types, labels, required indicators, and validation attributes — all styled per design LoRA.
+
+### 17.2 Client-Side Validation
+
+The Mind generates validation logic as event handlers:
+
+```
+For each required field:
+  dom.on_event(field, "blur", channel=80)   // validate on focus loss
+  
+On blur event:
+  Mind checks: is the field empty and required?
+  If yes: dom.add_class(field, "error"), dom.set_text(error_label, "Required")
+  If no: dom.remove_class(field, "error")
+```
+
+Validation patterns are part of training data — the Mind learns: "required fields show errors when empty," "email fields validate format," "date fields validate range."
+
+### 17.3 Form Submission
+
+```
+User clicks Submit:
+  1. dom.on_event fires on submit channel
+  2. Mind collects all field values:
+     $0 = dom.get_value(service_field)
+     $1 = dom.get_value(date_field)
+     $2 = dom.get_value(time_field)
+     $3 = dom.get_value(notes_field)
+  3. Mind validates all fields (client-side)
+  4. If valid: send to Backend SOMA:
+     DATA {type: "create_appointment", data: {service: $0, date: $1, ...}}
+  5. Show loading state on submit button
+  6. Backend responds: success → navigate to calendar, error → show error
+```
+
+### 17.4 Multi-Step Forms
+
+For complex flows (like provider onboarding):
+
+```json
+{
+  "view": "multi_step_form",
+  "current_step": 2,
+  "total_steps": 4,
+  "steps": ["Basic Info", "Services", "Schedule", "Gallery"],
+  "fields": { /* fields for current step */ },
+  "progress": 0.5
+}
+```
+
+The Mind renders: progress indicator, current step's fields, back/next buttons. Navigation between steps is local (no Backend call until final submit). Form state is in working memory.
+
+### 17.5 File Inputs
+
+For profile photo, gallery uploads:
+
+```
+User taps "Upload Photo":
+  1. Mind generates: dom.create("input", {type: "file", accept: "image/*"})
+  2. User selects file
+  3. dom.on_event fires with file metadata
+  4. Interface SOMA reads file bytes
+  5. Shows preview (using canvas or img element with Object URL)
+  6. Initiates chunked upload to Backend SOMA (CHUNK_START → CHUNK_DATA → CHUNK_END)
+  7. Backend processes (thumbnail, EXIF strip, store)
+  8. Backend sends back confirmation with thumbnail URL
+  9. Interface SOMA updates preview with final thumbnail
+```
+
+---
+
+## 18. Navigation and Routing
+
+### 18.1 URL Mapping
+
+For browser-based Interface SOMAs, views map to URLs for bookmarkability and browser history:
+
+```
+/contacts          → {view: "contact_list", sub_tab: "contacts"}
+/contacts/network  → {view: "contact_list", sub_tab: "network"}
+/chat/user_abc     → {view: "chat", peer: {id: "user_abc"}}
+/calendar          → {view: "calendar"}
+/calendar/2026-04  → {view: "calendar", month: "2026-04"}
+/profile           → {view: "profile"}
+/profile/settings  → {view: "settings"}
+```
+
+### 18.2 Navigation Flow
+
+```
+User taps "Chats" tab:
+  1. dom.on_event fires (click on chats tab)
+  2. Mind decides: navigate to chats view
+  3. Mind updates render tree: deactivate current tab, activate chats
+  4. Mind calls: dom.set_attr(window, "pushState", "/chats")  // browser history
+  5. Mind sends to Backend: INTENT "get my chats"
+  6. Mind renders loading state in content area
+  7. Backend responds with chat list
+  8. Mind renders chat list, removes loading state
+```
+
+### 18.3 Browser Back/Forward
+
+```
+User clicks browser back button:
+  1. "popstate" event fires → dom.on_event channel
+  2. Mind reads: new URL = /contacts
+  3. Mind navigates to contacts view (same flow as tab tap)
+  4. Uses cached data if available (offline plugin), otherwise fetches
+```
+
+### 18.4 Deep Links
+
+```
+User opens: helperbook.app/chat/user_abc
+
+1. Interface SOMA boots
+2. Reads URL: /chat/user_abc
+3. Mind: this is a chat view for user_abc
+4. Sends to Backend: INTENT "get chat with user_abc"
+5. Renders chat directly (skips contacts/chats list)
+```
+
+### 18.5 Mobile Navigation
+
+On mobile Interface SOMAs (native shell), navigation uses the platform's navigation stack instead of URL pushState:
+
+- iOS: UINavigationController push/pop
+- Android: NavController navigate/popBackStack
+
+The Mind generates the same navigation intents. The renderer plugin translates to platform-specific navigation.
+
+---
+
+## 19. Client-Side Security
+
+### 19.1 Session Token Storage
+
+The auth token (from Backend SOMA) must be stored securely on the client:
+
+| Platform | Storage | Security |
+|---|---|---|
+| Browser | HttpOnly cookie (if via http-bridge) or `sessionStorage` | XSS can't read HttpOnly cookies. sessionStorage clears on tab close. |
+| iOS | Keychain | Hardware-backed encryption |
+| Android | EncryptedSharedPreferences | AndroidKeyStore-backed |
+| Desktop | OS credential store (Keyring/Credential Manager) | OS-level encryption |
+
+The offline plugin manages token storage. The Mind never handles raw tokens — it calls `auth.get_token()` which the plugin resolves from secure storage.
+
+### 19.2 XSS Prevention
+
+The Mind generates DOM programs. If it uses `dom.set_html(element, untrusted_data)`, that's an XSS vector — the untrusted data could contain `<script>` tags.
+
+**Rules enforced by the DOM renderer plugin:**
+
+1. **`dom.set_text()` is always safe.** Text content is automatically escaped. The Mind should use `set_text` for any user-provided content.
+
+2. **`dom.set_html()` is restricted.** The DOM renderer plugin strips all `<script>` tags, inline event handlers (`onclick`, `onerror`, etc.), and dangerous attributes before inserting HTML. This is a built-in sanitizer, not a Mind responsibility.
+
+3. **`dom.set_attr()` validates attribute names.** The plugin refuses to set `onclick`, `onerror`, `onload` or any `on*` attribute. Event handling goes through `dom.on_event()` only.
+
+4. **URLs are validated.** `dom.set_attr(img, "src", url)` — the plugin validates that `url` starts with `https://`, `http://`, `data:image/`, or `soma://`. No `javascript:` URLs.
+
+### 19.3 Content Security Policy
+
+The browser bootstrap page includes a strict CSP:
+
+```html
+<meta http-equiv="Content-Security-Policy" 
+  content="default-src 'self' 'wasm-unsafe-eval'; 
+           connect-src wss://*.helperbook.app; 
+           img-src 'self' soma: https:; 
+           style-src 'self' 'unsafe-inline';
+           script-src 'self' 'wasm-unsafe-eval';">
+```
+
+This prevents: external script injection, unauthorized network connections, data exfiltration via image requests to attacker servers.
+
+### 19.4 Synaptic Connection Security
+
+The Interface SOMA only connects to Backend SOMAs listed in its configuration. It does NOT connect to arbitrary peers discovered via broadcast. This prevents a rogue SOMA from injecting signals into the Interface.
+
+```toml
+# interface-soma.toml
+[protocol.peers]
+# Only these backends are trusted
+backend = "wss://api.helperbook.app/synaptic"
+
+[protocol.security]
+allow_discovery = false    # do not accept connections from unknown peers
+require_encryption = true
+```

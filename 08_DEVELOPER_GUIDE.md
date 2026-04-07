@@ -19,11 +19,11 @@ This guide walks you from zero to a working SOMA that responds to intents, uses 
 
 ```bash
 # Linux x86_64
-curl -L https://github.com/soma-project/soma/releases/latest/download/soma-linux-x86_64 -o soma
+curl -L https://github.com/vmelnic/soma/releases/latest/download/soma-linux-x86_64 -o soma
 chmod +x soma
 
 # macOS Apple Silicon
-curl -L https://github.com/soma-project/soma/releases/latest/download/soma-macos-aarch64 -o soma
+curl -L https://github.com/vmelnic/soma/releases/latest/download/soma-macos-aarch64 -o soma
 chmod +x soma
 
 # Verify
@@ -34,7 +34,7 @@ chmod +x soma
 ### 2.2 From Source (Rust)
 
 ```bash
-git clone https://github.com/soma-project/soma.git
+git clone https://github.com/vmelnic/soma.git
 cd soma
 cargo build --release
 # Binary at target/release/soma
@@ -386,7 +386,7 @@ soma --repl
 ```
 soma> create a table called bookmarks with id, url, title, tags, and created_at
 
-soma> add bookmark https://soma-project.dev titled "SOMA Project" tagged "ai,neural"
+soma> add bookmark https://soma.local titled "SOMA Project" tagged "ai,neural"
 
 soma> find all bookmarks tagged ai
 
@@ -507,3 +507,196 @@ soma-dump --port 9001
 # Metrics (if http-bridge loaded with metrics endpoint)
 curl http://localhost:8080/metrics
 ```
+
+---
+
+## 11. Troubleshooting
+
+### 11.1 Common Problems
+
+**"Mind produces STOP immediately (empty program)"**
+
+The Mind doesn't know how to handle the intent. Causes:
+- The intent uses words not in the vocabulary (OOV). Check `vocab.json`.
+- No training examples cover this type of intent. Add examples and re-synthesize.
+- The model is undertrained. Check synthesis metrics — if E2E accuracy is below 80%, train longer.
+
+Fix: add training examples that cover this intent pattern, then re-synthesize.
+
+```
+soma> :trace full
+soma> list all contacts near me
+  [Trace] Tokens: [12, 45, 89, 2, 7, 1]  ← check for [UNK] tokens (indicates OOV)
+  [Trace] Encoder output: [...]
+  [Trace] Decoder step 0: STOP (confidence 0.78)  ← Mind chose STOP immediately
+  
+  Problem: "near" or "contacts" may be OOV, or no geo+contacts training examples
+```
+
+**"Plugin not found: convention 'postgres.query' not available"**
+
+The Mind generated a program referencing a convention that isn't loaded. Causes:
+- Plugin isn't installed. Run `soma plugin list` to check.
+- Plugin failed to load (config error, missing dependency). Check startup logs.
+- Model was synthesized with the plugin, but plugin isn't configured in `soma.toml`.
+- Convention name mismatch: model was trained with `postgres.query` but plugin registers `pg.query`. Convention names must match exactly.
+
+Fix: install/configure the plugin, or re-synthesize without it.
+
+**"LoRA incompatible: dimension mismatch"**
+
+Plugin LoRA weights don't fit the current Mind. Causes:
+- Mind was re-synthesized with different hidden/decoder dimensions.
+- Plugin LoRA was trained on a different Mind version.
+
+Fix: re-train the plugin LoRA on the current Mind (`soma-synthesize train-lora --plugin <name>`), or remove the LoRA (plugin works without it, just less accurately).
+
+**"Checkpoint restore failed: model hash mismatch"**
+
+The checkpoint was created with a different model. Causes:
+- Model was re-synthesized but old checkpoint is still referenced.
+- Checkpoint file was copied from a different SOMA instance.
+
+Fix: start without checkpoint (`soma --no-checkpoint`). Experiential memory is lost but the SOMA operates normally with base knowledge.
+
+**"Synaptic connection refused"**
+
+Can't connect to peer SOMA. Causes:
+- Peer isn't running. Check if the target SOMA is up.
+- Wrong address/port. Verify `soma.toml` peer config.
+- Firewall blocking. Synaptic Protocol uses TCP — ensure the port is open.
+- Encryption mismatch. Both SOMAs must agree on encryption (both enabled or both disabled).
+
+Fix: verify peer is running at the expected address, check firewalls, check encryption config.
+
+**"Inference timeout (exceeded 5s)"**
+
+The Mind took too long to generate a program. Causes:
+- Decoder stuck in a loop (not predicting STOP). Likely a training issue.
+- Model is too large for the hardware (slow inference).
+- System under heavy load (CPU contention).
+
+Fix: check `max_program_steps` config (should be 8-16). If the Mind consistently uses all steps without STOP, the model needs more STOP examples in training data.
+
+**"Plugin execution timeout"**
+
+A plugin convention took longer than its `max_latency`. Causes:
+- Database query too slow (missing index, large table scan).
+- External service down (SMTP server, S3, Twilio).
+- Plugin bug (infinite loop, deadlock).
+
+Fix: check `:inspect plugin <name>` for stats. Look at p99 latency. For database: run the generated SQL manually to check performance.
+
+### 11.2 Debug Workflow
+
+```
+1. Enable tracing:           soma> :trace full
+2. Reproduce the problem:    soma> [the failing intent]
+3. Check tokens:             are there [UNK] tokens? → vocabulary issue
+4. Check encoder output:     is it all zeros? → model didn't load correctly
+5. Check decoder steps:      did it predict wrong opcodes? → training data issue
+6. Check plugin execution:   did the right plugin receive the right args?
+7. Check plugin response:    did the plugin error or timeout?
+```
+
+---
+
+## 12. Training Data Best Practices
+
+### 12.1 How Many Examples Per Convention?
+
+**Minimum: 5 unique intent templates per convention.** Each template should express the same operation in a genuinely different way. "list files" / "show files" / "display files" are too similar — they're synonym variations, not structural variations.
+
+Good set for `postgres.query` (SELECT):
+```
+1. "list all {table}"                          ← imperative, simple
+2. "show me everything in {table}"             ← conversational, simple
+3. "find {table} where {column} is {value}"    ← with filter
+4. "how many {table} do I have"                ← count query
+5. "what {table} were created today"           ← temporal filter
+6. "get {table} sorted by {column}"            ← with ordering
+7. "search {table} for {value}"                ← search pattern
+```
+
+Each template then gets expanded by param pools (table names, column names, values), generating 50-200 training pairs per convention.
+
+**Target: 50-200 expanded training pairs per convention.** Under 30 → undertrained, the Mind guesses. Over 500 → diminishing returns, wastes training time.
+
+### 12.2 Param Pool Diversity
+
+Param pools should cover realistic variation:
+
+```json
+"params": {
+  "table": {
+    "pool": ["contacts", "users", "bookmarks", "appointments", "messages"],
+    "type": "string"
+  },
+  "column": {
+    "pool": ["name", "email", "created_at", "status", "rating"],
+    "type": "string"
+  }
+}
+```
+
+Bad pool (too small): `"pool": ["users"]` — the Mind only learns "users" and can't generalize to "contacts."
+
+Bad pool (unrealistic): `"pool": ["xyzzy", "foo_bar_baz"]` — the Mind learns patterns that won't match real intents.
+
+### 12.3 Common Mistakes
+
+**Mistake: All examples are the same structure with different words.**
+```
+"list all contacts" → query("SELECT * FROM contacts")
+"list all users"    → query("SELECT * FROM users")
+"list all messages" → query("SELECT * FROM messages")
+```
+The Mind only learns the "list all X" pattern. It can't handle "find contacts where name is Ana" because no structural variation was provided.
+
+**Mistake: Inconsistent convention naming.**
+```
+Example 1: convention = "postgres.query"
+Example 2: convention = "pg.query"
+Example 3: convention = "database.query"
+```
+Pick one name and use it everywhere. Convention names must exactly match the plugin manifest.
+
+**Mistake: Forgetting EMIT and STOP.**
+Every training program must end with EMIT (to send result) and STOP. If examples omit these, the Mind learns to generate programs that run but never return results.
+
+**Mistake: Overly complex programs in early examples.**
+Start simple (1-2 step programs), then add complexity. If all training examples are 5+ steps, the Mind never learns simple patterns and may overgenerate (adding unnecessary steps to simple intents).
+
+**Mistake: No edge cases.**
+Include examples for: empty results ("find contacts named Xyzzy" → returns []), errors ("delete a table that doesn't exist"), boundary values ("find contacts within 0 km"), and ambiguous intents ("do the thing" → should the Mind ask for clarification or fail gracefully?).
+
+### 12.4 Cross-Plugin Examples
+
+When the application requires operations spanning multiple plugins, you MUST provide cross-plugin training examples. The Mind does not automatically combine single-plugin programs.
+
+```json
+{
+  "intents": ["find contacts nearby and cache the results"],
+  "program": [
+    {"convention": "postgres.query", "args": [{"type": "literal", "value": "SELECT * FROM contacts WHERE ..."}]},
+    {"convention": "redis.set", "args": [{"type": "literal", "value": "contacts:nearby"}, {"type": "ref", "step": 0}]},
+    {"convention": "EMIT", "args": [{"type": "ref", "step": 0}]},
+    {"convention": "STOP"}
+  ]
+}
+```
+
+Without this, the Mind either queries postgres OR caches in redis — never both in one program.
+
+### 12.5 Validation Checklist
+
+Before synthesis, verify:
+
+- [ ] Every plugin has ≥5 unique intent templates per convention
+- [ ] Every convention in the manifest has at least one training example
+- [ ] All conventions referenced in examples match plugin manifests exactly
+- [ ] Every program ends with EMIT + STOP
+- [ ] Param pools have ≥5 diverse values each
+- [ ] Cross-plugin operations have dedicated examples
+- [ ] Edge cases are covered (empty, error, boundary)
+- [ ] Run `soma-synthesize validate` — all checks pass

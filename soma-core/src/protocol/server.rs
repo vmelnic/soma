@@ -1,14 +1,20 @@
-//! Synaptic Protocol server — TCP listener for inter-SOMA communication.
+//! Synaptic Protocol v2 server — TCP listener with binary wire format,
+//! handshake negotiation, heartbeat, and signal routing.
 
 use anyhow::Result;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
 use std::sync::Arc;
+use tokio::net::TcpListener;
 
-use super::signal::{Signal, SignalType};
 use crate::mind::MindEngine;
 
-/// Handler trait for incoming signals.
+use super::connection::{
+    SynapseConnection, DEFAULT_KEEPALIVE_INTERVAL, DEFAULT_MAX_MISSED_PONGS,
+    DEFAULT_PONG_TIMEOUT,
+};
+use super::signal::{Signal, SignalType};
+
+/// Handler trait for incoming signals. Implementations decide how to
+/// respond to each signal type.
 pub trait SignalHandler: Send + Sync {
     fn handle(&self, signal: Signal) -> Option<Signal>;
 }
@@ -21,13 +27,11 @@ pub struct DefaultHandler {
 impl SignalHandler for DefaultHandler {
     fn handle(&self, signal: Signal) -> Option<Signal> {
         match signal.signal_type {
-            SignalType::Ping => {
-                Some(Signal::pong(&self.name, &signal.sender))
-            }
+            SignalType::Ping => Some(Signal::pong(&self.name, signal.sequence)),
             _ => {
                 tracing::debug!(
                     signal_type = ?signal.signal_type,
-                    sender = %signal.sender,
+                    sender = %signal.sender_id,
                     "Received signal (no handler)"
                 );
                 None
@@ -48,21 +52,20 @@ pub struct SomaSignalHandler {
 impl SignalHandler for SomaSignalHandler {
     fn handle(&self, signal: Signal) -> Option<Signal> {
         match signal.signal_type {
-            SignalType::Ping => {
-                Some(Signal::pong(&self.name, &signal.sender))
-            }
+            SignalType::Ping => Some(Signal::pong(&self.name, signal.sequence)),
             SignalType::Intent => {
                 // Extract intent text from payload
                 let intent_text = match String::from_utf8(signal.payload.clone()) {
                     Ok(text) => text,
                     Err(_) => {
-                        let mut resp = Signal::new(SignalType::Error, self.name.clone(), signal.sender.clone());
-                        resp.payload = b"Invalid UTF-8 in intent payload".to_vec();
-                        return Some(resp);
+                        return Some(Signal::error(
+                            &self.name,
+                            "Invalid UTF-8 in intent payload",
+                        ));
                     }
                 };
 
-                // Propagate trace_id from incoming signal (Section 18.1.2)
+                // Propagate trace_id from incoming signal
                 let trace_id = if signal.trace_id.is_empty() {
                     uuid::Uuid::new_v4().to_string()[..12].to_string()
                 } else {
@@ -72,7 +75,7 @@ impl SignalHandler for SomaSignalHandler {
                 tracing::info!(
                     component = "router",
                     trace_id = %trace_id,
-                    sender = %signal.sender,
+                    sender = %signal.sender_id,
                     intent = %intent_text,
                     "Processing remote intent"
                 );
@@ -81,7 +84,9 @@ impl SignalHandler for SomaSignalHandler {
                 let mind_guard = self.mind.read().unwrap();
                 match mind_guard.infer(&intent_text) {
                     Ok(program) => {
-                        let result = self.plugins.execute_program(&program.steps, self.max_program_steps);
+                        let result = self
+                            .plugins
+                            .execute_program(&program.steps, self.max_program_steps);
 
                         tracing::info!(
                             component = "mind",
@@ -92,27 +97,35 @@ impl SignalHandler for SomaSignalHandler {
                             "Remote intent processed"
                         );
 
-                        let mut resp = Signal::new(SignalType::Data, self.name.clone(), signal.sender.clone());
-                        // Propagate trace_id in response
-                        resp.trace_id = trace_id;
-
-                        if result.success {
-                            // Serialize the output as the response payload
+                        let mut resp = if result.success {
                             let output_str = match &result.output {
                                 Some(val) => format!("{}", val),
                                 None => "Done.".to_string(),
                             };
-                            resp.payload = output_str.into_bytes();
+                            let mut r =
+                                Signal::new(SignalType::Result, self.name.clone());
+                            r.payload = output_str.into_bytes();
+                            r
                         } else {
-                            resp.signal_type = SignalType::Error;
-                            resp.payload = result.error.unwrap_or_else(|| "unknown error".into()).into_bytes();
-                        }
-
+                            let mut r =
+                                Signal::new(SignalType::Error, self.name.clone());
+                            r.payload = result
+                                .error
+                                .unwrap_or_else(|| "unknown error".into())
+                                .into_bytes();
+                            r
+                        };
+                        resp.trace_id = trace_id;
+                        resp.channel_id = signal.channel_id;
                         Some(resp)
                     }
                     Err(e) => {
-                        let mut resp = Signal::new(SignalType::Error, self.name.clone(), signal.sender.clone());
-                        resp.payload = format!("Inference error: {}", e).into_bytes();
+                        let mut resp = Signal::error(
+                            &self.name,
+                            &format!("Inference error: {}", e),
+                        );
+                        resp.trace_id = trace_id;
+                        resp.channel_id = signal.channel_id;
                         Some(resp)
                     }
                 }
@@ -120,7 +133,7 @@ impl SignalHandler for SomaSignalHandler {
             _ => {
                 tracing::debug!(
                     signal_type = ?signal.signal_type,
-                    sender = %signal.sender,
+                    sender = %signal.sender_id,
                     "Received signal (no handler)"
                 );
                 None
@@ -129,76 +142,190 @@ impl SignalHandler for SomaSignalHandler {
     }
 }
 
-/// TCP server that accepts connections and dispatches signals to a handler.
+/// Configuration for the SynapseServer.
+pub struct ServerConfig {
+    pub max_signal_size: u32,
+    pub keepalive_interval_secs: u64,
+    pub pong_timeout_secs: u64,
+    pub max_missed_pongs: u32,
+    pub capabilities: Vec<String>,
+    pub plugins: Vec<String>,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            max_signal_size: 10_485_760,
+            keepalive_interval_secs: DEFAULT_KEEPALIVE_INTERVAL.as_secs(),
+            pong_timeout_secs: DEFAULT_PONG_TIMEOUT.as_secs(),
+            max_missed_pongs: DEFAULT_MAX_MISSED_PONGS,
+            capabilities: vec![
+                "streaming".into(),
+                "chunked".into(),
+            ],
+            plugins: vec!["posix".into()],
+        }
+    }
+}
+
+/// TCP server that accepts connections, performs handshakes, manages
+/// heartbeats, and dispatches signals to a handler using binary wire format.
 pub struct SynapseServer {
     name: String,
     bind_addr: String,
+    config: ServerConfig,
 }
 
 impl SynapseServer {
     pub fn new(name: String, bind_addr: String) -> Self {
-        Self { name, bind_addr }
+        Self {
+            name,
+            bind_addr,
+            config: ServerConfig::default(),
+        }
     }
 
-    /// Start listening for incoming connections. This runs until the task is cancelled.
-    pub async fn start(&self, handler: impl SignalHandler + Send + Sync + 'static) -> Result<()> {
+    pub fn with_config(name: String, bind_addr: String, config: ServerConfig) -> Self {
+        Self {
+            name,
+            bind_addr,
+            config,
+        }
+    }
+
+    /// Start listening for incoming connections. Runs until the task is cancelled.
+    pub async fn start(
+        &self,
+        handler: impl SignalHandler + Send + Sync + 'static,
+    ) -> Result<()> {
         let listener = TcpListener::bind(&self.bind_addr).await?;
         tracing::info!(
             bind = %self.bind_addr,
             name = %self.name,
-            "Synaptic Protocol server started"
+            "Synaptic Protocol v2 server started (binary wire format)"
         );
 
         let handler = Arc::new(handler);
 
         loop {
-            let (mut stream, addr) = listener.accept().await?;
+            let (stream, addr) = listener.accept().await?;
             let handler = handler.clone();
             let server_name = self.name.clone();
+            let max_signal_size = self.config.max_signal_size;
+            let keepalive_secs = self.config.keepalive_interval_secs;
+            let pong_timeout_secs = self.config.pong_timeout_secs;
+            let max_missed = self.config.max_missed_pongs;
+            let capabilities: Vec<String> = self.config.capabilities.clone();
+            let plugins: Vec<String> = self.config.plugins.clone();
 
             tokio::spawn(async move {
-                tracing::debug!(peer = %addr, "Connection accepted");
+                tracing::debug!(peer = %addr, "TCP connection accepted");
 
-                loop {
-                    // Read 4-byte length prefix
-                    let mut len_buf = [0u8; 4];
-                    match stream.read_exact(&mut len_buf).await {
-                        Ok(_) => {}
-                        Err(_) => break, // connection closed
+                let (reader, writer) = stream.into_split();
+                let conn = Arc::new(SynapseConnection::new(
+                    server_name.clone(),
+                    String::new(), // peer_id filled after handshake
+                    reader,
+                    writer,
+                    max_signal_size,
+                ));
+
+                // Perform server-side handshake
+                let cap_refs: Vec<&str> = capabilities.iter().map(|s| s.as_str()).collect();
+                let plug_refs: Vec<&str> = plugins.iter().map(|s| s.as_str()).collect();
+                let peer_id = match conn.server_handshake(&cap_refs, &plug_refs).await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        tracing::warn!(peer = %addr, error = %e, "Handshake failed");
+                        return;
                     }
-                    let msg_len = u32::from_be_bytes(len_buf) as usize;
+                };
 
-                    // Sanity check on message size (max 16 MB)
-                    if msg_len > 16 * 1024 * 1024 {
-                        tracing::warn!(len = msg_len, "Signal too large, dropping connection");
+                tracing::info!(peer = %addr, peer_id = %peer_id, "Handshake successful");
+
+                // Start heartbeat task
+                let conn_for_heartbeat = conn.clone();
+                let _heartbeat_handle = tokio::spawn(async move {
+                    SynapseConnection::heartbeat_loop(
+                        conn_for_heartbeat,
+                        std::time::Duration::from_secs(keepalive_secs),
+                        std::time::Duration::from_secs(pong_timeout_secs),
+                        max_missed,
+                    )
+                    .await;
+                });
+
+                // Main signal processing loop
+                loop {
+                    if !conn.is_alive() {
+                        tracing::info!(peer = %peer_id, "Connection marked dead, closing");
                         break;
                     }
 
-                    // Read the message body
-                    let mut msg_buf = vec![0u8; msg_len];
-                    match stream.read_exact(&mut msg_buf).await {
-                        Ok(_) => {}
-                        Err(_) => break,
+                    let signal = match conn.recv().await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            // Check if it's just a clean disconnect
+                            let msg = e.to_string();
+                            if msg.contains("unexpected eof")
+                                || msg.contains("connection reset")
+                                || msg.contains("broken pipe")
+                            {
+                                tracing::debug!(
+                                    peer = %peer_id,
+                                    "Peer disconnected"
+                                );
+                            } else {
+                                tracing::warn!(
+                                    peer = %peer_id,
+                                    error = %e,
+                                    "Error reading signal"
+                                );
+                            }
+                            conn.mark_dead();
+                            break;
+                        }
+                    };
+
+                    tracing::debug!(
+                        signal_type = ?signal.signal_type,
+                        sender = %signal.sender_id,
+                        seq = signal.sequence,
+                        channel = signal.channel_id,
+                        "Received signal"
+                    );
+
+                    // Handle protocol-level signals internally
+                    match signal.signal_type {
+                        SignalType::Close => {
+                            tracing::info!(peer = %peer_id, "Peer sent CLOSE");
+                            conn.mark_dead();
+                            break;
+                        }
+                        SignalType::Pong => {
+                            // PONG resets are handled by recv() already
+                            tracing::debug!(peer = %peer_id, seq = signal.sequence, "PONG received");
+                            continue;
+                        }
+                        _ => {}
                     }
 
-                    // Parse and handle
-                    match Signal::from_bytes(&msg_buf) {
-                        Ok(signal) => {
-                            if let Some(response) = handler.handle(signal) {
-                                let resp_bytes = response.to_bytes();
-                                if stream.write_all(&resp_bytes).await.is_err() {
-                                    break;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e, "Failed to parse signal");
+                    // Dispatch to handler
+                    if let Some(mut response) = handler.handle(signal) {
+                        response.sequence = conn.next_sequence();
+                        if let Err(e) = conn.send(&response).await {
+                            tracing::warn!(
+                                peer = %peer_id,
+                                error = %e,
+                                "Failed to send response"
+                            );
+                            conn.mark_dead();
+                            break;
                         }
                     }
                 }
 
-                tracing::debug!(peer = %addr, "Connection closed");
-                let _ = server_name; // suppress unused warning
+                tracing::debug!(peer = %addr, peer_id = %peer_id, "Connection handler exiting");
             });
         }
     }

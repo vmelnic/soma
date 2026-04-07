@@ -1,7 +1,9 @@
-//! Synaptic Protocol — inter-SOMA communication (Spec Section 14).
-//! TCP-based signal protocol for peer-to-peer SOMA mesh.
+//! Synaptic Protocol v2 — inter-SOMA communication (Spec Section 14).
+//! Binary wire format over TCP with handshake, heartbeat, and multiplexed channels.
 
 pub mod signal;
+pub mod codec;
+pub mod connection;
 pub mod server;
 pub mod client;
 pub mod discovery;

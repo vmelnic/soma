@@ -522,3 +522,372 @@ For production SOMAs that accumulate experience, periodically re-synthesize inco
 ```
 
 This closes the loop: runtime experience improves the next synthesis.
+
+---
+
+## 10. Tokenizer Strategy
+
+### 10.1 Options
+
+| Strategy | Vocab Size | Handles OOV | Best For |
+|---|---|---|---|
+| Character-level | ~100 | Always (any UTF-8 char is in vocab) | Small models, embedded targets |
+| BPE (Byte-Pair Encoding) | 1,000-10,000 | Subword fallback | Medium models, technical content |
+| Word-level | 5,000-50,000 | OOV → UNK token | Large models, fixed domains |
+
+### 10.2 Recommended: Hybrid Character+BPE
+
+For SOMA, the ideal tokenizer handles:
+- Natural language intents ("list all contacts near downtown")
+- Technical content embedded in intents ("SELECT * FROM users WHERE id = $1")
+- Paths and URLs ("/tmp/data.csv", "https://api.stripe.com/v1/charges")
+- Multiple languages (en, ro, ru for HelperBook)
+- Names and values that were never in training data
+
+**Strategy: train a BPE tokenizer on the training corpus, with character-level fallback for OOV.**
+
+```python
+from tokenizers import Tokenizer, models, trainers, pre_tokenizers
+
+tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
+tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+
+trainer = trainers.BpeTrainer(
+    vocab_size=4000,           # small enough for embedded
+    special_tokens=["[PAD]", "[UNK]", "[START]", "[STOP]"],
+    min_frequency=2,
+    show_progress=True,
+)
+
+tokenizer.train_from_iterator(all_intent_texts, trainer)
+tokenizer.save("vocab.json")
+```
+
+### 10.3 Embedded Tokenizer
+
+For ESP32, the tokenizer must be tiny. Options:
+- Use smaller vocab (1,000-2,000 tokens) with more aggressive BPE merges
+- Store vocab in flash, not RAM
+- Character-level fallback is essential (embedded SOMAs encounter novel text)
+
+### 10.4 SQL and Code Tokens
+
+Training data includes SQL queries, file paths, and API parameters. The BPE tokenizer naturally learns common SQL tokens ("SELECT", "FROM", "WHERE", "INSERT") as single tokens if they appear frequently. Rare patterns decompose to subwords. This handles the technical content without a separate tokenizer.
+
+---
+
+## 11. Data Augmentation
+
+### 11.1 Why Augmentation Matters
+
+Template expansion (intent × param pool) generates syntactically varied training data. But real users phrase things in ways templates don't cover. Augmentation bridges this gap.
+
+### 11.2 Augmentation Techniques
+
+**Synonym replacement:** Replace words with synonyms while preserving intent:
+```
+"list all files in /tmp"
+→ "show all files in /tmp"
+→ "display all files in /tmp"
+→ "get all files in /tmp"
+→ "enumerate files in /tmp"
+```
+
+**Word dropout:** Randomly remove non-essential words (trains robustness to terse intents):
+```
+"please list all of the files in the /tmp directory"
+→ "list files in /tmp"
+→ "list files /tmp"
+→ "files in /tmp"
+```
+
+**Word order shuffle:** Rearrange non-critical words:
+```
+"find contacts near downtown"
+→ "near downtown find contacts"
+→ "contacts near downtown find"
+```
+(Only mild shuffles — the intent must remain parseable.)
+
+**Typo injection:** Introduce realistic typos (trains robustness):
+```
+"search for electrician"
+→ "serach for electrician"
+→ "search for electritian"
+→ "search for electrican"
+```
+(Low rate: ~5% of training examples. Don't corrupt all data.)
+
+**Paraphrase generation (optional):** Use a language model to generate diverse phrasings:
+```
+"create a new appointment for Thursday at 3pm"
+→ "schedule something for Thursday afternoon at 3"
+→ "book Thursday 3pm"
+→ "I need an appointment Thursday, 3 o'clock"
+→ "set up a meeting for thurs 15:00"
+```
+
+### 11.3 Augmentation Config
+
+```toml
+[training.augmentation]
+enabled = true
+synonym_replace_rate = 0.3      # 30% of examples get synonym variants
+word_dropout_rate = 0.2         # 20% get word dropout
+word_shuffle_rate = 0.1         # 10% get mild reordering
+typo_rate = 0.05                # 5% get typo injection
+paraphrase_enabled = false       # requires external LLM, optional
+augmentation_factor = 3          # generate 3 augmented versions per original
+```
+
+### 11.4 Augmentation Validation
+
+After augmentation, validate that augmented intents still map to the same program. If synonym replacement changes the semantic meaning (e.g., "delete" → "create"), the training pair is corrupt. Filter by:
+1. Run augmented intent through a simple intent classifier
+2. Verify it maps to the same convention(s) as the original
+3. Discard if mismatch
+
+---
+
+## 12. Multilingual Intents
+
+### 12.1 The Challenge
+
+HelperBook serves en/ro/ru users. The Mind must understand:
+- "list all contacts" (English)
+- "arată toate contactele" (Romanian)
+- "показать все контакты" (Russian)
+
+All three should produce the same program: `postgres.query("SELECT * FROM contacts")`.
+
+### 12.2 Approach: Shared Multilingual Model
+
+One Mind handles all languages. The tokenizer (BPE) is trained on a multilingual corpus. The vocabulary includes tokens from all target languages.
+
+Training data includes all languages:
+
+```json
+{
+  "intents": [
+    "list all contacts",
+    "show all contacts",
+    "arată toate contactele",
+    "arată-mi contactele",
+    "показать все контакты",
+    "покажи контакты"
+  ],
+  "program": [
+    {"convention": "postgres.query", "args": [{"type": "literal", "value": "SELECT * FROM contacts"}]}
+  ]
+}
+```
+
+The model learns that these different surface forms map to the same program. This is natural for neural networks — they learn semantic similarity across languages when trained with parallel examples.
+
+### 12.3 Vocabulary Impact
+
+Multilingual BPE vocabulary is larger:
+- English only: ~2,000 tokens sufficient
+- English + Romanian + Russian: ~4,000-6,000 tokens
+- Cyrillic characters double the character set
+
+For embedded targets, this may be too large. Solution: embedded SOMAs serve a single language. Server SOMAs handle multilingual.
+
+### 12.4 Language-Specific LoRA (Alternative)
+
+Instead of one model for all languages, use language-specific LoRA:
+
+```
+Base Mind: English (default synthesis language)
+  + ro.lora: Romanian language understanding
+  + ru.lora: Russian language understanding
+```
+
+The Mind detects the input language (from character set or explicit locale) and activates the appropriate LoRA. This keeps the base model smaller while supporting multiple languages.
+
+### 12.5 Mixed-Language Intents
+
+Real users code-switch: "arată-mi contacts from last week" (Romanian + English). The multilingual model handles this naturally — BPE tokenizes each word regardless of language, and the encoder learns to understand mixed input.
+
+---
+
+## 13. Training Data Validation
+
+### 13.1 Automated Checks
+
+Before training, the Synthesizer validates all training data:
+
+```
+soma-synthesize validate --plugins ./plugins --domain ./training/domain.json
+
+Validation Report:
+  ✓ 412 examples loaded from 8 plugins
+  ✓ All conventions referenced exist in plugin manifests
+  ✗ CONFLICT: examples pg_003 and pg_007 have identical intent 
+    "find contacts nearby" but different programs
+  ⚠ IMBALANCE: postgres has 120 examples, smtp has 8 examples 
+    (15:1 ratio, recommend ≤5:1)
+  ⚠ LOW COVERAGE: redis.subscribe has 0 training examples
+  ✓ No circular refs in program steps
+  ✓ All ref indices point to valid previous steps
+  ✓ All span extractions reference valid intent tokens
+  ⚠ DUPLICATE: examples geo_002 and geo_005 are identical after 
+    param expansion (redundant)
+  ✗ INVALID: example msg_012 references convention "mqtt.publish" 
+    but mqtt plugin is not in target plugins
+```
+
+### 13.2 Checks Performed
+
+| Check | Severity | Description |
+|---|---|---|
+| Convention exists | Error | Referenced convention must exist in some loaded plugin |
+| No conflicting examples | Error | Same intent must not map to different programs |
+| Ref indices valid | Error | `ref:N` must point to step N where N < current step |
+| Span extraction valid | Error | Span markers must reference tokens present in intent |
+| No circular refs | Error | Step cannot reference itself or create a cycle |
+| Coverage balance | Warning | Plugin examples should be within 5:1 ratio of each other |
+| Zero-example conventions | Warning | Conventions with no training examples won't be usable |
+| Duplicate examples | Warning | Identical (intent, program) pairs after expansion are wasted |
+| Step count | Warning | Programs with >max_steps are un-learnable |
+| Intent length | Warning | Intents >100 tokens may exceed model capacity |
+
+### 13.3 Auto-Fix Suggestions
+
+```
+CONFLICT detected:
+  Example pg_003: "find contacts nearby" → postgres.query(geo query)
+  Example pg_007: "find contacts nearby" → geo.within_radius(...)
+  
+  Suggestion: Disambiguate intents:
+    pg_003: "find contacts nearby in the database"
+    pg_007: "find contacts within radius nearby"
+  Or: merge into one cross-plugin example
+```
+
+---
+
+## 14. Quantization Details
+
+### 14.1 Quantization Methods
+
+| Method | Precision | Model Size | Accuracy Impact | Target |
+|---|---|---|---|---|
+| Float32 | Full | 1× (baseline) | None | Server with GPU |
+| Float16 | Half | 0.5× | Negligible (<0.1%) | Server CPU, Raspberry Pi |
+| Int8 symmetric | 8-bit | 0.25× | Small (1-3%) | ESP32 with PSRAM |
+| Int8 asymmetric | 8-bit | 0.25× + scales | Smaller (0.5-2%) | ESP32 with PSRAM |
+| Int4 (future) | 4-bit | 0.125× | Moderate (3-8%) | ESP32 without PSRAM |
+
+### 14.2 Recommended: Post-Training Quantization with Calibration
+
+```python
+def quantize_int8(model, calibration_data, method="asymmetric"):
+    """
+    Post-training quantization: run calibration data through the model,
+    observe activation ranges, compute per-tensor scale and zero-point.
+    """
+    # Collect activation statistics
+    ranges = {}
+    def hook_fn(name):
+        def fn(module, input, output):
+            ranges[name] = (output.min().item(), output.max().item())
+        return fn
+    
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Linear):
+            module.register_forward_hook(hook_fn(name))
+    
+    # Run calibration data (100-500 examples)
+    with torch.no_grad():
+        for batch in calibration_data:
+            model(batch)
+    
+    # Compute quantization parameters
+    quant_params = {}
+    for name, (min_val, max_val) in ranges.items():
+        if method == "symmetric":
+            scale = max(abs(min_val), abs(max_val)) / 127.0
+            zero_point = 0
+        else:  # asymmetric
+            scale = (max_val - min_val) / 255.0
+            zero_point = round(-min_val / scale)
+        quant_params[name] = {"scale": scale, "zero_point": zero_point}
+    
+    # Quantize weights
+    quantized_weights = {}
+    for name, param in model.named_parameters():
+        qp = quant_params.get(name.rsplit('.', 1)[0], {"scale": 1.0, "zero_point": 0})
+        quantized = torch.round(param / qp["scale"]) + qp["zero_point"]
+        quantized = quantized.clamp(-128, 127).to(torch.int8)
+        quantized_weights[name] = quantized
+    
+    return quantized_weights, quant_params
+```
+
+### 14.3 Calibration Dataset
+
+Use 100-500 representative intents from the training set. Must cover:
+- Short intents ("list files")
+- Long intents ("find all providers within 10km who offer plumbing services and are available next Thursday")
+- All plugins (at least a few intents per plugin)
+- Edge cases (empty string, very long string, special characters)
+
+### 14.4 Accuracy Validation After Quantization
+
+```
+soma-synthesize export --target embedded --quantize int8
+
+Quantization Report:
+  Float32 baseline E2E accuracy: 94.3%
+  Int8 quantized E2E accuracy:   92.1%
+  Accuracy delta:                -2.2%
+  
+  Per-plugin impact:
+    postgres: 95.2% → 93.8% (-1.4%)
+    redis:    93.1% → 91.2% (-1.9%)
+    smtp:     96.0% → 92.5% (-3.5%)  ← highest impact
+    
+  Recommendation: accuracy delta within acceptable range (< 5%).
+  Proceed with int8 export.
+```
+
+If accuracy drops >5% for any plugin, options:
+- Use float16 instead of int8
+- Increase calibration dataset size
+- Use per-channel quantization instead of per-tensor
+- Increase model size (more params are more quantization-tolerant)
+
+### 14.5 Quantization in .soma-model Format
+
+The .soma-model header stores quantization metadata:
+
+```
+quantization byte:
+  0x00 = float32 (4 bytes per weight)
+  0x01 = float16 (2 bytes per weight)
+  0x02 = int8 symmetric (1 byte per weight + per-tensor scale float32)
+  0x03 = int8 asymmetric (1 byte per weight + per-tensor scale + zero_point)
+
+Per weight section:
+  [section_name]
+  [shape]
+  [scale: float32]             ← quantization scale
+  [zero_point: int8]           ← only for asymmetric
+  [data: int8[]]               ← quantized weights, row-major
+```
+
+The EmbeddedMindEngine reads these and performs fixed-point inference:
+
+```rust
+fn dequantize(value: i8, scale: f32, zero_point: i8) -> f32 {
+    (value as f32 - zero_point as f32) * scale
+}
+
+// Or for efficiency, multiply in int8 and dequantize the result:
+fn matmul_int8(a: &[i8], b: &[i8], scale_a: f32, scale_b: f32) -> Vec<f32> {
+    // Accumulate in int32 to avoid overflow
+    let acc: Vec<i32> = int8_matmul_accumulate(a, b);
+    // Dequantize the result
+    acc.iter().map(|&v| v as f32 * scale_a * scale_b).collect()
+}
