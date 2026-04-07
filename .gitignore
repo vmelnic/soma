@@ -31,3 +31,4 @@ models/*.onnx
 .DS_Store
 Thumbs.db
 *.pt
+node_modules/
