@@ -83,3 +83,7 @@ tempfile = "3"
 opt-level = 3
 lto = true
 strip = true
+
+# Dev builds: optimize dependencies for reasonable inference speed
+[profile.dev.package."*"]
+opt-level = 2
