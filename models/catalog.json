@@ -309,112 +309,140 @@
       "description": "Get column information for a table"
     },
     {
-      "full_name": "redis.get",
+      "full_name": "postgres.find",
       "catalog_id": 44,
+      "plugin": "postgres",
+      "name": "find",
+      "description": "Structured SELECT query builder \u2014 accepts JSON spec with table, select, where, join, group_by, having, order_by, limit, offset"
+    },
+    {
+      "full_name": "postgres.find_one",
+      "catalog_id": 45,
+      "plugin": "postgres",
+      "name": "find_one",
+      "description": "Structured single-row query \u2014 same JSON spec as find but forces LIMIT 1, returns Map or Null"
+    },
+    {
+      "full_name": "postgres.count",
+      "catalog_id": 46,
+      "plugin": "postgres",
+      "name": "count",
+      "description": "Count rows matching conditions \u2014 accepts JSON spec with table and optional where clause"
+    },
+    {
+      "full_name": "postgres.aggregate",
+      "catalog_id": 47,
+      "plugin": "postgres",
+      "name": "aggregate",
+      "description": "Aggregation query with GROUP BY \u2014 accepts JSON spec with select (aggregate expressions), group_by, having, order_by, limit"
+    },
+    {
+      "full_name": "redis.get",
+      "catalog_id": 48,
       "plugin": "redis",
       "name": "get",
       "description": "Get string value by key"
     },
     {
       "full_name": "redis.set",
-      "catalog_id": 45,
+      "catalog_id": 49,
       "plugin": "redis",
       "name": "set",
       "description": "Set string value with optional TTL"
     },
     {
       "full_name": "redis.delete",
-      "catalog_id": 46,
+      "catalog_id": 50,
       "plugin": "redis",
       "name": "delete",
       "description": "Delete a key"
     },
     {
       "full_name": "redis.exists",
-      "catalog_id": 47,
+      "catalog_id": 51,
       "plugin": "redis",
       "name": "exists",
       "description": "Check if key exists"
     },
     {
       "full_name": "redis.incr",
-      "catalog_id": 48,
+      "catalog_id": 52,
       "plugin": "redis",
       "name": "incr",
       "description": "Atomic increment"
     },
     {
       "full_name": "redis.expire",
-      "catalog_id": 49,
+      "catalog_id": 53,
       "plugin": "redis",
       "name": "expire",
       "description": "Set TTL on existing key"
     },
     {
       "full_name": "redis.hget",
-      "catalog_id": 50,
+      "catalog_id": 54,
       "plugin": "redis",
       "name": "hget",
       "description": "Get hash field value"
     },
     {
       "full_name": "redis.hset",
-      "catalog_id": 51,
+      "catalog_id": 55,
       "plugin": "redis",
       "name": "hset",
       "description": "Set hash field value"
     },
     {
       "full_name": "redis.hgetall",
-      "catalog_id": 52,
+      "catalog_id": 56,
       "plugin": "redis",
       "name": "hgetall",
       "description": "Get all hash fields"
     },
     {
       "full_name": "redis.lpush",
-      "catalog_id": 53,
+      "catalog_id": 57,
       "plugin": "redis",
       "name": "lpush",
       "description": "Push to list head"
     },
     {
       "full_name": "redis.lrange",
-      "catalog_id": 54,
+      "catalog_id": 58,
       "plugin": "redis",
       "name": "lrange",
       "description": "Get list range"
     },
     {
       "full_name": "redis.publish",
-      "catalog_id": 55,
+      "catalog_id": 59,
       "plugin": "redis",
       "name": "publish",
       "description": "Publish message to channel"
     },
     {
       "full_name": "redis.subscribe",
-      "catalog_id": 56,
+      "catalog_id": 60,
       "plugin": "redis",
       "name": "subscribe",
       "description": "Subscribe to channel (streaming)"
     },
     {
       "full_name": "redis.keys",
-      "catalog_id": 57,
+      "catalog_id": 61,
       "plugin": "redis",
       "name": "keys",
       "description": "Find keys matching pattern"
     },
     {
       "full_name": "EMIT",
-      "catalog_id": 58
+      "catalog_id": 62
     },
     {
       "full_name": "STOP",
-      "catalog_id": 59
+      "catalog_id": 63
     }
   ],
-  "emit_id": 58,
-  "stop_id": 59
+  "emit_id": 62,
+  "stop_id": 63
 }

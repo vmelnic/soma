@@ -17,14 +17,44 @@
         "what's in the {table} table"
       ],
       "program": [
-        {"convention": "postgres.query", "args": [{"name": "sql", "type": "span", "extract": "table"}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.query",
+          "args": [
+            {
+              "name": "sql",
+              "type": "span",
+              "extract": "table"
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "table": ["users", "contacts", "appointments", "messages", "reviews"]
+        "table": [
+          "users",
+          "contacts",
+          "appointments",
+          "messages",
+          "reviews"
+        ]
       },
-      "tags": ["postgres", "query", "select"]
+      "tags": [
+        "postgres",
+        "query",
+        "select"
+      ]
     },
     {
       "id": "postgres_execute_001",
@@ -38,34 +68,105 @@
         "remove old records from {table}"
       ],
       "program": [
-        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "span", "extract": "table"}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.execute",
+          "args": [
+            {
+              "name": "sql",
+              "type": "span",
+              "extract": "table"
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "table": ["users", "contacts", "appointments", "messages", "reviews"]
+        "table": [
+          "users",
+          "contacts",
+          "appointments",
+          "messages",
+          "reviews"
+        ]
       },
-      "tags": ["postgres", "execute", "write"]
+      "tags": [
+        "postgres",
+        "execute",
+        "write"
+      ]
     },
     {
       "id": "postgres_query_one_001",
       "intents": [
-        "find one {entity} where id is {id}",
-        "get {entity} by id {id}",
-        "look up {entity} with id {id}",
-        "fetch a single {entity} with id {id}",
-        "find {entity} matching id {id}"
+        "run sql query for one {entity} with id {id}",
+        "execute single row query on {entity} where id equals {id}",
+        "sql select one {entity} by id {id}",
+        "query single {entity} record with id {id}",
+        "raw query one row from {entity} id {id}"
       ],
       "program": [
-        {"convention": "postgres.query_one", "args": [{"name": "table", "type": "span", "extract": "entity"}, {"name": "id", "type": "span", "extract": "id"}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.query_one",
+          "args": [
+            {
+              "name": "table",
+              "type": "span",
+              "extract": "entity"
+            },
+            {
+              "name": "id",
+              "type": "span",
+              "extract": "id"
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "entity": ["user", "contact", "order", "product", "review"],
-        "id": ["1", "42", "100", "999", "abc"]
+        "entity": [
+          "user",
+          "contact",
+          "order",
+          "product",
+          "review"
+        ],
+        "id": [
+          "1",
+          "42",
+          "100",
+          "999",
+          "abc"
+        ]
       },
-      "tags": ["postgres", "query_one", "lookup"]
+      "tags": [
+        "postgres",
+        "query_one",
+        "lookup"
+      ]
     },
     {
       "id": "postgres_create_table_001",
@@ -77,14 +178,49 @@
         "create the {table} table with columns"
       ],
       "program": [
-        {"convention": "postgres.create_table", "args": [{"name": "name", "type": "span", "extract": "table"}, {"name": "columns", "type": "literal", "value": "id SERIAL PRIMARY KEY, name TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW()"}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.create_table",
+          "args": [
+            {
+              "name": "name",
+              "type": "span",
+              "extract": "table"
+            },
+            {
+              "name": "columns",
+              "type": "literal",
+              "value": "id SERIAL PRIMARY KEY, name TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW()"
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "table": ["users", "contacts", "sessions", "events", "tasks"]
+        "table": [
+          "users",
+          "contacts",
+          "sessions",
+          "events",
+          "tasks"
+        ]
       },
-      "tags": ["postgres", "create_table", "ddl"]
+      "tags": [
+        "postgres",
+        "create_table",
+        "ddl"
+      ]
     },
     {
       "id": "postgres_table_exists_001",
@@ -96,14 +232,44 @@
         "verify the {table} table exists"
       ],
       "program": [
-        {"convention": "postgres.table_exists", "args": [{"name": "name", "type": "span", "extract": "table"}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.table_exists",
+          "args": [
+            {
+              "name": "name",
+              "type": "span",
+              "extract": "table"
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "table": ["users", "contacts", "orders", "sessions", "migrations"]
+        "table": [
+          "users",
+          "contacts",
+          "orders",
+          "sessions",
+          "migrations"
+        ]
       },
-      "tags": ["postgres", "table_exists", "check"]
+      "tags": [
+        "postgres",
+        "table_exists",
+        "check"
+      ]
     },
     {
       "id": "postgres_list_tables_001",
@@ -117,12 +283,30 @@
         "show the tables"
       ],
       "program": [
-        {"convention": "postgres.list_tables", "args": []},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.list_tables",
+          "args": []
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {},
-      "tags": ["postgres", "list_tables", "metadata"]
+      "tags": [
+        "postgres",
+        "list_tables",
+        "metadata"
+      ]
     },
     {
       "id": "postgres_table_schema_001",
@@ -136,14 +320,44 @@
         "describe the {table} table"
       ],
       "program": [
-        {"convention": "postgres.table_schema", "args": [{"name": "name", "type": "span", "extract": "table"}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.table_schema",
+          "args": [
+            {
+              "name": "name",
+              "type": "span",
+              "extract": "table"
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "table": ["users", "contacts", "orders", "products", "sessions"]
+        "table": [
+          "users",
+          "contacts",
+          "orders",
+          "products",
+          "sessions"
+        ]
       },
-      "tags": ["postgres", "table_schema", "metadata"]
+      "tags": [
+        "postgres",
+        "table_schema",
+        "metadata"
+      ]
     },
     {
       "id": "postgres_alter_table_001",
@@ -155,14 +369,49 @@
         "change the {table} table structure"
       ],
       "program": [
-        {"convention": "postgres.alter_table", "args": [{"name": "name", "type": "span", "extract": "table"}, {"name": "changes", "type": "literal", "value": "ADD COLUMN new_col TEXT"}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.alter_table",
+          "args": [
+            {
+              "name": "name",
+              "type": "span",
+              "extract": "table"
+            },
+            {
+              "name": "changes",
+              "type": "literal",
+              "value": "ADD COLUMN new_col TEXT"
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "table": ["users", "contacts", "orders", "products", "events"]
+        "table": [
+          "users",
+          "contacts",
+          "orders",
+          "products",
+          "events"
+        ]
       },
-      "tags": ["postgres", "alter_table", "ddl"]
+      "tags": [
+        "postgres",
+        "alter_table",
+        "ddl"
+      ]
     },
     {
       "id": "postgres_begin_001",
@@ -174,12 +423,30 @@
         "begin database transaction"
       ],
       "program": [
-        {"convention": "postgres.begin", "args": []},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.begin",
+          "args": []
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {},
-      "tags": ["postgres", "begin", "transaction"]
+      "tags": [
+        "postgres",
+        "begin",
+        "transaction"
+      ]
     },
     {
       "id": "postgres_commit_001",
@@ -191,12 +458,30 @@
         "finish transaction"
       ],
       "program": [
-        {"convention": "postgres.commit", "args": []},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.commit",
+          "args": []
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {},
-      "tags": ["postgres", "commit", "transaction"]
+      "tags": [
+        "postgres",
+        "commit",
+        "transaction"
+      ]
     },
     {
       "id": "postgres_rollback_001",
@@ -208,12 +493,30 @@
         "undo transaction"
       ],
       "program": [
-        {"convention": "postgres.rollback", "args": []},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.rollback",
+          "args": []
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {},
-      "tags": ["postgres", "rollback", "transaction"]
+      "tags": [
+        "postgres",
+        "rollback",
+        "transaction"
+      ]
     },
     {
       "id": "postgres_create_then_list_001",
@@ -223,15 +526,54 @@
         "add {table} table then list tables"
       ],
       "program": [
-        {"convention": "postgres.create_table", "args": [{"name": "name", "type": "span", "extract": "table"}, {"name": "columns", "type": "literal", "value": "id SERIAL PRIMARY KEY, name TEXT NOT NULL"}]},
-        {"convention": "postgres.list_tables", "args": []},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.create_table",
+          "args": [
+            {
+              "name": "name",
+              "type": "span",
+              "extract": "table"
+            },
+            {
+              "name": "columns",
+              "type": "literal",
+              "value": "id SERIAL PRIMARY KEY, name TEXT NOT NULL"
+            }
+          ]
+        },
+        {
+          "convention": "postgres.list_tables",
+          "args": []
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 1
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "table": ["users", "contacts", "sessions", "events", "tasks"]
+        "table": [
+          "users",
+          "contacts",
+          "sessions",
+          "events",
+          "tasks"
+        ]
       },
-      "tags": ["postgres", "multi-step", "create_table", "list_tables"]
+      "tags": [
+        "postgres",
+        "multi-step",
+        "create_table",
+        "list_tables"
+      ]
     },
     {
       "id": "postgres_list_then_describe_001",
@@ -241,15 +583,49 @@
         "get tables then describe {table}"
       ],
       "program": [
-        {"convention": "postgres.list_tables", "args": []},
-        {"convention": "postgres.table_schema", "args": [{"name": "name", "type": "span", "extract": "table"}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.list_tables",
+          "args": []
+        },
+        {
+          "convention": "postgres.table_schema",
+          "args": [
+            {
+              "name": "name",
+              "type": "span",
+              "extract": "table"
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 1
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "table": ["users", "contacts", "orders", "products", "sessions"]
+        "table": [
+          "users",
+          "contacts",
+          "orders",
+          "products",
+          "sessions"
+        ]
       },
-      "tags": ["postgres", "multi-step", "list_tables", "table_schema"]
+      "tags": [
+        "postgres",
+        "multi-step",
+        "list_tables",
+        "table_schema"
+      ]
     },
     {
       "id": "postgres_check_then_describe_001",
@@ -259,15 +635,55 @@
         "does {table} exist and what are its columns"
       ],
       "program": [
-        {"convention": "postgres.table_exists", "args": [{"name": "name", "type": "span", "extract": "table"}]},
-        {"convention": "postgres.table_schema", "args": [{"name": "name", "type": "span", "extract": "table"}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.table_exists",
+          "args": [
+            {
+              "name": "name",
+              "type": "span",
+              "extract": "table"
+            }
+          ]
+        },
+        {
+          "convention": "postgres.table_schema",
+          "args": [
+            {
+              "name": "name",
+              "type": "span",
+              "extract": "table"
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 1
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "table": ["users", "contacts", "orders", "products", "sessions"]
+        "table": [
+          "users",
+          "contacts",
+          "orders",
+          "products",
+          "sessions"
+        ]
       },
-      "tags": ["postgres", "multi-step", "table_exists", "table_schema"]
+      "tags": [
+        "postgres",
+        "multi-step",
+        "table_exists",
+        "table_schema"
+      ]
     },
     {
       "id": "postgres_find_001",
@@ -281,14 +697,50 @@
         "find all users where role is {role}"
       ],
       "program": [
-        {"convention": "postgres.find", "args": [{"name": "spec", "type": "json", "value": {"table": "users", "where": {"role": "{role}"}}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.find",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "users",
+                "where": {
+                  "role": "{role}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "role": ["provider", "client", "admin", "moderator", "guest"]
+        "role": [
+          "provider",
+          "client",
+          "admin",
+          "moderator",
+          "guest"
+        ]
       },
-      "tags": ["postgres", "find", "query_builder", "where"]
+      "tags": [
+        "postgres",
+        "find",
+        "query_builder",
+        "where"
+      ]
     },
     {
       "id": "postgres_find_002",
@@ -300,15 +752,64 @@
         "find top rated {role}s above {rating}"
       ],
       "program": [
-        {"convention": "postgres.find", "args": [{"name": "spec", "type": "json", "value": {"table": "users", "where": {"role": "{role}", "rating": {">": "{rating}"}}, "order_by": [{"field": "rating", "dir": "desc"}]}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.find",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "users",
+                "where": {
+                  "role": "{role}",
+                  "rating": {
+                    ">": "{rating}"
+                  }
+                },
+                "order_by": [
+                  {
+                    "field": "rating",
+                    "dir": "desc"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "role": ["provider", "client", "tutor", "freelancer"],
-        "rating": ["3", "4", "4.5"]
+        "role": [
+          "provider",
+          "client",
+          "tutor",
+          "freelancer"
+        ],
+        "rating": [
+          "3",
+          "4",
+          "4.5"
+        ]
       },
-      "tags": ["postgres", "find", "query_builder", "where", "order"]
+      "tags": [
+        "postgres",
+        "find",
+        "query_builder",
+        "where",
+        "order"
+      ]
     },
     {
       "id": "postgres_find_003",
@@ -320,15 +821,62 @@
         "find all {entity} belonging to user {id}"
       ],
       "program": [
-        {"convention": "postgres.find", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "where": {"user_id": "{id}"}, "order_by": [{"field": "created_at", "dir": "desc"}]}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.find",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "{entity}",
+                "where": {
+                  "user_id": "{id}"
+                },
+                "order_by": [
+                  {
+                    "field": "created_at",
+                    "dir": "desc"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "entity": ["appointments", "messages", "reviews", "orders", "tasks"],
-        "id": ["1", "42", "100"]
+        "entity": [
+          "appointments",
+          "messages",
+          "reviews",
+          "orders",
+          "tasks"
+        ],
+        "id": [
+          "1",
+          "42",
+          "100"
+        ]
       },
-      "tags": ["postgres", "find", "query_builder", "where", "order"]
+      "tags": [
+        "postgres",
+        "find",
+        "query_builder",
+        "where",
+        "order"
+      ]
     },
     {
       "id": "postgres_find_004",
@@ -340,14 +888,66 @@
         "list {role}s and their reviews"
       ],
       "program": [
-        {"convention": "postgres.find", "args": [{"name": "spec", "type": "json", "value": {"table": "users", "select": ["users.name", "users.email"], "where": {"role": "{role}"}, "join": [{"table": "reviews", "on": "reviews.reviewed_id = users.id", "type": "INNER"}], "group_by": ["users.id", "users.name", "users.email"]}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.find",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "users",
+                "select": [
+                  "users.name",
+                  "users.email"
+                ],
+                "where": {
+                  "role": "{role}"
+                },
+                "join": [
+                  {
+                    "table": "reviews",
+                    "on": "reviews.reviewed_id = users.id",
+                    "type": "INNER"
+                  }
+                ],
+                "group_by": [
+                  "users.id",
+                  "users.name",
+                  "users.email"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "role": ["provider", "tutor", "freelancer", "vendor"]
+        "role": [
+          "provider",
+          "tutor",
+          "freelancer",
+          "vendor"
+        ]
       },
-      "tags": ["postgres", "find", "query_builder", "join", "group_by"]
+      "tags": [
+        "postgres",
+        "find",
+        "query_builder",
+        "join",
+        "group_by"
+      ]
     },
     {
       "id": "postgres_find_005",
@@ -359,16 +959,65 @@
         "find {limit} newest {entity}"
       ],
       "program": [
-        {"convention": "postgres.find", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "order_by": [{"field": "{field}", "dir": "desc"}], "limit": "{limit}"}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.find",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "{entity}",
+                "order_by": [
+                  {
+                    "field": "{field}",
+                    "dir": "desc"
+                  }
+                ],
+                "limit": "{limit}"
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "entity": ["users", "appointments", "reviews", "messages"],
-        "field": ["created_at", "updated_at", "rating", "name"],
-        "limit": ["5", "10", "20"]
+        "entity": [
+          "users",
+          "appointments",
+          "reviews",
+          "messages"
+        ],
+        "field": [
+          "created_at",
+          "updated_at",
+          "rating",
+          "name"
+        ],
+        "limit": [
+          "5",
+          "10",
+          "20"
+        ]
       },
-      "tags": ["postgres", "find", "query_builder", "order", "limit"]
+      "tags": [
+        "postgres",
+        "find",
+        "query_builder",
+        "order",
+        "limit"
+      ]
     },
     {
       "id": "postgres_find_one_001",
@@ -380,14 +1029,48 @@
         "find a single user matching email {email}"
       ],
       "program": [
-        {"convention": "postgres.find_one", "args": [{"name": "spec", "type": "json", "value": {"table": "users", "where": {"email": "{email}"}}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.find_one",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "users",
+                "where": {
+                  "email": "{email}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "email": ["alice@example.com", "bob@test.com", "admin@soma.dev"]
+        "email": [
+          "alice@example.com",
+          "bob@test.com",
+          "admin@soma.dev"
+        ]
       },
-      "tags": ["postgres", "find_one", "query_builder", "lookup"]
+      "tags": [
+        "postgres",
+        "find_one",
+        "query_builder",
+        "lookup"
+      ]
     },
     {
       "id": "postgres_find_one_002",
@@ -399,15 +1082,55 @@
         "fetch {entity} record {id}"
       ],
       "program": [
-        {"convention": "postgres.find_one", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "where": {"id": "{id}"}}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.find_one",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "{entity}",
+                "where": {
+                  "id": "{id}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "entity": ["users", "appointments", "reviews", "contacts"],
-        "id": ["1", "42", "100", "999"]
+        "entity": [
+          "users",
+          "appointments",
+          "reviews",
+          "contacts"
+        ],
+        "id": [
+          "1",
+          "42",
+          "100",
+          "999"
+        ]
       },
-      "tags": ["postgres", "find_one", "query_builder", "lookup"]
+      "tags": [
+        "postgres",
+        "find_one",
+        "query_builder",
+        "lookup"
+      ]
     },
     {
       "id": "postgres_find_one_003",
@@ -419,16 +1142,61 @@
         "find single {entity} where {field} equals {value}"
       ],
       "program": [
-        {"convention": "postgres.find_one", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "where": {"{field}": "{value}"}}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.find_one",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "{entity}",
+                "where": {
+                  "{field}": "{value}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "entity": ["users", "contacts", "appointments", "messages"],
-        "field": ["name", "status", "role", "type"],
-        "value": ["active", "pending", "admin", "provider"]
+        "entity": [
+          "users",
+          "contacts",
+          "appointments",
+          "messages"
+        ],
+        "field": [
+          "name",
+          "status",
+          "role",
+          "type"
+        ],
+        "value": [
+          "active",
+          "pending",
+          "admin",
+          "provider"
+        ]
       },
-      "tags": ["postgres", "find_one", "query_builder", "lookup"]
+      "tags": [
+        "postgres",
+        "find_one",
+        "query_builder",
+        "lookup"
+      ]
     },
     {
       "id": "postgres_find_one_004",
@@ -440,14 +1208,54 @@
         "find the most recently added {entity}"
       ],
       "program": [
-        {"convention": "postgres.find_one", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "order_by": [{"field": "created_at", "dir": "desc"}]}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.find_one",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "{entity}",
+                "order_by": [
+                  {
+                    "field": "created_at",
+                    "dir": "desc"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "entity": ["users", "appointments", "reviews", "messages", "orders"]
+        "entity": [
+          "users",
+          "appointments",
+          "reviews",
+          "messages",
+          "orders"
+        ]
       },
-      "tags": ["postgres", "find_one", "query_builder", "order", "latest"]
+      "tags": [
+        "postgres",
+        "find_one",
+        "query_builder",
+        "order",
+        "latest"
+      ]
     },
     {
       "id": "postgres_find_one_005",
@@ -459,14 +1267,56 @@
         "find number one {role}"
       ],
       "program": [
-        {"convention": "postgres.find_one", "args": [{"name": "spec", "type": "json", "value": {"table": "users", "where": {"role": "{role}"}, "order_by": [{"field": "rating", "dir": "desc"}]}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.find_one",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "users",
+                "where": {
+                  "role": "{role}"
+                },
+                "order_by": [
+                  {
+                    "field": "rating",
+                    "dir": "desc"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "role": ["provider", "tutor", "freelancer", "vendor"]
+        "role": [
+          "provider",
+          "tutor",
+          "freelancer",
+          "vendor"
+        ]
       },
-      "tags": ["postgres", "find_one", "query_builder", "order", "top"]
+      "tags": [
+        "postgres",
+        "find_one",
+        "query_builder",
+        "order",
+        "top"
+      ]
     },
     {
       "id": "postgres_count_001",
@@ -480,14 +1330,46 @@
         "count records in {table}"
       ],
       "program": [
-        {"convention": "postgres.count", "args": [{"name": "spec", "type": "json", "value": {"table": "{table}"}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.count",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "{table}"
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "table": ["users", "contacts", "appointments", "messages", "reviews"]
+        "table": [
+          "users",
+          "contacts",
+          "appointments",
+          "messages",
+          "reviews"
+        ]
       },
-      "tags": ["postgres", "count", "query_builder"]
+      "tags": [
+        "postgres",
+        "count",
+        "query_builder"
+      ]
     },
     {
       "id": "postgres_count_002",
@@ -499,14 +1381,49 @@
         "how many users are {role}s"
       ],
       "program": [
-        {"convention": "postgres.count", "args": [{"name": "spec", "type": "json", "value": {"table": "users", "where": {"role": "{role}"}}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.count",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "users",
+                "where": {
+                  "role": "{role}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "role": ["provider", "client", "admin", "moderator"]
+        "role": [
+          "provider",
+          "client",
+          "admin",
+          "moderator"
+        ]
       },
-      "tags": ["postgres", "count", "query_builder", "where"]
+      "tags": [
+        "postgres",
+        "count",
+        "query_builder",
+        "where"
+      ]
     },
     {
       "id": "postgres_count_003",
@@ -518,14 +1435,51 @@
         "how many unresolved {entity}"
       ],
       "program": [
-        {"convention": "postgres.count", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "where": {"status": "pending"}}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.count",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "{entity}",
+                "where": {
+                  "status": "pending"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "entity": ["connection_requests", "appointments", "orders", "tasks", "messages"]
+        "entity": [
+          "connection_requests",
+          "appointments",
+          "orders",
+          "tasks",
+          "messages"
+        ]
       },
-      "tags": ["postgres", "count", "query_builder", "where", "status"]
+      "tags": [
+        "postgres",
+        "count",
+        "query_builder",
+        "where",
+        "status"
+      ]
     },
     {
       "id": "postgres_count_004",
@@ -537,12 +1491,43 @@
         "how many users have been verified"
       ],
       "program": [
-        {"convention": "postgres.count", "args": [{"name": "spec", "type": "json", "value": {"table": "users", "where": {"is_verified": true}}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.count",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "users",
+                "where": {
+                  "is_verified": true
+                }
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {},
-      "tags": ["postgres", "count", "query_builder", "where", "boolean"]
+      "tags": [
+        "postgres",
+        "count",
+        "query_builder",
+        "where",
+        "boolean"
+      ]
     },
     {
       "id": "postgres_count_005",
@@ -554,15 +1539,55 @@
         "total {entity} for user {id}"
       ],
       "program": [
-        {"convention": "postgres.count", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "where": {"user_id": "{id}"}}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.count",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "{entity}",
+                "where": {
+                  "user_id": "{id}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "entity": ["appointments", "messages", "reviews", "orders"],
-        "id": ["1", "42", "100"]
+        "entity": [
+          "appointments",
+          "messages",
+          "reviews",
+          "orders"
+        ],
+        "id": [
+          "1",
+          "42",
+          "100"
+        ]
       },
-      "tags": ["postgres", "count", "query_builder", "where", "user"]
+      "tags": [
+        "postgres",
+        "count",
+        "query_builder",
+        "where",
+        "user"
+      ]
     },
     {
       "id": "postgres_aggregate_001",
@@ -574,15 +1599,68 @@
         "{limit} best {role}s by average review score"
       ],
       "program": [
-        {"convention": "postgres.aggregate", "args": [{"name": "spec", "type": "json", "value": {"table": "reviews", "select": ["reviewed_id", "AVG(rating) as avg_rating", "COUNT(*) as total_reviews"], "group_by": ["reviewed_id"], "order_by": [{"field": "avg_rating", "dir": "desc"}], "limit": "{limit}"}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.aggregate",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "reviews",
+                "select": [
+                  "reviewed_id",
+                  "AVG(rating) as avg_rating",
+                  "COUNT(*) as total_reviews"
+                ],
+                "group_by": [
+                  "reviewed_id"
+                ],
+                "order_by": [
+                  {
+                    "field": "avg_rating",
+                    "dir": "desc"
+                  }
+                ],
+                "limit": "{limit}"
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "role": ["provider", "tutor", "freelancer", "vendor"],
-        "limit": ["5", "10", "20"]
+        "role": [
+          "provider",
+          "tutor",
+          "freelancer",
+          "vendor"
+        ],
+        "limit": [
+          "5",
+          "10",
+          "20"
+        ]
       },
-      "tags": ["postgres", "aggregate", "query_builder", "group_by", "order", "avg"]
+      "tags": [
+        "postgres",
+        "aggregate",
+        "query_builder",
+        "group_by",
+        "order",
+        "avg"
+      ]
     },
     {
       "id": "postgres_aggregate_002",
@@ -594,14 +1672,60 @@
         "mean rating for every {entity}"
       ],
       "program": [
-        {"convention": "postgres.aggregate", "args": [{"name": "spec", "type": "json", "value": {"table": "reviews", "select": ["{entity}_id", "AVG(rating) as avg_rating"], "group_by": ["{entity}_id"], "order_by": [{"field": "avg_rating", "dir": "desc"}]}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.aggregate",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "reviews",
+                "select": [
+                  "{entity}_id",
+                  "AVG(rating) as avg_rating"
+                ],
+                "group_by": [
+                  "{entity}_id"
+                ],
+                "order_by": [
+                  {
+                    "field": "avg_rating",
+                    "dir": "desc"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "entity": ["provider", "product", "service", "vendor"]
+        "entity": [
+          "provider",
+          "product",
+          "service",
+          "vendor"
+        ]
       },
-      "tags": ["postgres", "aggregate", "query_builder", "group_by", "avg"]
+      "tags": [
+        "postgres",
+        "aggregate",
+        "query_builder",
+        "group_by",
+        "avg"
+      ]
     },
     {
       "id": "postgres_aggregate_003",
@@ -613,15 +1737,66 @@
         "count {entity} grouped by {field}"
       ],
       "program": [
-        {"convention": "postgres.aggregate", "args": [{"name": "spec", "type": "json", "value": {"table": "{entity}", "select": ["{field}", "COUNT(*) as total"], "group_by": ["{field}"], "order_by": [{"field": "total", "dir": "desc"}]}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.aggregate",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "{entity}",
+                "select": [
+                  "{field}",
+                  "COUNT(*) as total"
+                ],
+                "group_by": [
+                  "{field}"
+                ],
+                "order_by": [
+                  {
+                    "field": "total",
+                    "dir": "desc"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "entity": ["users", "appointments", "orders", "messages"],
-        "field": ["role", "status", "type", "category"]
+        "entity": [
+          "users",
+          "appointments",
+          "orders",
+          "messages"
+        ],
+        "field": [
+          "role",
+          "status",
+          "type",
+          "category"
+        ]
       },
-      "tags": ["postgres", "aggregate", "query_builder", "group_by", "count"]
+      "tags": [
+        "postgres",
+        "aggregate",
+        "query_builder",
+        "group_by",
+        "count"
+      ]
     },
     {
       "id": "postgres_aggregate_004",
@@ -633,15 +1808,70 @@
         "{entity} with average rating over {threshold}"
       ],
       "program": [
-        {"convention": "postgres.aggregate", "args": [{"name": "spec", "type": "json", "value": {"table": "reviews", "select": ["{entity}_id", "AVG(rating) as avg_rating", "COUNT(*) as total"], "group_by": ["{entity}_id"], "having": {"AVG(rating)": {">=": "{threshold}"}}, "order_by": [{"field": "avg_rating", "dir": "desc"}]}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.aggregate",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "reviews",
+                "select": [
+                  "{entity}_id",
+                  "AVG(rating) as avg_rating",
+                  "COUNT(*) as total"
+                ],
+                "group_by": [
+                  "{entity}_id"
+                ],
+                "having": {
+                  "AVG(rating)": {
+                    ">=": "{threshold}"
+                  }
+                },
+                "order_by": [
+                  {
+                    "field": "avg_rating",
+                    "dir": "desc"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "entity": ["provider", "product", "service"],
-        "threshold": ["3.5", "4", "4.5"]
+        "entity": [
+          "provider",
+          "product",
+          "service"
+        ],
+        "threshold": [
+          "3.5",
+          "4",
+          "4.5"
+        ]
       },
-      "tags": ["postgres", "aggregate", "query_builder", "group_by", "having"]
+      "tags": [
+        "postgres",
+        "aggregate",
+        "query_builder",
+        "group_by",
+        "having"
+      ]
     },
     {
       "id": "postgres_aggregate_005",
@@ -653,14 +1883,61 @@
         "sum of amounts per {field}"
       ],
       "program": [
-        {"convention": "postgres.aggregate", "args": [{"name": "spec", "type": "json", "value": {"table": "orders", "select": ["{field}", "SUM(amount) as total_amount", "COUNT(*) as order_count"], "group_by": ["{field}"], "order_by": [{"field": "total_amount", "dir": "desc"}]}}]},
-        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
-        {"convention": "STOP"}
+        {
+          "convention": "postgres.aggregate",
+          "args": [
+            {
+              "name": "spec",
+              "type": "json",
+              "value": {
+                "table": "orders",
+                "select": [
+                  "{field}",
+                  "SUM(amount) as total_amount",
+                  "COUNT(*) as order_count"
+                ],
+                "group_by": [
+                  "{field}"
+                ],
+                "order_by": [
+                  {
+                    "field": "total_amount",
+                    "dir": "desc"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "convention": "EMIT",
+          "args": [
+            {
+              "name": "data",
+              "type": "ref",
+              "step": 0
+            }
+          ]
+        },
+        {
+          "convention": "STOP"
+        }
       ],
       "params": {
-        "field": ["status", "category", "user_id", "product_id"]
+        "field": [
+          "status",
+          "category",
+          "user_id",
+          "product_id"
+        ]
       },
-      "tags": ["postgres", "aggregate", "query_builder", "group_by", "sum"]
+      "tags": [
+        "postgres",
+        "aggregate",
+        "query_builder",
+        "group_by",
+        "sum"
+      ]
     }
   ]
 }

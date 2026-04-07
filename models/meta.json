@@ -1,26 +1,26 @@
 {
   "soma_synthesizer_version": "0.1.0",
   "architecture": "bilstm_gru",
-  "vocab_size": 606,
+  "vocab_size": 688,
   "embed_dim": 64,
   "hidden_dim": 128,
   "decoder_dim": 256,
   "num_layers": 2,
-  "num_conventions": 58,
-  "num_output_ids": 60,
+  "num_conventions": 62,
+  "num_output_ids": 64,
   "max_steps": 16,
   "max_seq_len": 20,
-  "emit_id": 58,
-  "stop_id": 59,
-  "start_token": 60,
-  "parameter_count": 1843488,
+  "emit_id": 62,
+  "stop_id": 63,
+  "start_token": 64,
+  "parameter_count": 1892040,
   "plugins": [],
   "training": {
-    "examples": 8704,
-    "epochs": 45,
-    "test_e2e_accuracy": 0.9989,
-    "training_time_seconds": 712
+    "examples": 0,
+    "epochs": 27,
+    "test_e2e_accuracy": 0.997,
+    "training_time_seconds": 0
   },
-  "export_timestamp": "2026-04-07T21:03:43.946476+00:00",
-  "model_hash": "0d33f6b2b2b8c4c2dcbbdc3da6a407c3fcedc76cb2be9acbee8f084fb8339441"
+  "export_timestamp": "2026-04-07T23:41:42.974689+00:00",
+  "model_hash": "977f7ad4e08bb300791ffd13863d7b3c8eb00f4af86b643bf506eea27458fec5"
 }
