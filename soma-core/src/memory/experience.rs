@@ -9,6 +9,10 @@ pub struct Experience {
     pub success: bool,
     pub execution_time_ms: u64,
     pub timestamp: std::time::Instant,
+    /// Cached hidden states from inference — (hidden_state, base_opcode_logits) per decoder step.
+    /// Pre-computed during normal inference so adaptation doesn't need to re-run ONNX.
+    /// Empty if not captured (backward compat).
+    pub cached_states: Vec<(Vec<f32>, Vec<f32>)>,
 }
 
 /// Ring buffer of recent experiences, used to drive LoRA adaptation.

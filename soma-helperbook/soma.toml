@@ -11,6 +11,9 @@ temperature = 0.8
 
 [mind.lora]
 adaptation_enabled = true
+adapt_every_n_successes = 3
+adapt_batch_size = 1
+adapt_learning_rate = 0.002
 
 [memory]
 checkpoint_dir = "./checkpoints"

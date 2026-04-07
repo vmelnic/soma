@@ -259,6 +259,7 @@ impl MindEngine for OnnxMindEngine {
         let mut prev_op = self.model_meta.start_token as i64;
         let mut steps = Vec::new();
         let mut step_confidences: Vec<f32> = Vec::new();
+        let mut cached_states: Vec<(Vec<f32>, Vec<f32>)> = Vec::new();
         let infer_start = Instant::now();
         let timeout_secs = self.max_inference_time_secs;
 
@@ -286,6 +287,10 @@ impl MindEngine for OnnxMindEngine {
 
             // Extract raw opcode logits from decoder output
             let mut op_l: Vec<f32> = dr[1].to_array_view::<f32>()?.iter().cloned().collect();
+
+            // Cache hidden state + base logits for fast LoRA adaptation (before LoRA is applied).
+            // This avoids re-running the ONNX model during adaptation.
+            cached_states.push((hidden.clone(), op_l.clone()));
 
             // Apply consolidated weight delta (permanent merged LoRA knowledge, Section 6.3).
             // This is the accumulated result of past consolidations: merged_delta = sum(scale * B @ A)
@@ -374,7 +379,7 @@ impl MindEngine for OnnxMindEngine {
         if timeout_secs > 0 && infer_start.elapsed().as_secs() >= timeout_secs {
             confidence *= 0.5; // penalty for incomplete program due to timeout
         }
-        Ok(Program { steps, confidence })
+        Ok(Program { steps, confidence, cached_states })
     }
 
     fn meta(&self) -> &ModelMeta { &self.model_meta }

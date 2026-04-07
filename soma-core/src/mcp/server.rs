@@ -799,6 +799,7 @@ impl McpServer {
                             success: result.success,
                             execution_time_ms,
                             timestamp: std::time::Instant::now(),
+                            cached_states: Vec::new(), // MCP path doesn't cache states yet
                         });
                     }
                     // Update experience buffer gauge

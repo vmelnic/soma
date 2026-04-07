@@ -49,6 +49,9 @@ pub enum ArgValue {
 pub struct Program {
     pub steps: Vec<ProgramStep>,
     pub confidence: f32,
+    /// Cached (hidden_state, base_opcode_logits) per decoder step for fast LoRA adaptation.
+    /// Pre-computed during inference so adaptation doesn't need to re-run the ONNX model.
+    pub cached_states: Vec<(Vec<f32>, Vec<f32>)>,
 }
 
 /// Model metadata.

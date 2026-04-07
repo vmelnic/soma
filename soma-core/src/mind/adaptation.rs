@@ -74,7 +74,24 @@ pub fn adapt_from_experience(
     let mut base_logits_batch: Vec<Vec<f32>> = Vec::new();
 
     for exp in sampled {
-        // Filter out non-convention steps (EMIT = -1, STOP = -2)
+        // Use cached states if available (fast path — no ONNX re-inference)
+        if !exp.cached_states.is_empty() {
+            for (hidden, op_logits) in &exp.cached_states {
+                // Find the target opcode for this step from the program
+                let step_idx = batch.len() % exp.program.len().max(1);
+                if step_idx < exp.program.len() {
+                    let (conv_id, _, _) = exp.program[step_idx];
+                    if conv_id >= 0 && (conv_id as usize) < num_conventions {
+                        batch.push((hidden.clone(), conv_id as usize));
+                        base_logits_batch.push(op_logits.clone());
+                    }
+                }
+            }
+            continue;
+        }
+
+        // Slow path: re-run ONNX encoder+decoder to get hidden states.
+        // This is only used when cached_states are not available.
         let valid_steps: Vec<&(i32, u8, u8)> = exp.program.iter()
             .filter(|(conv_id, _, _)| *conv_id >= 0)
             .collect();
@@ -83,7 +100,6 @@ pub fn adapt_from_experience(
             continue;
         }
 
-        // Run encoder on this experience's intent tokens
         let (enc_out, mut hidden) = match engine.encode_for_adaptation(&exp.intent_tokens) {
             Ok(result) => result,
             Err(e) => {
@@ -92,22 +108,14 @@ pub fn adapt_from_experience(
             }
         };
 
-        // Teacher-forced decoder walk through the program steps
         let mut prev_hiddens = vec![0.0f32; ms * dd];
         let mut prev_op = start_token as i64;
 
         for (t, (conv_id, _, _)) in exp.program.iter().enumerate() {
-            if t >= ms {
-                break;
-            }
+            if t >= ms { break; }
 
-            // Run one decoder step to get hidden state and base logits
             let (new_hidden, op_logits) = match engine.decode_step_for_adaptation(
-                prev_op,
-                &hidden,
-                &enc_out,
-                &prev_hiddens,
-                t,
+                prev_op, &hidden, &enc_out, &prev_hiddens, t,
             ) {
                 Ok(result) => result,
                 Err(e) => {
@@ -116,23 +124,18 @@ pub fn adapt_from_experience(
                 }
             };
 
-            // Only collect adaptation data for valid convention steps
             let target_opcode = *conv_id;
             if target_opcode >= 0 && (target_opcode as usize) < num_conventions {
                 batch.push((hidden.clone(), target_opcode as usize));
                 base_logits_batch.push(op_logits);
             }
 
-            // Update hidden state for next step
             for (i, &v) in new_hidden.iter().enumerate().take(dd) {
                 prev_hiddens[t * dd + i] = v;
             }
             hidden = new_hidden;
 
-            // Teacher forcing: use the target opcode as prev_op
-            if target_opcode == stop_id as i32 {
-                break;
-            }
+            if target_opcode == stop_id as i32 { break; }
             prev_op = target_opcode as i64;
         }
     }

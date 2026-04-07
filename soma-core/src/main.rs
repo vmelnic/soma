@@ -277,6 +277,7 @@ fn run_intent(
                     success: final_success,
                     execution_time_ms,
                     timestamp: std::time::Instant::now(),
+                    cached_states: program.cached_states.clone(),
                 };
                 if let Ok(mut buf) = experience_buf.write() {
                     // Section 17.1: Only successful executions are recorded
@@ -327,25 +328,34 @@ fn run_intent(
                         batch_size: config.mind.lora.adapt_batch_size,
                         learning_rate: config.mind.lora.adapt_learning_rate,
                     };
-                    let mut mind_guard = mind.write().unwrap();
-                    match mind::adaptation::adapt_from_experience(&mut *mind_guard, &experiences, &adapt_config) {
-                        Ok(result) => {
-                            println!("  [Mind] Adapted. Loss: {:.4}, Cycle: {}, LoRA magnitude: {:.6}",
-                                result.loss, result.cycle, result.lora_magnitude);
-                            if let Ok(mut p) = proprio.write() {
-                                p.record_adaptation();
+                    eprintln!("  [Mind] Adaptation triggered ({} experiences, batch_size={}) — running in background...",
+                        experiences.len(), config.mind.lora.adapt_batch_size);
+                    // Run adaptation on a background thread to avoid blocking the REPL/MCP.
+                    // This mirrors the whitepaper's "sleep" metaphor — learning happens
+                    // during idle periods, not during active execution.
+                    let mind_clone = mind.clone();
+                    let proprio_clone = proprio.clone();
+                    let metrics_clone = soma_metrics.clone();
+                    std::thread::spawn(move || {
+                        let mut mind_guard = mind_clone.write().unwrap();
+                        match mind::adaptation::adapt_from_experience(&mut *mind_guard, &experiences, &adapt_config) {
+                            Ok(result) => {
+                                eprintln!("  [Mind] Adapted. Loss: {:.4}, Cycle: {}, LoRA magnitude: {:.6}",
+                                    result.loss, result.cycle, result.lora_magnitude);
+                                if let Ok(mut p) = proprio_clone.write() {
+                                    p.record_adaptation();
+                                }
+                                metrics_clone.adaptations_total.fetch_add(1, Ordering::Relaxed);
+                                metrics_clone.lora_magnitude.store(
+                                    result.lora_magnitude.to_bits() as u64,
+                                    Ordering::Relaxed,
+                                );
                             }
-                            soma_metrics.adaptations_total.fetch_add(1, Ordering::Relaxed);
-                            // Update LoRA magnitude metric
-                            soma_metrics.lora_magnitude.store(
-                                result.lora_magnitude.to_bits() as u64,
-                                Ordering::Relaxed,
-                            );
+                            Err(e) => {
+                                tracing::warn!(error = %e, "LoRA adaptation failed");
+                            }
                         }
-                        Err(e) => {
-                            tracing::warn!(error = %e, "LoRA adaptation failed");
-                        }
-                    }
+                    });
                 }
             }
         }
