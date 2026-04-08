@@ -12,6 +12,7 @@
 
 pub mod adaptation;
 pub mod onnx_engine;
+pub mod reflex;
 pub mod tokenizer;
 pub mod lora;
 

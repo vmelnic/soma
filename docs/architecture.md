@@ -266,16 +266,18 @@ Synaptic handles SOMA-to-SOMA.
 - Optional ChaCha20-Poly1305 encryption
 - Big-endian byte order
 
-### 24 Signal Types (6 Categories)
+### 26 Signal Types (6 Categories)
 
 | Category  | Signals                                                  |
 |-----------|----------------------------------------------------------|
 | Protocol  | HANDSHAKE, HANDSHAKE_ACK, CLOSE, PING, PONG, ERROR, CONTROL |
-| Data      | INTENT, RESULT, DATA, BINARY                             |
+| Data      | INTENT, RESULT, INVOKE, QUERY, DATA, BINARY              |
 | Streaming | STREAM_START, STREAM_DATA, STREAM_END                    |
 | Chunked   | CHUNK_START, CHUNK_DATA, CHUNK_END, CHUNK_ACK            |
 | Discovery | DISCOVER, DISCOVER_ACK, PEER_QUERY, PEER_LIST            |
 | Pub/Sub   | SUBSCRIBE, UNSUBSCRIBE                                   |
+
+SOMA-to-SOMA supports three interaction modes matching MCP: INTENT (Mind inference), INVOKE (direct convention call), and QUERY (state query).
 
 ### Transport
 

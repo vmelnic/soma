@@ -166,6 +166,38 @@ async fn handle_ws_connection(
                                 ack.trace_id = signal.effective_trace_id();
                                 Some(ack)
                             }
+                            SignalType::Invoke => {
+                                let convention =
+                                    String::from_utf8_lossy(&signal.payload).to_string();
+                                tracing::info!(
+                                    peer = %addr,
+                                    convention = %convention,
+                                    "WS invoke received"
+                                );
+                                let mut ack =
+                                    Signal::new(SignalType::Data, server_id.to_string());
+                                ack.payload =
+                                    format!("ack:invoke:{convention}").into_bytes();
+                                ack.channel_id = signal.channel_id;
+                                ack.trace_id = signal.effective_trace_id();
+                                Some(ack)
+                            }
+                            SignalType::Query => {
+                                let query_type =
+                                    String::from_utf8_lossy(&signal.payload).to_string();
+                                tracing::info!(
+                                    peer = %addr,
+                                    query_type = %query_type,
+                                    "WS query received"
+                                );
+                                let mut ack =
+                                    Signal::new(SignalType::Data, server_id.to_string());
+                                ack.payload =
+                                    format!("ack:query:{query_type}").into_bytes();
+                                ack.channel_id = signal.channel_id;
+                                ack.trace_id = signal.effective_trace_id();
+                                Some(ack)
+                            }
                             SignalType::Close => {
                                 tracing::info!(peer = %addr, "Peer sent CLOSE");
                                 break;

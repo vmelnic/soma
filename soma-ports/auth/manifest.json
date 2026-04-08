@@ -1,0 +1,85 @@
+{
+  "id": "soma.ports.auth",
+  "name": "Auth",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.auth",
+  "description": "Authentication: OTP, sessions, TOTP, bearer tokens",
+  "port": {
+    "port_id": "auth",
+    "kind": "custom",
+    "trust_level": "trusted"
+  },
+  "skills": [
+    {
+      "id": "soma.ports.auth.otp_generate",
+      "name": "Generate OTP",
+      "description": "Generate a 6-digit OTP for phone verification",
+      "input": { "phone": "string" },
+      "output": { "phone": "string", "debug_code": "string", "expires_at": "string (ISO 8601)" }
+    },
+    {
+      "id": "soma.ports.auth.otp_verify",
+      "name": "Verify OTP",
+      "description": "Verify OTP code (max 5 attempts, 5-minute expiry)",
+      "input": { "phone": "string", "code": "string" },
+      "output": { "valid": "boolean", "user_id": "string|null" }
+    },
+    {
+      "id": "soma.ports.auth.session_create",
+      "name": "Create session",
+      "description": "Create an authenticated session token",
+      "input": { "user_id": "string", "device_info": "string (optional)", "ttl_hours": "integer (optional, default 720)" },
+      "output": { "token": "string", "user_id": "string", "expires_at": "string (ISO 8601)" }
+    },
+    {
+      "id": "soma.ports.auth.session_validate",
+      "name": "Validate session",
+      "description": "Check if a session token is valid and not expired",
+      "input": { "token": "string" },
+      "output": { "valid": "boolean", "user_id": "string|null" }
+    },
+    {
+      "id": "soma.ports.auth.session_revoke",
+      "name": "Revoke session",
+      "description": "Revoke a session by token",
+      "input": { "token": "string" },
+      "output": { "revoked": "boolean" }
+    },
+    {
+      "id": "soma.ports.auth.totp_generate",
+      "name": "Generate TOTP secret",
+      "description": "Generate a TOTP secret and provisioning URI for 2FA setup",
+      "input": { "user_id": "string" },
+      "output": { "secret": "string (base32)", "provisioning_uri": "string", "user_id": "string" }
+    },
+    {
+      "id": "soma.ports.auth.totp_verify",
+      "name": "Verify TOTP",
+      "description": "Verify a TOTP code against a base32 secret",
+      "input": { "secret": "string (base32)", "code": "string" },
+      "output": { "valid": "boolean" }
+    },
+    {
+      "id": "soma.ports.auth.token_generate",
+      "name": "Generate token",
+      "description": "Generate a random bearer token with expiry",
+      "input": { "user_id": "string", "ttl_hours": "integer (optional, default 24)" },
+      "output": { "token": "string", "user_id": "string", "expires_at": "string (ISO 8601)" }
+    },
+    {
+      "id": "soma.ports.auth.token_validate",
+      "name": "Validate token",
+      "description": "Check if a bearer token is valid",
+      "input": { "token": "string" },
+      "output": { "valid": "boolean", "user_id": "string|null" }
+    },
+    {
+      "id": "soma.ports.auth.token_refresh",
+      "name": "Refresh token",
+      "description": "Extend the expiry of a valid bearer token",
+      "input": { "token": "string", "ttl_hours": "integer (optional, default 24)" },
+      "output": { "refreshed": "boolean", "expires_at": "string (ISO 8601)" }
+    }
+  ]
+}

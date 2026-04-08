@@ -1,0 +1,22 @@
+# SOMA-next Configuration — soma.toml
+# All fields have sensible defaults. Only override what you need.
+
+[soma]
+# id = "my-node"               # Instance ID (default: machine hostname)
+# log_level = "info"           # trace, debug, info, warn, error
+
+[runtime]
+# max_steps = 100              # Max control-loop steps per session
+# default_risk_budget = 0.5    # Risk budget for new sessions (0.0 to 1.0)
+# default_latency_budget_ms = 30000  # Latency budget in milliseconds
+# default_resource_budget = 100.0    # Abstract resource units per session
+
+[mcp]
+# transport = "stdio"          # MCP transport: "stdio" or "http"
+# enabled = false              # Start MCP server on launch
+
+[ports]
+# filesystem_enabled = true    # Enable the filesystem port
+# http_enabled = true          # Enable the HTTP port
+# require_signatures = false   # Require Ed25519 signatures for dynamic port libraries
+                               # Set true for production to reject unsigned libraries

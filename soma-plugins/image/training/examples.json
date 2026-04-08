@@ -1,0 +1,257 @@
+{
+  "schema_version": "1.0",
+  "plugin": "image",
+  "plugin_version": "0.1.0",
+  "examples": [
+    {
+      "id": "image_thumbnail_001",
+      "intents": [
+        "generate a thumbnail at {width}x{height}",
+        "create a {width}x{height} thumbnail of this image",
+        "make a thumbnail {width} by {height} pixels",
+        "shrink image to a {width}x{height} thumbnail",
+        "produce a small {width}x{height} preview"
+      ],
+      "program": [
+        {"convention": "image.thumbnail", "args": [{"name": "data", "type": "span", "extract": "data"}, {"name": "width", "type": "span", "extract": "width"}, {"name": "height", "type": "span", "extract": "height"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "width": [100, 150, 200, 256, 320],
+        "height": [100, 150, 200, 256, 320]
+      },
+      "tags": ["image", "thumbnail", "resize"]
+    },
+    {
+      "id": "image_thumbnail_002",
+      "intents": [
+        "generate a thumbnail of this image at 200x200",
+        "thumbnail the photo at 200 by 200",
+        "create a 200x200 thumbnail preview",
+        "make a small 200x200 version of this image",
+        "produce a 200 pixel square thumbnail"
+      ],
+      "program": [
+        {"convention": "image.thumbnail", "args": [{"name": "data", "type": "span", "extract": "data"}, {"name": "width", "type": "literal", "value": 200}, {"name": "height", "type": "literal", "value": 200}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["image", "thumbnail"]
+    },
+    {
+      "id": "image_resize_001",
+      "intents": [
+        "resize the image to {width}x{height}",
+        "scale image to {width} by {height} pixels",
+        "change image dimensions to {width}x{height}",
+        "make the image {width} pixels wide and {height} tall",
+        "resize to {width}x{height} with high quality"
+      ],
+      "program": [
+        {"convention": "image.resize", "args": [{"name": "data", "type": "span", "extract": "data"}, {"name": "width", "type": "span", "extract": "width"}, {"name": "height", "type": "span", "extract": "height"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "width": [640, 800, 1024, 1280, 1920],
+        "height": [480, 600, 768, 720, 1080]
+      },
+      "tags": ["image", "resize", "scale"]
+    },
+    {
+      "id": "image_resize_002",
+      "intents": [
+        "resize the image to 800 pixels wide",
+        "scale image to 800x600",
+        "make the image 800 by 600 pixels",
+        "resize to 800x600 resolution",
+        "change image size to 800 wide 600 tall"
+      ],
+      "program": [
+        {"convention": "image.resize", "args": [{"name": "data", "type": "span", "extract": "data"}, {"name": "width", "type": "literal", "value": 800}, {"name": "height", "type": "literal", "value": 600}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["image", "resize"]
+    },
+    {
+      "id": "image_crop_001",
+      "intents": [
+        "crop the image at ({x},{y}) with size {w}x{h}",
+        "extract a {w}x{h} region starting at {x},{y}",
+        "cut out a rectangle from {x},{y} of width {w} height {h}",
+        "crop region at position {x},{y} to size {w} by {h}",
+        "trim the image to a {w}x{h} area at offset {x},{y}"
+      ],
+      "program": [
+        {"convention": "image.crop", "args": [{"name": "data", "type": "span", "extract": "data"}, {"name": "x", "type": "span", "extract": "x"}, {"name": "y", "type": "span", "extract": "y"}, {"name": "w", "type": "span", "extract": "w"}, {"name": "h", "type": "span", "extract": "h"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "x": [0, 50, 100, 200],
+        "y": [0, 50, 100, 200],
+        "w": [200, 300, 400, 500],
+        "h": [200, 300, 400, 500]
+      },
+      "tags": ["image", "crop", "region"]
+    },
+    {
+      "id": "image_crop_002",
+      "intents": [
+        "crop the profile photo to a square",
+        "crop the image to a 300x300 square from the top-left",
+        "extract a square region from the image",
+        "cut a 300 by 300 square from position 0,0",
+        "make a square crop of the image at 300 pixels"
+      ],
+      "program": [
+        {"convention": "image.crop", "args": [{"name": "data", "type": "span", "extract": "data"}, {"name": "x", "type": "literal", "value": 0}, {"name": "y", "type": "literal", "value": 0}, {"name": "w", "type": "literal", "value": 300}, {"name": "h", "type": "literal", "value": 300}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["image", "crop", "square", "profile"]
+    },
+    {
+      "id": "image_format_convert_001",
+      "intents": [
+        "convert this image to {format}",
+        "change image format to {format}",
+        "save the image as {format}",
+        "re-encode image in {format} format",
+        "export image as {format}",
+        "transform image to {format}"
+      ],
+      "program": [
+        {"convention": "image.format_convert", "args": [{"name": "data", "type": "span", "extract": "data"}, {"name": "format", "type": "span", "extract": "format"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "format": ["png", "jpeg", "webp"]
+      },
+      "tags": ["image", "format", "convert"]
+    },
+    {
+      "id": "image_format_convert_002",
+      "intents": [
+        "convert this image to PNG",
+        "save as PNG format",
+        "re-encode this as a PNG image",
+        "change the image format to PNG",
+        "export as PNG"
+      ],
+      "program": [
+        {"convention": "image.format_convert", "args": [{"name": "data", "type": "span", "extract": "data"}, {"name": "format", "type": "literal", "value": "png"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["image", "format", "png"]
+    },
+    {
+      "id": "image_exif_strip_001",
+      "intents": [
+        "strip EXIF data from the photo",
+        "remove EXIF metadata from this image",
+        "clean metadata from the image",
+        "delete EXIF tags from the photo",
+        "remove location data from the image",
+        "strip all metadata from this picture"
+      ],
+      "program": [
+        {"convention": "image.exif_strip", "args": [{"name": "data", "type": "span", "extract": "data"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["image", "exif", "metadata", "privacy"]
+    },
+    {
+      "id": "image_exif_strip_002",
+      "intents": [
+        "strip EXIF data and convert to PNG",
+        "remove metadata then save as PNG",
+        "clean EXIF from image and convert format to PNG",
+        "strip metadata and re-encode as PNG"
+      ],
+      "program": [
+        {"convention": "image.exif_strip", "args": [{"name": "data", "type": "span", "extract": "data"}]},
+        {"convention": "image.format_convert", "args": [{"name": "data", "type": "ref", "step": 0}, {"name": "format", "type": "literal", "value": "png"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["image", "exif", "format", "multi-step"]
+    },
+    {
+      "id": "image_resize_and_convert_001",
+      "intents": [
+        "resize image to {width}x{height} and convert to {format}",
+        "scale to {width} by {height} then save as {format}",
+        "make image {width}x{height} and export as {format}",
+        "resize and convert image to {format} at {width}x{height}"
+      ],
+      "program": [
+        {"convention": "image.resize", "args": [{"name": "data", "type": "span", "extract": "data"}, {"name": "width", "type": "span", "extract": "width"}, {"name": "height", "type": "span", "extract": "height"}]},
+        {"convention": "image.format_convert", "args": [{"name": "data", "type": "ref", "step": 0}, {"name": "format", "type": "span", "extract": "format"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "width": [640, 800, 1024, 1920],
+        "height": [480, 600, 768, 1080],
+        "format": ["png", "jpeg", "webp"]
+      },
+      "tags": ["image", "resize", "format", "multi-step"]
+    },
+    {
+      "id": "image_thumbnail_strip_001",
+      "intents": [
+        "create a thumbnail and strip EXIF data",
+        "generate a {width}x{height} thumbnail without metadata",
+        "make a clean thumbnail with no EXIF",
+        "thumbnail at {width}x{height} with metadata removed"
+      ],
+      "program": [
+        {"convention": "image.exif_strip", "args": [{"name": "data", "type": "span", "extract": "data"}]},
+        {"convention": "image.thumbnail", "args": [{"name": "data", "type": "ref", "step": 0}, {"name": "width", "type": "span", "extract": "width"}, {"name": "height", "type": "span", "extract": "height"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "width": [100, 150, 200, 256],
+        "height": [100, 150, 200, 256]
+      },
+      "tags": ["image", "thumbnail", "exif", "multi-step"]
+    },
+    {
+      "id": "image_crop_and_resize_001",
+      "intents": [
+        "crop the image then resize to {width}x{height}",
+        "extract a region and scale it to {width} by {height}",
+        "crop at ({x},{y}) size {w}x{h} then resize to {width}x{height}",
+        "cut out a section and resize the result"
+      ],
+      "program": [
+        {"convention": "image.crop", "args": [{"name": "data", "type": "span", "extract": "data"}, {"name": "x", "type": "span", "extract": "x"}, {"name": "y", "type": "span", "extract": "y"}, {"name": "w", "type": "span", "extract": "w"}, {"name": "h", "type": "span", "extract": "h"}]},
+        {"convention": "image.resize", "args": [{"name": "data", "type": "ref", "step": 0}, {"name": "width", "type": "span", "extract": "width"}, {"name": "height", "type": "span", "extract": "height"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "x": [0, 50, 100],
+        "y": [0, 50, 100],
+        "w": [400, 500, 600],
+        "h": [400, 500, 600],
+        "width": [200, 300, 400],
+        "height": [200, 300, 400]
+      },
+      "tags": ["image", "crop", "resize", "multi-step"]
+    }
+  ]
+}

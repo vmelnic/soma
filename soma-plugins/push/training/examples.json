@@ -1,0 +1,190 @@
+{
+  "schema_version": "1.0",
+  "plugin": "push",
+  "plugin_version": "0.1.0",
+  "examples": [
+    {
+      "id": "push_fcm_001",
+      "intents": [
+        "send push notification to {device_token}",
+        "notify device {device_token}",
+        "send FCM message to {device_token}",
+        "push {title} to {device_token}",
+        "send firebase notification to {device_token}"
+      ],
+      "program": [
+        {"convention": "push.send_fcm", "args": [{"name": "device_token", "type": "span", "extract": "device_token"}, {"name": "title", "type": "span", "extract": "title"}, {"name": "body", "type": "span", "extract": "body"}, {"name": "data", "type": "literal", "value": "{}"}]},
+        {"convention": "EMIT", "args": [{"name": "result", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "device_token": ["dAbC123xYz:APA91bHun4MxP5egoKl0", "fKLm456pQr:APA91bGsT7vWx"],
+        "title": ["New message", "Reminder", "Alert"],
+        "body": ["You have a new message", "Your appointment is in 30 minutes", "Action required"]
+      },
+      "tags": ["push", "fcm", "notification"]
+    },
+    {
+      "id": "push_fcm_data_001",
+      "intents": [
+        "send data message via FCM to {device_token}",
+        "push silent notification to {device_token} with data",
+        "send FCM data payload to {device_token}",
+        "notify {device_token} with custom data"
+      ],
+      "program": [
+        {"convention": "push.send_fcm", "args": [{"name": "device_token", "type": "span", "extract": "device_token"}, {"name": "title", "type": "span", "extract": "title"}, {"name": "body", "type": "span", "extract": "body"}, {"name": "data", "type": "span", "extract": "data"}]},
+        {"convention": "EMIT", "args": [{"name": "result", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "device_token": ["dAbC123xYz:APA91bHun4MxP5egoKl0", "fKLm456pQr:APA91bGsT7vWx"],
+        "title": ["Order Update", "Payment Received"],
+        "body": ["Your order has shipped", "We received your payment"],
+        "data": ["{\"order_id\":\"12345\",\"action\":\"view_order\"}", "{\"payment_id\":\"pay_abc\",\"amount\":\"50.00\"}"]
+      },
+      "tags": ["push", "fcm", "data", "notification"]
+    },
+    {
+      "id": "push_webpush_001",
+      "intents": [
+        "send web push notification to browser",
+        "notify browser subscription with {title}",
+        "send webpush to {subscription_json}",
+        "push browser notification with {title}",
+        "send VAPID push notification"
+      ],
+      "program": [
+        {"convention": "push.send_webpush", "args": [{"name": "subscription_json", "type": "span", "extract": "subscription_json"}, {"name": "title", "type": "span", "extract": "title"}, {"name": "body", "type": "span", "extract": "body"}]},
+        {"convention": "EMIT", "args": [{"name": "result", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "subscription_json": ["{\"endpoint\":\"https://fcm.googleapis.com/fcm/send/abc\",\"keys\":{\"p256dh\":\"BNcR\",\"auth\":\"tBHI\"}}"],
+        "title": ["New Update", "Reminder"],
+        "body": ["Check out the latest update", "You have pending tasks"]
+      },
+      "tags": ["push", "webpush", "vapid", "browser"]
+    },
+    {
+      "id": "push_register_001",
+      "intents": [
+        "register device for {user_id}",
+        "add push token for user {user_id}",
+        "register {platform} device for {user_id}",
+        "save device token for {user_id}",
+        "enable push notifications for {user_id}"
+      ],
+      "program": [
+        {"convention": "push.register_device", "args": [{"name": "user_id", "type": "span", "extract": "user_id"}, {"name": "platform", "type": "span", "extract": "platform"}, {"name": "token", "type": "span", "extract": "token"}]},
+        {"convention": "EMIT", "args": [{"name": "result", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": ["user_123", "user_456", "user_789"],
+        "platform": ["android", "ios", "web"],
+        "token": ["dAbC123xYz:APA91bHun4MxP5egoKl0", "fKLm456pQr:APA91bGsT7vWx", "{\"endpoint\":\"https://fcm.googleapis.com/fcm/send/abc\"}"]
+      },
+      "tags": ["push", "register", "device"]
+    },
+    {
+      "id": "push_unregister_001",
+      "intents": [
+        "unregister device for {user_id}",
+        "remove push token for user {user_id}",
+        "disable {platform} notifications for {user_id}",
+        "delete device registration for {user_id}",
+        "stop push notifications for {user_id} on {platform}"
+      ],
+      "program": [
+        {"convention": "push.unregister_device", "args": [{"name": "user_id", "type": "span", "extract": "user_id"}, {"name": "platform", "type": "span", "extract": "platform"}]},
+        {"convention": "EMIT", "args": [{"name": "result", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": ["user_123", "user_456", "user_789"],
+        "platform": ["android", "ios", "web"]
+      },
+      "tags": ["push", "unregister", "device"]
+    },
+    {
+      "id": "push_register_and_send_001",
+      "intents": [
+        "register device for {user_id} then send a welcome notification",
+        "add device for {user_id} and push a welcome message",
+        "enroll {user_id} for push and notify them"
+      ],
+      "program": [
+        {"convention": "push.register_device", "args": [{"name": "user_id", "type": "span", "extract": "user_id"}, {"name": "platform", "type": "span", "extract": "platform"}, {"name": "token", "type": "span", "extract": "token"}]},
+        {"convention": "push.send_fcm", "args": [{"name": "device_token", "type": "span", "extract": "token"}, {"name": "title", "type": "literal", "value": "Welcome"}, {"name": "body", "type": "literal", "value": "Push notifications are now enabled!"}, {"name": "data", "type": "literal", "value": "{}"}]},
+        {"convention": "EMIT", "args": [{"name": "result", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": ["user_123", "user_456"],
+        "platform": ["android", "ios"],
+        "token": ["dAbC123xYz:APA91bHun4MxP5egoKl0", "fKLm456pQr:APA91bGsT7vWx"]
+      },
+      "tags": ["push", "register", "fcm", "multi-step"]
+    },
+    {
+      "id": "push_notify_all_platforms_001",
+      "intents": [
+        "send notification to all devices of {user_id}",
+        "notify {user_id} on all platforms",
+        "push alert to every device for {user_id}",
+        "broadcast notification to {user_id}"
+      ],
+      "program": [
+        {"convention": "push.send_fcm", "args": [{"name": "device_token", "type": "span", "extract": "device_token"}, {"name": "title", "type": "span", "extract": "title"}, {"name": "body", "type": "span", "extract": "body"}, {"name": "data", "type": "literal", "value": "{}"}]},
+        {"convention": "EMIT", "args": [{"name": "result", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "device_token": ["dAbC123xYz:APA91bHun4MxP5egoKl0"],
+        "title": ["Important Update", "Security Alert"],
+        "body": ["Please review your account settings", "New login detected from a new device"]
+      },
+      "tags": ["push", "fcm", "broadcast", "multi-device"]
+    },
+    {
+      "id": "push_unregister_and_cleanup_001",
+      "intents": [
+        "remove {user_id} from all push notifications",
+        "unregister all devices for {user_id}",
+        "disable all notifications for {user_id}",
+        "clean up push registrations for {user_id}"
+      ],
+      "program": [
+        {"convention": "push.unregister_device", "args": [{"name": "user_id", "type": "span", "extract": "user_id"}, {"name": "platform", "type": "literal", "value": "android"}]},
+        {"convention": "push.unregister_device", "args": [{"name": "user_id", "type": "span", "extract": "user_id"}, {"name": "platform", "type": "literal", "value": "ios"}]},
+        {"convention": "push.unregister_device", "args": [{"name": "user_id", "type": "span", "extract": "user_id"}, {"name": "platform", "type": "literal", "value": "web"}]},
+        {"convention": "EMIT", "args": [{"name": "result", "type": "literal", "value": "true"}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": ["user_123", "user_456", "user_789"]
+      },
+      "tags": ["push", "unregister", "cleanup", "multi-step"]
+    },
+    {
+      "id": "push_webpush_multiple_001",
+      "intents": [
+        "send web push to multiple subscribers",
+        "broadcast webpush notification",
+        "push browser notification to all subscribers"
+      ],
+      "program": [
+        {"convention": "push.send_webpush", "args": [{"name": "subscription_json", "type": "span", "extract": "subscription_json"}, {"name": "title", "type": "span", "extract": "title"}, {"name": "body", "type": "span", "extract": "body"}]},
+        {"convention": "EMIT", "args": [{"name": "result", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "subscription_json": ["{\"endpoint\":\"https://fcm.googleapis.com/fcm/send/abc\",\"keys\":{\"p256dh\":\"BNcR\",\"auth\":\"tBHI\"}}"],
+        "title": ["System Maintenance", "New Feature"],
+        "body": ["Scheduled maintenance tonight at 10 PM", "Try our new dashboard"]
+      },
+      "tags": ["push", "webpush", "broadcast"]
+    }
+  ]
+}

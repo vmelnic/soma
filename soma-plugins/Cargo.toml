@@ -5,7 +5,12 @@ members = [
     "crypto",
     "geo",
     "http-bridge",
+    "image",
     "postgres",
+    "push",
     "redis",
+    "s3",
+    "smtp",
+    "timer",
 ]
 resolver = "3"

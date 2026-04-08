@@ -1,0 +1,13 @@
+[package]
+name = "soma-plugin-smtp"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soma-plugin-sdk = { path = "../sdk" }
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+serde_json = "1"

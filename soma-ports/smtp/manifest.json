@@ -1,0 +1,30 @@
+{
+  "id": "soma.ports.smtp",
+  "name": "SMTP",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.smtp",
+  "description": "SMTP email delivery: plain text, HTML, and attachments via lettre",
+  "port": {
+    "port_id": "smtp",
+    "kind": "messaging",
+    "trust_level": "verified"
+  },
+  "skills": [
+    {
+      "id": "soma.ports.smtp.send_plain",
+      "name": "Send Plain",
+      "description": "Send a plain-text email to a recipient"
+    },
+    {
+      "id": "soma.ports.smtp.send_html",
+      "name": "Send HTML",
+      "description": "Send an HTML email to a recipient"
+    },
+    {
+      "id": "soma.ports.smtp.send_attachment",
+      "name": "Send Attachment",
+      "description": "Send an email with a binary attachment"
+    }
+  ]
+}

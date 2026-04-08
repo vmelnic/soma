@@ -1,0 +1,422 @@
+{
+  "schema_version": "1.0",
+  "plugin": "_cross_plugin",
+  "plugin_version": "0.1.0",
+  "examples": [
+    {
+      "id": "xp_001",
+      "intents": [
+        "query users and cache the result",
+        "fetch all users and store in cache",
+        "get users from database and cache them",
+        "load users and save to redis cache",
+        "read users table and cache the result"
+      ],
+      "program": [
+        {"convention": "postgres.query", "args": [{"name": "sql", "type": "literal", "value": "SELECT id, name, phone, bio, role FROM users LIMIT 100"}]},
+        {"convention": "redis.set", "args": [{"name": "key", "type": "literal", "value": "cache:users:all"}, {"name": "value", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["cross-plugin", "postgres", "redis", "cache", "multi-step"]
+    },
+    {
+      "id": "xp_002",
+      "intents": [
+        "get cached contacts or query database for {user_id}",
+        "fetch contacts for {user_id} from cache or database",
+        "look up {user_id} contacts with cache fallback",
+        "retrieve contacts for {user_id} trying cache first",
+        "load {user_id} contacts from cache or postgres"
+      ],
+      "program": [
+        {"convention": "redis.get", "args": [{"name": "key", "type": "literal", "value": "cache:contacts"}]},
+        {"convention": "postgres.query", "args": [{"name": "sql", "type": "literal", "value": "SELECT c.id, u.name, u.photo_url, u.bio FROM connections c JOIN users u ON (c.requester_id = u.id OR c.recipient_id = u.id) WHERE (c.requester_id = $1 OR c.recipient_id = $1) AND c.status = 'accepted' AND u.id != $1"}]},
+        {"convention": "redis.set", "args": [{"name": "key", "type": "literal", "value": "cache:contacts"}, {"name": "value", "type": "ref", "step": 1}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": ["user_001", "user_002", "user_003", "user_004", "user_005"]
+      },
+      "tags": ["cross-plugin", "postgres", "redis", "cache", "fallback", "multi-step"]
+    },
+    {
+      "id": "xp_003",
+      "intents": [
+        "query providers for {service} and cache results with TTL",
+        "search {service} providers and cache for later",
+        "find {service} providers and store in redis",
+        "load {service} providers from DB and cache them",
+        "get {service} providers with caching"
+      ],
+      "program": [
+        {"convention": "postgres.query", "args": [{"name": "sql", "type": "literal", "value": "SELECT u.id, u.name, u.bio, us.rate_amount FROM users u JOIN user_services us ON u.id = us.user_id JOIN service_categories sc ON us.service_id = sc.id WHERE sc.name_en = $1 AND u.role IN ('provider', 'both')"}]},
+        {"convention": "redis.set", "args": [{"name": "key", "type": "literal", "value": "cache:providers:service"}, {"name": "value", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "service": ["Hair Styling", "House Cleaning", "Tutoring", "Photography", "Massage"]
+      },
+      "tags": ["cross-plugin", "postgres", "redis", "cache", "providers", "multi-step"]
+    },
+
+    {
+      "id": "xp_004",
+      "intents": [
+        "get my profile",
+        "show my user profile",
+        "fetch my account details",
+        "view my profile information",
+        "what is my profile"
+      ],
+      "program": [
+        {"convention": "auth.validate_session", "args": []},
+        {"convention": "postgres.query_one", "args": [{"name": "sql", "type": "literal", "value": "SELECT id, phone, name, bio, photo_url, role, is_verified, locale, currency, created_at FROM users WHERE id = $1"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["cross-plugin", "auth", "postgres", "profile", "multi-step"]
+    },
+    {
+      "id": "xp_005",
+      "intents": [
+        "update my bio to {bio}",
+        "change my profile bio to {bio}",
+        "set my bio as {bio}",
+        "edit my description to {bio}",
+        "update my profile description to {bio}"
+      ],
+      "program": [
+        {"convention": "auth.validate_session", "args": []},
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "UPDATE users SET bio = $2 WHERE id = $1"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "bio": ["Professional cleaner, 5 years experience", "Hair stylist specializing in color", "Math tutor, PhD student", "Licensed electrician", "Freelance photographer"]
+      },
+      "tags": ["cross-plugin", "auth", "postgres", "update", "multi-step"]
+    },
+    {
+      "id": "xp_006",
+      "intents": [
+        "get my appointments and cache them",
+        "fetch my schedule with caching",
+        "load my upcoming appointments into cache",
+        "retrieve my appointments from DB and store in redis",
+        "pull my appointments and cache the result"
+      ],
+      "program": [
+        {"convention": "auth.validate_session", "args": []},
+        {"convention": "postgres.query", "args": [{"name": "sql", "type": "literal", "value": "SELECT a.id, a.service, a.start_time, a.status, u.name AS provider_name FROM appointments a JOIN users u ON a.provider_id = u.id WHERE a.client_id = $1 AND a.start_time >= NOW() ORDER BY a.start_time ASC"}]},
+        {"convention": "redis.set", "args": [{"name": "key", "type": "literal", "value": "cache:appointments"}, {"name": "value", "type": "ref", "step": 1}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["cross-plugin", "auth", "postgres", "redis", "cache", "appointments", "multi-step"]
+    },
+
+    {
+      "id": "xp_007",
+      "intents": [
+        "hash password {password} and create user with phone {phone} and name {name}",
+        "register user {name} with phone {phone} and hashed password {password}",
+        "create account for {name} phone {phone} with secure password {password}",
+        "sign up {name} with phone {phone} securely hashing password {password}",
+        "new user {name} phone {phone} with argon2 hashed password {password}"
+      ],
+      "program": [
+        {"convention": "crypto.hash_argon2", "args": [{"name": "password", "type": "span", "extract": "password"}]},
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "INSERT INTO users (phone, name, created_at) VALUES ($1, $2, NOW()) RETURNING id"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "password": ["hunter2", "s3cret!", "MyP@ssw0rd", "correcthorsebatterystaple", "admin123"],
+        "phone": ["+40712345678", "+1234567890", "+447911123456", "+33612345678", "+491701234567"],
+        "name": ["Ana", "Ion", "Maria", "Alex", "Elena"]
+      },
+      "tags": ["cross-plugin", "crypto", "postgres", "user", "create", "multi-step"]
+    },
+    {
+      "id": "xp_008",
+      "intents": [
+        "verify password {password} and create session for {phone}",
+        "authenticate {phone} with password {password} and log in",
+        "check password {password} for user {phone} and start session",
+        "login {phone} by verifying password {password} and issuing session",
+        "validate password {password} for {phone} then create auth session"
+      ],
+      "program": [
+        {"convention": "postgres.query_one", "args": [{"name": "sql", "type": "literal", "value": "SELECT id, phone, name FROM users WHERE phone = $1"}]},
+        {"convention": "crypto.verify_argon2", "args": [{"name": "password", "type": "span", "extract": "password"}, {"name": "hash", "type": "ref", "step": 0}]},
+        {"convention": "auth.create_session", "args": [{"name": "user_id", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 2}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "password": ["hunter2", "s3cret!", "MyP@ssw0rd", "correcthorsebatterystaple", "admin123"],
+        "phone": ["+40712345678", "+1234567890", "+447911123456", "+33612345678", "+491701234567"]
+      },
+      "tags": ["cross-plugin", "postgres", "crypto", "auth", "login", "multi-step"]
+    },
+    {
+      "id": "xp_009",
+      "intents": [
+        "generate a secure token and store it for user {user_id}",
+        "create a random token and save it in redis for {user_id}",
+        "issue secure token for {user_id} and cache it",
+        "generate cryptographic token for {user_id} and persist in redis",
+        "make a random auth token for {user_id} and store in cache"
+      ],
+      "program": [
+        {"convention": "crypto.random_bytes", "args": [{"name": "count", "type": "literal", "value": "32"}]},
+        {"convention": "redis.set", "args": [{"name": "key", "type": "literal", "value": "token:user"}, {"name": "value", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": ["user_001", "user_002", "user_003", "user_004", "user_005"]
+      },
+      "tags": ["cross-plugin", "crypto", "redis", "token", "multi-step"]
+    },
+
+    {
+      "id": "xp_010",
+      "intents": [
+        "find nearby providers for {service}",
+        "search {service} providers near my location",
+        "get {service} providers close to me",
+        "locate {service} providers in my area",
+        "who offers {service} nearby"
+      ],
+      "program": [
+        {"convention": "geo.geocode", "args": [{"name": "address", "type": "literal", "value": "current_location"}]},
+        {"convention": "postgres.query", "args": [{"name": "sql", "type": "literal", "value": "SELECT u.id, u.name, u.photo_url, u.bio, u.location_lat, u.location_lon, us.rate_amount FROM users u JOIN user_services us ON u.id = us.user_id JOIN service_categories sc ON us.service_id = sc.id WHERE sc.name_en = $1 AND u.role IN ('provider', 'both') AND earth_distance(ll_to_earth(u.location_lat, u.location_lon), ll_to_earth($2, $3)) <= 25000 ORDER BY earth_distance(ll_to_earth(u.location_lat, u.location_lon), ll_to_earth($2, $3)) ASC"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "service": ["Hair Styling", "House Cleaning", "Tutoring", "Plumbing", "Massage"]
+      },
+      "tags": ["cross-plugin", "geo", "postgres", "search", "nearby", "multi-step"]
+    },
+    {
+      "id": "xp_011",
+      "intents": [
+        "find providers within {radius}km and cache results",
+        "search nearby providers within {radius}km with caching",
+        "get providers in {radius}km radius and store in cache",
+        "locate providers within {radius}km and save to redis",
+        "proximity search for providers within {radius}km with cache"
+      ],
+      "program": [
+        {"convention": "geo.geocode", "args": [{"name": "address", "type": "literal", "value": "current_location"}]},
+        {"convention": "postgres.query", "args": [{"name": "sql", "type": "literal", "value": "SELECT u.id, u.name, u.bio, u.location_lat, u.location_lon FROM users u WHERE u.role IN ('provider', 'both') AND earth_distance(ll_to_earth(u.location_lat, u.location_lon), ll_to_earth($1, $2)) <= $3 * 1000"}]},
+        {"convention": "redis.set", "args": [{"name": "key", "type": "literal", "value": "cache:nearby:providers"}, {"name": "value", "type": "ref", "step": 1}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "radius": ["1", "5", "10", "25", "50"]
+      },
+      "tags": ["cross-plugin", "geo", "postgres", "redis", "cache", "nearby", "multi-step"]
+    },
+    {
+      "id": "xp_012",
+      "intents": [
+        "calculate distance to provider {provider_id}",
+        "how far is provider {provider_id} from me",
+        "get distance to provider {provider_id}",
+        "distance from my location to {provider_id}",
+        "how many km to provider {provider_id}"
+      ],
+      "program": [
+        {"convention": "postgres.query_one", "args": [{"name": "sql", "type": "literal", "value": "SELECT location_lat, location_lon FROM users WHERE id = $1"}]},
+        {"convention": "geo.distance", "args": [{"name": "from", "type": "literal", "value": "current_location"}, {"name": "to", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "provider_id": ["provider_010", "provider_020", "provider_030", "provider_040", "provider_050"]
+      },
+      "tags": ["cross-plugin", "postgres", "geo", "distance", "multi-step"]
+    },
+
+    {
+      "id": "xp_013",
+      "intents": [
+        "fetch exchange rate from API and store in database",
+        "get current exchange rate and save to postgres",
+        "download exchange rate and persist it",
+        "pull exchange rate from external API and record it",
+        "retrieve exchange rate from URL and insert into database"
+      ],
+      "program": [
+        {"convention": "http-bridge.get", "args": [{"name": "url", "type": "literal", "value": "https://api.exchangerate.host/latest?base=EUR"}]},
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "INSERT INTO user_settings (user_id, key, value) VALUES ('system', 'exchange_rate_eur', $1) ON CONFLICT (user_id, key) DO UPDATE SET value = $1"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {},
+      "tags": ["cross-plugin", "http-bridge", "postgres", "exchange", "multi-step"]
+    },
+    {
+      "id": "xp_014",
+      "intents": [
+        "fetch provider data from API {url} and cache it",
+        "download data from {url} and store in redis",
+        "get external data from {url} and cache",
+        "retrieve {url} and save result to cache",
+        "call {url} and store the response in redis"
+      ],
+      "program": [
+        {"convention": "http-bridge.get", "args": [{"name": "url", "type": "span", "extract": "url"}]},
+        {"convention": "redis.set", "args": [{"name": "key", "type": "literal", "value": "cache:external:data"}, {"name": "value", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "url": ["https://api.example.com/providers", "https://api.example.com/categories", "https://api.example.com/rates", "https://api.example.com/status"]
+      },
+      "tags": ["cross-plugin", "http-bridge", "redis", "cache", "multi-step"]
+    },
+    {
+      "id": "xp_015",
+      "intents": [
+        "send push notification via webhook for appointment {apt_id}",
+        "notify via external webhook about appointment {apt_id}",
+        "trigger push notification webhook for {apt_id}",
+        "call notification API for appointment {apt_id}",
+        "send external notification about appointment {apt_id}"
+      ],
+      "program": [
+        {"convention": "postgres.query_one", "args": [{"name": "sql", "type": "literal", "value": "SELECT a.id, a.service, a.start_time, a.status, d.push_token, d.device_type FROM appointments a JOIN devices d ON d.user_id = a.client_id WHERE a.id = $1 LIMIT 1"}]},
+        {"convention": "http-bridge.post", "args": [{"name": "url", "type": "literal", "value": "https://push.helperbook.com/send"}, {"name": "body", "type": "ref", "step": 0}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "apt_id": ["apt_001", "apt_002", "apt_100", "apt_500", "apt_999"]
+      },
+      "tags": ["cross-plugin", "postgres", "http-bridge", "notification", "push", "multi-step"]
+    },
+
+    {
+      "id": "xp_016",
+      "intents": [
+        "complete appointment {apt_id} and prompt for review",
+        "finish appointment {apt_id} and ask for a rating",
+        "mark {apt_id} done and request review",
+        "close appointment {apt_id} and send review reminder",
+        "end appointment {apt_id} and notify for feedback"
+      ],
+      "program": [
+        {"convention": "auth.validate_session", "args": []},
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "UPDATE appointments SET status = 'completed' WHERE id = $1 AND status = 'confirmed'"}]},
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "INSERT INTO notifications (user_id, type, title, body, created_at) SELECT client_id, 'review_prompt', 'Leave a review', 'How was your appointment?', NOW() FROM appointments WHERE id = $1"}]},
+        {"convention": "redis.publish", "args": [{"name": "channel", "type": "literal", "value": "notifications"}, {"name": "message", "type": "ref", "step": 2}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "apt_id": ["apt_001", "apt_002", "apt_100", "apt_500", "apt_999"]
+      },
+      "tags": ["cross-plugin", "auth", "postgres", "redis", "appointment", "review", "multi-step"]
+    },
+    {
+      "id": "xp_017",
+      "intents": [
+        "book appointment and send confirmation message in chat {chat_id} with {provider_id} for {service} at {time}",
+        "schedule {service} with {provider_id} at {time} and message chat {chat_id}",
+        "create appointment with {provider_id} for {service} at {time} and post to chat {chat_id}",
+        "book {service} with {provider_id} at {time} and notify in chat {chat_id}",
+        "make booking with {provider_id} for {service} at {time} and send card to chat {chat_id}"
+      ],
+      "program": [
+        {"convention": "auth.validate_session", "args": []},
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "INSERT INTO appointments (chat_id, creator_id, provider_id, service, start_time, status, created_at) VALUES ($1, $2, $3, $4, $5, 'proposed', NOW()) RETURNING id"}]},
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "INSERT INTO messages (chat_id, sender_id, type, content, created_at) VALUES ($1, $2, 'appointment_card', $3, NOW())"}]},
+        {"convention": "redis.publish", "args": [{"name": "channel", "type": "literal", "value": "chat"}, {"name": "message", "type": "ref", "step": 2}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "chat_id": ["chat_001", "chat_002", "chat_100", "chat_abc", "chat_xyz"],
+        "provider_id": ["provider_010", "provider_020", "provider_030", "provider_040", "provider_050"],
+        "service": ["Hair Styling", "House Cleaning", "Tutoring", "Photography", "Massage"],
+        "time": ["2025-01-15 10:00", "2025-01-16 14:30", "2025-01-17 09:00", "2025-01-18 16:00", "2025-01-20 11:00"]
+      },
+      "tags": ["cross-plugin", "auth", "postgres", "redis", "appointment", "messaging", "multi-step"]
+    },
+    {
+      "id": "xp_018",
+      "intents": [
+        "accept connection and create a chat with {user_id}",
+        "approve connection from {user_id} and start a conversation",
+        "confirm {user_id} connection and open direct chat",
+        "accept {user_id} as contact and begin messaging",
+        "approve {user_id} and create direct chat"
+      ],
+      "program": [
+        {"convention": "auth.validate_session", "args": []},
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "UPDATE connections SET status = 'accepted' WHERE requester_id = $1 AND recipient_id = $2 AND status = 'pending'"}]},
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "INSERT INTO chats (type, created_by, created_at) VALUES ('direct', $1, NOW()) RETURNING id"}]},
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "INSERT INTO chat_members (chat_id, user_id, role, joined_at) VALUES ($1, $2, 'member', NOW()), ($1, $3, 'member', NOW())"}]},
+        {"convention": "redis.publish", "args": [{"name": "channel", "type": "literal", "value": "notifications"}, {"name": "message", "type": "ref", "step": 1}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 2}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": ["user_001", "user_002", "user_003", "user_004", "user_005"]
+      },
+      "tags": ["cross-plugin", "auth", "postgres", "redis", "connection", "chat", "multi-step"]
+    },
+    {
+      "id": "xp_019",
+      "intents": [
+        "generate JWT token for user {user_id} and cache session",
+        "create JWT for {user_id} and store in redis",
+        "issue JWT token for {user_id} with redis session cache",
+        "sign JWT for {user_id} and save session data to cache",
+        "produce JWT for {user_id} and persist session in redis"
+      ],
+      "program": [
+        {"convention": "postgres.query_one", "args": [{"name": "sql", "type": "literal", "value": "SELECT id, phone, name, role FROM users WHERE id = $1"}]},
+        {"convention": "crypto.jwt_sign", "args": [{"name": "payload", "type": "ref", "step": 0}]},
+        {"convention": "redis.set", "args": [{"name": "key", "type": "literal", "value": "session:jwt"}, {"name": "value", "type": "ref", "step": 1}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "user_id": ["user_001", "user_002", "user_003", "user_004", "user_005"]
+      },
+      "tags": ["cross-plugin", "postgres", "crypto", "redis", "jwt", "session", "multi-step"]
+    },
+    {
+      "id": "xp_020",
+      "intents": [
+        "hash and store a review photo for appointment {apt_id}",
+        "upload review photo for {apt_id} with integrity hash",
+        "save review image for appointment {apt_id} with SHA-256 verification",
+        "store photo for review of {apt_id} and compute hash",
+        "attach photo to {apt_id} review with content hash"
+      ],
+      "program": [
+        {"convention": "crypto.hash_sha256", "args": [{"name": "data", "type": "span", "extract": "photo_data"}]},
+        {"convention": "postgres.execute", "args": [{"name": "sql", "type": "literal", "value": "UPDATE reviews SET photos = array_append(photos, $2) WHERE appointment_id = $1"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "apt_id": ["apt_001", "apt_002", "apt_100", "apt_500", "apt_999"]
+      },
+      "tags": ["cross-plugin", "crypto", "postgres", "review", "photo", "multi-step"]
+    }
+  ]
+}

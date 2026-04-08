@@ -454,6 +454,8 @@ mod tests {
             SignalType::Close,
             SignalType::Intent,
             SignalType::Result,
+            SignalType::Invoke,
+            SignalType::Query,
             SignalType::Data,
             SignalType::Binary,
             SignalType::StreamStart,

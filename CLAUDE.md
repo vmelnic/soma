@@ -62,7 +62,7 @@ soma/
         dynamic.rs            # libloading, scan, manifest parsing, Ed25519 verify
         process.rs            # ProcessManager for child processes
       protocol/
-        signal.rs             # 24 SignalTypes, 6 flags, Signal struct
+        signal.rs             # 26 SignalTypes, 6 flags, Signal struct
         codec.rs              # Binary wire format, CRC32, zstd, ChaCha20-Poly1305
         connection.rs         # TCP, heartbeat, RTT, channels, session token (24h)
         server.rs             # Listener, PubSub, capability+relay enforcement, metrics
@@ -211,6 +211,7 @@ The `docs/` directory contains all consolidated documentation. The `SOMA_Whitepa
 ## Rules
 
 - **NEVER GUESS.** If you don't know the answer, read the code. If the code doesn't have the answer, read the spec. If the spec doesn't cover it, ask the user. Do not speculate, assume, or fabricate answers. Always verify by reading the actual source before responding.
+- **NO SPEC CITATIONS IN COMMENTS.** Never write comments like `// §7.1:`, `// S13.2.1:`, `// MUST`, `// Section 12`, or any reference to spec section numbers or RFC keywords. Comments explain what the code does and why — not where the requirement came from.
 
 ## When Editing
 

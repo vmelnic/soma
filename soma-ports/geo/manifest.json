@@ -1,0 +1,50 @@
+{
+  "id": "soma.ports.geo",
+  "name": "Geo",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.geo",
+  "description": "Geolocation: distance calculation, radius filtering, geocoding, bounds checking",
+  "port": {
+    "port_id": "geo",
+    "kind": "custom",
+    "trust_level": "trusted"
+  },
+  "skills": [
+    {
+      "id": "soma.ports.geo.distance",
+      "name": "Haversine distance",
+      "description": "Compute great-circle distance between two lat/lon points in km",
+      "input": { "lat1": "float", "lon1": "float", "lat2": "float", "lon2": "float" },
+      "output": { "distance_km": "float" }
+    },
+    {
+      "id": "soma.ports.geo.radius_filter",
+      "name": "Radius filter",
+      "description": "Filter a JSON array of points to those within a radius",
+      "input": { "lat": "float", "lon": "float", "radius_km": "float", "points": "string (JSON array)" },
+      "output": { "matches": "array", "count": "integer" }
+    },
+    {
+      "id": "soma.ports.geo.geocode",
+      "name": "Geocode",
+      "description": "Convert address to lat/lon coordinates (requires api_key)",
+      "input": { "address": "string", "api_key": "string" },
+      "output": { "lat": "float", "lon": "float", "display_name": "string" }
+    },
+    {
+      "id": "soma.ports.geo.reverse_geocode",
+      "name": "Reverse geocode",
+      "description": "Convert lat/lon to address (requires api_key)",
+      "input": { "lat": "float", "lon": "float", "api_key": "string" },
+      "output": { "address": "string", "city": "string", "country": "string" }
+    },
+    {
+      "id": "soma.ports.geo.bounds_check",
+      "name": "Bounds check",
+      "description": "Check if a point falls within a bounding box",
+      "input": { "lat": "float", "lon": "float", "min_lat": "float", "max_lat": "float", "min_lon": "float", "max_lon": "float" },
+      "output": { "within": "boolean" }
+    }
+  ]
+}

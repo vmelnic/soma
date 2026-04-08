@@ -91,6 +91,7 @@ pub struct McpServer {
     pub peers: Arc<RwLock<PeerRegistry>>,
     pub auth: Arc<RwLock<AuthManager>>,
     pub shutdown_requested: Arc<std::sync::atomic::AtomicBool>,
+    pub reflex_layer: Arc<RwLock<crate::mind::reflex::ReflexLayer>>,
 }
 
 impl McpServer {
@@ -786,8 +787,29 @@ impl McpServer {
         let trace_id = uuid::Uuid::new_v4().to_string()[..12].to_string();
         let exec_start = std::time::Instant::now();
 
+        // Reflex check: try cached (intent -> program) pair before Mind inference.
         let mind_guard = self.mind.read().unwrap();
-        match mind_guard.infer(text) {
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        let reflex_tokens: Vec<u32> = mind_guard.tokenizer.encode(text)
+            .iter().map(|&t| t as u32).collect();
+        drop(mind_guard);
+
+        let reflex_hit = {
+            let mut rl = self.reflex_layer.write().unwrap();
+            rl.try_match(&reflex_tokens).map(|(prog, conf)| (prog.clone(), conf))
+        };
+        let used_reflex = reflex_hit.is_some();
+
+        let mind_guard = self.mind.read().unwrap();
+        let infer_result = if let Some((cached_program, _conf)) = reflex_hit {
+            self.metrics.record_reflex_hit(self.reflex_layer.read().unwrap().len() as u64);
+            Ok(cached_program)
+        } else {
+            self.metrics.record_reflex_miss(self.reflex_layer.read().unwrap().len() as u64);
+            mind_guard.infer(text)
+        };
+
+        match infer_result {
             Ok(program) => {
                 let plugins_guard = self.plugins.read().unwrap();
                 let result = plugins_guard.execute_program(
@@ -845,6 +867,17 @@ impl McpServer {
                     );
                 }
 
+                // Record as reflex on success (only if came from Mind, not from cache).
+                if result.success && !used_reflex {
+                    if let Ok(mut rl) = self.reflex_layer.write() {
+                        rl.record(reflex_tokens, program.clone(), program.confidence);
+                        self.metrics.reflex_entries.store(
+                            rl.len() as u64,
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
+                    }
+                }
+
                 tracing::info!(
                     component = "mcp",
                     trace_id = %trace_id,
@@ -852,6 +885,7 @@ impl McpServer {
                     steps = program.steps.len(),
                     confidence = %program.confidence,
                     success = result.success,
+                    reflex = used_reflex,
                     "MCP intent processed"
                 );
 
@@ -864,6 +898,7 @@ impl McpServer {
                     "output": result.output.map(|o| format!("{o}")),
                     "error": result.error,
                     "trace": result.trace,
+                    "reflex_hit": used_reflex,
                 });
 
                 McpToolResult::json(response)

@@ -1,0 +1,11 @@
+[package]
+name = "soma-plugin-timer"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soma-plugin-sdk = { path = "../sdk" }
+serde_json = "1"

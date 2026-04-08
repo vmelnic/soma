@@ -1,7 +1,5 @@
 # Rust
-soma-core/target/
-soma-plugins/target/
-soma-plugin-sdk/target/
+**/target/
 
 # Python
 __pycache__/
@@ -42,3 +40,5 @@ package-lock.json
 
 # SOMA checkpoints
 soma-helperbook/checkpoints/
+soma-next/target/
+soma-ports/target/

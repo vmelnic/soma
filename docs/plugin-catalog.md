@@ -2,6 +2,8 @@
 
 Reference of all SOMA plugins and their calling conventions. Each plugin provides a set of conventions that the Mind can invoke as program steps. Plugins are compiled as `cdylib` crates that export a C ABI `soma_plugin_init` function.
 
+**Current status:** 6 implemented + 5 implementing = 11 plugins, 83 conventions. 29 additional plugins planned (~230 conventions). 40 total catalog.
+
 Organized by implementation status and priority tier:
 
 | Tier | Meaning |
@@ -192,6 +194,98 @@ Note: The current implementation is HTTP client only. The spec also defines HTTP
 
 ---
 
+## Implementing Plugins
+
+These plugins are actively being implemented in `soma-plugins/`. Convention sets are finalized, crate dependencies chosen, `SomaPlugin` trait implementation in progress.
+
+---
+
+### Image Processing (soma-plugin-image)
+
+5 conventions for image manipulation. Pure Rust using the `image` crate (no C dependencies).
+
+| # | Convention | Args | Returns | Latency | Description |
+|---|-----------|------|---------|---------|-------------|
+| 0 | `thumbnail` | data: Bytes, width: Int, height: Int | Bytes | ~10ms | Generate thumbnail |
+| 1 | `resize` | data: Bytes, width: Int, height: Int | Bytes | ~10ms | Resize image |
+| 2 | `crop` | data: Bytes, x: Int, y: Int, w: Int, h: Int | Bytes | ~5ms | Crop region |
+| 3 | `format_convert` | data: Bytes, format: String | Bytes | ~10ms | Convert between formats (PNG, JPEG, WebP) |
+| 4 | `exif_strip` | data: Bytes | Bytes | ~1ms | Strip EXIF metadata |
+
+Use case: Profile photos, service gallery images in HelperBook.
+
+**Crate:** `image` (pure Rust).
+
+---
+
+### S3 Storage (soma-plugin-s3)
+
+5 conventions for S3-compatible object storage. Works with AWS S3, MinIO, Cloudflare R2, Backblaze B2.
+
+| # | Convention | Args | Returns | Latency | Description |
+|---|-----------|------|---------|---------|-------------|
+| 0 | `put_object` | bucket: String, key: String, data: Bytes, content_type: String | String (URL) | ~50ms | Upload object |
+| 1 | `get_object` | bucket: String, key: String | Bytes | ~50ms | Download object |
+| 2 | `delete_object` | bucket: String, key: String | Bool | ~20ms | Delete object |
+| 3 | `presign_url` | bucket: String, key: String, expires_secs: Int | String (URL) | ~1ms | Generate presigned URL |
+| 4 | `list_objects` | bucket: String, prefix: String | List | ~20ms | List objects by prefix |
+
+Use case: File uploads, media storage for HelperBook.
+
+**Crate:** `aws-sdk-s3`.
+
+---
+
+### Push Notifications (soma-plugin-push)
+
+4 conventions for push notifications via FCM HTTP v1 API and Web Push.
+
+| # | Convention | Args | Returns | Latency | Description |
+|---|-----------|------|---------|---------|-------------|
+| 0 | `send_fcm` | device_token: String, title: String, body: String, data: Map | Map (message_id) | ~100ms | Send via Firebase Cloud Messaging |
+| 1 | `send_webpush` | subscription: Map, title: String, body: String | Bool | ~100ms | Send Web Push notification |
+| 2 | `register_device` | user_id: String, platform: String, token: String | Bool | ~10ms | Register device token |
+| 3 | `unregister_device` | token: String | Bool | ~10ms | Unregister device token |
+
+Use case: Message alerts, appointment reminders in HelperBook.
+
+**Crate:** `reqwest` (FCM HTTP v1 API).
+
+---
+
+### Timer (soma-plugin-timer)
+
+4 conventions for time-based scheduling. Pure standard library, no external dependencies.
+
+| # | Convention | Args | Returns | Latency | Description |
+|---|-----------|------|---------|---------|-------------|
+| 0 | `set_timeout` | callback_intent: String, delay_ms: Int | Handle | ~1ms | One-shot delayed callback |
+| 1 | `set_interval` | callback_intent: String, interval_ms: Int | Handle | ~1ms | Recurring callback |
+| 2 | `cancel` | handle: Handle | Bool | ~1ms | Cancel timeout or interval |
+| 3 | `list_active` | -- | List\<Map\> | ~1ms | List active timers |
+
+Use case: Reminders, periodic tasks, session expiry in HelperBook.
+
+**Crate:** `std` only.
+
+---
+
+### SMTP Email (soma-plugin-smtp)
+
+3 conventions for sending email via SMTP.
+
+| # | Convention | Args | Returns | Latency | Description |
+|---|-----------|------|---------|---------|-------------|
+| 0 | `send` | to: String, subject: String, body: String | Bool | ~200ms | Send plain text email |
+| 1 | `send_html` | to: String, subject: String, html: String | Bool | ~200ms | Send HTML email |
+| 2 | `send_with_attachment` | to: String, subject: String, body: String, attachment: Bytes, filename: String | Bool | ~500ms | Send email with attachment |
+
+Use case: Email notifications, appointment confirmations in HelperBook.
+
+**Crate:** `lettre`.
+
+---
+
 ## Planned Plugins
 
 These plugins are specified in the catalog but not yet implemented. Listed by priority tier with key conventions, recommended Rust crates, and dependencies.
@@ -258,15 +352,10 @@ Note: `soma-core` already ships a built-in PosixPlugin with 22 conventions cover
 
 #### S3-Compatible Storage (`s3`)
 
-Object storage for media, documents, uploads. Works with AWS S3, MinIO, Cloudflare R2, Backblaze B2.
+Core 5 conventions being implemented (see Implementing section). The full planned set adds multipart upload support:
 
 | Convention | Args | Returns |
 |-----------|------|---------|
-| `s3.put_object` | bucket, key, data: Bytes, content_type | Map (url, etag) |
-| `s3.get_object` | bucket, key | Bytes |
-| `s3.delete_object` | bucket, key | Void |
-| `s3.list_objects` | bucket, prefix | List\<Map\> |
-| `s3.presigned_url` | bucket, key, expires: Int | String |
 | `s3.head_object` | bucket, key | Map (size, type, modified) |
 | `s3.multipart_start` | bucket, key, content_type | Handle |
 | `s3.multipart_upload` | handle, part: Int, data: Bytes | String (etag) |
@@ -279,11 +368,10 @@ Cleanup: `multipart_start` -> `multipart_abort`.
 
 #### SMTP Email (`smtp`)
 
+Core 3 conventions being implemented (see Implementing section). The full planned set adds template and verification support:
+
 | Convention | Args | Returns |
 |-----------|------|---------|
-| `smtp.send` | to, subject, body_text | Map (message_id) |
-| `smtp.send_html` | to, subject, body_html, body_text | Map |
-| `smtp.send_with_attachment` | to, subject, body, attachment: Bytes, filename | Map |
 | `smtp.send_template` | to, template, variables: Map | Map |
 | `smtp.verify_address` | email | Bool |
 
@@ -304,26 +392,22 @@ Dependencies: `http-bridge` (for webhook receiving).
 
 #### Push Notifications (`push`)
 
+Core 4 conventions being implemented (see Implementing section). The full planned set adds APNs, unified send, and batch support:
+
 | Convention | Args | Returns |
 |-----------|------|---------|
 | `push.send_apns` | device_token, title, body, data: Map | Map (apns_id) |
-| `push.send_fcm` | device_token, title, body, data: Map | Map (message_id) |
 | `push.send` | device_token, platform, title, body, data: Map | Map |
 | `push.send_batch` | tokens: List\<Map\>, title, body, data: Map | List\<Map\> |
-| `push.register_token` | user_id, token, platform | Void |
-| `push.unregister_token` | token | Void |
 
 **Crates:** `a2` (APNs), `fcm-rust` or direct HTTP/2.
 
 #### Image Processing (`image-proc`)
 
+Core 5 conventions being implemented (see Implementing section). The full planned set adds info, compress, and blur:
+
 | Convention | Args | Returns |
 |-----------|------|---------|
-| `image.thumbnail` | data: Bytes, width, height | Bytes |
-| `image.resize` | data: Bytes, width, height, fit | Bytes |
-| `image.crop` | data: Bytes, x, y, w, h | Bytes |
-| `image.format_convert` | data: Bytes, target_format | Bytes |
-| `image.strip_exif` | data: Bytes | Bytes |
 | `image.info` | data: Bytes | Map (width, height, format, size) |
 | `image.compress` | data: Bytes, quality: Int | Bytes |
 | `image.blur_region` | data: Bytes, x, y, w, h | Bytes |
@@ -399,7 +483,7 @@ LoRA-only plugin -- no conventions. Absorbs design specifications (pencil.dev, F
 
 #### Timer (`timer`)
 
-Time and scheduling primitives. Timer events are sent as Synaptic signals on specified channels.
+Core 4 conventions being implemented (see Implementing section). The full planned set adds time queries, sleep, and channel-based callbacks:
 
 | Convention | Args | Returns |
 |-----------|------|---------|
@@ -407,10 +491,6 @@ Time and scheduling primitives. Timer events are sent as Synaptic signals on spe
 | `timer.now_unix` | -- | Int (unix seconds) |
 | `timer.now_millis` | -- | Int (unix millis) |
 | `timer.sleep` | ms: Int | Void |
-| `timer.set_interval` | ms: Int, channel: Int | Handle |
-| `timer.clear_interval` | handle | Void |
-| `timer.set_timeout` | ms: Int, channel: Int | Handle |
-| `timer.clear_timeout` | handle | Void |
 
 ---
 
@@ -721,7 +801,7 @@ These are compiled directly into the embedded SOMA binary, not dynamically loade
 
 ## Convention Quick Reference
 
-Compact table of all conventions across implemented plugins (62 total).
+Compact table of all conventions across implemented and implementing plugins (83 total).
 
 | Plugin | Convention | Args | Returns | Est. Latency |
 |--------|-----------|------|---------|--------------|
@@ -787,6 +867,27 @@ Compact table of all conventions across implemented plugins (62 total).
 | http-bridge | `put` | url: String, body: String, headers: String (opt) | Map | 100ms+ |
 | http-bridge | `delete` | url: String, headers: String (opt) | Map | 100ms+ |
 | http-bridge | `request` | method, url, body, headers: String (opt) | Map | 100ms+ |
+| image | `thumbnail` | data: Bytes, width: Int, height: Int | Bytes | 10ms |
+| image | `resize` | data: Bytes, width: Int, height: Int | Bytes | 10ms |
+| image | `crop` | data: Bytes, x: Int, y: Int, w: Int, h: Int | Bytes | 5ms |
+| image | `format_convert` | data: Bytes, format: String | Bytes | 10ms |
+| image | `exif_strip` | data: Bytes | Bytes | 1ms |
+| s3 | `put_object` | bucket, key, data: Bytes, content_type: String | String (URL) | 50ms |
+| s3 | `get_object` | bucket, key: String | Bytes | 50ms |
+| s3 | `delete_object` | bucket, key: String | Bool | 20ms |
+| s3 | `presign_url` | bucket, key: String, expires_secs: Int | String (URL) | 1ms |
+| s3 | `list_objects` | bucket, prefix: String | List | 20ms |
+| push | `send_fcm` | device_token, title, body: String, data: Map | Map | 100ms |
+| push | `send_webpush` | subscription: Map, title, body: String | Bool | 100ms |
+| push | `register_device` | user_id, platform, token: String | Bool | 10ms |
+| push | `unregister_device` | token: String | Bool | 10ms |
+| timer | `set_timeout` | callback_intent: String, delay_ms: Int | Handle | 1ms |
+| timer | `set_interval` | callback_intent: String, interval_ms: Int | Handle | 1ms |
+| timer | `cancel` | handle: Handle | Bool | 1ms |
+| timer | `list_active` | -- | List\<Map\> | 1ms |
+| smtp | `send` | to, subject, body: String | Bool | 200ms |
+| smtp | `send_html` | to, subject, html: String | Bool | 200ms |
+| smtp | `send_with_attachment` | to, subject, body: String, attachment: Bytes, filename: String | Bool | 500ms |
 
 \* Geocoding latency depends on external API. Stub implementation returns instantly.
 
@@ -804,16 +905,16 @@ Compact table of all conventions across implemented plugins (62 total).
 | 6 | `http-bridge` | T1 | **Implemented** | 5 | server, desktop |
 | 7 | `mcp` | T0 | Planned | dynamic | server, desktop |
 | 8 | `filesystem` | T0 | Planned (built-in exists) | 17 | all |
-| 9 | `s3` | T1 | Planned | 10 | server, desktop |
-| 10 | `smtp` | T1 | Planned | 5 | server, desktop |
+| 9 | `s3` | T1 | **Implementing** (5) | 10 | server, desktop |
+| 10 | `smtp` | T1 | **Implementing** (3) | 5 | server, desktop |
 | 11 | `twilio` | T1 | Planned | 4 | server |
-| 12 | `push` | T1 | Planned | 6 | server |
-| 13 | `image-proc` | T1 | Planned | 8 | server, desktop |
+| 12 | `push` | T1 | **Implementing** (4) | 6 | server |
+| 13 | `image-proc` | T1 | **Implementing** (5) | 8 | server, desktop |
 | 14 | `sqlite` | T1 | Planned | 9 | desktop, mobile, embedded |
 | 15 | `search` | T1 | Planned | 6 | server, desktop |
 | 16 | `dom-renderer` | T1 | Planned | 19 | wasm32 |
 | 17 | `design` | T1 | Planned | 0 (LoRA only) | wasm32, desktop |
-| 18 | `timer` | T1 | Planned | 8 | all |
+| 18 | `timer` | T1 | **Implementing** (4) | 8 | all |
 | 19 | `audio-proc` | T2 | Planned | 6 | server, desktop |
 | 20 | `video-proc` | T2 | Planned | 5 | server |
 | 21 | `webrtc` | T2 | Planned | 4+4 | server + browser |
@@ -838,5 +939,7 @@ Compact table of all conventions across implemented plugins (62 total).
 | 40 | `export` | T3 | Planned | 5 | server, desktop |
 
 **Implemented:** 6 plugins, 62 conventions.
-**Planned:** 34 plugins, ~250 conventions.
+**Implementing:** 5 plugins, 21 conventions (image, s3, push, timer, smtp).
+**Total implemented + implementing:** 11 plugins, 83 conventions.
+**Planned:** 29 plugins, ~230 conventions (remaining).
 **Total catalog:** 40 plugins, ~310 conventions.

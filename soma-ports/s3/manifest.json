@@ -1,0 +1,40 @@
+{
+  "id": "soma.ports.s3",
+  "name": "S3",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.s3",
+  "description": "S3-compatible object storage: upload, download, delete, presign, list",
+  "port": {
+    "port_id": "s3",
+    "kind": "database",
+    "trust_level": "verified"
+  },
+  "skills": [
+    {
+      "id": "soma.ports.s3.put_object",
+      "name": "Put Object",
+      "description": "Upload an object to an S3 bucket"
+    },
+    {
+      "id": "soma.ports.s3.get_object",
+      "name": "Get Object",
+      "description": "Download an object from an S3 bucket"
+    },
+    {
+      "id": "soma.ports.s3.delete_object",
+      "name": "Delete Object",
+      "description": "Delete an object from an S3 bucket"
+    },
+    {
+      "id": "soma.ports.s3.presign_url",
+      "name": "Presign URL",
+      "description": "Generate a presigned URL for temporary access to an object"
+    },
+    {
+      "id": "soma.ports.s3.list_objects",
+      "name": "List Objects",
+      "description": "List objects in an S3 bucket with optional prefix filter"
+    }
+  ]
+}

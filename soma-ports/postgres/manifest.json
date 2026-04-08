@@ -1,0 +1,270 @@
+{
+  "id": "soma.ports.postgres",
+  "name": "Postgres",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.postgres",
+  "description": "PostgreSQL database operations: queries, DDL, ORM-style CRUD, transactions",
+  "port": {
+    "port_id": "postgres",
+    "kind": "database",
+    "trust_level": "verified",
+    "side_effect_class": "external_state_mutation",
+    "latency_profile": {
+      "expected_latency_ms": 20,
+      "p95_latency_ms": 200,
+      "max_latency_ms": 30000
+    },
+    "sandbox_requirements": {
+      "filesystem_access": false,
+      "network_access": true,
+      "device_access": false,
+      "process_access": false,
+      "time_limit_ms": 30000
+    },
+    "remote_exposure": false
+  },
+  "skills": [
+    {
+      "skill_id": "soma.ports.postgres.query",
+      "name": "query",
+      "purpose": "Execute a SELECT query and return rows",
+      "effect_class": "read_only",
+      "determinism_class": "partially_deterministic",
+      "idempotence_class": "idempotent",
+      "risk_class": "low",
+      "input": {
+        "sql": "string (required) — SELECT statement, supports $1/$2 params",
+        "params": "array (optional) — parameter values"
+      },
+      "output": {
+        "rows": "array of row objects",
+        "count": "integer — number of rows returned"
+      }
+    },
+    {
+      "skill_id": "soma.ports.postgres.execute",
+      "name": "execute",
+      "purpose": "Execute an INSERT/UPDATE/DELETE and return rows affected",
+      "effect_class": "external_state_mutation",
+      "determinism_class": "partially_deterministic",
+      "idempotence_class": "non_idempotent",
+      "risk_class": "medium",
+      "input": {
+        "sql": "string (required) — SQL statement",
+        "params": "array (optional) — parameter values"
+      },
+      "output": {
+        "rows_affected": "integer"
+      }
+    },
+    {
+      "skill_id": "soma.ports.postgres.find",
+      "name": "find",
+      "purpose": "Find a single row by ID (ORM-style)",
+      "effect_class": "read_only",
+      "determinism_class": "partially_deterministic",
+      "idempotence_class": "idempotent",
+      "risk_class": "low",
+      "input": {
+        "table": "string (required) — table name",
+        "id": "string|number (required) — row identifier",
+        "id_column": "string (optional, default 'id') — primary key column name"
+      },
+      "output": "row object or null"
+    },
+    {
+      "skill_id": "soma.ports.postgres.find_many",
+      "name": "find_many",
+      "purpose": "Find multiple rows with structured filter",
+      "effect_class": "read_only",
+      "determinism_class": "partially_deterministic",
+      "idempotence_class": "idempotent",
+      "risk_class": "low",
+      "input": {
+        "table": "string (required) — table name",
+        "where": "object (optional) — filter conditions",
+        "order_by": "array (optional) — sort specification",
+        "limit": "integer (optional)",
+        "offset": "integer (optional)"
+      },
+      "output": {
+        "rows": "array of row objects",
+        "count": "integer"
+      }
+    },
+    {
+      "skill_id": "soma.ports.postgres.count",
+      "name": "count",
+      "purpose": "Count rows matching a filter",
+      "effect_class": "read_only",
+      "determinism_class": "partially_deterministic",
+      "idempotence_class": "idempotent",
+      "risk_class": "negligible",
+      "input": {
+        "table": "string (required) — table name",
+        "where": "object (optional) — filter conditions"
+      },
+      "output": {
+        "count": "integer"
+      }
+    },
+    {
+      "skill_id": "soma.ports.postgres.aggregate",
+      "name": "aggregate",
+      "purpose": "Run an aggregate function (SUM/AVG/MIN/MAX) with optional grouping",
+      "effect_class": "read_only",
+      "determinism_class": "partially_deterministic",
+      "idempotence_class": "idempotent",
+      "risk_class": "low",
+      "input": {
+        "table": "string (required)",
+        "function": "string (required) — one of SUM, AVG, MIN, MAX, COUNT",
+        "column": "string (required) — column to aggregate",
+        "where": "object (optional) — filter conditions",
+        "group_by": "array of strings (optional)"
+      },
+      "output": {
+        "rows": "array of result objects"
+      }
+    },
+    {
+      "skill_id": "soma.ports.postgres.create_table",
+      "name": "create_table",
+      "purpose": "Create a table (DDL CREATE TABLE IF NOT EXISTS)",
+      "effect_class": "external_state_mutation",
+      "determinism_class": "deterministic",
+      "idempotence_class": "idempotent",
+      "risk_class": "high",
+      "input": {
+        "table": "string (required) — table name",
+        "columns": "string (required) — column definitions"
+      },
+      "output": {
+        "created": "string — table name"
+      }
+    },
+    {
+      "skill_id": "soma.ports.postgres.drop_table",
+      "name": "drop_table",
+      "purpose": "Drop a table (DDL DROP TABLE IF EXISTS)",
+      "effect_class": "destructive",
+      "determinism_class": "deterministic",
+      "idempotence_class": "idempotent",
+      "risk_class": "critical",
+      "input": {
+        "table": "string (required) — table name",
+        "cascade": "boolean (optional, default false)"
+      },
+      "output": {
+        "dropped": "string — table name"
+      }
+    },
+    {
+      "skill_id": "soma.ports.postgres.alter_table",
+      "name": "alter_table",
+      "purpose": "Alter a table (DDL ALTER TABLE)",
+      "effect_class": "external_state_mutation",
+      "determinism_class": "deterministic",
+      "idempotence_class": "non_idempotent",
+      "risk_class": "high",
+      "input": {
+        "table": "string (required) — table name",
+        "changes": "string (required) — ALTER TABLE clause"
+      },
+      "output": {
+        "altered": "string — table name"
+      }
+    },
+    {
+      "skill_id": "soma.ports.postgres.insert",
+      "name": "insert",
+      "purpose": "Insert a row with column/value pairs",
+      "effect_class": "external_state_mutation",
+      "determinism_class": "partially_deterministic",
+      "idempotence_class": "non_idempotent",
+      "risk_class": "low",
+      "input": {
+        "table": "string (required) — table name",
+        "values": "object (required) — column:value pairs",
+        "returning": "string (optional, default '*') — RETURNING clause"
+      },
+      "output": "inserted row object or {inserted: true}"
+    },
+    {
+      "skill_id": "soma.ports.postgres.update",
+      "name": "update",
+      "purpose": "Update rows matching a WHERE filter",
+      "effect_class": "external_state_mutation",
+      "determinism_class": "partially_deterministic",
+      "idempotence_class": "conditionally_idempotent",
+      "risk_class": "medium",
+      "input": {
+        "table": "string (required) — table name",
+        "set": "object (required) — column:value pairs to update",
+        "where": "object (optional) — filter conditions"
+      },
+      "output": {
+        "rows_affected": "integer"
+      }
+    },
+    {
+      "skill_id": "soma.ports.postgres.delete",
+      "name": "delete",
+      "purpose": "Delete rows matching a WHERE filter",
+      "effect_class": "destructive",
+      "determinism_class": "partially_deterministic",
+      "idempotence_class": "idempotent",
+      "risk_class": "high",
+      "input": {
+        "table": "string (required) — table name",
+        "where": "object (required) — filter conditions"
+      },
+      "output": {
+        "rows_affected": "integer"
+      }
+    },
+    {
+      "skill_id": "soma.ports.postgres.begin_transaction",
+      "name": "begin_transaction",
+      "purpose": "Execute multiple statements atomically within a transaction",
+      "effect_class": "external_state_mutation",
+      "determinism_class": "partially_deterministic",
+      "idempotence_class": "non_idempotent",
+      "risk_class": "medium",
+      "input": {
+        "statements": "array (required) — [{sql: string, params?: array}]"
+      },
+      "output": {
+        "committed": "boolean",
+        "results": "array of per-statement results"
+      }
+    },
+    {
+      "skill_id": "soma.ports.postgres.commit",
+      "name": "commit",
+      "purpose": "Commit a transaction (provided for API completeness)",
+      "effect_class": "external_state_mutation",
+      "determinism_class": "deterministic",
+      "idempotence_class": "idempotent",
+      "risk_class": "low",
+      "input": {},
+      "output": {
+        "committed": "boolean"
+      }
+    },
+    {
+      "skill_id": "soma.ports.postgres.rollback",
+      "name": "rollback",
+      "purpose": "Rollback a transaction (provided for API completeness)",
+      "effect_class": "none",
+      "determinism_class": "deterministic",
+      "idempotence_class": "idempotent",
+      "risk_class": "negligible",
+      "input": {},
+      "output": {
+        "rolled_back": "boolean"
+      }
+    }
+  ]
+}

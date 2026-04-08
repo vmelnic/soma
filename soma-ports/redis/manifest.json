@@ -1,0 +1,44 @@
+{
+  "id": "soma.ports.redis",
+  "name": "Redis Port Pack",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.redis",
+  "description": "Redis key-value store: strings, hashes, lists, pub/sub",
+  "port": {
+    "port_id": "redis",
+    "name": "Redis",
+    "kind": "database",
+    "trust_level": "verified",
+    "capabilities": [
+      { "capability_id": "get",       "name": "get",       "purpose": "Get string value by key" },
+      { "capability_id": "set",       "name": "set",       "purpose": "Set string value with optional TTL" },
+      { "capability_id": "del",       "name": "del",       "purpose": "Delete a key" },
+      { "capability_id": "hget",      "name": "hget",      "purpose": "Get a hash field value" },
+      { "capability_id": "hset",      "name": "hset",      "purpose": "Set a hash field value" },
+      { "capability_id": "hdel",      "name": "hdel",      "purpose": "Delete a hash field" },
+      { "capability_id": "hgetall",   "name": "hgetall",   "purpose": "Get all hash fields and values" },
+      { "capability_id": "lpush",     "name": "lpush",     "purpose": "Push value to head of list" },
+      { "capability_id": "lpop",      "name": "lpop",      "purpose": "Pop value from head of list" },
+      { "capability_id": "lrange",    "name": "lrange",    "purpose": "Get a range of elements from a list" },
+      { "capability_id": "publish",   "name": "publish",   "purpose": "Publish a message to a channel" },
+      { "capability_id": "subscribe", "name": "subscribe", "purpose": "Subscribe to a channel (streaming, not yet supported)" },
+      { "capability_id": "keys",      "name": "keys",      "purpose": "Find keys matching a glob pattern" }
+    ]
+  },
+  "skills": [
+    { "skill_id": "soma.ports.redis.get",       "name": "Redis GET",       "description": "Get string value by key",                 "port_capability": "get" },
+    { "skill_id": "soma.ports.redis.set",       "name": "Redis SET",       "description": "Set string value with optional TTL",      "port_capability": "set" },
+    { "skill_id": "soma.ports.redis.del",       "name": "Redis DEL",       "description": "Delete a key",                            "port_capability": "del" },
+    { "skill_id": "soma.ports.redis.hget",      "name": "Redis HGET",      "description": "Get a hash field value",                  "port_capability": "hget" },
+    { "skill_id": "soma.ports.redis.hset",      "name": "Redis HSET",      "description": "Set a hash field value",                  "port_capability": "hset" },
+    { "skill_id": "soma.ports.redis.hdel",      "name": "Redis HDEL",      "description": "Delete a hash field",                     "port_capability": "hdel" },
+    { "skill_id": "soma.ports.redis.hgetall",   "name": "Redis HGETALL",   "description": "Get all hash fields and values",          "port_capability": "hgetall" },
+    { "skill_id": "soma.ports.redis.lpush",     "name": "Redis LPUSH",     "description": "Push value to head of list",              "port_capability": "lpush" },
+    { "skill_id": "soma.ports.redis.lpop",      "name": "Redis LPOP",      "description": "Pop value from head of list",             "port_capability": "lpop" },
+    { "skill_id": "soma.ports.redis.lrange",    "name": "Redis LRANGE",    "description": "Get a range of elements from a list",     "port_capability": "lrange" },
+    { "skill_id": "soma.ports.redis.publish",   "name": "Redis PUBLISH",   "description": "Publish a message to a channel",          "port_capability": "publish" },
+    { "skill_id": "soma.ports.redis.subscribe", "name": "Redis SUBSCRIBE", "description": "Subscribe to a channel (not yet supported)", "port_capability": "subscribe" },
+    { "skill_id": "soma.ports.redis.keys",      "name": "Redis KEYS",      "description": "Find keys matching a glob pattern",       "port_capability": "keys" }
+  ]
+}

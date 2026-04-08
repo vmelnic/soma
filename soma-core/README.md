@@ -325,7 +325,7 @@ src/
     dynamic.rs                # libloading, scan, manifest parsing, Ed25519 verify
     process.rs                # ProcessManager for child processes (MCP Bridge)
   protocol/
-    signal.rs                 # 24 SignalTypes, 6 flags, Signal struct
+    signal.rs                 # 26 SignalTypes, 6 flags, Signal struct
     codec.rs                  # Binary wire format, CRC32, zstd, ChaCha20-Poly1305
     connection.rs             # TCP, heartbeat, RTT, channels, session token (24h)
     server.rs                 # Listener, PubSub, capability enforcement, metrics

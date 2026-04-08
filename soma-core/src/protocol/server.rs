@@ -66,6 +66,7 @@ pub struct SomaSignalHandler {
     pub mind: Arc<std::sync::RwLock<crate::mind::onnx_engine::OnnxMindEngine>>,
     pub plugins: Arc<std::sync::RwLock<crate::plugin::manager::PluginManager>>,
     pub max_program_steps: usize,
+    pub reflex_layer: Arc<std::sync::RwLock<crate::mind::reflex::ReflexLayer>>,
 }
 
 impl SignalHandler for SomaSignalHandler {
@@ -94,8 +95,28 @@ impl SignalHandler for SomaSignalHandler {
                     "Processing remote intent"
                 );
 
+                // Reflex check: try cached (intent -> program) pair before Mind inference.
                 let mind_guard = self.mind.read().unwrap();
-                match mind_guard.infer(&intent_text) {
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                let reflex_tokens: Vec<u32> = mind_guard.tokenizer.encode(&intent_text)
+                    .iter().map(|&t| t as u32).collect();
+                drop(mind_guard);
+
+                let reflex_hit = {
+                    let mut rl = self.reflex_layer.write().unwrap();
+                    rl.try_match(&reflex_tokens).map(|(prog, conf)| (prog.clone(), conf))
+                };
+                let used_reflex = reflex_hit.is_some();
+
+                let mind_guard = self.mind.read().unwrap();
+                let infer_result = if let Some((cached_program, _conf)) = reflex_hit {
+                    Ok(cached_program)
+                } else {
+                    mind_guard.infer(&intent_text)
+                };
+                drop(mind_guard);
+
+                match infer_result {
                     Ok(program) => {
                         let result = self
                             .plugins
@@ -109,8 +130,16 @@ impl SignalHandler for SomaSignalHandler {
                             steps = program.steps.len(),
                             confidence = %program.confidence,
                             success = result.success,
+                            reflex = used_reflex,
                             "Remote intent processed"
                         );
+
+                        // Record as reflex on success (only if came from Mind inference).
+                        if result.success && !used_reflex {
+                            if let Ok(mut rl) = self.reflex_layer.write() {
+                                rl.record(reflex_tokens, program.clone(), program.confidence);
+                            }
+                        }
 
                         let mut resp = if result.success {
                             let output_str = result.output.as_ref().map_or_else(
@@ -145,6 +174,230 @@ impl SignalHandler for SomaSignalHandler {
                     }
                 }
             }
+            SignalType::Invoke => {
+                let Ok(payload_text) = String::from_utf8(signal.payload.clone()) else {
+                    return Some(Signal::error(
+                        &self.name,
+                        "Invalid UTF-8 in invoke payload",
+                    ));
+                };
+
+                let trace_id = if signal.trace_id.is_empty() {
+                    uuid::Uuid::new_v4().to_string()[..12].to_string()
+                } else {
+                    signal.trace_id.clone()
+                };
+
+                // Payload format: "plugin.convention" (e.g. "posix.open_read")
+                let parts: Vec<&str> = payload_text.splitn(2, '.').collect();
+                if parts.len() < 2 {
+                    let mut resp = Signal::error(
+                        &self.name,
+                        &format!("Invalid invoke format: expected 'plugin.convention', got '{payload_text}'"),
+                    );
+                    resp.trace_id = trace_id;
+                    resp.channel_id = signal.channel_id;
+                    return Some(resp);
+                }
+                let plugin_name = parts[0];
+                let conv_name = parts[1];
+
+                tracing::info!(
+                    component = "router",
+                    trace_id = %trace_id,
+                    sender = %signal.sender_id,
+                    plugin = %plugin_name,
+                    convention = %conv_name,
+                    "Processing remote invoke"
+                );
+
+                // Extract args from metadata (JSON array)
+                let args_json = signal.metadata.get("args")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Array(Vec::new()));
+
+                let pm = self.plugins.read().unwrap();
+
+                // Resolve convention by name to get its ID
+                let conventions = pm.conventions();
+                let conv = conventions.iter().find(|c| c.name == conv_name);
+                let Some(conv) = conv else {
+                    drop(pm);
+                    let mut resp = Signal::error(
+                        &self.name,
+                        &format!("Unknown convention: {conv_name}"),
+                    );
+                    resp.trace_id = trace_id;
+                    resp.channel_id = signal.channel_id;
+                    return Some(resp);
+                };
+                let conv_id = conv.id;
+
+                // Convert JSON args to plugin Values
+                let plugin_args: Vec<crate::plugin::interface::Value> = if let Some(arr) = args_json.as_array() {
+                    arr.iter().map(json_to_plugin_value).collect()
+                } else {
+                    vec![json_to_plugin_value(&args_json)]
+                };
+
+                drop(pm);
+
+                // Execute via the plugin manager (bypasses Mind inference)
+                let pm = self.plugins.read().unwrap();
+                let exec_result = pm.execute_direct(conv_id, plugin_args);
+                drop(pm);
+
+                let mut resp = match exec_result {
+                    Ok(val) => {
+                        let output = serde_json::json!({
+                            "success": true,
+                            "result": serde_json::to_value(&val).unwrap_or(serde_json::Value::Null),
+                        });
+                        tracing::info!(
+                            component = "router",
+                            trace_id = %trace_id,
+                            plugin = %plugin_name,
+                            convention = %conv_name,
+                            "Remote invoke succeeded"
+                        );
+                        let mut r = Signal::new(SignalType::Result, self.name.clone());
+                        r.payload = serde_json::to_string(&output).unwrap_or_default().into_bytes();
+                        r
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            component = "router",
+                            trace_id = %trace_id,
+                            plugin = %plugin_name,
+                            convention = %conv_name,
+                            error = %e,
+                            "Remote invoke failed"
+                        );
+                        Signal::error(
+                            &self.name,
+                            &format!("Invoke error: {e}"),
+                        )
+                    }
+                };
+                resp.trace_id = trace_id;
+                resp.channel_id = signal.channel_id;
+                Some(resp)
+            }
+            SignalType::Query => {
+                let Ok(query_type) = String::from_utf8(signal.payload.clone()) else {
+                    return Some(Signal::error(
+                        &self.name,
+                        "Invalid UTF-8 in query payload",
+                    ));
+                };
+
+                let trace_id = if signal.trace_id.is_empty() {
+                    uuid::Uuid::new_v4().to_string()[..12].to_string()
+                } else {
+                    signal.trace_id.clone()
+                };
+
+                tracing::info!(
+                    component = "router",
+                    trace_id = %trace_id,
+                    sender = %signal.sender_id,
+                    query_type = %query_type,
+                    "Processing remote query"
+                );
+
+                let result_json = match query_type.as_str() {
+                    "get_state" => {
+                        let pm = self.plugins.read().unwrap();
+                        let plugin_names: Vec<String> = pm.plugin_names();
+                        drop(pm);
+                        serde_json::json!({
+                            "soma_id": self.name,
+                            "version": "0.1.0",
+                            "plugins": plugin_names,
+                        })
+                    }
+                    "get_plugins" => {
+                        let pm = self.plugins.read().unwrap();
+                        let namespaced = pm.namespaced_conventions();
+                        let health_warnings = pm.check_plugin_health();
+                        let mut plugins_map: std::collections::HashMap<String, Vec<serde_json::Value>> =
+                            std::collections::HashMap::new();
+                        for (plugin_name, c) in &namespaced {
+                            let entry = serde_json::json!({
+                                "id": c.id,
+                                "name": c.name,
+                                "description": c.description,
+                            });
+                            plugins_map.entry(plugin_name.clone()).or_default().push(entry);
+                        }
+                        let plugin_list: Vec<serde_json::Value> = plugins_map.iter().map(|(name, convs)| {
+                            let health = health_warnings.iter().find(|(n, _)| n == name);
+                            serde_json::json!({
+                                "name": name,
+                                "convention_count": convs.len(),
+                                "conventions": convs,
+                                "health": if health.is_some() { "degraded" } else { "healthy" },
+                            })
+                        }).collect();
+                        drop(pm);
+                        serde_json::json!({
+                            "count": plugin_list.len(),
+                            "plugins": plugin_list,
+                        })
+                    }
+                    "get_schema" => {
+                        let pm = self.plugins.read().unwrap();
+                        let conventions = pm.conventions();
+                        drop(pm);
+                        let schema: Vec<serde_json::Value> = conventions.iter().map(|c| {
+                            serde_json::json!({
+                                "id": c.id,
+                                "name": c.name,
+                                "description": c.description,
+                                "args": c.args,
+                                "returns": c.returns,
+                                "is_deterministic": c.is_deterministic,
+                            })
+                        }).collect();
+                        serde_json::json!({ "conventions": schema })
+                    }
+                    "get_health" => {
+                        let pm = self.plugins.read().unwrap();
+                        let health_warnings = pm.check_plugin_health();
+                        let status = if health_warnings.is_empty() { "healthy" } else { "degraded" };
+                        let warnings: Vec<serde_json::Value> = health_warnings.iter().map(|(name, msg)| {
+                            serde_json::json!({"plugin": name, "warning": msg})
+                        }).collect();
+                        drop(pm);
+                        serde_json::json!({
+                            "status": status,
+                            "plugin_warnings": warnings,
+                        })
+                    }
+                    other => {
+                        let mut resp = Signal::error(
+                            &self.name,
+                            &format!("Unknown query type: {other}"),
+                        );
+                        resp.trace_id = trace_id;
+                        resp.channel_id = signal.channel_id;
+                        return Some(resp);
+                    }
+                };
+
+                tracing::info!(
+                    component = "router",
+                    trace_id = %trace_id,
+                    query_type = %query_type,
+                    "Remote query succeeded"
+                );
+
+                let mut resp = Signal::new(SignalType::Result, self.name.clone());
+                resp.payload = serde_json::to_string(&result_json).unwrap_or_default().into_bytes();
+                resp.trace_id = trace_id;
+                resp.channel_id = signal.channel_id;
+                Some(resp)
+            }
             _ => {
                 tracing::debug!(
                     signal_type = ?signal.signal_type,
@@ -153,6 +406,32 @@ impl SignalHandler for SomaSignalHandler {
                 );
                 None
             }
+        }
+    }
+}
+
+/// Recursively convert a `serde_json::Value` to a SOMA plugin `Value`.
+///
+/// Used by the INVOKE signal handler to convert JSON arguments from the
+/// signal metadata into plugin-compatible values.
+fn json_to_plugin_value(val: &serde_json::Value) -> crate::plugin::interface::Value {
+    match val {
+        serde_json::Value::Null => crate::plugin::interface::Value::Null,
+        serde_json::Value::Bool(b) => crate::plugin::interface::Value::Bool(*b),
+        serde_json::Value::Number(n) => {
+            n.as_i64().map_or_else(
+                || crate::plugin::interface::Value::Float(n.as_f64().unwrap_or(0.0)),
+                crate::plugin::interface::Value::Int,
+            )
+        }
+        serde_json::Value::String(s) => crate::plugin::interface::Value::String(s.clone()),
+        serde_json::Value::Array(arr) => {
+            crate::plugin::interface::Value::List(arr.iter().map(json_to_plugin_value).collect())
+        }
+        serde_json::Value::Object(obj) => {
+            let map: std::collections::HashMap<String, crate::plugin::interface::Value> =
+                obj.iter().map(|(k, v)| (k.clone(), json_to_plugin_value(v))).collect();
+            crate::plugin::interface::Value::Map(map)
         }
     }
 }

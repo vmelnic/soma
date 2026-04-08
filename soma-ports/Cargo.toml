@@ -1,0 +1,4 @@
+[workspace]
+members = ["sdk", "image", "s3", "push", "timer", "smtp", "crypto", "auth", "geo", "postgres"]
+exclude = ["redis"]
+resolver = "2"

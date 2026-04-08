@@ -1,0 +1,35 @@
+{
+  "id": "soma.ports.push",
+  "name": "Push",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.push",
+  "description": "Push notifications: FCM, WebPush (VAPID), device registration",
+  "port": {
+    "port_id": "push",
+    "kind": "messaging",
+    "trust_level": "verified"
+  },
+  "skills": [
+    {
+      "id": "soma.ports.push.send_fcm",
+      "name": "Send FCM",
+      "description": "Send push notification via Firebase Cloud Messaging HTTP v1 API"
+    },
+    {
+      "id": "soma.ports.push.send_webpush",
+      "name": "Send WebPush",
+      "description": "Send push notification via Web Push protocol (VAPID)"
+    },
+    {
+      "id": "soma.ports.push.register_device",
+      "name": "Register Device",
+      "description": "Register a device token for push notifications"
+    },
+    {
+      "id": "soma.ports.push.unregister_device",
+      "name": "Unregister Device",
+      "description": "Unregister a device from push notifications"
+    }
+  ]
+}

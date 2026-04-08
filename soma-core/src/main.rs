@@ -126,6 +126,7 @@ fn run_intent(
     experience_buf: &Arc<RwLock<ExperienceBuffer>>,
     soma_state: &Arc<RwLock<SomaState>>,
     soma_metrics: &Arc<SomaMetrics>,
+    reflex_layer: &Arc<RwLock<mind::reflex::ReflexLayer>>,
     config: &SomaConfig,
     text: &str,
     max_concurrent: usize,
@@ -159,25 +160,58 @@ fn run_intent(
     )
     .entered();
 
+    // Reflex check: try to match against cached (intent -> program) pairs before Mind inference.
     let mind_guard = mind.read().unwrap();
-    match mind_guard.infer(text) {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let reflex_tokens: Vec<u32> = mind_guard.tokenizer.encode(text)
+        .iter().map(|&t| t as u32).collect();
+    drop(mind_guard);
+
+    let reflex_hit = {
+        let mut rl = reflex_layer.write().unwrap();
+        rl.try_match(&reflex_tokens).map(|(prog, conf)| (prog.clone(), conf))
+    };
+    let used_reflex = reflex_hit.is_some();
+
+    let mind_guard = mind.read().unwrap();
+    let infer_result = if let Some((cached_program, conf)) = reflex_hit {
+        soma_metrics.record_reflex_hit(reflex_layer.read().unwrap().len() as u64);
+        let real_count = cached_program.steps.iter().filter(|s| s.conv_id != STOP_ID).count();
+        println!(
+            "\n  [Reflex] Cached program ({real_count} steps, {:.0}%):",
+            conf * 100.0
+        );
+        for (i, step) in cached_program.steps.iter().enumerate() {
+            println!("    {}", step.format(i, &mind_guard.meta().catalog));
+            if step.conv_id == STOP_ID { break; }
+        }
+        println!();
+        Ok(cached_program)
+    } else {
+        soma_metrics.record_reflex_miss(reflex_layer.read().unwrap().len() as u64);
+        mind_guard.infer(text)
+    };
+
+    match infer_result {
         Ok(program) => {
             let real_count = program
                 .steps
                 .iter()
                 .filter(|s| s.conv_id != STOP_ID)
                 .count();
-            println!(
-                "\n  [Mind] Program ({real_count} steps, {:.0}%):",
-                program.confidence * 100.0
-            );
-            for (i, step) in program.steps.iter().enumerate() {
-                println!("    {}", step.format(i, &mind_guard.meta().catalog));
-                if step.conv_id == STOP_ID {
-                    break;
+            if !used_reflex {
+                println!(
+                    "\n  [Mind] Program ({real_count} steps, {:.0}%):",
+                    program.confidence * 100.0
+                );
+                for (i, step) in program.steps.iter().enumerate() {
+                    println!("    {}", step.format(i, &mind_guard.meta().catalog));
+                    if step.conv_id == STOP_ID {
+                        break;
+                    }
                 }
+                println!();
             }
-            println!();
 
             let result = plugins.read().unwrap().execute_program(&program.steps, max_program_steps);
 
@@ -278,6 +312,18 @@ fn run_intent(
                         (s.conv_id, a0, a1)
                     })
                     .collect();
+                // Record successful (intent -> program) pair as a reflex for future lookups.
+                // Must happen before experience recording which consumes cached_states.
+                if final_success && !used_reflex {
+                    if let Ok(mut rl) = reflex_layer.write() {
+                        rl.record(reflex_tokens.clone(), program.clone(), program.confidence);
+                        soma_metrics.reflex_entries.store(
+                            rl.len() as u64,
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
+                    }
+                }
+
                 let exp = Experience {
                     intent_tokens: tokens,
                     program: program_data,
@@ -395,8 +441,8 @@ fn run_intent(
     ACTIVE_INFERENCES.fetch_sub(1, Ordering::SeqCst);
 }
 
-/// Persists a checkpoint containing `LoRA` state, plugin states, decisions, and execution
-/// history. Prunes old checkpoints beyond `config.memory.max_checkpoints`.
+/// Persists a checkpoint containing `LoRA` state, plugin states, decisions, execution
+/// history, and reflex layer cache. Prunes old checkpoints beyond `config.memory.max_checkpoints`.
 fn do_checkpoint(
     config: &SomaConfig,
     _experience_buf: &Arc<RwLock<ExperienceBuffer>>,
@@ -404,6 +450,7 @@ fn do_checkpoint(
     plugins: &Arc<RwLock<PluginManager>>,
     soma_state: Option<&Arc<RwLock<SomaState>>>,
     mind: Option<&Arc<RwLock<OnnxMindEngine>>>,
+    reflex_layer: Option<&Arc<RwLock<mind::reflex::ReflexLayer>>>,
 ) {
     let ckpt_dir = Path::new(&config.memory.checkpoint_dir);
     let filename = Checkpoint::filename(&config.soma.id);
@@ -878,6 +925,8 @@ async fn main() -> Result<()> {
         config.memory.max_experience_buffer,
     )));
 
+    let reflex_layer = Arc::new(RwLock::new(mind::reflex::ReflexLayer::new(10_000, 0.9)));
+
     let soma_state = Arc::new(RwLock::new(SomaState::new(
         config.mcp.max_execution_history,
     )));
@@ -1049,6 +1098,7 @@ async fn main() -> Result<()> {
         mind: mind.clone(),
         plugins: plugins_arc.clone(),
         max_program_steps: config.mind.max_program_steps,
+        reflex_layer: reflex_layer.clone(),
     };
 
     let server = SynapseServer::new(config.soma.id.clone(), bind_addr.clone())
@@ -1074,6 +1124,7 @@ async fn main() -> Result<()> {
             peers: peer_registry.clone(),
             auth: auth_manager.clone(),
             shutdown_requested: mcp_shutdown.clone(),
+            reflex_layer: reflex_layer.clone(),
         };
 
         eprintln!("============================================================");
@@ -1130,6 +1181,7 @@ async fn main() -> Result<()> {
             &experience_buf,
             &soma_state,
             &soma_metrics,
+            &reflex_layer,
             &config,
             intent,
             config.resources.max_concurrent_inferences,
@@ -1299,6 +1351,7 @@ async fn main() -> Result<()> {
             &experience_buf,
             &soma_state,
             &soma_metrics,
+            &reflex_layer,
             &config,
             text,
             max_concurrent,

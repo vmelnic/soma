@@ -71,7 +71,7 @@ Negotiated during handshake via `max_signal_size`. Default: 10 MB. Embedded: 4 K
 
 ---
 
-## Signal Types (24)
+## Signal Types (26)
 
 Every signal carries a 1-byte type code. Signal types are grouped by function:
 
@@ -87,12 +87,14 @@ Every signal carries a 1-byte type code. Signal types are grouped by function:
 | `0xFE` | ERROR          | Error signal (checksum, rate limit, etc.)      |
 | `0xFF` | CONTROL        | Protocol-level control (backpressure, etc.)    |
 
-### Data (intent and payload exchange)
+### Data (intent, invocation, and payload exchange)
 
 | Code   | Name    | Purpose                                            |
 |--------|---------|----------------------------------------------------|
 | `0x10` | INTENT  | Natural language intent for processing             |
 | `0x11` | RESULT  | Execution result (response to an intent)           |
+| `0x12` | INVOKE  | Direct convention call, bypasses Mind inference    |
+| `0x13` | QUERY   | State query between SOMAs                          |
 | `0x20` | DATA    | Structured data (JSON/MessagePack in payload)      |
 | `0x21` | BINARY  | Raw binary data (file, image, audio frame)         |
 
@@ -265,6 +267,53 @@ The basic request/reply pattern:
 ```
 A -> B: INTENT  {payload: "list files in /tmp"}
 B -> A: RESULT  {payload: {files: ["a.txt", "b.txt"]}}
+```
+
+### Invoke/Query (Direct Convention Call and State Query)
+
+INVOKE and QUERY signals give SOMA-to-SOMA communication parity with LLM-to-SOMA (MCP). While INTENT passes natural language through Mind inference, INVOKE calls a convention directly (like MCP's `soma.postgres.query()`) and QUERY retrieves state (like MCP's `soma.get_state()`).
+
+**INVOKE payload format:**
+
+```
+A -> B: INVOKE {
+  payload: {
+    "convention": "postgres.query",
+    "args": ["SELECT * FROM users WHERE active = $1", [true]]
+  }
+}
+B -> A: RESULT {payload: {rows: [{id: 1, name: "Ana"}, ...]}}
+```
+
+**QUERY payload format:**
+
+```
+A -> B: QUERY {
+  payload: {
+    "query": "get_schema",
+    "params": {"table": "users"}
+  }
+}
+B -> A: RESULT {payload: {table: "users", columns: [...]}}
+```
+
+Both INVOKE and QUERY return a RESULT signal with execution or state data.
+
+**Example: Backend SOMA invoking Interface SOMA rendering convention.**
+A Backend SOMA can INVOKE a rendering convention on an Interface SOMA directly, without the Interface Mind needing to interpret an intent:
+
+```
+Backend -> Interface: INVOKE {
+  payload: {"convention": "renderer.show_view", "args": ["contact_list", {data: [...]}]}
+}
+```
+
+**Example: Hub SOMA querying ESP32 SOMA health.**
+A hub SOMA can QUERY a remote ESP32 SOMA for its health status:
+
+```
+Hub -> ESP32: QUERY {payload: {"query": "get_health"}}
+ESP32 -> Hub: RESULT {payload: {rss_bytes: 48000, uptime: 86400, plugins: 2}}
 ```
 
 ### Semantic UI Signals
@@ -772,7 +821,7 @@ The Rust implementation lives in `soma-core/src/protocol/` with one module per c
 
 | Module            | Spec Sections | Purpose                                     |
 |-------------------|---------------|---------------------------------------------|
-| `signal.rs`       | 4.2, 4.3      | SignalType enum (24 types), SignalFlags      |
+| `signal.rs`       | 4.2, 4.3      | SignalType enum (26 types), SignalFlags      |
 | `codec.rs`        | 4, 17         | Binary wire format encode/decode, CRC32     |
 | `connection.rs`   | 3, 14, 18     | TCP transport, heartbeat, session tokens    |
 | `server.rs`       | 3, 12         | Listener, capability enforcement, metrics   |

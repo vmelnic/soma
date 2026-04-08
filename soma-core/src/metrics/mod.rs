@@ -45,6 +45,10 @@ pub struct SomaMetrics {
     /// `LoRA` adapter magnitude stored as raw `f32::to_bits` inside a `u64`.
     pub lora_magnitude: AtomicU64,
 
+    pub reflex_hits_total: AtomicU64,
+    pub reflex_misses_total: AtomicU64,
+    pub reflex_entries: AtomicU64,
+
     pub protocol_connections_active: AtomicU64,
     pub protocol_signals_sent: AtomicU64,
     pub protocol_signals_received: AtomicU64,
@@ -75,6 +79,9 @@ impl SomaMetrics {
             checkpoints_saved: AtomicU64::new(0),
             memory_rss_bytes: AtomicU64::new(0),
             lora_magnitude: AtomicU64::new(0),
+            reflex_hits_total: AtomicU64::new(0),
+            reflex_misses_total: AtomicU64::new(0),
+            reflex_entries: AtomicU64::new(0),
             protocol_connections_active: AtomicU64::new(0),
             protocol_signals_sent: AtomicU64::new(0),
             protocol_signals_received: AtomicU64::new(0),
@@ -130,6 +137,18 @@ impl SomaMetrics {
         if !success {
             entry.errors.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// Record a reflex layer cache hit and update entry gauge.
+    pub fn record_reflex_hit(&self, entries: u64) {
+        self.reflex_hits_total.fetch_add(1, Ordering::Relaxed);
+        self.reflex_entries.store(entries, Ordering::Relaxed);
+    }
+
+    /// Record a reflex layer cache miss and update entry gauge.
+    pub fn record_reflex_miss(&self, entries: u64) {
+        self.reflex_misses_total.fetch_add(1, Ordering::Relaxed);
+        self.reflex_entries.store(entries, Ordering::Relaxed);
     }
 
     /// Record a plugin retry.
@@ -218,6 +237,12 @@ impl SomaMetrics {
             "Sum of inference durations in ms", self.inference_duration_sum_ms.load(Ordering::Relaxed));
         prom_f64(&mut out, "soma_inference_confidence_avg", "gauge",
             "Average inference confidence", self.avg_confidence());
+        prom(&mut out, "soma_reflex_hits_total", "counter",
+            "Reflex layer cache hits", self.reflex_hits_total.load(Ordering::Relaxed));
+        prom(&mut out, "soma_reflex_misses_total", "counter",
+            "Reflex layer cache misses", self.reflex_misses_total.load(Ordering::Relaxed));
+        prom(&mut out, "soma_reflex_entries", "gauge",
+            "Current reflex layer entry count", self.reflex_entries.load(Ordering::Relaxed));
         prom(&mut out, "soma_programs_executed", "counter",
             "Total programs executed", self.programs_executed.load(Ordering::Relaxed));
         prom(&mut out, "soma_program_steps_executed", "counter",
@@ -333,6 +358,11 @@ impl SomaMetrics {
                 "adaptations_total": self.adaptations_total.load(Ordering::Relaxed),
                 "checkpoints_saved": self.checkpoints_saved.load(Ordering::Relaxed),
                 "rss_bytes": self.memory_rss_bytes.load(Ordering::Relaxed),
+            },
+            "reflex": {
+                "hits_total": self.reflex_hits_total.load(Ordering::Relaxed),
+                "misses_total": self.reflex_misses_total.load(Ordering::Relaxed),
+                "entries": self.reflex_entries.load(Ordering::Relaxed),
             },
             "adaptation": {
                 "lora_magnitude": self.get_lora_magnitude(),

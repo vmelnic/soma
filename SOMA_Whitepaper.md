@@ -329,13 +329,15 @@ The Synaptic Protocol is the SOMA-to-SOMA communication layer. MCP is for LLM↔
 
 Binary wire protocol, 22-byte overhead per signal (vs HTTP's 500-2000 bytes). Transport-agnostic: TCP, Unix Domain Socket, WebSocket. Big-endian. CRC32 checksum. Optional zstd compression.
 
-**24 signal types across six categories:**
+**26 signal types across six categories:**
 - **Protocol**: HANDSHAKE, HANDSHAKE_ACK, CLOSE, PING, PONG, ERROR, CONTROL
-- **Data**: INTENT, RESULT, DATA, BINARY
+- **Data**: INTENT, RESULT, INVOKE, QUERY, DATA, BINARY
 - **Streaming**: STREAM_START, STREAM_DATA, STREAM_END
 - **Chunked**: CHUNK_START, CHUNK_DATA, CHUNK_END, CHUNK_ACK (resumable)
 - **Discovery**: DISCOVER, DISCOVER_ACK, PEER_QUERY, PEER_LIST
 - **Pub/Sub**: SUBSCRIBE, UNSUBSCRIBE
+
+INVOKE and QUERY signals provide direct convention calling and state querying between SOMAs, giving SOMA-to-SOMA communication full parity with LLM-to-SOMA via MCP.
 
 Key capabilities: multiplexed channels, resumable uploads (SHA-256 verified), pub/sub with durable subscriptions and catch-up, peer discovery via presence broadcasting with decaying TTL, auto-reconnect with exponential backoff, and protocol versioning negotiated at handshake.
 

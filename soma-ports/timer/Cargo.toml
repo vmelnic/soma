@@ -1,0 +1,13 @@
+[package]
+name = "soma-port-timer"
+version = "0.1.0"
+edition = "2024"
+description = "SOMA port pack: timer/scheduler (timeout, interval, cancel, list)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soma-port-sdk = { path = "../sdk" }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }

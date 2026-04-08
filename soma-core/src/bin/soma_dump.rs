@@ -71,6 +71,8 @@ const fn signal_type_name(byte: u8) -> &'static str {
         0x03 => "close",
         0x10 => "intent",
         0x11 => "result",
+        0x12 => "invoke",
+        0x13 => "query",
         0x20 => "data",
         0x21 => "binary",
         0x22 => "stream_start",

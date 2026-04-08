@@ -1,0 +1,106 @@
+{
+  "id": "soma.ports.crypto",
+  "name": "Crypto",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.crypto",
+  "description": "Cryptographic operations: hashing, signing, encryption, JWT, random generation",
+  "port": {
+    "port_id": "crypto",
+    "kind": "custom",
+    "trust_level": "trusted"
+  },
+  "skills": [
+    {
+      "id": "soma.ports.crypto.sha256",
+      "name": "SHA-256 hash",
+      "description": "Compute SHA-256 hex digest of data",
+      "input": { "data": "string" },
+      "output": { "hash": "string" }
+    },
+    {
+      "id": "soma.ports.crypto.sha512",
+      "name": "SHA-512 hash",
+      "description": "Compute SHA-512 hex digest of data",
+      "input": { "data": "string" },
+      "output": { "hash": "string" }
+    },
+    {
+      "id": "soma.ports.crypto.hmac",
+      "name": "HMAC-SHA256",
+      "description": "Compute HMAC-SHA256 message authentication code",
+      "input": { "data": "string|bytes", "key": "string|bytes" },
+      "output": { "mac": "string" }
+    },
+    {
+      "id": "soma.ports.crypto.bcrypt_hash",
+      "name": "bcrypt hash",
+      "description": "Hash a password with bcrypt",
+      "input": { "password": "string", "cost": "integer (optional, default 12)" },
+      "output": { "hash": "string" }
+    },
+    {
+      "id": "soma.ports.crypto.bcrypt_verify",
+      "name": "bcrypt verify",
+      "description": "Verify password against bcrypt hash",
+      "input": { "password": "string", "hash": "string" },
+      "output": { "valid": "boolean" }
+    },
+    {
+      "id": "soma.ports.crypto.aes_encrypt",
+      "name": "AES-256-GCM encrypt",
+      "description": "Encrypt data with AES-256-GCM; nonce prepended to output",
+      "input": { "plaintext": "string|bytes", "key": "bytes (32)" },
+      "output": { "ciphertext": "bytes" }
+    },
+    {
+      "id": "soma.ports.crypto.aes_decrypt",
+      "name": "AES-256-GCM decrypt",
+      "description": "Decrypt AES-256-GCM ciphertext (expects prepended nonce)",
+      "input": { "ciphertext": "bytes", "key": "bytes (32)" },
+      "output": { "plaintext": "bytes" }
+    },
+    {
+      "id": "soma.ports.crypto.rsa_sign",
+      "name": "RSA sign",
+      "description": "Sign data with RSA-PKCS1v15-SHA256",
+      "input": { "data": "string|bytes", "private_key_pem": "string" },
+      "output": { "signature": "string (hex)" }
+    },
+    {
+      "id": "soma.ports.crypto.rsa_verify",
+      "name": "RSA verify",
+      "description": "Verify RSA-PKCS1v15-SHA256 signature",
+      "input": { "data": "string|bytes", "signature": "string (hex)", "public_key_pem": "string" },
+      "output": { "valid": "boolean" }
+    },
+    {
+      "id": "soma.ports.crypto.jwt_sign",
+      "name": "JWT sign",
+      "description": "Sign a JWT with HS256",
+      "input": { "claims": "string (JSON)", "secret": "string" },
+      "output": { "token": "string" }
+    },
+    {
+      "id": "soma.ports.crypto.jwt_verify",
+      "name": "JWT verify",
+      "description": "Verify JWT and return decoded claims",
+      "input": { "token": "string", "secret": "string" },
+      "output": { "claims": "object" }
+    },
+    {
+      "id": "soma.ports.crypto.random_bytes",
+      "name": "Random bytes",
+      "description": "Generate cryptographically secure random bytes",
+      "input": { "count": "integer (1-65536)" },
+      "output": { "bytes": "bytes" }
+    },
+    {
+      "id": "soma.ports.crypto.random_string",
+      "name": "Random string",
+      "description": "Generate random alphanumeric string",
+      "input": { "length": "integer (1-65536)" },
+      "output": { "value": "string" }
+    }
+  ]
+}

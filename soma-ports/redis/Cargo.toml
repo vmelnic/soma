@@ -1,0 +1,18 @@
+[package]
+name = "soma-port-redis"
+version = "0.1.0"
+edition = "2024"
+description = "SOMA port pack for Redis key-value operations"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soma-port-sdk = { path = "../sdk" }
+redis = { version = "0.27", features = ["aio", "tokio-comp", "connection-manager"] }
+tokio = { version = "1", features = ["rt", "net"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+semver = { version = "1", features = ["serde"] }

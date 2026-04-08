@@ -1,0 +1,201 @@
+{
+  "schema_version": "1.0",
+  "plugin": "smtp",
+  "plugin_version": "0.1.0",
+  "examples": [
+    {
+      "id": "smtp_send_001",
+      "intents": [
+        "send an email to {to} with subject {subject}",
+        "email {to} about {subject}",
+        "send a message to {to} with subject {subject}",
+        "mail {to} regarding {subject}",
+        "notify {to} by email about {subject}"
+      ],
+      "program": [
+        {"convention": "smtp.send", "args": [{"name": "to", "type": "span", "extract": "to"}, {"name": "subject", "type": "span", "extract": "subject"}, {"name": "body", "type": "span", "extract": "body"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "to": ["user@example.com", "admin@helperbook.app", "support@company.org"],
+        "subject": ["Welcome", "Your appointment is confirmed", "Password reset"],
+        "body": ["Hello, welcome to HelperBook!", "Your appointment has been confirmed for tomorrow.", "Click the link to reset your password."]
+      },
+      "tags": ["smtp", "email", "send"]
+    },
+    {
+      "id": "smtp_send_welcome_001",
+      "intents": [
+        "send a welcome email to {to}",
+        "email the welcome message to {to}",
+        "send the onboarding email to {to}",
+        "welcome {to} by email"
+      ],
+      "program": [
+        {"convention": "smtp.send", "args": [{"name": "to", "type": "span", "extract": "to"}, {"name": "subject", "type": "literal", "value": "Welcome to HelperBook"}, {"name": "body", "type": "literal", "value": "Welcome! Your account has been created."}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "to": ["newuser@example.com", "jane@company.org", "john.doe@gmail.com"]
+      },
+      "tags": ["smtp", "email", "welcome", "onboarding"]
+    },
+    {
+      "id": "smtp_send_confirmation_001",
+      "intents": [
+        "email the appointment confirmation to {to}",
+        "send appointment confirmation email to {to}",
+        "confirm the appointment by email to {to}",
+        "notify {to} about their confirmed appointment"
+      ],
+      "program": [
+        {"convention": "smtp.send", "args": [{"name": "to", "type": "span", "extract": "to"}, {"name": "subject", "type": "literal", "value": "Appointment Confirmed"}, {"name": "body", "type": "span", "extract": "body"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "to": ["client@example.com", "patient@hospital.org"],
+        "body": ["Your appointment is confirmed for Monday at 10:00 AM.", "Your booking on Friday at 2:00 PM has been confirmed."]
+      },
+      "tags": ["smtp", "email", "appointment", "confirmation"]
+    },
+    {
+      "id": "smtp_send_html_001",
+      "intents": [
+        "send an HTML email to {to} with subject {subject}",
+        "send a rich email to {to} about {subject}",
+        "email {to} an HTML message with subject {subject}",
+        "send formatted email to {to} regarding {subject}"
+      ],
+      "program": [
+        {"convention": "smtp.send_html", "args": [{"name": "to", "type": "span", "extract": "to"}, {"name": "subject", "type": "span", "extract": "subject"}, {"name": "html", "type": "span", "extract": "html"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "to": ["subscriber@example.com", "marketing@company.org"],
+        "subject": ["Monthly Newsletter", "Special Offer"],
+        "html": ["<h1>Newsletter</h1><p>Here are the latest updates.</p>", "<h1>50% Off</h1><p>Use code SAVE50 at checkout.</p>"]
+      },
+      "tags": ["smtp", "email", "html", "newsletter"]
+    },
+    {
+      "id": "smtp_send_html_newsletter_001",
+      "intents": [
+        "send the HTML newsletter to {to}",
+        "email the newsletter to {to}",
+        "deliver the newsletter email to {to}",
+        "send HTML newsletter to subscribers at {to}"
+      ],
+      "program": [
+        {"convention": "smtp.send_html", "args": [{"name": "to", "type": "span", "extract": "to"}, {"name": "subject", "type": "literal", "value": "HelperBook Newsletter"}, {"name": "html", "type": "span", "extract": "html"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "to": ["readers@list.helperbook.app", "subscribers@example.com"],
+        "html": ["<h1>HelperBook Updates</h1><p>New features this month.</p>"]
+      },
+      "tags": ["smtp", "email", "html", "newsletter"]
+    },
+    {
+      "id": "smtp_send_password_reset_001",
+      "intents": [
+        "send a password reset email to {to}",
+        "email {to} a password reset link",
+        "send the reset password link to {to}",
+        "notify {to} about their password reset"
+      ],
+      "program": [
+        {"convention": "smtp.send", "args": [{"name": "to", "type": "span", "extract": "to"}, {"name": "subject", "type": "literal", "value": "Password Reset"}, {"name": "body", "type": "span", "extract": "body"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "to": ["user@example.com", "forgot@company.org"],
+        "body": ["Click here to reset your password: https://helperbook.app/reset?token=abc123", "Your password reset link is: https://helperbook.app/reset?token=xyz789"]
+      },
+      "tags": ["smtp", "email", "password", "reset"]
+    },
+    {
+      "id": "smtp_send_attachment_001",
+      "intents": [
+        "send an email with attachment to {to}",
+        "email {to} with a file attachment",
+        "send {to} an email with the attached file",
+        "mail the document to {to} as an attachment"
+      ],
+      "program": [
+        {"convention": "smtp.send_with_attachment", "args": [{"name": "to", "type": "span", "extract": "to"}, {"name": "subject", "type": "span", "extract": "subject"}, {"name": "body", "type": "span", "extract": "body"}, {"name": "attachment_name", "type": "span", "extract": "attachment_name"}, {"name": "attachment_data", "type": "span", "extract": "attachment_data"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "to": ["client@example.com", "partner@company.org"],
+        "subject": ["Invoice Attached", "Report Enclosed"],
+        "body": ["Please find the invoice attached.", "The monthly report is attached."],
+        "attachment_name": ["invoice.pdf", "report.csv"],
+        "attachment_data": []
+      },
+      "tags": ["smtp", "email", "attachment"]
+    },
+    {
+      "id": "smtp_send_invoice_001",
+      "intents": [
+        "email the invoice to {to}",
+        "send the invoice email to {to}",
+        "deliver the invoice to {to} by email",
+        "mail the invoice to {to} with attachment"
+      ],
+      "program": [
+        {"convention": "smtp.send_with_attachment", "args": [{"name": "to", "type": "span", "extract": "to"}, {"name": "subject", "type": "literal", "value": "Your Invoice"}, {"name": "body", "type": "literal", "value": "Please find your invoice attached."}, {"name": "attachment_name", "type": "literal", "value": "invoice.pdf"}, {"name": "attachment_data", "type": "span", "extract": "attachment_data"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "to": ["billing@example.com", "accounts@company.org"],
+        "attachment_data": []
+      },
+      "tags": ["smtp", "email", "invoice", "attachment"]
+    },
+    {
+      "id": "smtp_send_html_receipt_001",
+      "intents": [
+        "send an HTML receipt email to {to}",
+        "email the payment receipt to {to}",
+        "deliver the HTML receipt to {to}"
+      ],
+      "program": [
+        {"convention": "smtp.send_html", "args": [{"name": "to", "type": "span", "extract": "to"}, {"name": "subject", "type": "literal", "value": "Payment Receipt"}, {"name": "html", "type": "span", "extract": "html"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 0}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "to": ["customer@example.com", "buyer@shop.com"],
+        "html": ["<h1>Receipt</h1><p>Amount: $50.00</p><p>Thank you for your payment.</p>"]
+      },
+      "tags": ["smtp", "email", "html", "receipt", "payment"]
+    },
+    {
+      "id": "smtp_query_then_email_001",
+      "intents": [
+        "look up the user {to} and send them a notification email",
+        "find user {to} in the database and email them",
+        "query the user {to} then send an email notification"
+      ],
+      "program": [
+        {"convention": "postgres.query_one", "args": [{"name": "sql", "type": "literal", "value": "SELECT email, name FROM users WHERE email = $1"}, {"name": "params", "type": "span", "extract": "to"}]},
+        {"convention": "smtp.send", "args": [{"name": "to", "type": "ref", "step": 0, "field": "email"}, {"name": "subject", "type": "literal", "value": "Notification"}, {"name": "body", "type": "span", "extract": "body"}]},
+        {"convention": "EMIT", "args": [{"name": "data", "type": "ref", "step": 1}]},
+        {"convention": "STOP"}
+      ],
+      "params": {
+        "to": ["user@example.com"],
+        "body": ["You have a new notification."]
+      },
+      "tags": ["smtp", "email", "postgres", "multi-step"]
+    }
+  ]
+}

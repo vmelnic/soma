@@ -1,0 +1,40 @@
+{
+  "id": "soma.ports.image",
+  "name": "Image",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.image",
+  "description": "Image processing: thumbnail, resize, crop, format conversion, EXIF stripping",
+  "port": {
+    "port_id": "image",
+    "kind": "custom",
+    "trust_level": "verified"
+  },
+  "skills": [
+    {
+      "id": "soma.ports.image.thumbnail",
+      "name": "Thumbnail",
+      "description": "Generate a thumbnail of an image (fast, lower quality than resize)"
+    },
+    {
+      "id": "soma.ports.image.resize",
+      "name": "Resize",
+      "description": "Resize an image to exact dimensions using Lanczos3 interpolation"
+    },
+    {
+      "id": "soma.ports.image.crop",
+      "name": "Crop",
+      "description": "Crop a rectangular region from an image"
+    },
+    {
+      "id": "soma.ports.image.format_convert",
+      "name": "Format Convert",
+      "description": "Convert image between formats (png, jpeg, webp)"
+    },
+    {
+      "id": "soma.ports.image.exif_strip",
+      "name": "EXIF Strip",
+      "description": "Strip EXIF metadata from an image by re-encoding pixel data"
+    }
+  ]
+}

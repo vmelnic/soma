@@ -55,6 +55,10 @@ pub struct Checkpoint {
     /// as `logits += hidden @ delta.T` since tract-onnx graphs are frozen.
     #[serde(default)]
     pub merged_opcode_delta: Vec<f32>,
+    /// Serialized reflex layer state (proven intent -> program cache).
+    /// Optional for backwards compatibility with older checkpoints.
+    #[serde(default)]
+    pub reflex_data: Option<Vec<u8>>,
 }
 
 /// A single plugin's serialized state within a checkpoint.
@@ -91,6 +95,7 @@ impl Checkpoint {
             base_model_hash: String::new(),
             plugin_manifest: Vec::new(),
             merged_opcode_delta: Vec::new(),
+            reflex_data: None,
         }
     }
 

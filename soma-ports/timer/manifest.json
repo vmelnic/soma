@@ -1,0 +1,35 @@
+{
+  "id": "soma.ports.timer",
+  "name": "Timer",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.timer",
+  "description": "Timer/scheduler: timeouts, intervals, cancellation, and listing",
+  "port": {
+    "port_id": "timer",
+    "kind": "custom",
+    "trust_level": "built_in"
+  },
+  "skills": [
+    {
+      "id": "soma.ports.timer.set_timeout",
+      "name": "Set Timeout",
+      "description": "Set a one-shot timer that fires after a delay"
+    },
+    {
+      "id": "soma.ports.timer.set_interval",
+      "name": "Set Interval",
+      "description": "Set a recurring timer that fires at regular intervals"
+    },
+    {
+      "id": "soma.ports.timer.cancel_timer",
+      "name": "Cancel Timer",
+      "description": "Cancel an active timer by ID"
+    },
+    {
+      "id": "soma.ports.timer.list_active",
+      "name": "List Active",
+      "description": "List all active timers with remaining time"
+    }
+  ]
+}

@@ -229,6 +229,82 @@ impl SynapseClient {
         }
     }
 
+    /// Send an invoke and wait up to 30 s for a correlated response via the [`SignalRouter`].
+    ///
+    /// INVOKE bypasses Mind inference — it calls the named convention directly on the
+    /// remote SOMA node. The payload carries the convention name as "plugin.convention",
+    /// and args are passed in signal metadata as a JSON array.
+    #[allow(dead_code)]
+    pub async fn send_invoke_and_wait(
+        addr: &str,
+        sender: &str,
+        convention: &str,
+        args: serde_json::Value,
+        router: &SignalRouter,
+    ) -> Result<Signal> {
+        let mut invoke = Signal::new(SignalType::Invoke, sender.to_string());
+        invoke.payload = convention.as_bytes().to_vec();
+        if let serde_json::Value::Object(ref mut map) = invoke.metadata {
+            map.insert("args".to_string(), args);
+        }
+
+        let sequence = invoke.sequence;
+        let rx = router.register_pending(sequence)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        let response = Self::send(addr, sender, &invoke).await?;
+        if let Some(resp) = response {
+            router.deliver_response(sequence, resp);
+        }
+
+        match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+            Ok(Ok(response)) => Ok(response),
+            Ok(Err(_)) => bail!("Response channel closed"),
+            Err(_) => {
+                router.cancel(sequence);
+                bail!("Invoke response timed out after 30s")
+            }
+        }
+    }
+
+    /// Send a query and wait up to 30 s for a correlated response via the [`SignalRouter`].
+    ///
+    /// QUERY retrieves state from a remote SOMA node without triggering inference.
+    /// The payload carries the query type (e.g. "get_state", "get_plugins", "get_schema",
+    /// "get_health"), and optional params are passed in signal metadata.
+    #[allow(dead_code)]
+    pub async fn send_query_and_wait(
+        addr: &str,
+        sender: &str,
+        query_type: &str,
+        params: serde_json::Value,
+        router: &SignalRouter,
+    ) -> Result<Signal> {
+        let mut query = Signal::new(SignalType::Query, sender.to_string());
+        query.payload = query_type.as_bytes().to_vec();
+        if let serde_json::Value::Object(ref mut map) = query.metadata {
+            map.insert("params".to_string(), params);
+        }
+
+        let sequence = query.sequence;
+        let rx = router.register_pending(sequence)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        let response = Self::send(addr, sender, &query).await?;
+        if let Some(resp) = response {
+            router.deliver_response(sequence, resp);
+        }
+
+        match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+            Ok(Ok(response)) => Ok(response),
+            Ok(Err(_)) => bail!("Response channel closed"),
+            Err(_) => {
+                router.cancel(sequence);
+                bail!("Query response timed out after 30s")
+            }
+        }
+    }
+
     /// One-shot intent send without router-based correlation.
     #[allow(dead_code)]
     pub async fn send_intent(

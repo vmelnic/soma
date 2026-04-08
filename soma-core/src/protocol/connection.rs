@@ -400,6 +400,8 @@ impl SynapseConnection {
             | SignalType::Control
             | SignalType::Intent
             | SignalType::Result
+            | SignalType::Invoke
+            | SignalType::Query
             | SignalType::Data
             | SignalType::Discover
             | SignalType::DiscoverAck

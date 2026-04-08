@@ -22,6 +22,8 @@ pub enum SignalType {
 
     Intent = 0x10,
     Result = 0x11,
+    Invoke = 0x12,
+    Query = 0x13,
 
     Data = 0x20,
     Binary = 0x21,
@@ -58,6 +60,8 @@ impl SignalType {
             0x03 => Some(Self::Close),
             0x10 => Some(Self::Intent),
             0x11 => Some(Self::Result),
+            0x12 => Some(Self::Invoke),
+            0x13 => Some(Self::Query),
             0x20 => Some(Self::Data),
             0x21 => Some(Self::Binary),
             0x22 => Some(Self::StreamStart),
