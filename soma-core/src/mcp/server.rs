@@ -1260,7 +1260,7 @@ impl McpServer {
         match pm.execute_by_plugin_async(plugin_name, conv_id, plugin_args).await {
             Ok(val) => McpToolResult::json(serde_json::json!({
                 "success": true,
-                "result": format!("{}", val),
+                "result": serde_json::to_value(&val).unwrap_or(serde_json::Value::Null),
             })),
             Err(e) => McpToolResult::error(format!("Plugin error: {}", e)),
         }

@@ -51,6 +51,114 @@ function getMessages(contactId) {
   ];
 }
 
+// Current user ID (fixed for now — would come from auth in production)
+const CURRENT_USER_ID = 1;
+
+async function loadChatContacts() {
+  try {
+    // Load contacts that have chats with the current user
+    const result = await api.query(
+      "SELECT DISTINCT u.id, u.name, u.phone, u.role, u.bio, u.is_verified, " +
+      "m.content as last_message, m.created_at as last_time " +
+      "FROM users u " +
+      "JOIN messages m ON (m.sender_id = u.id OR m.sender_id = " + CURRENT_USER_ID + ") " +
+      "JOIN chats c ON c.id = m.chat_id " +
+      "WHERE u.id != " + CURRENT_USER_ID + " " +
+      "AND m.created_at = (SELECT MAX(m2.created_at) FROM messages m2 WHERE m2.chat_id = m.chat_id) " +
+      "ORDER BY m.created_at DESC"
+    );
+    const rows = SomaAPI.extractRows(result);
+    if (rows && Array.isArray(rows) && rows.length > 0) {
+      return rows.map(row => ({
+        id: String(row.id),
+        name: row.name || 'Unknown',
+        phone: row.phone || '',
+        role: row.role || 'provider',
+        services: (row.bio || '').split(',').map(s => s.trim()).filter(Boolean),
+        online: false,
+        verified: !!row.is_verified,
+        lastMessage: row.last_message || '',
+        lastTime: formatTimeAgo(row.last_time)
+      }));
+    }
+  } catch (e) {
+    console.warn('[chat] API load failed, using mock data:', e.message);
+  }
+  return null; // null means use mock data
+}
+
+async function loadChatMessages(contactId) {
+  try {
+    const result = await api.query(
+      "SELECT m.id, m.sender_id, m.type, m.content, m.status, m.created_at " +
+      "FROM messages m " +
+      "JOIN chats c ON c.id = m.chat_id " +
+      "WHERE m.chat_id IN (" +
+      "  SELECT DISTINCT ch.id FROM chats ch " +
+      "  JOIN messages msg ON msg.chat_id = ch.id " +
+      "  WHERE ch.type = 'direct' " +
+      "  AND (msg.sender_id = " + CURRENT_USER_ID + " OR msg.sender_id = " + contactId + ")" +
+      ") " +
+      "ORDER BY m.created_at ASC LIMIT 100"
+    );
+    const rows = SomaAPI.extractRows(result);
+    if (rows && Array.isArray(rows) && rows.length > 0) {
+      return rows.map(row => {
+        const isMe = String(row.sender_id) === String(CURRENT_USER_ID);
+        if (row.type === 'appointment') {
+          return {
+            id: String(row.id),
+            type: 'appointment',
+            service: row.content || 'Appointment',
+            date: '',
+            time: '',
+            status: row.status || 'confirmed',
+            provider: ''
+          };
+        }
+        return {
+          id: String(row.id),
+          from: isMe ? 'me' : 'them',
+          text: row.content || '',
+          time: formatMessageTime(row.created_at)
+        };
+      });
+    }
+  } catch (e) {
+    console.warn('[chat] Failed to load messages for contact ' + contactId + ':', e.message);
+  }
+  return null; // null means use mock data
+}
+
+function formatTimeAgo(timestamp) {
+  if (!timestamp) return '';
+  try {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'now';
+    if (diffMins < 60) return diffMins + 'm ago';
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return diffHours + 'h ago';
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return diffDays + 'd ago';
+    return Math.floor(diffDays / 7) + 'w ago';
+  } catch (e) {
+    return '';
+  }
+}
+
+function formatMessageTime(timestamp) {
+  if (!timestamp) return '';
+  try {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    return '';
+  }
+}
+
 function renderChatList() {
   const main = document.getElementById('main');
   const container = document.createElement('div');
@@ -65,71 +173,78 @@ function renderChatList() {
   title.appendChild(h2);
   container.appendChild(title);
 
-  // Chat list - only contacts with messages
-  const chatContacts = MOCK_CONTACTS.filter(c => MOCK_MESSAGES[c.id]);
   const list = document.createElement('div');
   list.className = 'px-4 flex flex-col';
-
-  chatContacts.forEach(contact => {
-    const messages = MOCK_MESSAGES[contact.id];
-    const lastMsg = messages[messages.length - 1];
-    const lastText = lastMsg.type === 'appointment'
-      ? 'Appointment: ' + lastMsg.service
-      : lastMsg.text;
-
-    const row = document.createElement('div');
-    row.className = 'flex items-center gap-3 py-3 border-b border-gray-50 cursor-pointer hover:bg-gray-50 rounded-lg px-2 -mx-2';
-    row.addEventListener('click', () => navigate('chat', { contact }));
-
-    // Avatar
-    const colors = [
-      'bg-indigo-500', 'bg-rose-500', 'bg-emerald-500', 'bg-amber-500',
-      'bg-cyan-500', 'bg-purple-500', 'bg-pink-500', 'bg-teal-500'
-    ];
-    const hash = contact.name.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-    const avatarColor = colors[hash % colors.length];
-    const initials = contact.name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
-
-    const avatar = document.createElement('div');
-    avatar.className = 'relative flex-shrink-0';
-    const circle = document.createElement('div');
-    circle.className = 'w-12 h-12 ' + avatarColor + ' rounded-full flex items-center justify-center text-white font-semibold text-sm';
-    circle.textContent = initials;
-    avatar.appendChild(circle);
-    if (contact.online) {
-      const dot = document.createElement('span');
-      dot.className = 'absolute bottom-0 right-0 w-3 h-3 bg-green-400 rounded-full border-2 border-white status-online';
-      avatar.appendChild(dot);
-    }
-    row.appendChild(avatar);
-
-    // Text content
-    const textDiv = document.createElement('div');
-    textDiv.className = 'flex-1 min-w-0';
-    const nameRow = document.createElement('div');
-    nameRow.className = 'flex items-center justify-between';
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'font-semibold text-sm text-gray-900';
-    nameSpan.textContent = contact.name;
-    const timeSpan = document.createElement('span');
-    timeSpan.className = 'text-xs text-gray-400';
-    timeSpan.textContent = contact.lastTime || '';
-    nameRow.appendChild(nameSpan);
-    nameRow.appendChild(timeSpan);
-    textDiv.appendChild(nameRow);
-
-    const msgP = document.createElement('p');
-    msgP.className = 'text-sm text-gray-500 truncate mt-0.5';
-    msgP.textContent = lastText;
-    textDiv.appendChild(msgP);
-
-    row.appendChild(textDiv);
-    list.appendChild(row);
-  });
-
+  list.innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">Loading...</div>';
   container.appendChild(list);
+
   main.innerHTML = '';
   main.appendChild(container);
+
+  // Try loading from API, fall back to mock
+  loadChatContacts().then(apiContacts => {
+    const chatContacts = apiContacts || MOCK_CONTACTS.filter(c => MOCK_MESSAGES[c.id]);
+    list.innerHTML = '';
+
+    chatContacts.forEach(contact => {
+      const mockMessages = MOCK_MESSAGES[contact.id];
+      const lastText = contact.lastMessage
+        || (mockMessages ? (mockMessages[mockMessages.length - 1].type === 'appointment'
+            ? 'Appointment: ' + mockMessages[mockMessages.length - 1].service
+            : mockMessages[mockMessages.length - 1].text)
+          : '');
+      const lastTime = contact.lastTime || '';
+
+      const row = document.createElement('div');
+      row.className = 'flex items-center gap-3 py-3 border-b border-gray-50 cursor-pointer hover:bg-gray-50 rounded-lg px-2 -mx-2';
+      row.addEventListener('click', () => navigate('chat', { contact }));
+
+      // Avatar
+      const colors = [
+        'bg-indigo-500', 'bg-rose-500', 'bg-emerald-500', 'bg-amber-500',
+        'bg-cyan-500', 'bg-purple-500', 'bg-pink-500', 'bg-teal-500'
+      ];
+      const hash = contact.name.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+      const avatarColor = colors[hash % colors.length];
+      const initials = contact.name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
+
+      const avatar = document.createElement('div');
+      avatar.className = 'relative flex-shrink-0';
+      const circle = document.createElement('div');
+      circle.className = 'w-12 h-12 ' + avatarColor + ' rounded-full flex items-center justify-center text-white font-semibold text-sm';
+      circle.textContent = initials;
+      avatar.appendChild(circle);
+      if (contact.online) {
+        const dot = document.createElement('span');
+        dot.className = 'absolute bottom-0 right-0 w-3 h-3 bg-green-400 rounded-full border-2 border-white status-online';
+        avatar.appendChild(dot);
+      }
+      row.appendChild(avatar);
+
+      // Text content
+      const textDiv = document.createElement('div');
+      textDiv.className = 'flex-1 min-w-0';
+      const nameRow = document.createElement('div');
+      nameRow.className = 'flex items-center justify-between';
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'font-semibold text-sm text-gray-900';
+      nameSpan.textContent = contact.name;
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'text-xs text-gray-400';
+      timeSpan.textContent = lastTime;
+      nameRow.appendChild(nameSpan);
+      nameRow.appendChild(timeSpan);
+      textDiv.appendChild(nameRow);
+
+      const msgP = document.createElement('p');
+      msgP.className = 'text-sm text-gray-500 truncate mt-0.5';
+      msgP.textContent = lastText;
+      textDiv.appendChild(msgP);
+
+      row.appendChild(textDiv);
+      list.appendChild(row);
+    });
+  });
 }
 
 function renderChat(params = {}) {
@@ -139,8 +254,9 @@ function renderChat(params = {}) {
   }
 
   const contact = params.contact;
-  const messages = getMessages(contact.id);
   const main = document.getElementById('main');
+  // Start with mock messages, then try to load from API
+  let messages = getMessages(contact.id);
 
   // Hide default header, show chat header
   const header = document.getElementById('header');
@@ -307,6 +423,79 @@ function renderChat(params = {}) {
     if (e.key === 'Enter') sendMessage(contact);
   });
   textInput.focus();
+
+  // Try loading messages from API in the background
+  loadChatMessages(contact.id).then(apiMessages => {
+    if (apiMessages && apiMessages.length > 0) {
+      // Replace mock messages with real ones
+      messagesInner.innerHTML = '';
+      apiMessages.forEach(msg => {
+        appendMessageBubble(messagesInner, msg);
+      });
+      lucide.createIcons();
+      messagesArea.scrollTop = messagesArea.scrollHeight;
+    }
+  });
+}
+
+function appendMessageBubble(container, msg) {
+  if (msg.type === 'appointment') {
+    const card = document.createElement('div');
+    card.className = 'bg-indigo-50 rounded-2xl p-4 my-2 border border-indigo-100';
+
+    const cardTitle = document.createElement('div');
+    cardTitle.className = 'flex items-center gap-2 mb-2';
+    const calIcon = document.createElement('i');
+    calIcon.setAttribute('data-lucide', 'calendar-check');
+    calIcon.className = 'w-4 h-4 text-indigo-600';
+    cardTitle.appendChild(calIcon);
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'text-sm font-semibold text-indigo-700';
+    titleSpan.textContent = 'Appointment Booked';
+    cardTitle.appendChild(titleSpan);
+    card.appendChild(cardTitle);
+
+    const serviceP = document.createElement('p');
+    serviceP.className = 'text-sm font-medium text-gray-900';
+    serviceP.textContent = msg.service;
+    card.appendChild(serviceP);
+
+    if (msg.date || msg.time) {
+      const detailP = document.createElement('p');
+      detailP.className = 'text-xs text-gray-500 mt-1';
+      detailP.textContent = (msg.date || '') + (msg.date && msg.time ? ' at ' : '') + (msg.time || '');
+      card.appendChild(detailP);
+    }
+
+    const statusBadge = document.createElement('span');
+    statusBadge.className = 'inline-block mt-2 text-xs px-2 py-0.5 rounded-full font-medium badge-' + (msg.status || 'confirmed');
+    statusBadge.textContent = (msg.status || 'confirmed').charAt(0).toUpperCase() + (msg.status || 'confirmed').slice(1);
+    card.appendChild(statusBadge);
+
+    container.appendChild(card);
+  } else {
+    const isMe = msg.from === 'me';
+    const bubble = document.createElement('div');
+    bubble.className = 'flex ' + (isMe ? 'justify-end' : 'justify-start');
+
+    const inner = document.createElement('div');
+    inner.className = 'max-w-[75%] px-4 py-2.5 rounded-2xl text-sm ' +
+      (isMe
+        ? 'bg-indigo-600 text-white bubble-sent'
+        : 'bg-white text-gray-900 shadow-sm bubble-received');
+
+    const textP = document.createElement('p');
+    textP.textContent = msg.text;
+    inner.appendChild(textP);
+
+    const timeSpan = document.createElement('p');
+    timeSpan.className = 'text-[10px] mt-1 ' + (isMe ? 'text-indigo-200' : 'text-gray-400');
+    timeSpan.textContent = msg.time;
+    inner.appendChild(timeSpan);
+
+    bubble.appendChild(inner);
+    container.appendChild(bubble);
+  }
 }
 
 function sendMessage(contact) {

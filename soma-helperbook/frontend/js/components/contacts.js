@@ -76,14 +76,65 @@ const DISCOVER_CONTACTS = [
 
 async function loadContacts() {
   try {
-    const result = await api.find({ table: 'contacts', filter: {} });
-    if (result.result && result.result.content) {
-      return JSON.parse(result.result.content[0].text);
+    const result = await api.query(
+      "SELECT u.id, u.name, u.phone, u.role, u.bio, u.is_verified, " +
+      "u.location_lat, u.location_lon, " +
+      "COALESCE(pp.service_area_radius, 25) as radius " +
+      "FROM users u LEFT JOIN provider_profiles pp ON pp.user_id = u.id " +
+      "WHERE u.role IN ('provider', 'both') " +
+      "ORDER BY u.name LIMIT 50"
+    );
+    const rows = SomaAPI.extractRows(result);
+    if (rows && Array.isArray(rows) && rows.length > 0) {
+      return rows.map(mapDbUserToContact);
     }
   } catch (e) {
-    // Fall back to mock data
+    console.warn('[contacts] API load failed, using mock data:', e.message);
   }
   return MOCK_CONTACTS;
+}
+
+async function loadDiscoverContacts() {
+  try {
+    const result = await api.query(
+      "SELECT u.id, u.name, u.phone, u.role, u.bio, u.is_verified, " +
+      "u.location_lat, u.location_lon " +
+      "FROM users u " +
+      "WHERE u.role IN ('provider', 'both') " +
+      "AND u.id NOT IN (SELECT recipient_id FROM connections WHERE requester_id = 1 AND status = 'accepted') " +
+      "ORDER BY u.created_at DESC LIMIT 20"
+    );
+    const rows = SomaAPI.extractRows(result);
+    if (rows && Array.isArray(rows) && rows.length > 0) {
+      return rows.map(mapDbUserToContact);
+    }
+  } catch (e) {
+    console.warn('[contacts] API discover load failed, using mock data:', e.message);
+  }
+  return DISCOVER_CONTACTS;
+}
+
+function mapDbUserToContact(row) {
+  // Row comes from the database — field names match column names
+  const name = row.name || 'Unknown';
+  const bio = row.bio || '';
+  // Derive services from bio (split on commas or use as single service)
+  const services = bio ? bio.split(',').map(s => s.trim()).filter(Boolean) : [];
+  return {
+    id: String(row.id),
+    name: name,
+    phone: row.phone || '',
+    role: row.role || 'provider',
+    bio: bio,
+    services: services.length ? services : ['General'],
+    rating: 0,
+    reviews: 0,
+    distance: '',
+    online: false,
+    verified: !!row.is_verified,
+    lastMessage: '',
+    lastTime: ''
+  };
 }
 
 function renderContactsList(contacts, listEl) {
@@ -144,19 +195,26 @@ function renderContacts(params = {}) {
   main.innerHTML = '';
   main.appendChild(container);
 
-  const contacts = activeTab === 'my' ? MOCK_CONTACTS : DISCOVER_CONTACTS;
-  renderContactsList(contacts, listEl);
-
-  // Search filter
-  const searchInput = document.getElementById('contact-search');
-  searchInput.addEventListener('input', (e) => {
-    const query = e.target.value.toLowerCase();
-    const filtered = contacts.filter(c =>
-      c.name.toLowerCase().includes(query) ||
-      c.services.some(s => s.toLowerCase().includes(query))
-    );
-    renderContactsList(filtered, listEl);
-  });
-
+  // Show loading state
+  listEl.innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">Loading...</div>';
   lucide.createIcons();
+
+  // Load contacts asynchronously
+  const contactsPromise = activeTab === 'my' ? loadContacts() : loadDiscoverContacts();
+  contactsPromise.then(contacts => {
+    renderContactsList(contacts, listEl);
+
+    // Search filter
+    const searchInput = document.getElementById('contact-search');
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        const query = e.target.value.toLowerCase();
+        const filtered = contacts.filter(c =>
+          c.name.toLowerCase().includes(query) ||
+          c.services.some(s => s.toLowerCase().includes(query))
+        );
+        renderContactsList(filtered, listEl);
+      });
+    }
+  });
 }
