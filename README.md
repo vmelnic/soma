@@ -121,4 +121,4 @@ See [Roadmap](docs/roadmap.md) for details.
 
 ## License
 
-This project is proprietary. All rights reserved.
+[BSL 1.1](LICENSE) — Free for non-commercial use. Converts to Apache-2.0 on 2030-04-08.
