@@ -31,4 +31,14 @@ models/*.onnx
 .DS_Store
 Thumbs.db
 *.pt
+
+# Node
 node_modules/
+package-lock.json
+
+# Python venv/eggs
+.venv/
+*.egg-info/
+
+# SOMA checkpoints
+soma-helperbook/checkpoints/
