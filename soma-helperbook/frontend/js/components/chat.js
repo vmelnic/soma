@@ -1,56 +1,5 @@
 // Chat View
 
-const MOCK_MESSAGES = {
-  '1': [
-    { id: 'm1', from: 'them', text: 'Hi! I saw your profile. Do you have availability this week?', time: '10:30 AM' },
-    { id: 'm2', from: 'me', text: 'Yes! I have slots on Wednesday and Friday afternoon.', time: '10:32 AM' },
-    { id: 'm3', from: 'them', text: 'Wednesday at 3 PM works for me.', time: '10:33 AM' },
-    { id: 'm4', from: 'me', text: 'Perfect. I will book you in.', time: '10:35 AM' },
-    {
-      id: 'm5', type: 'appointment',
-      service: 'Hair Styling',
-      date: 'Wed, Apr 9',
-      time: '3:00 PM',
-      status: 'confirmed',
-      provider: 'Ana M.'
-    },
-    { id: 'm6', from: 'them', text: 'See you tomorrow at 3!', time: '2:15 PM' },
-  ],
-  '2': [
-    { id: 'm1', from: 'me', text: 'Hi Ion, I have a leaky faucet in the kitchen. Can you help?', time: '9:00 AM' },
-    { id: 'm2', from: 'them', text: 'Sure, I can come today between 2-4 PM. Does that work?', time: '9:15 AM' },
-    { id: 'm3', from: 'me', text: 'That works. Address is Str. Victoriei 45.', time: '9:16 AM' },
-    { id: 'm4', from: 'them', text: 'On my way!', time: '1:55 PM' },
-    { id: 'm5', from: 'them', text: 'The pipe is fixed now.', time: '3:20 PM' },
-  ],
-  '3': [
-    { id: 'm1', from: 'me', text: 'Hello Elena, do you offer deep cleaning services?', time: 'Mon 8:00 AM' },
-    { id: 'm2', from: 'them', text: 'Yes! I do regular and deep cleaning. For deep cleaning the rate is 200 RON for a 2-bedroom apartment.', time: 'Mon 8:30 AM' },
-    { id: 'm3', from: 'me', text: 'That sounds good. When is the earliest you can come?', time: 'Mon 8:32 AM' },
-    { id: 'm4', from: 'them', text: 'I can come on Saturday morning.', time: 'Mon 9:00 AM' },
-  ],
-  '5': [
-    { id: 'm1', from: 'them', text: 'Hello! Ready for your massage session?', time: 'Tue 4:00 PM' },
-    { id: 'm2', from: 'me', text: 'Yes, same time as usual please.', time: 'Tue 4:05 PM' },
-    {
-      id: 'm3', type: 'appointment',
-      service: 'Deep Tissue Massage',
-      date: 'Thu, Apr 10',
-      time: '5:00 PM',
-      status: 'confirmed',
-      provider: 'Sofia L.'
-    },
-    { id: 'm4', from: 'them', text: 'Your next session is confirmed.', time: 'Tue 4:10 PM' },
-  ]
-};
-
-// Build a default empty conversation for contacts without specific messages
-function getMessages(contactId) {
-  return MOCK_MESSAGES[contactId] || [
-    { id: 'm0', from: 'them', text: 'Hi there! How can I help you?', time: 'Recently' }
-  ];
-}
-
 // Current user ID (fixed for now — would come from auth in production)
 function getCurrentUserId() {
   return window.SOMA_USER_ID || 'unknown';
@@ -83,9 +32,9 @@ async function loadChatContacts() {
       }));
     }
   } catch (e) {
-    console.warn('[chat] API load failed, using mock data:', e.message);
+    console.warn('[chat] API load failed:', e.message);
   }
-  return null; // null means use mock data
+  return [];
 }
 
 async function loadChatMessages(contactId) {
@@ -127,7 +76,7 @@ async function loadChatMessages(contactId) {
   } catch (e) {
     console.warn('[chat] Failed to load messages for contact ' + contactId + ':', e.message);
   }
-  return null; // null means use mock data
+  return [];
 }
 
 function formatTimeAgo(timestamp) {
@@ -181,18 +130,17 @@ function renderChatList() {
   main.innerHTML = '';
   main.appendChild(container);
 
-  // Try loading from API, fall back to mock
-  loadChatContacts().then(apiContacts => {
-    const chatContacts = apiContacts || MOCK_CONTACTS.filter(c => MOCK_MESSAGES[c.id]);
+  // Load chat contacts from API
+  loadChatContacts().then(chatContacts => {
     list.innerHTML = '';
 
+    if (!chatContacts || chatContacts.length === 0) {
+      list.innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">No messages yet</div>';
+      return;
+    }
+
     chatContacts.forEach(contact => {
-      const mockMessages = MOCK_MESSAGES[contact.id];
-      const lastText = contact.lastMessage
-        || (mockMessages ? (mockMessages[mockMessages.length - 1].type === 'appointment'
-            ? 'Appointment: ' + mockMessages[mockMessages.length - 1].service
-            : mockMessages[mockMessages.length - 1].text)
-          : '');
+      const lastText = contact.lastMessage || '';
       const lastTime = contact.lastTime || '';
 
       const row = document.createElement('div');
@@ -255,8 +203,6 @@ function renderChat(params = {}) {
 
   const contact = params.contact;
   const main = document.getElementById('main');
-  // Start with mock messages, then try to load from API
-  let messages = getMessages(contact.id);
 
   // Hide default header, show chat header
   const header = document.getElementById('header');
@@ -324,65 +270,11 @@ function renderChat(params = {}) {
   const messagesInner = document.createElement('div');
   messagesInner.className = 'chat-messages flex flex-col gap-2';
 
-  messages.forEach(msg => {
-    if (msg.type === 'appointment') {
-      // Appointment card
-      const card = document.createElement('div');
-      card.className = 'bg-indigo-50 rounded-2xl p-4 my-2 border border-indigo-100';
-      
-      const cardTitle = document.createElement('div');
-      cardTitle.className = 'flex items-center gap-2 mb-2';
-      const calIcon = document.createElement('i');
-      calIcon.setAttribute('data-lucide', 'calendar-check');
-      calIcon.className = 'w-4 h-4 text-indigo-600';
-      cardTitle.appendChild(calIcon);
-      const titleSpan = document.createElement('span');
-      titleSpan.className = 'text-sm font-semibold text-indigo-700';
-      titleSpan.textContent = 'Appointment Booked';
-      cardTitle.appendChild(titleSpan);
-      card.appendChild(cardTitle);
-
-      const serviceP = document.createElement('p');
-      serviceP.className = 'text-sm font-medium text-gray-900';
-      serviceP.textContent = msg.service;
-      card.appendChild(serviceP);
-
-      const detailP = document.createElement('p');
-      detailP.className = 'text-xs text-gray-500 mt-1';
-      detailP.textContent = msg.date + ' at ' + msg.time;
-      card.appendChild(detailP);
-
-      const statusBadge = document.createElement('span');
-      statusBadge.className = 'inline-block mt-2 text-xs px-2 py-0.5 rounded-full font-medium badge-' + msg.status;
-      statusBadge.textContent = msg.status.charAt(0).toUpperCase() + msg.status.slice(1);
-      card.appendChild(statusBadge);
-
-      messagesInner.appendChild(card);
-    } else {
-      // Regular message bubble
-      const isMe = msg.from === 'me';
-      const bubble = document.createElement('div');
-      bubble.className = 'flex ' + (isMe ? 'justify-end' : 'justify-start');
-
-      const inner = document.createElement('div');
-      inner.className = 'max-w-[75%] px-4 py-2.5 rounded-2xl text-sm ' +
-        (isMe
-          ? 'bg-indigo-600 text-white bubble-sent'
-          : 'bg-white text-gray-900 shadow-sm bubble-received');
-
-      const textP = document.createElement('p');
-      textP.textContent = msg.text;
-      inner.appendChild(textP);
-
-      const timeSpan = document.createElement('p');
-      timeSpan.className = 'text-[10px] mt-1 ' + (isMe ? 'text-indigo-200' : 'text-gray-400');
-      timeSpan.textContent = msg.time;
-      inner.appendChild(timeSpan);
-
-      bubble.appendChild(inner);
-      messagesInner.appendChild(bubble);
-    }
-  });
+  // Show loading state until messages arrive from API
+  const loadingMsg = document.createElement('div');
+  loadingMsg.className = 'text-center py-8 text-gray-400 text-sm';
+  loadingMsg.textContent = 'Loading messages...';
+  messagesInner.appendChild(loadingMsg);
 
   messagesArea.appendChild(messagesInner);
   container.appendChild(messagesArea);
@@ -424,17 +316,21 @@ function renderChat(params = {}) {
   });
   textInput.focus();
 
-  // Try loading messages from API in the background
+  // Load messages from API
   loadChatMessages(contact.id).then(apiMessages => {
+    messagesInner.innerHTML = '';
     if (apiMessages && apiMessages.length > 0) {
-      // Replace mock messages with real ones
-      messagesInner.innerHTML = '';
       apiMessages.forEach(msg => {
         appendMessageBubble(messagesInner, msg);
       });
-      lucide.createIcons();
-      messagesArea.scrollTop = messagesArea.scrollHeight;
+    } else {
+      const emptyMsg = document.createElement('div');
+      emptyMsg.className = 'text-center py-8 text-gray-400 text-sm';
+      emptyMsg.textContent = 'No messages yet. Say hello!';
+      messagesInner.appendChild(emptyMsg);
     }
+    lucide.createIcons();
+    messagesArea.scrollTop = messagesArea.scrollHeight;
   });
 }
 

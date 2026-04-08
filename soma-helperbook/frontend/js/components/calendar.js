@@ -1,43 +1,5 @@
 // Calendar View
 
-const MOCK_APPOINTMENTS = [
-  {
-    id: 'a1', date: '2026-04-09', time: '15:00', duration: 60,
-    service: 'Hair Styling', provider: 'Ana M.', providerId: '1',
-    status: 'confirmed', notes: 'Regular appointment'
-  },
-  {
-    id: 'a2', date: '2026-04-10', time: '17:00', duration: 90,
-    service: 'Deep Tissue Massage', provider: 'Sofia L.', providerId: '5',
-    status: 'confirmed', notes: ''
-  },
-  {
-    id: 'a3', date: '2026-04-12', time: '09:00', duration: 180,
-    service: 'Deep Cleaning', provider: 'Elena D.', providerId: '3',
-    status: 'pending', notes: '2-bedroom apartment'
-  },
-  {
-    id: 'a4', date: '2026-04-15', time: '10:00', duration: 60,
-    service: 'English Tutoring', provider: 'Maria V.', providerId: '7',
-    status: 'confirmed', notes: 'Advanced conversation'
-  },
-  {
-    id: 'a5', date: '2026-04-18', time: '14:00', duration: 60,
-    service: 'Personal Training', provider: 'Andrei T.', providerId: '6',
-    status: 'pending', notes: 'First session'
-  },
-  {
-    id: 'a6', date: '2026-04-05', time: '11:00', duration: 45,
-    service: 'Haircut', provider: 'Ana M.', providerId: '1',
-    status: 'confirmed', notes: 'Completed'
-  },
-  {
-    id: 'a7', date: '2026-04-02', time: '16:00', duration: 60,
-    service: 'Plumbing Repair', provider: 'Ion P.', providerId: '2',
-    status: 'cancelled', notes: 'Rescheduled'
-  }
-];
-
 // Cached appointments — loaded once, then reused
 let _cachedAppointments = null;
 let _appointmentsLoaded = false;
@@ -77,11 +39,11 @@ async function loadAppointments() {
       return _cachedAppointments;
     }
   } catch (e) {
-    console.warn('[calendar] API load failed, using mock data:', e.message);
+    console.warn('[calendar] API load failed:', e.message);
   }
   _appointmentsLoaded = true;
-  _cachedAppointments = null;
-  return null;
+  _cachedAppointments = [];
+  return [];
 }
 
 function renderCalendar(params = {}) {
@@ -167,8 +129,8 @@ function renderCalendar(params = {}) {
   main.appendChild(container);
 
   // Load appointments async, then render calendar grid + appointments
-  loadAppointments().then(apiAppts => {
-    const appointments = apiAppts || MOCK_APPOINTMENTS;
+  loadAppointments().then(appointments => {
+    if (!appointments) appointments = [];
     const apptDates = new Set(appointments.map(a => a.date));
 
     // Rebuild the grid with appointment dots

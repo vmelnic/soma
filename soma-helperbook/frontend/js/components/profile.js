@@ -1,18 +1,5 @@
 // Profile View
 
-const MOCK_PROFILE = {
-  name: 'Alexandru P.',
-  phone: '+40 740 555 123',
-  email: 'alex.p@email.com',
-  role: 'both', // client, provider, both
-  rating: 4.7,
-  reviews: 34,
-  completedServices: 28,
-  joinedDate: 'March 2025',
-  avatar: null, // No image, use initials
-  services: ['Home Repairs', 'Furniture Assembly']
-};
-
 // Current user ID — matches the seeded "me" user
 function getProfileUserId() { return window.SOMA_USER_ID || 'unknown'; }
 
@@ -50,9 +37,23 @@ async function loadProfile() {
       };
     }
   } catch (e) {
-    console.warn('[profile] API load failed, using mock data:', e.message);
+    console.warn('[profile] API load failed:', e.message);
   }
   return null;
+}
+
+function renderProfileEmpty(container) {
+  const emptyDiv = document.createElement('div');
+  emptyDiv.className = 'bg-white rounded-2xl shadow-sm p-6 text-center';
+  const emptyIcon = document.createElement('div');
+  emptyIcon.className = 'text-gray-300 mb-2';
+  emptyIcon.innerHTML = '<svg class="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>';
+  emptyDiv.appendChild(emptyIcon);
+  const emptyText = document.createElement('p');
+  emptyText.className = 'text-sm text-gray-400';
+  emptyText.textContent = 'Could not load profile';
+  emptyDiv.appendChild(emptyText);
+  container.appendChild(emptyDiv);
 }
 
 function renderProfileCard(profile, container) {
@@ -130,10 +131,15 @@ function renderProfile(params = {}) {
   main.appendChild(container);
 
   // Load profile async
-  loadProfile().then(apiProfile => {
-    const profile = apiProfile || MOCK_PROFILE;
+  loadProfile().then(profile => {
     // Remove loading indicator
     if (loadingDiv.parentNode) loadingDiv.remove();
+
+    if (!profile) {
+      renderProfileEmpty(container);
+      lucide.createIcons();
+      return;
+    }
 
     renderProfileCard(profile, container);
 
