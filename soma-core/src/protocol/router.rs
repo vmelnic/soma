@@ -1,5 +1,4 @@
-//! `SignalRouter` — centralized signal routing with request-response correlation
-//! (Whitepaper Section 14.2).
+//! `SignalRouter` — centralized signal routing with request-response correlation.
 
 use dashmap::DashMap;
 use tokio::sync::oneshot;
@@ -16,11 +15,11 @@ const DEFAULT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_INFLIGHT: usize = 1000;
 
 /// Correlates outgoing requests with incoming responses using one-shot channels
-/// keyed by sequence number (Spec Section 14.3).
+/// keyed by sequence number.
 ///
 /// Uses `DashMap` for lock-free concurrent access from multiple connection
 /// handlers. Entries are cleaned up on delivery, cancellation, or timeout.
-#[allow(dead_code)] // Spec feature for request-response correlation
+#[allow(dead_code)]
 pub struct SignalRouter {
     /// `sequence_id` -> one-shot sender awaiting the correlated response.
     pending_requests: DashMap<u32, oneshot::Sender<Signal>>,
@@ -28,7 +27,7 @@ pub struct SignalRouter {
     response_timeout: Duration,
 }
 
-#[allow(dead_code)] // Spec feature for request-response correlation
+#[allow(dead_code)]
 impl SignalRouter {
     pub fn new() -> Self {
         Self {
@@ -116,7 +115,7 @@ impl SignalRouter {
 }
 
 /// Errors from the signal router.
-#[allow(dead_code)] // Spec feature for request-response correlation
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum RouterError {
     /// Response channel was closed (peer disconnected).

@@ -1,12 +1,12 @@
-//! Experience ring buffer — bounded storage of recent inference outcomes (Spec Section 17).
+//! Experience ring buffer — bounded storage of recent inference outcomes.
 //!
-//! Only successful experiences drive `LoRA` adaptation (Section 17.1: "don't reinforce bad
-//! programs"). The buffer uses FIFO eviction: when full, the oldest entry is removed to
-//! make room. Cached hidden states allow adaptation without re-running ONNX inference.
+//! Only successful experiences drive `LoRA` adaptation ("don't reinforce bad programs").
+//! The buffer uses FIFO eviction: when full, the oldest entry is removed to make room.
+//! Cached hidden states allow adaptation without re-running ONNX inference.
 
 /// A single inference-then-execution outcome.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Spec feature: experience tracking fields
+#[allow(dead_code)]
 pub struct Experience {
     /// Tokenized intent that was fed to the encoder.
     pub intent_tokens: Vec<u32>,
@@ -60,7 +60,7 @@ impl ExperienceBuffer {
     }
 
     /// Returns only failed experiences.
-    #[allow(dead_code)] // Spec feature: experience analysis
+    #[allow(dead_code)]
     pub fn failures(&self) -> Vec<&Experience> {
         self.buffer.iter().filter(|e| !e.success).collect()
     }
@@ -69,7 +69,7 @@ impl ExperienceBuffer {
         self.buffer.len()
     }
 
-    #[allow(dead_code)] // Spec feature: experience buffer API
+    #[allow(dead_code)]
     pub const fn is_empty(&self) -> bool {
         self.buffer.is_empty()
     }
@@ -92,7 +92,7 @@ impl ExperienceBuffer {
     }
 
     /// Returns a slice of the most recent `n` experiences (or fewer if the buffer is smaller).
-    #[allow(dead_code)] // Spec feature: experience buffer API
+    #[allow(dead_code)]
     pub fn recent(&self, n: usize) -> &[Experience] {
         let start = if self.buffer.len() > n {
             self.buffer.len() - n

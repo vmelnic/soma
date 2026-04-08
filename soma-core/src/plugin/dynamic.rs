@@ -1,4 +1,4 @@
-//! Dynamic plugin loading from `.so`/`.dylib` shared libraries (Section 5.3).
+//! Dynamic plugin loading from `.so`/`.dylib` shared libraries.
 //!
 //! Each plugin crate is compiled as `cdylib` and must export:
 //! ```ignore
@@ -136,9 +136,9 @@ pub fn scan_plugin_directory(dir: &Path) -> Vec<std::path::PathBuf> {
     results
 }
 
-/// Parsed plugin metadata from `manifest.toml` (Plugin Catalog spec Section 4).
+/// Parsed plugin metadata from `manifest.toml`.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Spec feature: manifest fields for plugin catalog
+#[allow(dead_code)]
 pub struct PluginManifest {
     pub name: String,
     pub version: String,

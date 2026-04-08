@@ -216,7 +216,7 @@ impl OnnxMindEngine {
         self.model_meta.stop_id
     }
 
-    #[allow(dead_code)] // Spec Section 6.3 — checkpoint serialization of consolidated LoRA
+    #[allow(dead_code)]
     pub fn merged_opcode_delta(&self) -> &[f32] {
         &self.merged_opcode_delta
     }
@@ -489,7 +489,7 @@ impl MindEngine for OnnxMindEngine {
 }
 
 /// Resolve an argument directly from raw decoder tensor outputs (pre-LoRA path).
-#[allow(dead_code)] // Spec Section 4.3 — arg resolution from raw decoder tensors (pre-LoRA path)
+#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)] // mirrors decoder output head structure
 fn resolve_arg(tid: usize, o: &TVec<TValue>, ss: usize, se: usize, ri: usize, li: usize, tokens: &[String], tok: &Tokenizer) -> (ArgType, ArgValue) {
     match tid {

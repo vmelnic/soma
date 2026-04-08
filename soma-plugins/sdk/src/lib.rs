@@ -242,7 +242,7 @@ impl PluginError {
 // ---------------------------------------------------------------------------
 
 /// Trust level assigned to a plugin, governing what the runtime allows it to
-/// do (Whitepaper Section 12.2).
+/// do.
 ///
 /// Higher trust levels unlock broader permissions.  `BuiltIn` plugins ship
 /// with the runtime itself; `Untrusted` plugins run with maximal sandboxing.
@@ -261,7 +261,6 @@ pub enum TrustLevel {
 }
 
 /// Declares that a plugin depends on another plugin being loaded first
-/// (Whitepaper Section 6.7).
 ///
 /// The runtime performs a topological sort of dependencies at startup and
 /// refuses to load a plugin whose *required* dependencies are missing.
@@ -274,8 +273,7 @@ pub struct PluginDependency {
     pub required: bool,
 }
 
-/// Least-privilege permission declarations for a plugin (Whitepaper Section
-/// 12.2).
+/// Least-privilege permission declarations for a plugin.
 ///
 /// Plugins declare the resources they need upfront.  The runtime enforces
 /// these declarations, rejecting operations that exceed the declared scope.
@@ -362,7 +360,7 @@ impl PluginConfig {
 // Convention types
 // ---------------------------------------------------------------------------
 
-/// The data type of a convention argument (Whitepaper Section 3.1).
+/// The data type of a convention argument.
 ///
 /// Maps directly to [`Value`] variants, except `Any` which accepts all of
 /// them.  Used for argument validation before a convention is invoked.
@@ -399,7 +397,7 @@ impl ArgType {
     }
 }
 
-/// What a convention returns (Whitepaper Section 3.2).
+/// What a convention returns.
 #[derive(Debug, Clone, Serialize)]
 pub enum ReturnSpec {
     /// A single value of the described type (e.g., `"string"`, `"map"`).
@@ -412,7 +410,7 @@ pub enum ReturnSpec {
     Void,
 }
 
-/// Names the convention to call for cleanup on error (Whitepaper Section 3.3).
+/// Names the convention to call for cleanup on error.
 ///
 /// When a program step fails, the runtime invokes the cleanup convention,
 /// passing the partial result in argument slot `pass_result_as`.
@@ -424,7 +422,7 @@ pub struct CleanupSpec {
     pub pass_result_as: u8,
 }
 
-/// A declared side effect of a convention (Whitepaper Section 3.2).
+/// A declared side effect of a convention.
 ///
 /// Side effects are advisory strings (e.g., `"writes filesystem"`,
 /// `"sends network"`) used by the Mind during program generation to reason
@@ -432,7 +430,7 @@ pub struct CleanupSpec {
 #[derive(Debug, Clone, Serialize)]
 pub struct SideEffect(pub String);
 
-/// Specification of a single argument to a convention (Whitepaper Section 6.1).
+/// Specification of a single argument to a convention.
 #[derive(Debug, Clone, Serialize)]
 pub struct ArgSpec {
     /// Argument name used in training data and MCP tool schemas.
@@ -446,7 +444,6 @@ pub struct ArgSpec {
 }
 
 /// A named operation ("calling convention") that a plugin exposes to the Mind
-/// (Whitepaper Section 6.1).
 ///
 /// Conventions are the atomic building blocks that the Mind assembles into
 /// execution programs.  Each convention declares its arguments, return type,
@@ -481,7 +478,7 @@ pub struct Convention {
 // SomaPlugin trait
 // ---------------------------------------------------------------------------
 
-/// The trait every SOMA plugin must implement (Whitepaper Section 6.2).
+/// The trait every SOMA plugin must implement.
 ///
 /// The runtime loads plugins as trait objects (`Box<dyn SomaPlugin>`) and
 /// interacts with them exclusively through this interface.  Only [`name`],

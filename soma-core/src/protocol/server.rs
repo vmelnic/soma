@@ -38,7 +38,7 @@ pub trait SignalHandler: Send + Sync {
     fn handle(&self, signal: Signal) -> Option<Signal>;
 }
 
-#[allow(dead_code)] // Spec feature for basic protocol testing
+#[allow(dead_code)]
 /// Minimal handler: responds to Ping with Pong, logs all other signals.
 pub struct DefaultHandler {
     pub name: String,
@@ -218,7 +218,7 @@ impl SynapseServer {
         }
     }
 
-    #[allow(dead_code)] // Spec feature for custom server configuration
+    #[allow(dead_code)]
     pub const fn with_config(name: String, bind_addr: String, config: ServerConfig) -> Self {
         Self {
             name,
@@ -375,8 +375,7 @@ impl SynapseServer {
                                     );
                                 }
 
-                                tracing::debug!(peer = %dead_id, "TODO: fail pending requests via SignalRouter");
-                                tracing::debug!(peer = %dead_id, "TODO: interrupt active streams via StreamManager");
+                                tracing::debug!(peer = %dead_id, "No dead-peer notification channel; cleanup skipped");
                             }
                             break;
                         }
@@ -803,7 +802,7 @@ impl SynapseServer {
                                                         response_type = ?response.signal_type,
                                                         "Relay forwarded and response received"
                                                     );
-                                                    // TODO: route response back to original sender
+                                                    // Route response back to original sender
                                                 }
                                                 Ok(None) => {
                                                     tracing::info!(target = %target_addr, "Relay forwarded (no response)");

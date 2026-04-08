@@ -1,4 +1,4 @@
-//! Peer discovery and registry for the Synaptic Protocol v2 (Spec Section 7).
+//! Peer discovery and registry for the Synaptic Protocol v2.
 //!
 //! DISCOVER signals include address, plugins, conventions, and load.
 //! `PEER_QUERY` finds SOMAs with specific plugins.
@@ -22,10 +22,10 @@ pub struct PeerInfo {
     /// Current load factor (0.0 = idle, higher = busier) for routing decisions.
     pub load: f64,
     /// Maximum concurrent requests this peer can handle.
-    #[allow(dead_code)] // Spec feature for peer load balancing
+    #[allow(dead_code)]
     pub capacity: u64,
     /// Unix timestamp of last DISCOVER or heartbeat from this peer.
-    #[allow(dead_code)] // Spec feature for peer health tracking
+    #[allow(dead_code)]
     pub last_seen: u64,
 }
 
@@ -65,7 +65,7 @@ impl PeerRegistry {
     }
 
     /// Update the `last_seen` timestamp for a peer.
-    #[allow(dead_code)] // Spec feature for peer health tracking
+    #[allow(dead_code)]
     pub fn touch(&mut self, name: &str) {
         if let Some(peer) = self.peers.get_mut(name) {
             peer.last_seen = std::time::SystemTime::now()
@@ -142,7 +142,7 @@ impl PeerRegistry {
     }
 
     /// Register or update a discovered peer with explicit info.
-    #[allow(dead_code)] // Spec feature for peer discovery
+    #[allow(dead_code)]
     pub fn register(&mut self, name: String, addr: String) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -181,8 +181,8 @@ impl PeerRegistry {
     }
 
     /// Create a DISCOVER signal announcing this SOMA's presence on the network.
-    /// The signal includes a TTL of 3 for chemical-gradient forwarding (Spec 7.1).
-    #[allow(dead_code)] // Spec feature for peer discovery
+    /// The signal includes a TTL of 3 for chemical-gradient forwarding.
+    #[allow(dead_code)]
     pub fn create_discover_signal(
         soma_id: &str,
         address: &str,
@@ -210,7 +210,7 @@ impl PeerRegistry {
     }
 
     /// Create a `DISCOVER_ACK` response signal.
-    #[allow(dead_code)] // Spec feature for peer discovery
+    #[allow(dead_code)]
     pub fn create_discover_ack(
         soma_id: &str,
         address: &str,
@@ -275,10 +275,10 @@ impl PeerRegistry {
     }
 }
 
-/// Prepare a DISCOVER signal for TTL-based forwarding (chemical-gradient decay,
-/// Spec 7.1). Returns `None` if TTL has reached 0 or the signal originated from
+/// Prepare a DISCOVER signal for TTL-based forwarding (chemical-gradient decay).
+/// Returns `None` if TTL has reached 0 or the signal originated from
 /// `our_id`. Appends `our_id` to `forward_path` for loop/path tracking.
-#[allow(dead_code)] // Spec feature for discovery forwarding
+#[allow(dead_code)]
 pub fn prepare_forward_discover(signal: &Signal, our_id: &str) -> Option<Signal> {
     let ttl = signal
         .metadata

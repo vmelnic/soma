@@ -17,8 +17,8 @@ pub mod lora;
 
 use anyhow::Result;
 
-/// Configuration for `MindEngine` initialization (Spec Section 4.2).
-#[allow(dead_code)] // Spec Section 4.2 config structure — used when wiring MindEngine init
+/// Configuration for `MindEngine` initialization.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct MindConfig {
     pub max_program_steps: usize,
@@ -99,21 +99,21 @@ pub struct CatalogEntry {
     pub name: String,
     /// The function name used for display (e.g. "stat", "readdir").
     pub function: String,
-    #[allow(dead_code)] // Spec catalog field — used during catalog-driven plugin dispatch
+    #[allow(dead_code)]
     pub call_pattern: String,
-    #[allow(dead_code)] // Spec catalog field — used during catalog-driven plugin dispatch
+    #[allow(dead_code)]
     pub var_args: Vec<VarArg>,
-    #[allow(dead_code)] // Spec catalog field — used during catalog-driven plugin dispatch
+    #[allow(dead_code)]
     pub description: String,
 }
 
 /// Typed argument descriptor within a `CatalogEntry`.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct VarArg {
-    #[allow(dead_code)] // Spec catalog field — deserialized from catalog.json
+    #[allow(dead_code)]
     pub name: String,
     #[serde(rename = "type")]
-    #[allow(dead_code)] // Spec catalog field — deserialized from catalog.json
+    #[allow(dead_code)]
     pub arg_type: String,
 }
 
@@ -127,7 +127,7 @@ pub const STOP_ID: i32 = -2;
 pub struct MindInfo {
     pub backend: String,
     /// Estimated total parameter count across encoder + decoder.
-    #[allow(dead_code)] // Spec proprioception field — exposed via MindEngine::info()
+    #[allow(dead_code)]
     pub param_count: usize,
     pub conventions_known: usize,
     pub max_steps: usize,
@@ -137,7 +137,7 @@ pub struct MindInfo {
     pub lora_magnitude: f32,
 }
 
-/// Abstract inference backend (Spec Section 4.2).
+/// Abstract inference backend.
 ///
 /// Takes `&str` rather than pre-tokenized input because tokenization is an
 /// internal concern of the engine -- the engine owns the tokenizer. This
@@ -160,11 +160,11 @@ pub trait MindEngine: Send + Sync {
     fn attach_lora_bytes(&mut self, _plugin_name: &str, _data: &[u8]) -> Result<()> { Ok(()) }
 
     /// Remove a `LoRA` adapter without merging its weights into the base model.
-    #[allow(dead_code)] // Spec Section 4.7 — called by LoRA lifecycle management
+    #[allow(dead_code)]
     fn detach_lora(&mut self, _name: &str) -> Result<()> { Ok(()) }
 
     /// Permanently fold a `LoRA` adapter's weight delta into the base model.
-    #[allow(dead_code)] // Spec Section 6.3 — called during LoRA consolidation
+    #[allow(dead_code)]
     fn merge_lora(&mut self, _name: &str) -> Result<()> { Ok(()) }
 
     /// Snapshot current `LoRA` state for checkpoint serialization.

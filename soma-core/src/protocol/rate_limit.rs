@@ -1,4 +1,4 @@
-//! Per-connection rate limiting with graduated response (Spec Section 20).
+//! Per-connection rate limiting with graduated response.
 //!
 //! Enforces two independent per-second limits -- signal count and byte
 //! throughput. When either limit is exceeded, the limiter returns a
@@ -19,7 +19,7 @@ use std::time::Instant;
 
 use super::signal::{Signal, SignalType};
 
-/// Graduated violation levels for rate-limit enforcement (Spec Section 20.3).
+/// Graduated violation levels for rate-limit enforcement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViolationLevel {
     /// No active violation.
@@ -48,9 +48,9 @@ pub struct RateLimiter {
     /// Snapshot of the original byte limit for `restore_window`.
     #[allow(dead_code)] // Used by reduce/restore_window
     original_bytes_per_second: u64,
-    #[allow(dead_code)] // Spec feature for channel limits
+    #[allow(dead_code)]
     max_channels: u32,
-    #[allow(dead_code)] // Spec feature for subscription limits
+    #[allow(dead_code)]
     max_subscriptions: u32,
 
     signal_count_this_second: u32,
@@ -65,7 +65,7 @@ pub struct RateLimiter {
 impl RateLimiter {
     /// Create a new rate limiter with the given per-second limits.
     ///
-    /// Defaults: `max_channels` = 256, `max_subscriptions` = 100 (Spec Section 20.2).
+    /// Defaults: `max_channels` = 256, `max_subscriptions` = 100.
     pub fn new(signals_per_second: u32, bytes_per_second: u64) -> Self {
         Self {
             signals_per_second,
@@ -82,7 +82,7 @@ impl RateLimiter {
     }
 
     /// Create a rate limiter with custom channel/subscription caps.
-    #[allow(dead_code)] // Spec feature for custom rate limits
+    #[allow(dead_code)]
     pub fn with_caps(
         signals_per_second: u32,
         bytes_per_second: u64,
@@ -150,34 +150,34 @@ impl RateLimiter {
     }
 
     /// Returns `true` if opening another channel is within the limit.
-    #[allow(dead_code)] // Spec feature for channel limits
+    #[allow(dead_code)]
     pub const fn check_channel_limit(&self, current_channels: usize) -> bool {
         current_channels < self.max_channels as usize
     }
 
     /// Returns `true` if adding another subscription is within the limit.
-    #[allow(dead_code)] // Spec feature for subscription limits
+    #[allow(dead_code)]
     pub const fn check_subscription_limit(&self, current_subs: usize) -> bool {
         current_subs < self.max_subscriptions as usize
     }
 
     /// Halve both throughput limits as a graduated response to sustained violations.
     /// Floors at 1 to avoid zero-limit deadlock. Call [`restore_window`](Self::restore_window) to undo.
-    #[allow(dead_code)] // Spec feature for graduated response
+    #[allow(dead_code)]
     pub fn reduce_window(&mut self) {
         self.signals_per_second = (self.signals_per_second / 2).max(1);
         self.bytes_per_second = (self.bytes_per_second / 2).max(1);
     }
 
     /// Restore throughput limits to the values set at construction time.
-    #[allow(dead_code)] // Spec feature for graduated response
+    #[allow(dead_code)]
     pub const fn restore_window(&mut self) {
         self.signals_per_second = self.original_signals_per_second;
         self.bytes_per_second = self.original_bytes_per_second;
     }
 
     /// Clear all counters and violation state, starting a fresh measurement window.
-    #[allow(dead_code)] // Spec feature for rate limit reset
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.signal_count_this_second = 0;
         self.bytes_this_second = 0;
@@ -203,18 +203,18 @@ pub fn create_rate_limit_signal(sender: &str, retry_after_ms: u32) -> Signal {
     signal
 }
 
-/// Time-limited ban list for peers after severe rate-limit violations (Spec Section 20.4).
+/// Time-limited ban list for peers after severe rate-limit violations.
 ///
 /// Entries expire automatically after `blacklist_duration` (default 5 minutes).
 /// Call [`cleanup`](Self::cleanup) periodically to reclaim memory from expired entries.
-#[allow(dead_code)] // Spec feature for peer blacklisting
+#[allow(dead_code)]
 pub struct PeerBlacklist {
     /// Maps peer address to the instant at which the ban expires.
     entries: HashMap<String, Instant>,
     blacklist_duration: std::time::Duration,
 }
 
-#[allow(dead_code)] // Spec feature for peer blacklisting
+#[allow(dead_code)]
 impl PeerBlacklist {
     pub fn new() -> Self {
         Self {
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn test_default_max_subscriptions() {
         let rl = RateLimiter::new(100, 1_000_000);
-        // Spec Section 20.2: default max_subscriptions = 100
+        
         assert!(rl.check_subscription_limit(99));
         assert!(!rl.check_subscription_limit(100));
         assert!(!rl.check_subscription_limit(200));

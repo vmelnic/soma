@@ -1,4 +1,4 @@
-//! Proprioception — self-knowledge and runtime statistics (Whitepaper Section 11).
+//! Proprioception — self-knowledge and runtime statistics.
 //!
 //! The SOMA's self-model: what it knows about itself, its capabilities,
 //! its current state, and its recent performance.
@@ -23,9 +23,9 @@ pub struct Proprioception {
     pub experience_count: u64,
     pub checkpoints_saved: u64,
     pub consolidations: u64,
-    #[allow(dead_code)] // Spec feature: Section 11 protocol tracking
+    #[allow(dead_code)]
     pub active_connections: u64,
-    #[allow(dead_code)] // Spec feature: Section 11 protocol tracking
+    #[allow(dead_code)]
     pub total_signals_processed: u64,
     pub total_decisions_recorded: u64,
     pub loaded_plugins: Vec<String>,
@@ -84,7 +84,7 @@ impl Proprioception {
     }
 
     /// Record that a `LoRA` consolidation (merge into base weights) occurred.
-    #[allow(dead_code)] // Spec feature: Section 11 consolidation tracking
+    #[allow(dead_code)]
     pub const fn record_consolidation(&mut self) {
         self.consolidations += 1;
     }
@@ -179,14 +179,14 @@ impl Proprioception {
     }
 
     /// Set the current `LoRA` adapter magnitude.
-    #[allow(dead_code)] // Spec feature: Section 11 adaptation tracking
+    #[allow(dead_code)]
     pub const fn set_lora_magnitude(&mut self, mag: f32) {
         self.lora_magnitude = mag;
     }
 
     /// Refresh CPU usage estimate. Currently a no-op (returns 0.0) pending
     /// platform-specific implementation (`proc_pidinfo` on macOS, `/proc/self/stat` on Linux).
-    #[allow(dead_code)] // Spec feature: Section 11 resource tracking
+    #[allow(dead_code)]
     pub const fn update_cpu(&mut self) {
         self.cpu_usage_percent = 0.0;
     }

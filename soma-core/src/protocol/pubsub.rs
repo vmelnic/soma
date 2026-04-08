@@ -1,4 +1,4 @@
-//! Pub/Sub fan-out for topic-based signal distribution (Spec Section 16).
+//! Pub/Sub fan-out for topic-based signal distribution.
 //!
 //! Supports wildcard topic matching (`chat:*` matches `chat:room-1`),
 //! durable subscriptions with catch-up replay, and per-topic buffering.

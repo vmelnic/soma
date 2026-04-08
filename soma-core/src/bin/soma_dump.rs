@@ -1,4 +1,4 @@
-//! soma-dump -- Synaptic Protocol signal capture tool (Whitepaper Section 11.5).
+//! soma-dump -- Synaptic Protocol signal capture tool.
 //!
 //! A passive diagnostic tool that connects to a SOMA instance's Synaptic Protocol
 //! TCP server and decodes the binary wire frames in real time. Each captured signal

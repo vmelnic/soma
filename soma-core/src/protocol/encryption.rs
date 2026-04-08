@@ -1,4 +1,4 @@
-//! Synaptic Protocol encryption layer (Spec Sections 9.4, 12.3).
+//! Synaptic Protocol encryption layer.
 //!
 //! Provides the cryptographic primitives for peer-to-peer SOMA communication:
 //!
@@ -20,12 +20,12 @@ use anyhow::Result;
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce, aead::{Aead, KeyInit}};
 use sha2::{Sha256, Digest};
 
-/// Ed25519 identity keypair for a SOMA instance (Spec Section 12.3).
+/// Ed25519 identity keypair for a SOMA instance.
 ///
 /// Each SOMA node has a single long-lived identity. The Ed25519 seed
 /// deterministically derives both the signing keypair and the X25519
 /// static key used for session establishment.
-#[allow(dead_code)] // Spec feature for SOMA identity
+#[allow(dead_code)]
 pub struct SomaIdentity {
     /// Ed25519 signing key (32-byte seed).
     pub signing_key: [u8; 32],
@@ -37,7 +37,7 @@ pub struct SomaIdentity {
     pub x25519_public: [u8; 32],
 }
 
-#[allow(dead_code)] // Spec feature for SOMA identity
+#[allow(dead_code)]
 impl SomaIdentity {
     /// Generate a new random identity using OS entropy.
     pub fn generate() -> Self {
@@ -92,7 +92,7 @@ pub struct SessionKeys {
     pub recv_nonce: AtomicU64,
 }
 
-#[allow(dead_code)] // Spec feature for session encryption
+#[allow(dead_code)]
 impl SessionKeys {
     /// Derive session keys from X25519 ECDH between our static secret and the
     /// peer's public key.
@@ -181,7 +181,7 @@ pub fn decrypt_payload(
 }
 
 /// Produce a 64-byte Ed25519 signature over `data`.
-#[allow(dead_code)] // Spec feature for Ed25519 signing
+#[allow(dead_code)]
 pub fn sign(signing_key: &[u8; 32], data: &[u8]) -> [u8; 64] {
     use ed25519_dalek::{SigningKey, Signer};
     let key = SigningKey::from_bytes(signing_key);

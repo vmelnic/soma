@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::process::Stdio;
 
 /// A child process with captured stdio handles, owned by a plugin.
-#[allow(dead_code)] // Spec feature: MCP Bridge plugin child processes
+#[allow(dead_code)]
 pub struct ManagedProcess {
     pub name: String,
     pub child: std::process::Child,
@@ -15,12 +15,12 @@ pub struct ManagedProcess {
 }
 
 /// Named process registry. Ensures all spawned processes are cleaned up on drop.
-#[allow(dead_code)] // Spec feature: MCP Bridge plugin process management
+#[allow(dead_code)]
 pub struct ProcessManager {
     processes: HashMap<String, ManagedProcess>,
 }
 
-#[allow(dead_code)] // Spec feature: MCP Bridge plugin process management
+#[allow(dead_code)]
 impl ProcessManager {
     pub fn new() -> Self {
         Self { processes: HashMap::new() }

@@ -19,10 +19,10 @@ use crate::memory::experience::Experience;
 /// Controls when and how adaptation runs.
 #[derive(Debug, Clone)]
 pub struct AdaptationConfig {
-    #[allow(dead_code)] // Spec Section 4.7 — toggle for adaptation engine
+    #[allow(dead_code)]
     pub enabled: bool,
     /// Run adaptation every N successful experiences.
-    #[allow(dead_code)] // Spec Section 4.7 — adaptation frequency control
+    #[allow(dead_code)]
     pub adapt_every_n: usize,
     /// Maximum number of experiences to sample per adaptation cycle.
     pub batch_size: usize,

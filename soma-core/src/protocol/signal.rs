@@ -3,7 +3,6 @@
 //!
 //! Every protocol interaction is expressed as a `Signal` with a type, flags,
 //! channel, sequence number, sender identity, metadata, and payload.
-//! Spec reference: Sections 4.2, 4.3.
 
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
@@ -87,7 +86,7 @@ impl SignalType {
         self as u8
     }
 
-    #[allow(dead_code)] // Spec feature used by protocol routing
+    #[allow(dead_code)]
     /// Whether this signal type is a control signal (must use channel 0).
     pub const fn is_control(self) -> bool {
         matches!(self, Self::Handshake | Self::HandshakeAck | Self::Close |
@@ -97,7 +96,7 @@ impl SignalType {
 }
 
 bitflags! {
-    /// Signal flags byte (Spec Section 4.2).
+    /// Signal flags byte.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct SignalFlags: u8 {
         const COMPRESSED    = 0b0000_0001;
@@ -186,7 +185,7 @@ impl Signal {
     }
 
     /// Create a Handshake signal with negotiation metadata.
-    /// Includes a `session_token` for reconnect identification (Spec Section 14.5).
+    /// Includes a `session_token` for reconnect identification.
     pub fn handshake(soma_id: &str, capabilities: &[&str], plugins: &[&str]) -> Self {
         let mut s = Self::new(SignalType::Handshake, soma_id.to_string());
         s.channel_id = 0; // control channel

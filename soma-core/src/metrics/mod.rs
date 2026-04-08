@@ -1,4 +1,4 @@
-//! Prometheus-compatible metrics (Whitepaper Sections 11.5, 18.4).
+//! Prometheus-compatible metrics.
 //!
 //! 20+ metrics covering inference, plugin execution, protocol, memory, and adaptation.
 //! All counters use atomic operations for lock-free concurrent updates.
@@ -102,7 +102,7 @@ impl SomaMetrics {
     }
 
     /// Record a plugin call (global counters only, no per-plugin tracking).
-    #[allow(dead_code)] // Spec feature: used by plugin execution path
+    #[allow(dead_code)]
     pub fn record_plugin_call(&self, success: bool) {
         self.plugin_calls_total.fetch_add(1, Ordering::Relaxed);
         if !success {
@@ -139,7 +139,7 @@ impl SomaMetrics {
 
     /// Accumulate an inference confidence score into the running sum.
     /// Stored as `(confidence * 1e6)` to preserve ~6 decimal digits in integer form.
-    #[allow(dead_code)] // Spec feature: Section 18.4
+    #[allow(dead_code)]
     pub fn record_confidence(&self, confidence: f32) {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let scaled = (f64::from(confidence) * 1_000_000.0) as u64;
@@ -147,20 +147,20 @@ impl SomaMetrics {
     }
 
     /// Accumulate a plugin call duration (global counter only, no per-plugin tracking).
-    #[allow(dead_code)] // Spec feature: Section 18.4
+    #[allow(dead_code)]
     pub fn record_plugin_duration(&self, duration_ms: u64) {
         self.plugin_duration_sum_ms.fetch_add(duration_ms, Ordering::Relaxed);
     }
 
-    /// Set the current `LoRA` adapter magnitude (Section 18.4).
+    /// Set the current `LoRA` adapter magnitude.
     /// Stored as raw f32 bits inside an `AtomicU64`.
-    #[allow(dead_code)] // Spec feature: Section 18.4
+    #[allow(dead_code)]
     pub fn set_lora_magnitude(&self, magnitude: f32) {
         self.lora_magnitude.store(u64::from(magnitude.to_bits()), Ordering::Relaxed);
     }
 
-    /// Set the current process RSS in bytes (Section 18.4).
-    #[allow(dead_code)] // Spec feature: Section 18.4
+    /// Set the current process RSS in bytes.
+    #[allow(dead_code)]
     pub fn set_memory_rss(&self, bytes: u64) {
         self.memory_rss_bytes.store(bytes, Ordering::Relaxed);
     }
@@ -291,7 +291,7 @@ impl SomaMetrics {
     }
 
     /// Set the active connection count gauge.
-    #[allow(dead_code)] // Spec feature: protocol metrics
+    #[allow(dead_code)]
     pub fn set_active_connections(&self, count: u64) {
         self.protocol_connections_active.store(count, Ordering::Relaxed);
     }

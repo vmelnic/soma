@@ -1,6 +1,6 @@
 //! MCP authentication and authorization.
 //!
-//! Implements role-based access control per Whitepaper Section 8.3. Three token-based
+//! Implements role-based access control. Three token-based
 //! roles (admin, builder, viewer) gate access to MCP tools. Destructive actions
 //! (checkpoint restore, plugin uninstall) require two-step confirmation with a 60-second
 //! expiry window. Tokens are registered from environment variables or config at startup.
@@ -29,7 +29,7 @@ impl AuthLevel {
         matches!(self, Self::Admin)
     }
 
-    #[allow(dead_code, clippy::unused_self)] // Spec feature: Section 8.3 role checks
+    #[allow(dead_code, clippy::unused_self)]
     pub const fn can_read(self) -> bool {
         true // all levels can read
     }
@@ -47,7 +47,7 @@ impl std::fmt::Display for AuthLevel {
 
 /// A registered authentication token bound to a session and role.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Spec feature: Section 8.3 auth token fields
+#[allow(dead_code)]
 pub struct AuthToken {
     pub token: String,
     pub level: AuthLevel,
@@ -61,9 +61,9 @@ pub struct AuthToken {
 ///
 /// Stores the original tool name and arguments so that `soma.confirm` can
 /// re-dispatch the call without the caller having to resend the full request.
-/// Expires after 60 seconds (Section 8.3).
+/// Expires after 60 seconds.
 #[derive(Debug)]
-#[allow(dead_code)] // Spec feature: Section 8.3 confirmation fields
+#[allow(dead_code)]
 pub struct PendingConfirmation {
     pub action_id: String,
     pub description: String,
@@ -97,7 +97,7 @@ impl AuthManager {
     }
 
     /// Generate a new UUID-based auth token for the given role level.
-    #[allow(dead_code)] // Spec feature: Section 8.3 dynamic token creation
+    #[allow(dead_code)]
     pub fn create_token(&mut self, level: AuthLevel) -> String {
         let token = uuid::Uuid::new_v4().to_string();
         let session_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
@@ -148,7 +148,7 @@ impl AuthManager {
     }
 
     /// Look up a token and return its metadata, or `None` if auth is disabled.
-    #[allow(dead_code)] // Spec feature: Section 8.3 token validation
+    #[allow(dead_code)]
     pub fn validate(&self, token: &str) -> Option<&AuthToken> {
         if !self.require_auth {
             return None;
@@ -211,7 +211,7 @@ impl AuthManager {
     }
 
     /// Evict all confirmations older than 60 seconds.
-    #[allow(dead_code)] // Spec feature: Section 8.3 confirmation cleanup
+    #[allow(dead_code)]
     pub fn cleanup_expired(&mut self) {
         self.pending_confirmations.retain(|_, p| {
             p.created_at.elapsed().as_secs() < 60

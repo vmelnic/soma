@@ -1,4 +1,4 @@
-//! Multi-hop signal relay (Spec Section 15).
+//! Multi-hop signal relay.
 //!
 //! Enables signals to traverse intermediate SOMA nodes when the
 //! recipient is not directly connected to the sender.

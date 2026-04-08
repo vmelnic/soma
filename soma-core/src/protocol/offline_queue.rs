@@ -1,5 +1,4 @@
 //! Priority-ordered offline signal queue for store-and-forward delivery
-//! (Spec Section 21.4).
 //!
 //! When a peer is disconnected, outbound signals are held in a bounded
 //! queue ordered by priority (highest first). On reconnect the queue is
@@ -17,7 +16,7 @@ use std::time::{Duration, Instant};
 use super::signal::Signal;
 
 /// A signal awaiting delivery, annotated with scheduling metadata.
-#[allow(dead_code)] // Spec feature for offline signal queuing
+#[allow(dead_code)]
 pub struct QueuedSignal {
     pub signal: Signal,
     /// Timestamp used for max-age expiry checks.
@@ -32,7 +31,7 @@ pub struct QueuedSignal {
 ///
 /// Internally stored as a `VecDeque` sorted by descending priority so
 /// that [`drain`](Self::drain) returns highest-priority signals first.
-#[allow(dead_code)] // Spec feature for offline signal queuing
+#[allow(dead_code)]
 pub struct OfflineQueue {
     signals: VecDeque<QueuedSignal>,
     max_size: usize,
@@ -40,7 +39,7 @@ pub struct OfflineQueue {
     max_age: Duration,
 }
 
-#[allow(dead_code)] // Spec feature for offline signal queuing
+#[allow(dead_code)]
 impl OfflineQueue {
     pub fn new(max_size: usize) -> Self {
         Self {

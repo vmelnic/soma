@@ -1,4 +1,4 @@
-//! Streaming lifecycle management (Spec Section 6.4).
+//! Streaming lifecycle management.
 //!
 //! Tracks `STREAM_START` / `STREAM_DATA` / `STREAM_END` on per-channel streams,
 //! counting frames and handling connection-drop interrupts.
@@ -11,7 +11,7 @@ use anyhow::{bail, Result};
 ///
 /// Each channel supports at most one concurrent stream. A stream transitions
 /// through: `start_stream` (active=true) -> data frames -> `end_stream` (active=false).
-#[allow(dead_code)] // Spec feature for stream lifecycle
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct StreamState {
     /// Channel this stream occupies (one stream per channel).
@@ -32,13 +32,13 @@ pub struct StreamState {
 ///
 /// Enforces single-stream-per-channel: attempting to start a second stream
 /// on an occupied channel returns an error.
-#[allow(dead_code)] // Spec feature for stream lifecycle
+#[allow(dead_code)]
 pub struct StreamManager {
     /// `channel_id` -> stream state. Only active streams are present.
     active_streams: HashMap<u32, StreamState>,
 }
 
-#[allow(dead_code)] // Spec feature for stream lifecycle
+#[allow(dead_code)]
 impl StreamManager {
     pub fn new() -> Self {
         Self {

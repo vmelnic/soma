@@ -1,10 +1,10 @@
-//! MCP server -- JSON-RPC 2.0 over stdio (Whitepaper Section 8, Milestone 3).
+//! MCP server -- JSON-RPC 2.0 over stdio (Milestone 3).
 //!
 //! Reads newline-delimited JSON-RPC 2.0 messages from stdin, dispatches them to
 //! tool handlers, and writes responses to stdout. This is the primary interface
 //! for LLMs to drive SOMA: querying state, executing intents, managing plugins,
-//! and calling plugin conventions. Every tool call is logged for audit (Section 12.1)
-//! and gated by role-based auth (Section 8.3).
+//! and calling plugin conventions. Every tool call is logged for audit
+//! and gated by role-based auth.
 
 use std::path::Path;
 use std::sync::{Arc, RwLock};
@@ -240,7 +240,7 @@ impl McpServer {
     }
 
     /// Dispatch a `tools/call` request: parse arguments, enforce auth, route to the
-    /// correct tool handler, and log the outcome for the audit trail (Section 12.1).
+    /// correct tool handler, and log the outcome for the audit trail.
     #[allow(clippy::future_not_send)]
     async fn handle_tools_call(
         &self,
@@ -818,7 +818,7 @@ impl McpServer {
                     else { p.record_failure(); }
                 }
 
-                // Record experience (Section 17.1: successes only)
+                // Record experience (successes only)
                 let tokens: Vec<u32> = mind_guard.tokenizer.encode(text)
                     .iter().map(|&t| t as u32).collect();
                 drop(mind_guard);

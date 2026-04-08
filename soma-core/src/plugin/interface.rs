@@ -1,4 +1,4 @@
-//! Plugin trait — the contract every SOMA plugin implements (Whitepaper Section 6).
+//! Plugin trait — the contract every SOMA plugin implements.
 //!
 //! All types are defined in the `soma-plugin-sdk` crate and re-exported here.
 //! This allows external plugins to depend only on the lightweight SDK crate

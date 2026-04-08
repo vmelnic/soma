@@ -1,4 +1,4 @@
-//! Synaptic Protocol v2 binary wire codec (Spec Sections 4, 17).
+//! Synaptic Protocol v2 binary wire codec.
 //!
 //! Frame layout:
 //!   magic:          0x53 0x4D (2 bytes, "SM")
@@ -10,7 +10,7 @@
 //!   `sender_id_len`:  u8 (1 byte)
 //!   `sender_id`:      [u8; `sender_id_len`]
 //!   `metadata_len`:   u32 BE (4 bytes)
-//!   metadata:       [u8; `metadata_len`] (MessagePack-encoded per spec)
+//!   metadata:       [u8; `metadata_len`] (MessagePack-encoded)
 //!   `payload_len`:    u32 BE (4 bytes)
 //!   payload:        [u8; `payload_len`]
 //!   checksum:       u32 BE CRC32 (4 bytes)
@@ -25,7 +25,7 @@ use super::signal::{Signal, SignalFlags, SignalType};
 ///
 /// Returns `(data, was_compressed)`. Skips compression when:
 /// - Payload < 256 bytes (overhead not worth it)
-/// - Signal is `StreamData` or `Binary` (latency-sensitive, Spec Section 19)
+/// - Signal is `StreamData` or `Binary` (latency-sensitive)
 /// - Compressed output is not smaller than the original
 fn maybe_compress(payload: &[u8], signal_type: SignalType) -> (Vec<u8>, bool) {
     if payload.len() < 256 {
@@ -105,7 +105,7 @@ pub fn encode_frame(signal: &Signal, session_keys: Option<&SessionKeys>) -> Vec<
         flags -= SignalFlags::COMPRESSED;
     }
 
-    // AEAD encrypt payload when ENCRYPTED flag is set (Spec Section 9.4).
+    // AEAD encrypt payload when ENCRYPTED flag is set.
     // Falls back to a deterministic test key when no session keys are provided.
     let payload_bytes = if flags.contains(SignalFlags::ENCRYPTED) {
         let (key, nonce) = session_keys.map_or(
@@ -161,8 +161,8 @@ pub fn encode_frame(signal: &Signal, session_keys: Option<&SessionKeys>) -> Vec<
 /// are used for AEAD decryption (if the ENCRYPTED flag is set). When `None`,
 /// falls back to the hardcoded test key for backwards compatibility.
 ///
-/// Returns `Ok(None)` for frames with unknown signal types per Spec Section 12.3:
-/// "Unknown signal type received -> Ignore signal. Log warning. Do NOT close connection."
+/// Returns `Ok(None)` for frames with unknown signal types.
+/// Unknown signal type received -> Ignore signal. Log warning. Do NOT close connection.
 #[allow(clippy::too_many_lines)]
 pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<Option<Signal>> {
     if data.len() < MIN_FRAME_SIZE {
@@ -190,11 +190,11 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
 
     let flags = SignalFlags::from_bits_truncate(data[3]);
 
-    // Unknown signal types are silently ignored per Spec Section 12.3
+    // Unknown signal types are silently ignored
     let Some(signal_type) = SignalType::from_u8(data[4]) else {
         tracing::warn!(
             signal_type_byte = format_args!("0x{:02X}", data[4]),
-            "Unknown signal type received, ignoring frame (Spec Sec 12.3)"
+            "Unknown signal type received, ignoring frame"
         );
         return Ok(None);
     };
@@ -550,7 +550,6 @@ mod tests {
 
     #[test]
     fn test_unknown_signal_type_returns_none() {
-        // Spec Section 12.3: unknown signal type should be ignored, not error
         let signal = Signal::new(SignalType::Ping, "s".to_string());
         let mut encoded = encode_frame(&signal, None);
 

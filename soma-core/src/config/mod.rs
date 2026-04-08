@@ -1,4 +1,4 @@
-//! SOMA configuration system (Spec Section 15).
+//! SOMA configuration system.
 //!
 //! Loads configuration from a TOML file with sensible defaults for all fields.
 //! Override order: compiled defaults < `soma.toml` < environment variables (`SOMA_*`) < CLI flags.
@@ -193,10 +193,10 @@ pub struct SomaSection {
     pub id: String,
     #[serde(default = "default_log_level")]
     pub log_level: String,
-    /// Program trace verbosity: "terse", "normal", "verbose" (Section 11.5)
+    /// Program trace verbosity: "terse", "normal", "verbose".
     #[serde(default = "default_trace_verbosity")]
     pub trace_verbosity: String,
-    /// Directory to search for plugin libraries (Section 15.1)
+    /// Directory to search for plugin libraries.
     #[serde(default = "default_plugins_directory")]
     pub plugins_directory: String,
 }
@@ -214,7 +214,7 @@ pub struct MindSection {
     pub model_dir: String,
     #[serde(default = "default_max_steps")]
     pub max_program_steps: usize,
-    /// Softmax temperature for inference (Section 2.3). Lower = more deterministic.
+    /// Softmax temperature for inference. Lower = more deterministic.
     #[serde(default = "default_temperature")]
     pub temperature: f32,
     /// Maximum wall-clock time allowed for a single inference call, in seconds.
@@ -229,7 +229,7 @@ pub struct MindSection {
 
 /// `LoRA` (Low-Rank Adaptation) parameters for runtime model adaptation (`[mind.lora]`).
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)] // Spec config fields: Section 15.1
+#[allow(dead_code)]
 pub struct LoraConfig {
     #[serde(default = "default_rank")]
     pub default_rank: usize,
@@ -243,7 +243,7 @@ pub struct LoraConfig {
     pub adapt_batch_size: usize,
     #[serde(default = "default_lr")]
     pub adapt_learning_rate: f32,
-    /// Maximum number of `LoRA` adapter layers (Section 20.1).
+    /// Maximum number of `LoRA` adapter layers.
     /// Checked at configuration/init time.
     #[serde(default = "default_max_lora_layers")]
     pub max_lora_layers: usize,
@@ -263,9 +263,9 @@ impl Default for LoraConfig {
     }
 }
 
-/// Consolidation configuration (Spec Section 15.1).
+/// Consolidation configuration.
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)] // Spec config fields: Section 15.1
+#[allow(dead_code)]
 pub struct ConsolidationConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -288,10 +288,10 @@ impl Default for ConsolidationConfig {
     }
 }
 
-/// Encryption configuration (Spec Section 15.1).
+/// Encryption configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[derive(Default)]
-#[allow(dead_code)] // Spec config fields: Section 15.1
+#[allow(dead_code)]
 pub struct EncryptionConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -302,7 +302,7 @@ pub struct EncryptionConfig {
 
 /// Checkpoint and experience buffer settings (`[memory]` section).
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)] // Spec config fields: Section 15.1
+#[allow(dead_code)]
 pub struct MemorySection {
     #[serde(default = "default_ckpt_dir")]
     pub checkpoint_dir: String,
@@ -320,7 +320,7 @@ pub struct MemorySection {
 
 /// Synaptic protocol (SOMA-to-SOMA networking) settings (`[protocol]` section).
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)] // Spec config fields: Section 15.1
+#[allow(dead_code)]
 pub struct ProtocolSection {
     #[serde(default = "default_bind")]
     pub bind: String,
@@ -332,34 +332,34 @@ pub struct ProtocolSection {
     pub connection_timeout_secs: u64,
     #[serde(default)]
     pub encryption: EncryptionConfig,
-    /// Maximum signal payload size in bytes (Section 20.1). Default 10 MB.
+    /// Maximum signal payload size in bytes. Default 10 MB.
     #[serde(default = "default_max_signal_size")]
     pub max_signal_size: usize,
-    /// Keepalive interval in seconds (Section 20.1). Default 30s.
+    /// Keepalive interval in seconds. Default 30s.
     #[serde(default = "default_keepalive_interval_secs")]
     pub keepalive_interval_secs: u64,
 }
 
 /// Concurrency and memory limits (`[resources]` section).
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code, clippy::struct_field_names)] // Spec config fields: Section 15.1; all fields share "max" prefix by design
+#[allow(dead_code, clippy::struct_field_names)]
 pub struct ResourceSection {
     #[serde(default = "default_max_infer")]
     pub max_concurrent_inferences: usize,
     #[serde(default = "default_max_plugin")]
     pub max_concurrent_plugin_calls: usize,
-    /// Maximum number of plugins that can be loaded simultaneously (Section 20.1).
+    /// Maximum number of plugins that can be loaded simultaneously.
     /// Checked at plugin registration time.
     #[serde(default = "default_max_plugins_loaded")]
     pub max_plugins_loaded: usize,
-    /// Maximum memory usage in bytes (Section 20.1). Default 512 MB.
+    /// Maximum memory usage in bytes. Default 512 MB.
     #[serde(default = "default_max_memory_bytes")]
     pub max_memory_bytes: usize,
 }
 
-/// MCP Server configuration (Whitepaper Section 8).
+/// MCP Server configuration.
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)] // Spec config fields: Section 8
+#[allow(dead_code)]
 pub struct McpSection {
     /// Transport: "stdio" or "http"
     #[serde(default = "default_mcp_transport")]
@@ -402,9 +402,9 @@ fn default_viewer_token_env() -> String {
     "SOMA_MCP_VIEWER_TOKEN".to_string()
 }
 
-/// Security configuration (Whitepaper Sections 8.3, 12.2).
+/// Security configuration.
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)] // Spec config fields: Sections 8.3, 12.2
+#[allow(dead_code)]
 pub struct SecuritySection {
     /// Require auth tokens for MCP connections
     #[serde(default)]
@@ -428,7 +428,7 @@ pub struct SecuritySection {
     /// Default: `["DROP", "DELETE", "TRUNCATE"]`.
     #[serde(default = "default_confirmation_patterns")]
     pub confirmation_patterns: Vec<String>,
-    /// Plugins whose execution is denied (Section 12.2 permission enforcement).
+    /// Plugins whose execution is denied.
     /// Plugin names in this list will be refused at `execute_step` time.
     #[serde(default)]
     pub denied_plugins: Vec<String>,
@@ -560,8 +560,8 @@ impl SomaConfig {
         }
     }
 
-    /// Apply environment variable overrides (Section 15.3).
-    /// Format: `SOMA_SECTION_KEY` maps to [section].key.
+    /// Apply environment variable overrides.
+    /// Format: `SOMA_SECTION_KEY` maps to `[section].key`.
     /// Examples: `SOMA_MIND_TEMPERATURE=0.5`, `SOMA_PROTOCOL_BIND=0.0.0.0:9001`
     pub fn apply_env_overrides(&mut self) {
         if let Ok(v) = std::env::var("SOMA_MIND_TEMPERATURE")

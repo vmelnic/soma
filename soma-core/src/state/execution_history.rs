@@ -1,5 +1,4 @@
-//! Execution history -- bounded record of recent intent executions
-//! (Whitepaper Section 7.5).
+//! Execution history -- bounded record of recent intent executions.
 //!
 //! Uses a `VecDeque` as a ring buffer: when `max_size` is reached, the oldest
 //! record is evicted on each new insertion. `total_count` tracks the lifetime
@@ -53,7 +52,7 @@ impl ExecutionHistory {
     }
 
     /// Record a new execution, evicting the oldest entry if the buffer is full.
-    #[allow(clippy::too_many_arguments)] // All fields are needed per spec Section 7.5
+    #[allow(clippy::too_many_arguments)]
     pub fn record(
         &mut self,
         intent: String,
@@ -97,18 +96,18 @@ impl ExecutionHistory {
         self.records.len()
     }
 
-    #[allow(dead_code)] // Spec feature: Section 7.5
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
     }
 
-    #[allow(dead_code)] // Spec feature: Section 7.5
+    #[allow(dead_code)]
     pub const fn total_count(&self) -> u64 {
         self.total_count
     }
 
     /// Success rate as a percentage (0.0..100.0) over the current buffer contents.
-    #[allow(dead_code, clippy::cast_precision_loss)] // Spec feature; precision loss acceptable for percentages
+    #[allow(dead_code, clippy::cast_precision_loss)]
     pub fn success_rate(&self) -> f64 {
         if self.records.is_empty() {
             return 0.0;
@@ -118,7 +117,7 @@ impl ExecutionHistory {
     }
 
     /// Mean execution time in ms over the current buffer contents.
-    #[allow(dead_code, clippy::cast_precision_loss)] // Spec feature; precision loss acceptable for averages
+    #[allow(dead_code, clippy::cast_precision_loss)]
     pub fn avg_execution_time_ms(&self) -> f64 {
         if self.records.is_empty() {
             return 0.0;

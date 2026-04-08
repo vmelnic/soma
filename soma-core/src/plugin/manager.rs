@@ -28,7 +28,7 @@ pub struct TraceEntry {
     pub summary: String,
 }
 
-/// Per-convention execution statistics for metrics and proprioception (Section 19.3).
+/// Per-convention execution statistics for metrics and proprioception.
 #[derive(Debug)]
 pub struct ConventionStats {
     pub call_count: u64,
@@ -66,7 +66,7 @@ impl ConventionStats {
     }
 
     /// Compute average duration from the recent samples ring buffer.
-    #[allow(dead_code)] // Spec Section 19.3 -- exposed via metrics/proprioception
+    #[allow(dead_code)]
     #[allow(clippy::cast_precision_loss)] // duration values fit comfortably in f64
     pub fn avg_duration_ms(&self) -> f64 {
         if self.recent_durations.is_empty() {
@@ -77,13 +77,13 @@ impl ConventionStats {
     }
 
     /// Compute p50 (median) duration from recent samples.
-    #[allow(dead_code)] // Spec Section 19.3 -- exposed via metrics/proprioception
+    #[allow(dead_code)]
     pub fn p50_duration_ms(&self) -> u64 {
         self.percentile(50)
     }
 
     /// Compute p99 duration from recent samples.
-    #[allow(dead_code)] // Spec Section 19.3 -- exposed via metrics/proprioception
+    #[allow(dead_code)]
     pub fn p99_duration_ms(&self) -> u64 {
         self.percentile(99)
     }
@@ -110,18 +110,18 @@ pub struct PluginManager {
     plugins: Vec<Box<dyn SomaPlugin>>,
     /// Global convention ID (`plugin_idx * 1000 + local_id`) -> (`plugin_index`, `local_conv_id`).
     routing: std::collections::HashMap<u32, (usize, u32)>,
-    /// Indices of plugins disabled after a panic (Section 11.3). Interior mutability lets
+    /// Indices of plugins disabled after a panic. Interior mutability lets
     /// `execute_step(&self)` mark crashes without requiring `&mut self`.
     crashed_plugins: std::sync::RwLock<std::collections::HashSet<usize>>,
-    /// Name-based lookup: "plugin.convention" -> global routing ID (Section 5.4).
+    /// Name-based lookup: "plugin.convention" -> global routing ID.
     name_routing: std::collections::HashMap<String, u32>,
     /// Model catalog ID -> global routing ID. Bridges the Mind's output IDs (from training
     /// catalog) to the runtime's plugin-index-based routing IDs.
     catalog_routing: std::collections::HashMap<u32, u32>,
     metrics: Option<std::sync::Arc<crate::metrics::SomaMetrics>>,
-    /// Per-convention execution stats keyed by global ID (Section 19.3).
+    /// Per-convention execution stats keyed by global ID.
     convention_stats: std::sync::RwLock<std::collections::HashMap<u32, ConventionStats>>,
-    /// Plugin names denied from execution (Section 12.2 permission enforcement).
+    /// Plugin names denied from execution.
     denied_plugins: std::sync::RwLock<std::collections::HashSet<String>>,
 }
 
@@ -144,8 +144,8 @@ impl PluginManager {
         self.metrics = Some(metrics);
     }
 
-    /// Populate the denied-plugins set from configuration (Section 12.2).
-    #[allow(dead_code)] // Spec Section 12.2 -- called during startup with config
+    /// Populate the denied-plugins set from configuration.
+    #[allow(dead_code)]
     pub fn set_denied_plugins(&self, names: &[String]) {
         if let Ok(mut denied) = self.denied_plugins.write() {
             denied.clear();
@@ -159,7 +159,7 @@ impl PluginManager {
     }
 
     /// Deny a single plugin by name at runtime (e.g., via MCP admin command).
-    #[allow(dead_code)] // Spec Section 12.2 -- runtime plugin denial via MCP
+    #[allow(dead_code)]
     pub fn deny_plugin(&self, name: &str) {
         if let Ok(mut denied) = self.denied_plugins.write() {
             denied.insert(name.to_string());
@@ -168,7 +168,7 @@ impl PluginManager {
     }
 
     /// Re-enable a previously denied plugin.
-    #[allow(dead_code)] // Spec Section 12.2 -- runtime plugin re-enable via MCP
+    #[allow(dead_code)]
     pub fn allow_plugin(&self, name: &str) {
         if let Ok(mut denied) = self.denied_plugins.write() {
             denied.remove(name);
@@ -177,7 +177,7 @@ impl PluginManager {
     }
 
     /// Check whether a plugin is currently denied.
-    #[allow(dead_code)] // Spec Section 12.2 -- queried by MCP tools
+    #[allow(dead_code)]
     pub fn is_plugin_denied(&self, name: &str) -> bool {
         self.denied_plugins
             .read()
@@ -206,7 +206,7 @@ impl PluginManager {
 
         validate_plugin_config(&*plugin);
 
-        // Surface LoRA weights if the plugin provides them (Section 7.3)
+        // Surface LoRA weights if the plugin provides them
         if let Some(lora_data) = plugin.lora_weights() {
             tracing::info!(
                 plugin = plugin.name(),
@@ -245,12 +245,12 @@ impl PluginManager {
         self.plugins.push(plugin);
     }
 
-    /// Register multiple plugins in dependency-resolved order (Section 6.7).
+    /// Register multiple plugins in dependency-resolved order.
     ///
     /// Uses DFS-based topological sort with three-color cycle detection:
     /// white (0) = unvisited, gray (1) = in current DFS path, black (2) = finished.
     /// A gray->gray edge indicates a cycle; cyclic plugins are skipped with an error log.
-    #[allow(dead_code)] // Spec Section 6.7 -- batch plugin registration with toposort
+    #[allow(dead_code)]
     pub fn register_all(&mut self, mut plugins: Vec<Box<dyn SomaPlugin>>) {
         fn visit_with_cycle_check(
             idx: usize,
@@ -478,7 +478,7 @@ impl PluginManager {
     }
 
     /// Execute a plugin call wrapped in `catch_unwind` for panic isolation.
-    /// On panic, marks the plugin as crashed so future calls are refused (Section 11.3).
+    /// On panic, marks the plugin as crashed so future calls are refused.
     #[allow(clippy::borrowed_box)] // Box<dyn SomaPlugin> needed for catch_unwind AssertUnwindSafe
     fn execute_with_catch_unwind(
         plugin: &Box<dyn SomaPlugin>,
@@ -682,7 +682,7 @@ impl PluginManager {
 
     /// Execute a convention by local ID, searching all plugin offsets if the raw ID is not found.
     /// Used by MCP tool calls that reference conventions by local ID.
-    #[allow(dead_code)] // Spec Section 5.4 -- direct convention execution via MCP
+    #[allow(dead_code)]
     #[allow(clippy::cast_possible_truncation)] // plugin count is small
     pub fn execute_direct(&self, conv_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
         // Try raw ID first (works for plugin_idx=0 where global == local)
@@ -700,7 +700,7 @@ impl PluginManager {
     }
 
     /// Execute a convention by plugin name + local ID (unambiguous across plugins).
-    #[allow(dead_code)] // Spec Section 5.4 -- plugin-namespaced convention execution
+    #[allow(dead_code)]
     #[allow(clippy::cast_possible_truncation)] // plugin count is small
     pub fn execute_by_plugin(&self, plugin_name: &str, conv_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
         let plugin_idx = self.plugins.iter().position(|p| p.name() == plugin_name)
@@ -764,7 +764,7 @@ impl PluginManager {
         self.catalog_routing.get(&catalog_id).copied().unwrap_or(catalog_id)
     }
 
-    /// Collect serialized state from all plugins for checkpointing (Section 7.5).
+    /// Collect serialized state from all plugins for checkpointing.
     pub fn collect_plugin_states(&self) -> Vec<(String, serde_json::Value)> {
         self.plugins.iter()
             .filter_map(|p| {
@@ -790,8 +790,8 @@ impl PluginManager {
         self.plugins.iter().map(|p| (p.name().to_string(), p.version().to_string())).collect()
     }
 
-    /// Snapshot all per-convention execution stats (Section 19.3).
-    #[allow(dead_code)] // Spec Section 19.3 -- exposed via metrics/proprioception
+    /// Snapshot all per-convention execution stats.
+    #[allow(dead_code)]
     pub fn get_convention_stats(&self) -> std::collections::HashMap<u32, ConventionStats> {
         self.convention_stats.read()
             .map(|s| s.iter().map(|(k, v)| (*k, ConventionStats {
@@ -869,7 +869,7 @@ impl PluginManager {
     }
 
     /// Detect unhealthy plugins by aggregating error rates across their conventions.
-    /// Returns warnings for plugins with >50% error rate (Section 11.3).
+    /// Returns warnings for plugins with >50% error rate.
     #[allow(clippy::significant_drop_tightening)] // stats_map lock needed for entire iteration
     pub fn check_plugin_health(&self) -> Vec<(String, &str)> {
         let mut warnings = Vec::new();

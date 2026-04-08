@@ -1,4 +1,4 @@
-//! Synaptic Protocol v2 client (Spec Sections 12, 14).
+//! Synaptic Protocol v2 client.
 //!
 //! Provides both one-shot and persistent connection modes for
 //! inter-SOMA communication over the binary wire format:
@@ -22,7 +22,7 @@ use super::connection::SynapseConnection;
 use super::router::SignalRouter;
 use super::signal::{Signal, SignalType};
 
-#[allow(dead_code)] // Spec Section 14.2 — used by connect_with_retry
+#[allow(dead_code)]
 /// Fixed portion of the backoff schedule; attempts beyond this use exponential doubling.
 const BACKOFF_SCHEDULE: &[Duration] = &[
     Duration::from_millis(100),
@@ -30,11 +30,11 @@ const BACKOFF_SCHEDULE: &[Duration] = &[
     Duration::from_secs(2),
     Duration::from_secs(5),
 ];
-#[allow(dead_code)] // Spec Section 14.2 — used by connect_with_retry
+#[allow(dead_code)]
 /// Upper bound for the exponential portion of the backoff.
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 
-/// Snapshot of an active subscription, kept so it can be replayed on reconnect (Spec Section 14.3).
+/// Snapshot of an active subscription, kept so it can be replayed on reconnect.
 ///
 /// `last_seen_sequence` is updated as signals arrive, allowing the server
 /// to resume delivery from the correct point after a reconnection.
@@ -122,7 +122,7 @@ impl SynapseClient {
         Ok(conn)
     }
 
-    #[allow(dead_code)] // Spec Section 14.2 — auto-reconnect with backoff
+    #[allow(dead_code)]
     /// Connect with unlimited retries using graduated exponential backoff.
     ///
     /// The first four attempts use the fixed [`BACKOFF_SCHEDULE`]; subsequent
@@ -187,7 +187,7 @@ impl SynapseClient {
     }
 
     /// Send a Ping and return `true` if the peer responds with a Pong.
-    #[allow(dead_code)] // Spec feature for peer health checking
+    #[allow(dead_code)]
     pub async fn ping(addr: &str, sender: &str) -> Result<bool> {
         let mut signal = Signal::ping(sender);
         signal.channel_id = 0;
@@ -198,7 +198,7 @@ impl SynapseClient {
     }
 
     /// Send an intent and wait up to 30 s for a correlated response via the [`SignalRouter`].
-    #[allow(dead_code)] // Spec feature for correlated intent-result
+    #[allow(dead_code)]
     pub async fn send_intent_and_wait(
         addr: &str,
         sender: &str,
@@ -230,7 +230,7 @@ impl SynapseClient {
     }
 
     /// One-shot intent send without router-based correlation.
-    #[allow(dead_code)] // Spec feature for inter-SOMA communication
+    #[allow(dead_code)]
     pub async fn send_intent(
         addr: &str,
         sender: &str,
@@ -247,7 +247,7 @@ impl SynapseClient {
     }
 
     /// Register a subscription so it will be replayed on reconnect.
-    #[allow(dead_code)] // Spec feature for subscription replay
+    #[allow(dead_code)]
     pub fn track_subscription(&mut self, topic: String, channel_id: u32, durable: bool) {
         self.active_subscriptions.push(SubscriptionRecord {
             topic,
@@ -258,13 +258,13 @@ impl SynapseClient {
     }
 
     /// Stop tracking a subscription (it will not be replayed on reconnect).
-    #[allow(dead_code)] // Spec feature for subscription replay
+    #[allow(dead_code)]
     pub fn untrack_subscription(&mut self, topic: &str) {
         self.active_subscriptions.retain(|s| s.topic != topic);
     }
 
     /// Advance the last-seen sequence for a subscription so reconnect replay resumes correctly.
-    #[allow(dead_code)] // Spec feature for subscription replay
+    #[allow(dead_code)]
     pub fn update_subscription_sequence(&mut self, topic: &str, sequence: u32) {
         if let Some(sub) = self.active_subscriptions.iter_mut().find(|s| s.topic == topic) {
             sub.last_seen_sequence = Some(sequence);
@@ -275,7 +275,7 @@ impl SynapseClient {
     ///
     /// Each subscription signal includes `last_seen_sequence` (when available)
     /// so the server can catch up the client from the correct point.
-    #[allow(dead_code)] // Spec feature for subscription replay
+    #[allow(dead_code)]
     pub async fn replay_subscriptions(&self, conn: &Arc<SynapseConnection>) -> Result<()> {
         for sub in &self.active_subscriptions {
             let mut signal = Signal::new(SignalType::Subscribe, self.local_id.clone());

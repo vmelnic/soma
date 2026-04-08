@@ -1,4 +1,4 @@
-//! Plugin system -- loads, routes, and manages SOMA plugins (Whitepaper Section 5-6).
+//! Plugin system -- loads, routes, and manages SOMA plugins.
 //!
 //! Plugins expose named conventions (operations) that the Mind's generated programs invoke.
 //! The [`manager::PluginManager`] routes convention calls by global ID, handles crash recovery,

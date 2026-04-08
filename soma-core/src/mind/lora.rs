@@ -248,7 +248,7 @@ pub struct LoRALayerState {
     pub b: Vec<f32>,
 }
 
-/// Wire format for plugin-provided `LoRA` weights (Spec Section 7.3).
+/// Wire format for plugin-provided `LoRA` weights.
 /// Returned by `SomaPlugin::lora_weights()` and deserialized by `attach_lora_bytes()`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LoRABundle {
@@ -257,7 +257,7 @@ pub struct LoRABundle {
 }
 
 impl LoRAWeights {
-    #[allow(dead_code)] // Spec Section 4.7 — used for LoRA magnitude tracking
+    #[allow(dead_code)]
     pub fn magnitude(&self) -> f32 {
         self.b.iter().map(|x| x.abs()).sum::<f32>() * self.scale
     }

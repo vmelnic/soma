@@ -1,4 +1,4 @@
-//! `LoRA` consolidation — permanently merging adapted weights into the base model (Spec Section 6.3).
+//! `LoRA` consolidation — permanently merging adapted weights into the base model.
 //!
 //! Because tract-onnx models are frozen (compiled into the inference graph), we cannot
 //! modify base weights in-place. Instead, consolidation computes `scale * B @ A` for

@@ -3,14 +3,14 @@
 //! - **Word-level**: flat `{"token": idx, ...}` -- splits on whitespace, direct lookup.
 //! - **BPE**: `{"vocab": {...}, "merges": ["X Y", ...]}` -- splits on whitespace, then
 //!   applies Byte Pair Encoding merges for subword tokenization with character-level
-//!   fallback for OOV words (Spec Section 10.2).
+//!   fallback for OOV words.
 
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 
-#[allow(dead_code)] // Spec Section 10.2 — padding token index
+#[allow(dead_code)]
 pub const PAD_IDX: i64 = 0;
 /// Unknown token index -- used for OOV words and unrecognized BPE subwords.
 pub const UNK_IDX: i64 = 1;
@@ -154,7 +154,7 @@ impl Tokenizer {
             .collect()
     }
 
-    #[allow(dead_code)] // Spec Section 10.2 — explicit BPE encode path
+    #[allow(dead_code)]
     pub fn encode_bpe(&self, text: &str) -> Vec<i64> {
         let lower = text.to_lowercase();
         lower.split_whitespace()

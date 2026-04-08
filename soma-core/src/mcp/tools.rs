@@ -1,4 +1,4 @@
-//! MCP tool definitions and result types (Whitepaper Section 8.1).
+//! MCP tool definitions and result types.
 //!
 //! Defines the schema for all tools exposed over the MCP interface:
 //! - **State tools** (read-only): `soma.get_state`, `soma.get_plugins`, `soma.get_conventions`,
@@ -10,7 +10,7 @@
 //!   `soma.uninstall_plugin`, `soma.configure_plugin`, `soma.reload_design`,
 //!   `soma.render_view`, `soma.update_view`
 //! - **Plugin convention tools**: dynamically generated as `soma.{plugin}.{convention}`
-//!   from every loaded plugin's conventions (Section 12.2).
+//!   from every loaded plugin's conventions.
 
 use serde::{Deserialize, Serialize};
 

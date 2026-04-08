@@ -1,5 +1,4 @@
 //! SOMA state system -- the permanent, queryable record of what happened
-//! (Whitepaper Sections 1.2, 7.5).
 //!
 //! Contains two subsystems:
 //! - **Decision log**: append-only record of architectural/configuration choices.

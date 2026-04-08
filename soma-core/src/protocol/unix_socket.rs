@@ -1,4 +1,4 @@
-//! Unix Domain Socket transport for the Synaptic Protocol (Section 3.1).
+//! Unix Domain Socket transport for the Synaptic Protocol.
 //!
 //! Provides zero-network-overhead IPC for SOMA instances on the same host.
 //! The wire format is identical to TCP — only the transport layer differs.
@@ -7,7 +7,7 @@
 //!
 //! Signal routing is minimal: only `PING` (responded with `PONG`) and
 //! `CLOSE` (terminates the connection) are handled. Full `SignalRouter`
-//! integration is deferred.
+//! integration is not yet wired.
 
 #[cfg(unix)]
 use anyhow::Result;
@@ -22,7 +22,7 @@ use super::signal::{Signal, SignalType};
 /// Removes any stale socket file at `path` before binding. The caller should
 /// invoke [`cleanup_socket`] on shutdown to remove the file.
 #[cfg(unix)]
-#[allow(dead_code)] // Spec feature for same-host transport
+#[allow(dead_code)]
 pub async fn start_unix_server(path: &str) -> Result<()> {
     let _ = std::fs::remove_file(path);
 
@@ -116,7 +116,7 @@ async fn handle_uds_connection(stream: tokio::net::UnixStream) {
 /// Removes the socket file at `path`, logging a warning on failure
 /// (except `NotFound`, which is silently ignored).
 #[cfg(unix)]
-#[allow(dead_code)] // Spec feature for UDS cleanup
+#[allow(dead_code)]
 pub fn cleanup_socket(path: &str) {
     if let Err(e) = std::fs::remove_file(path) {
         if e.kind() != std::io::ErrorKind::NotFound {
@@ -128,7 +128,7 @@ pub fn cleanup_socket(path: &str) {
 }
 
 /// Returns the conventional socket path for a SOMA instance: `/tmp/soma-{id}.sock`.
-#[allow(dead_code)] // Spec feature for UDS transport
+#[allow(dead_code)]
 pub fn default_socket_path(soma_id: &str) -> String {
     format!("/tmp/soma-{soma_id}.sock")
 }

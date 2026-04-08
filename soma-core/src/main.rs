@@ -563,7 +563,7 @@ fn format_uptime(d: std::time::Duration) -> String {
     }
 }
 
-/// Graceful shutdown sequence (Whitepaper Section 11.4):
+/// Graceful shutdown sequence:
 /// 1. Stop accepting new requests
 /// 2. Notify peers with CLOSE signals
 /// 3. Drain in-flight requests (wait for `ACTIVE_INFERENCES` to reach 0)

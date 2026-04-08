@@ -1,4 +1,4 @@
-//! WebSocket transport adapter for the Synaptic Protocol (Section 3.1).
+//! WebSocket transport adapter for the Synaptic Protocol.
 //!
 //! Browser-based renderers cannot open raw TCP connections, so this adapter
 //! wraps Synaptic Protocol frames inside WebSocket binary messages using
@@ -12,8 +12,7 @@
 //! security boundary.
 //!
 //! Signal routing is minimal: `HANDSHAKE`, `PING`, `INTENT`, and `CLOSE`
-//! are handled inline. Full `SignalRouter` integration is deferred until
-//! the TCP server handler is refactored into a shared trait.
+//! are handled inline.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -32,7 +31,7 @@ const DEFAULT_MAX_WS_CONNECTIONS: usize = 64;
 /// Starts a WebSocket server on `bind_addr` with the default connection limit.
 ///
 /// Delegates to [`start_ws_server_with_limit`] with [`DEFAULT_MAX_WS_CONNECTIONS`].
-#[allow(dead_code)] // Spec feature for browser-based renderers
+#[allow(dead_code)]
 pub async fn start_ws_server(bind_addr: &str) -> Result<()> {
     start_ws_server_with_limit(bind_addr, DEFAULT_MAX_WS_CONNECTIONS).await
 }
@@ -43,7 +42,7 @@ pub async fn start_ws_server(bind_addr: &str) -> Result<()> {
 /// Each accepted TCP connection is upgraded to WebSocket via `tungstenite`,
 /// then handed to [`handle_ws_connection`]. Connections beyond
 /// `max_connections` are dropped immediately before the upgrade handshake.
-#[allow(dead_code)] // Spec feature for browser-based renderers
+#[allow(dead_code)]
 pub async fn start_ws_server_with_limit(bind_addr: &str, max_connections: usize) -> Result<()> {
     let listener = TcpListener::bind(bind_addr).await?;
     tracing::info!(bind = %bind_addr, max_connections, "WebSocket transport started");
@@ -159,7 +158,6 @@ async fn handle_ws_connection(
                                     "WS intent received"
                                 );
                                 // Echo the intent back as a DATA ack. Full mind-engine
-                                // routing is deferred until the handler trait is shared.
                                 let mut ack =
                                     Signal::new(SignalType::Data, server_id.to_string());
                                 ack.payload =

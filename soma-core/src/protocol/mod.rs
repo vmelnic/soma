@@ -4,7 +4,6 @@
 //! version-negotiated handshakes, per-connection heartbeat, multiplexed channels
 //! with flow control, and pluggable transports (TCP, WebSocket, Unix socket).
 //!
-//! Spec reference: `02_SYNAPTIC_PROTOCOL.md` (Sections 4-20).
 
 /// Signal types and flags — the fundamental unit of protocol communication.
 pub mod signal;

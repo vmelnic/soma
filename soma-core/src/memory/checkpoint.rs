@@ -15,7 +15,7 @@ pub const CHECKPOINT_MAGIC: &[u8; 4] = b"SOMA";
 /// Current checkpoint format version. Loader accepts 1 through this value.
 pub const CHECKPOINT_VERSION: u32 = 2;
 
-/// Complete snapshot of a SOMA instance's learned state (Spec Section 7.5).
+/// Complete snapshot of a SOMA instance's learned state.
 ///
 /// Captures everything needed to resume from where a SOMA left off:
 /// `LoRA` weights, experience counts, plugin states, decision history,
@@ -34,7 +34,7 @@ pub struct Checkpoint {
     pub experience_count: u64,
     /// Total `LoRA` adaptation cycles completed before this checkpoint.
     pub adaptation_count: u64,
-    /// Plugin-specific state snapshots (institutional memory, Section 7.5).
+    /// Plugin-specific state snapshots (institutional memory).
     #[serde(default)]
     pub plugin_states: Vec<PluginStateEntry>,
     /// Decision log entries — what was built, why, and when.
@@ -50,7 +50,7 @@ pub struct Checkpoint {
     /// Which plugins (name + version) were loaded when this checkpoint was taken.
     #[serde(default)]
     pub plugin_manifest: Vec<PluginManifestEntry>,
-    /// Accumulated consolidation delta for the opcode head (Section 6.3).
+    /// Accumulated consolidation delta for the opcode head.
     /// Shape: `num_conventions * decoder_dim`, row-major. Applied during inference
     /// as `logits += hidden @ delta.T` since tract-onnx graphs are frozen.
     #[serde(default)]

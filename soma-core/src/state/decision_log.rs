@@ -1,5 +1,5 @@
 //! Decision log -- append-only record of what was built, why, and by which
-//! LLM session (Whitepaper Section 7.5).
+//! LLM session.
 //!
 //! Decisions are never deleted or modified. The log grows monotonically and
 //! is serialized in full for MCP `get_state()` responses.
@@ -82,7 +82,7 @@ impl DecisionLog {
         self.decisions.len()
     }
 
-    #[allow(dead_code)] // Spec feature: decision log API
+    #[allow(dead_code)]
     pub const fn is_empty(&self) -> bool {
         self.decisions.is_empty()
     }

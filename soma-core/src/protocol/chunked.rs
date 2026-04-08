@@ -1,4 +1,4 @@
-//! Resumable chunked file transfer (Spec Section 6.3).
+//! Resumable chunked file transfer.
 //!
 //! Implements the `CHUNK_START` / `CHUNK_DATA` / `CHUNK_END` / `CHUNK_ACK`
 //! signal lifecycle for large payloads that exceed a single signal's size limit.
@@ -193,14 +193,14 @@ impl ChunkManager {
     }
 
     /// Next expected sequence number, used to communicate the resume position to a sender.
-    #[allow(dead_code)] // Spec feature for resumable transfers
+    #[allow(dead_code)]
     pub fn resume_from(&self, channel_id: u32) -> Option<u32> {
         let transfer = self.active_transfers.get(&channel_id)?;
         Some(transfer.last_ack_seq + 1)
     }
 
     /// Check whether a transfer is active on the given channel.
-    #[allow(dead_code)] // Spec feature for transfer state queries
+    #[allow(dead_code)]
     pub fn has_transfer(&self, channel_id: u32) -> bool {
         self.active_transfers.contains_key(&channel_id)
     }

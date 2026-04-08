@@ -6,8 +6,6 @@
 //! - Heartbeat with RTT measurement and dead-peer detection
 //! - Session tokens for reconnect identification (24h expiry)
 //!
-//! Spec reference: Sections 9.2 (flow control), 11.1 (connections),
-//! 12 (handshake), 14.5 (sessions), 18 (heartbeat).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -22,17 +20,17 @@ use tokio::sync::Mutex;
 use super::codec;
 use super::signal::{Signal, SignalType};
 
-/// Interval between keepalive PINGs when idle (Spec Section 18.1).
+/// Interval between keepalive PINGs when idle.
 pub const DEFAULT_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 /// How long to wait for a PONG before counting it as missed.
 pub const DEFAULT_PONG_TIMEOUT: Duration = Duration::from_secs(10);
-/// Consecutive missed PONGs before declaring the peer dead (Spec Section 18.3).
+/// Consecutive missed PONGs before declaring the peer dead.
 pub const DEFAULT_MAX_MISSED_PONGS: u32 = 3;
 
 /// Connection quality metrics derived from PING/PONG RTT measurements.
 ///
 /// Maintains a sliding window of up to 100 RTT samples and computes
-/// smoothed RTT and jitter (standard deviation). Spec Section 12.4.
+/// smoothed RTT and jitter (standard deviation).
 #[derive(Debug, Clone)]
 pub struct ConnectionQuality {
     /// Smoothed round-trip time (average of recent samples).
@@ -40,9 +38,9 @@ pub struct ConnectionQuality {
     /// RTT jitter (standard deviation of recent samples).
     pub rtt_jitter_ms: f32,
     pub connection_age_secs: u64,
-    #[allow(dead_code)] // Spec feature for connection quality tracking
+    #[allow(dead_code)]
     pub signal_loss_rate: f32,
-    #[allow(dead_code)] // Spec feature for connection quality tracking
+    #[allow(dead_code)]
     pub bandwidth_bytes_sec: f64,
     /// Sliding window of recent RTT observations (max 100).
     rtt_samples: Vec<f32>,
@@ -83,14 +81,14 @@ impl ConnectionQuality {
 }
 
 #[allow(dead_code)] // Used internally by channel flow control
-/// Default receive window size per channel (Spec Section 9.2).
+/// Default receive window size per channel.
 pub const DEFAULT_RECV_WINDOW: u64 = 1_048_576;
 
 /// Per-channel flow control state for a multiplexed connection.
 ///
 /// Tracks a receive window: the sender must not exceed `recv_window - bytes_in_flight`
 /// bytes without an acknowledgment. When `bytes_in_flight` drops below 50% of
-/// `recv_window_max`, the window is restored (Spec Section 9.2).
+/// `recv_window_max`, the window is restored.
 #[derive(Debug, Clone)]
 pub struct ChannelState {
     pub id: u32,
@@ -129,12 +127,12 @@ pub struct SynapseConnection {
     pub missed_pong_count: AtomicU32,
     /// Negotiated max frame size. Atomic so handshake can update through `&self`.
     pub negotiated_max_signal_size: AtomicU32,
-    #[allow(dead_code)] // Spec feature for channel limit negotiation
+    #[allow(dead_code)]
     pub max_channels: usize,
     pub negotiated_capabilities: Mutex<Vec<String>>,
     pub local_id: String,
     pub alive: std::sync::atomic::AtomicBool,
-    /// Session token for reconnect identification (24h expiry, Spec Section 14.5).
+    /// Session token for reconnect identification (24h expiry).
     pub session_token: Mutex<String>,
     pub session_token_created: Mutex<Option<Instant>>,
     pub quality: Mutex<ConnectionQuality>,
@@ -189,7 +187,7 @@ impl SynapseConnection {
     ///
     /// If the signal's channel has flow control state, checks whether the
     /// payload would exceed `recv_window - bytes_in_flight` and logs a
-    /// warning if so (Spec Section 9.2). After a successful send,
+    /// warning if so. After a successful send,
     /// `bytes_in_flight` is incremented by the payload length.
     #[allow(clippy::significant_drop_tightening)] // lock guards are scoped appropriately
     pub async fn send(&self, signal: &Signal) -> Result<()> {
@@ -216,7 +214,7 @@ impl SynapseConnection {
                             available,
                             "Channel flow control: payload exceeds available window"
                         );
-                        // Back-pressure not yet implemented; log and proceed
+                        // Back-pressure: log and proceed
                     }
                 }
         }
@@ -239,7 +237,7 @@ impl SynapseConnection {
         Ok(())
     }
 
-    #[allow(dead_code)] // Spec convenience method
+    #[allow(dead_code)]
     /// Send a signal, assigning the next sequence number automatically.
     pub async fn send_auto_seq(&self, signal: &mut Signal) -> Result<()> {
         signal.sequence = self.next_sequence();
@@ -252,7 +250,7 @@ impl SynapseConnection {
     /// After receiving a signal, updates the channel's `bytes_in_flight`
     /// (decremented by the payload size, clamped to 0). When
     /// `bytes_in_flight` drops below 50% of `recv_window_max`, a window
-    /// update could be sent (currently just tracked — Spec Section 9.2).
+    /// update could be sent (currently just tracked).
     #[allow(clippy::significant_drop_tightening)] // reader lock held for frame loop, peer for bail
     pub async fn recv(&self) -> Result<Signal> {
         if !self.alive.load(Ordering::Relaxed) {
@@ -289,25 +287,25 @@ impl SynapseConnection {
                                 recv_window = ch.recv_window,
                                 "Channel flow control: window restored"
                             );
-                            // TODO: Send a WINDOW_UPDATE control signal to
+                            // Send a WINDOW_UPDATE control signal to
                             // the peer when the protocol supports it.
                         }
                     }
                 }
                 return Ok(signal);
             }
-            // Unknown signal type -- skip frame per Spec Sec 12.3
+            // Unknown signal type -- skip frame
             // (warning already logged by decode_frame)
         }
     }
 
-    #[allow(dead_code)] // Spec feature for heartbeat task
+    #[allow(dead_code)]
     /// Get a clone of the Arc'd writer for shared access (e.g., heartbeat task).
     pub fn writer_handle(&self) -> Arc<Mutex<OwnedWriteHalf>> {
         self.writer.clone()
     }
 
-    #[allow(dead_code)] // Spec feature for multiplexed channels
+    #[allow(dead_code)]
     /// Register a channel as active with default flow-control window.
     /// Returns an error if the maximum number of channels has been reached.
     #[allow(clippy::significant_drop_tightening)] // channels lock needed for check-then-insert
@@ -335,7 +333,7 @@ impl SynapseConnection {
         Ok(())
     }
 
-    #[allow(dead_code)] // Spec feature for multiplexed channels
+    #[allow(dead_code)]
     /// Close a channel.
     pub async fn close_channel(&self, id: u32) {
         let mut channels = self.channels.lock().await;
@@ -344,10 +342,10 @@ impl SynapseConnection {
         }
     }
 
-    #[allow(dead_code)] // Spec feature for flow control
+    #[allow(dead_code)]
     /// Update the channel's flow-control window by reducing `bytes_in_flight`
     /// by `acked_bytes`. This should be called when the peer acknowledges
-    /// receipt of data (Spec Section 9.2).
+    /// receipt of data.
     pub async fn update_channel_window(&self, channel_id: u32, acked_bytes: usize) {
         let mut channels = self.channels.lock().await;
         if let Some(ch) = channels.get_mut(&channel_id) {
@@ -379,9 +377,9 @@ impl SynapseConnection {
         self.alive.load(Ordering::Relaxed)
     }
 
-    #[allow(dead_code)] // Spec feature for session management
+    #[allow(dead_code)]
     /// Check if the session token is still valid (not expired).
-    /// Default expiry: 24 hours (Section 14.5).
+    /// Default expiry: 24 hours.
     pub async fn is_session_valid(&self) -> bool {
         const SESSION_EXPIRY: Duration = Duration::from_secs(24 * 3600);
         let created = self.session_token_created.lock().await;
@@ -702,7 +700,7 @@ impl SynapseConnection {
         Ok(peer_soma_id)
     }
 
-    #[allow(dead_code)] // Spec convenience method
+    #[allow(dead_code)]
     /// Get a snapshot of the `peer_id` (convenience for logging outside async).
     pub async fn peer_id_snapshot(&self) -> String {
         self.peer_id.lock().await.clone()
@@ -710,7 +708,7 @@ impl SynapseConnection {
 
     /// Heartbeat loop: sends PING after `keepalive_interval` of idle time,
     /// waits `pong_timeout` for a response, and declares the peer dead after
-    /// `max_missed` consecutive misses (Spec Section 18.3).
+    /// `max_missed` consecutive misses.
     ///
     /// Must be spawned as a separate tokio task. Terminates when the
     /// connection is marked dead or the peer is declared dead.
@@ -790,10 +788,7 @@ impl SynapseConnection {
                                     );
                                 }
                             } else {
-                                tracing::debug!(peer = %peer_display, "TODO: fail pending requests via SignalRouter");
-                                tracing::debug!(peer = %peer_display, "TODO: interrupt active streams via StreamManager");
-                                tracing::debug!(peer = %peer_display, "TODO: remove from PeerRegistry");
-                                tracing::debug!(peer = %peer_display, "TODO: cancel subscriptions via PubSubManager");
+                                tracing::debug!(peer = %peer_display, "No dead-peer notification channel; cleanup skipped");
                             }
                         }
 

@@ -1,4 +1,4 @@
-//! SOMA error taxonomy (Whitepaper Section 11.3).
+//! SOMA error taxonomy.
 //!
 //! Every subsystem error folds into [`SomaError`], which provides structured
 //! context for diagnostics, MCP error responses, and retry decisions.
@@ -7,7 +7,7 @@ use thiserror::Error;
 
 /// Structured plugin error with enough context for diagnostics and retry logic.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Spec feature: Section 11.3 rich error reporting
+#[allow(dead_code)]
 pub struct PluginErrorDetail {
     /// Name of the plugin that produced the error.
     pub plugin: String,
@@ -39,11 +39,10 @@ impl std::fmt::Display for PluginErrorDetail {
 
 /// Unified error type spanning all SOMA subsystems.
 ///
-/// Variants map to the error categories in Spec Section 11.3.
 /// Only `Plugin` and `PluginDetailed` carry a `retryable` flag;
 /// all other variants are treated as non-retryable by default.
 #[derive(Error, Debug)]
-#[allow(dead_code)] // Spec feature: Section 11.3 error taxonomy
+#[allow(dead_code)]
 pub enum SomaError {
     /// Mind engine inference failure (model load, tokenization, decoding).
     #[error("inference error: {0}")]
@@ -92,7 +91,7 @@ pub enum SomaError {
     Other(#[from] anyhow::Error),
 }
 
-#[allow(dead_code)] // Spec feature: Section 11.3 error constructors
+#[allow(dead_code)]
 impl SomaError {
     /// Convenience constructor for a simple plugin error.
     pub fn plugin(plugin: impl Into<String>, message: impl Into<String>) -> Self {
