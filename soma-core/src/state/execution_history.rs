@@ -1,28 +1,45 @@
-//! Execution history — recent intent executions with results
+//! Execution history -- bounded record of recent intent executions
 //! (Whitepaper Section 7.5).
+//!
+//! Uses a `VecDeque` as a ring buffer: when `max_size` is reached, the oldest
+//! record is evicted on each new insertion. `total_count` tracks the lifetime
+//! count across evictions.
 
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// A recorded execution — intent, program, result.
+/// A single execution record: the intent, the generated program's metadata,
+/// and whether execution succeeded.
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct ExecutionRecord {
+    /// Monotonic identifier (`e-1`, `e-2`, ...).
     pub id: String,
+    /// The natural-language intent that was inferred upon.
     pub intent: String,
+    /// Number of steps in the generated program.
     pub program_steps: usize,
+    /// Model confidence score for the generated program (0.0..1.0).
     pub confidence: f32,
     pub success: bool,
+    /// Wall-clock execution time in milliseconds.
     pub execution_time_ms: u64,
+    /// Unix timestamp in seconds.
     pub timestamp: u64,
+    /// Opaque trace identifier for correlating logs and signals.
     pub trace_id: String,
+    /// Error message if `success` is false.
     pub error: Option<String>,
 }
 
 /// Bounded ring buffer of recent execution records.
+///
+/// Oldest entries are evicted when `max_size` is reached. The MCP `get_state()`
+/// tool serializes the 50 most recent records.
 pub struct ExecutionHistory {
     records: VecDeque<ExecutionRecord>,
     max_size: usize,
+    /// Lifetime execution count (never resets, even as old records are evicted).
     total_count: u64,
 }
 
@@ -35,7 +52,7 @@ impl ExecutionHistory {
         }
     }
 
-    /// Record a new execution.
+    /// Record a new execution, evicting the oldest entry if the buffer is full.
     #[allow(clippy::too_many_arguments)] // All fields are needed per spec Section 7.5
     pub fn record(
         &mut self,
@@ -90,7 +107,7 @@ impl ExecutionHistory {
         self.total_count
     }
 
-    /// Success rate over the buffer.
+    /// Success rate as a percentage (0.0..100.0) over the current buffer contents.
     #[allow(dead_code, clippy::cast_precision_loss)] // Spec feature; precision loss acceptable for percentages
     pub fn success_rate(&self) -> f64 {
         if self.records.is_empty() {
@@ -100,7 +117,7 @@ impl ExecutionHistory {
         (ok as f64 / self.records.len() as f64) * 100.0
     }
 
-    /// Average execution time over the buffer.
+    /// Mean execution time in ms over the current buffer contents.
     #[allow(dead_code, clippy::cast_precision_loss)] // Spec feature; precision loss acceptable for averages
     pub fn avg_execution_time_ms(&self) -> f64 {
         if self.records.is_empty() {

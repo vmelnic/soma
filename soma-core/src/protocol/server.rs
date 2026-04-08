@@ -1,10 +1,18 @@
-//! Synaptic Protocol v2 server — TCP listener with binary wire format,
-//! handshake negotiation, heartbeat, and signal routing.
+//! Synaptic Protocol v2 TCP server.
 //!
-// Future: SignalRouter struct with DashMap for pending_requests,
-// stream_handlers, chunk_buffers (Section 14.2). Currently routing
-// is inline per-connection. Will be extracted when inter-SOMA
-// request-response correlation is needed.
+//! `SynapseServer` binds a TCP port, accepts connections, performs binary-wire
+//! handshakes, spawns per-connection heartbeat tasks, and dispatches incoming
+//! signals through a `SignalHandler`. Built-in protocol handling covers:
+//!
+//! - Keepalive (PING/PONG with dead-peer detection)
+//! - PubSub (subscribe/unsubscribe/fan-out with catch-up replay)
+//! - Discovery (DISCOVER/DISCOVER_ACK, PEER_QUERY/PEER_LIST)
+//! - Chunked transfer (ChunkStart/Data/End/Ack with SHA-256)
+//! - Relay forwarding with capability gating
+//! - Rate limiting with graduated response (warn/drop/disconnect)
+//!
+//! Application-level signals (Intent, Data, etc.) are delegated to the
+//! configured `SignalHandler` implementation.
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -22,14 +30,16 @@ use super::pubsub::PubSubManager;
 use super::rate_limit::{self, RateLimiter, ViolationLevel};
 use super::signal::{Signal, SignalFlags, SignalType};
 
-/// Handler trait for incoming signals. Implementations decide how to
-/// respond to each signal type.
+/// Handler for application-level signals. Protocol-level signals (PING/PONG,
+/// Subscribe, Discover, Chunk*, Close) are handled internally by the server;
+/// everything else is dispatched here. Return `Some(response)` to send a
+/// reply, or `None` to silently consume the signal.
 pub trait SignalHandler: Send + Sync {
     fn handle(&self, signal: Signal) -> Option<Signal>;
 }
 
 #[allow(dead_code)] // Spec feature for basic protocol testing
-/// A simple handler that responds to Ping with Pong and logs everything else.
+/// Minimal handler: responds to Ping with Pong, logs all other signals.
 pub struct DefaultHandler {
     pub name: String,
 }
@@ -47,8 +57,10 @@ impl SignalHandler for DefaultHandler {
     }
 }
 
-/// Handler that routes Intent signals to the mind engine and plugin manager.
-/// This enables inter-SOMA intent-to-result communication.
+/// Routes Intent signals through the Mind engine for inference, then
+/// executes the resulting program via the plugin manager. Returns a
+/// Result signal on success or an Error signal on failure. This is the
+/// primary handler for inter-SOMA intent-to-result communication.
 pub struct SomaSignalHandler {
     pub name: String,
     pub mind: Arc<std::sync::RwLock<crate::mind::onnx_engine::OnnxMindEngine>>,
@@ -61,7 +73,6 @@ impl SignalHandler for SomaSignalHandler {
         match signal.signal_type {
             SignalType::Ping => Some(Signal::pong(&self.name, signal.sequence)),
             SignalType::Intent => {
-                // Extract intent text from payload
                 let Ok(intent_text) = String::from_utf8(signal.payload.clone()) else {
                     return Some(Signal::error(
                         &self.name,
@@ -69,7 +80,6 @@ impl SignalHandler for SomaSignalHandler {
                     ));
                 };
 
-                // Propagate trace_id from incoming signal
                 let trace_id = if signal.trace_id.is_empty() {
                     uuid::Uuid::new_v4().to_string()[..12].to_string()
                 } else {
@@ -84,7 +94,6 @@ impl SignalHandler for SomaSignalHandler {
                     "Processing remote intent"
                 );
 
-                // Run inference via the mind engine
                 let mind_guard = self.mind.read().unwrap();
                 match mind_guard.infer(&intent_text) {
                     Ok(program) => {
@@ -148,14 +157,19 @@ impl SignalHandler for SomaSignalHandler {
     }
 }
 
-/// Configuration for the `SynapseServer`.
+/// Configuration for `SynapseServer`. All fields have sensible defaults
+/// (see `Default` impl) and can be overridden via `soma.toml` or env vars.
 pub struct ServerConfig {
+    /// Maximum frame size in bytes (default 10 MB, negotiated down during handshake).
     pub max_signal_size: u32,
+    /// Maximum concurrent connections before rejecting new ones.
     pub max_connections: usize,
     pub keepalive_interval_secs: u64,
     pub pong_timeout_secs: u64,
     pub max_missed_pongs: u32,
+    /// Capabilities advertised during handshake (e.g., "streaming", "chunked", "relay").
     pub capabilities: Vec<String>,
+    /// Plugin names advertised during handshake.
     pub plugins: Vec<String>,
 }
 
@@ -178,8 +192,13 @@ impl Default for ServerConfig {
     }
 }
 
-/// TCP server that accepts connections, performs handshakes, manages
-/// heartbeats, and dispatches signals to a handler using binary wire format.
+/// Synaptic Protocol v2 TCP server.
+///
+/// Accepts connections, negotiates handshakes, spawns per-connection
+/// heartbeat and signal-processing tasks, and dispatches application
+/// signals through a [`SignalHandler`]. Shared subsystems (`PubSub`,
+/// `ChunkManager`, `PeerRegistry`) are managed at the server level and
+/// accessible from all connection tasks.
 pub struct SynapseServer {
     name: String,
     bind_addr: String,
@@ -221,7 +240,11 @@ impl SynapseServer {
     }
 
     #[allow(clippy::too_many_lines)]
-    /// Start listening for incoming connections. Runs until the task is cancelled.
+    /// Start the server accept loop. Runs indefinitely until the task is cancelled.
+    ///
+    /// For each accepted connection: performs handshake, spawns a heartbeat
+    /// task, then enters a signal-processing loop that handles protocol
+    /// signals internally and delegates the rest to `handler`.
     pub async fn start(
         &self,
         handler: impl SignalHandler + 'static,
@@ -244,7 +267,6 @@ impl SynapseServer {
         loop {
             let (stream, addr) = listener.accept().await?;
 
-            // Enforce max connection limit (Section 11)
             let current = active_connections.load(std::sync::atomic::Ordering::Relaxed);
             if current >= max_conn_limit {
                 tracing::warn!(
@@ -285,7 +307,6 @@ impl SynapseServer {
                     max_signal_size,
                 ));
 
-                // Perform server-side handshake
                 let cap_refs: Vec<&str> = capabilities.iter().map(std::string::String::as_str).collect();
                 let plug_refs: Vec<&str> = plugins.iter().map(std::string::String::as_str).collect();
                 let peer_id = match conn.server_handshake(&cap_refs, &plug_refs).await {
@@ -299,15 +320,12 @@ impl SynapseServer {
 
                 tracing::info!(peer = %addr, peer_id = %peer_id, "Handshake successful");
 
-                // Dead-peer notification channel (Spec Section 18.3).
-                // The heartbeat loop sends the peer_id when the peer is
-                // declared dead; we select on this in the main loop to
-                // perform cleanup with access to PubSubManager, PeerRegistry, etc.
+                // Dead-peer channel: heartbeat sends peer_id here, main loop
+                // selects on it to clean up PubSub, PeerRegistry, etc.
                 let (dead_peer_tx, mut dead_peer_rx) =
                     tokio::sync::mpsc::channel::<String>(1);
                 conn.set_dead_peer_tx(dead_peer_tx).await;
 
-                // Start heartbeat task
                 let conn_for_heartbeat = conn.clone();
                 let _heartbeat_handle = tokio::spawn(async move {
                     SynapseConnection::heartbeat_loop(
@@ -319,18 +337,14 @@ impl SynapseServer {
                     .await;
                 });
 
-                // Per-connection rate limiter (Spec Section 20)
+                // 1000 signals/sec, 10 MB/sec budget per connection
                 let mut rate_limiter = RateLimiter::new(1000, 10_485_760);
-
-                // Main signal processing loop
                 loop {
                     if !conn.is_alive() {
                         tracing::info!(peer = %peer_id, "Connection marked dead, closing");
                         break;
                     }
 
-                    // Select between receiving a signal and a dead-peer
-                    // notification from the heartbeat loop.
                     let signal = tokio::select! {
                         dead_id = dead_peer_rx.recv() => {
                             if let Some(dead_id) = dead_id {
@@ -340,7 +354,6 @@ impl SynapseServer {
                                     "Dead peer notification received, performing cleanup"
                                 );
 
-                                // Step 4: Remove from active peer list (PeerRegistry)
                                 if let Some(ref registry) = peer_registry {
                                     let removed = registry.write().unwrap().remove(&dead_id);
                                     if removed.is_some() {
@@ -351,7 +364,6 @@ impl SynapseServer {
                                     }
                                 }
 
-                                // Step 5: Cancel all subscriptions for this connection (PubSubManager)
                                 {
                                     let mut ps = pubsub.lock().await;
                                     ps.remove_connection(conn_id);
@@ -363,8 +375,6 @@ impl SynapseServer {
                                     );
                                 }
 
-                                // Steps 2 & 3: SignalRouter.fail_all and StreamManager.interrupt_all
-                                // are not yet accessible here; log for future implementation.
                                 tracing::debug!(peer = %dead_id, "TODO: fail pending requests via SignalRouter");
                                 tracing::debug!(peer = %dead_id, "TODO: interrupt active streams via StreamManager");
                             }
@@ -379,7 +389,6 @@ impl SynapseServer {
                                     s
                                 }
                                 Err(e) => {
-                                    // Check if it's just a clean disconnect
                                     let msg = e.to_string();
                                     if msg.contains("unexpected eof")
                                         || msg.contains("connection reset")
@@ -411,7 +420,7 @@ impl SynapseServer {
                         "Received signal"
                     );
 
-                    // Rate limiting (Spec Section 20): check before processing
+                    // Graduated rate limiting: warn, then drop, then disconnect
                     if let Some(retry_after) = rate_limiter.check(signal.payload.len()) {
                         let level = rate_limiter.violation_level();
                         match level {
@@ -448,7 +457,6 @@ impl SynapseServer {
                         }
                     }
 
-                    // Handle protocol-level signals internally
                     match signal.signal_type {
                         SignalType::Close => {
                             tracing::info!(peer = %peer_id, "Peer sent CLOSE");
@@ -461,7 +469,6 @@ impl SynapseServer {
                             continue;
                         }
                         SignalType::Subscribe => {
-                            // Pub/Sub subscribe (Section 9.4)
                             let topic = String::from_utf8_lossy(&signal.payload).to_string();
                             let durable = signal.metadata.get("durable")
                                 .and_then(serde_json::Value::as_bool).unwrap_or(false);
@@ -478,10 +485,10 @@ impl SynapseServer {
                             );
                             tracing::info!(peer = %peer_id, topic = %topic, conn_id, "Subscribed");
 
-                            // Catch-up: send buffered signals since last_seen (Spec Section 16)
+                            // Catch-up replay: send buffered signals since last_seen
                             if let Some(last) = last_seen {
                                 let catchup_signals = ps.catch_up(&topic, last);
-                                drop(ps); // release lock before sending
+                                drop(ps);
                                 for mut catchup_signal in catchup_signals {
                                     catchup_signal.sequence = conn.next_sequence();
                                     catchup_signal.sender_id = server_name.clone();
@@ -510,7 +517,6 @@ impl SynapseServer {
                             continue;
                         }
 
-                        // Discovery signals (Spec Section 7)
                         SignalType::Discover => {
                             if let Some(ref registry) = peer_registry {
                                 {
@@ -587,7 +593,6 @@ impl SynapseServer {
                             continue;
                         }
 
-                        // Chunked transfer signals (Spec Section 6.3)
                         SignalType::ChunkStart => {
                             let mut cm = chunk_mgr.lock().await;
                             let result = cm.start_transfer(signal.channel_id, &signal.metadata);
@@ -650,7 +655,6 @@ impl SynapseServer {
                                         size = data.len(),
                                         "Chunked transfer complete"
                                     );
-                                    // Send final ACK with reassembled size
                                     let mut ack = Signal::new(
                                         SignalType::ChunkAck,
                                         server_name.clone(),
@@ -682,8 +686,6 @@ impl SynapseServer {
                             continue;
                         }
                         SignalType::ChunkAck => {
-                            // ChunkAck is typically sent by the receiver; if we get
-                            // one it means we are the sender. Log and continue.
                             tracing::debug!(
                                 peer = %peer_id,
                                 channel = signal.channel_id,
@@ -696,12 +698,8 @@ impl SynapseServer {
                         _ => {}
                     }
 
-                    // PRIORITY signals bypass capability checks (Sec 9.2)
+                    // PRIORITY flag bypasses capability enforcement
                     let is_priority = signal.flags.contains(SignalFlags::PRIORITY);
-
-                    // Capability enforcement (Spec Section 12.4):
-                    // reject signals whose type requires a capability that
-                    // was not negotiated during handshake.
                     if !is_priority && !conn.is_signal_allowed(signal.signal_type).await {
                         tracing::warn!(
                             peer = %peer_id,
@@ -726,7 +724,7 @@ impl SynapseServer {
                         continue;
                     }
 
-                    // PubSub fan-out: if DATA or STREAM_DATA has a topic, publish to subscribers
+                    // PubSub fan-out for DATA/STREAM_DATA with a "topic" metadata key
                     if matches!(signal.signal_type, SignalType::Data | SignalType::StreamData)
                         && let Some(topic) = signal.metadata.get("topic").and_then(|v| v.as_str()) {
                             let topic = topic.to_string();
@@ -737,10 +735,6 @@ impl SynapseServer {
                                 signal.channel_id,
                             );
                             drop(ps);
-                            // Fan-out signals to matching subscribers on this connection
-                            // (In a full implementation, fan-out would route to each
-                            // connection by conn_id. Here we send signals destined
-                            // for this connection.)
                             for (target_conn_id, mut pub_signal) in fan_out {
                                 if target_conn_id == conn_id {
                                     pub_signal.sender_id = server_name.clone();
@@ -767,13 +761,11 @@ impl SynapseServer {
                             }
                         }
 
-                    // Relay capability gating (Sec 12.4)
                     if super::relay::should_relay(&signal, &server_name) {
                         if !conn.is_capability_negotiated("relay").await {
                             tracing::warn!(peer = %peer_id, "Relay rejected: capability not negotiated");
                             continue;
                         }
-                        // Prepare and forward the relayed signal (Spec Section 15)
                         let mut relay_signal = signal.clone();
                         match super::relay::prepare_relay(&mut relay_signal, &server_name) {
                             Ok(()) => {
@@ -796,7 +788,6 @@ impl SynapseServer {
                                                 .and_then(serde_json::Value::as_u64).unwrap_or(0),
                                             "Relaying signal to peer (via SynapseClient)"
                                         );
-                                        // Forward the signal to the target peer
                                         let target_addr = addr.clone();
                                         let sender_name = server_name.clone();
                                         let relay_signal = relay_signal.clone();
@@ -852,7 +843,6 @@ impl SynapseServer {
                         continue;
                     }
 
-                    // Dispatch to handler
                     if let Some(mut response) = handler.handle(signal) {
                         response.sequence = conn.next_sequence();
                         if let Some(ref m) = metrics {
@@ -870,7 +860,6 @@ impl SynapseServer {
                     }
                 }
 
-                // Clean up pub/sub subscriptions for this connection
                 {
                     let mut ps = pubsub.lock().await;
                     ps.remove_connection(conn_id);

@@ -1,7 +1,23 @@
-//! SOMA HTTP Bridge Plugin — 5 HTTP client conventions.
+//! SOMA HTTP Bridge Plugin -- synchronous HTTP client conventions.
 //!
-//! Provides: GET, POST, PUT, DELETE, and generic HTTP request capabilities
-//! for calling external APIs. Uses reqwest with async execution.
+//! Five conventions:
+//!
+//! | ID | Name      | Description                                  |
+//! |----|-----------|----------------------------------------------|
+//! | 0  | `get`     | HTTP GET request                             |
+//! | 1  | `post`    | HTTP POST request with body                  |
+//! | 2  | `put`     | HTTP PUT request with body                   |
+//! | 3  | `delete`  | HTTP DELETE request                           |
+//! | 4  | `request` | Generic HTTP request with any method + body  |
+//!
+//! Uses `reqwest` (async under the hood) with a blocking bridge via `tokio`.
+//! The `SomaPlugin` trait is synchronous, so `execute()` either borrows the
+//! current tokio runtime (if one is active) or spins up a temporary one.
+//! This avoids requiring every SOMA host to be async-aware while still
+//! benefiting from reqwest's connection pooling and TLS stack.
+//!
+//! The HTTP client is created lazily in `on_load` with a 30-second timeout
+//! and a `soma-http-bridge/0.1.0` user-agent string.
 
 use soma_plugin_sdk::prelude::*;
 
@@ -10,12 +26,25 @@ use std::future::Future;
 use std::pin::Pin;
 
 /// The SOMA HTTP bridge plugin.
+///
+/// Wraps a `reqwest::Client` that is initialized on `on_load` and torn down on
+/// `on_unload`.  The client is connection-pooled, so repeated requests to the
+/// same host reuse TCP connections.
 pub struct HttpBridgePlugin {
     client: Option<reqwest::Client>,
 }
 
+impl Default for HttpBridgePlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HttpBridgePlugin {
-    pub fn new() -> Self {
+    /// Create a new plugin instance with no HTTP client yet.
+    ///
+    /// The client is initialized in [`on_load`](SomaPlugin::on_load).
+    pub const fn new() -> Self {
         Self { client: None }
     }
 
@@ -26,14 +55,16 @@ impl HttpBridgePlugin {
             .ok_or_else(|| PluginError::Failed("HTTP client not initialized; call on_load first".into()))
     }
 
-    /// Parse optional headers JSON string into a header map.
+    /// Parse an optional JSON string into a header map.
+    ///
+    /// Returns an empty map when `headers_json` is `None` or empty.
     fn parse_headers(
         headers_json: Option<&str>,
     ) -> Result<HashMap<String, String>, PluginError> {
         match headers_json {
             Some(json) if !json.is_empty() => {
                 let map: HashMap<String, String> = serde_json::from_str(json).map_err(|e| {
-                    PluginError::InvalidArg(format!("invalid headers JSON: {}", e))
+                    PluginError::InvalidArg(format!("invalid headers JSON: {e}"))
                 })?;
                 Ok(map)
             }
@@ -41,12 +72,17 @@ impl HttpBridgePlugin {
         }
     }
 
-    /// Build response Value from reqwest Response.
+    /// Build a `Value::Map` response from a `reqwest::Response`.
+    ///
+    /// The map contains three keys:
+    /// - `status` -- HTTP status code as `Value::Int`
+    /// - `headers` -- response headers as `Value::Map<String, Value::String>`
+    /// - `body` -- response body as `Value::String`
     async fn build_response(resp: reqwest::Response) -> Result<Value, PluginError> {
-        let status = resp.status().as_u16() as i64;
+        let status = i64::from(resp.status().as_u16());
 
         let mut resp_headers = HashMap::new();
-        for (name, value) in resp.headers().iter() {
+        for (name, value) in resp.headers() {
             if let Ok(v) = value.to_str() {
                 resp_headers.insert(name.as_str().to_string(), Value::String(v.to_string()));
             }
@@ -55,7 +91,7 @@ impl HttpBridgePlugin {
         let body = resp
             .text()
             .await
-            .map_err(|e| PluginError::Failed(format!("failed to read response body: {}", e)))?;
+            .map_err(|e| PluginError::Failed(format!("failed to read response body: {e}")))?;
 
         let mut result = HashMap::new();
         result.insert("status".to_string(), Value::Int(status));
@@ -65,7 +101,7 @@ impl HttpBridgePlugin {
         Ok(Value::Map(result))
     }
 
-    /// Apply headers to a request builder.
+    /// Apply a map of header key-value pairs to a request builder.
     fn apply_headers(
         mut builder: reqwest::RequestBuilder,
         headers: &HashMap<String, String>,
@@ -76,7 +112,15 @@ impl HttpBridgePlugin {
         builder
     }
 
-    /// Execute an HTTP GET request (async).
+    /// Extract an optional headers JSON string from a `Value` at the given index.
+    fn extract_headers_json(args: &[Value], index: usize) -> Option<&str> {
+        args.get(index).and_then(|v| match v {
+            Value::String(s) => Some(s.as_str()),
+            _ => None,
+        })
+    }
+
+    /// Execute an HTTP GET request.
     async fn do_get(&self, args: Vec<Value>) -> Result<Value, PluginError> {
         let client = self.client()?;
 
@@ -85,23 +129,18 @@ impl HttpBridgePlugin {
             .ok_or_else(|| PluginError::InvalidArg("missing argument: url".into()))?
             .as_str()?;
 
-        let headers_json = args.get(1).and_then(|v| match v {
-            Value::String(s) => Some(s.as_str()),
-            Value::Null => None,
-            _ => None,
-        });
-        let headers = Self::parse_headers(headers_json)?;
+        let headers = Self::parse_headers(Self::extract_headers_json(&args, 1))?;
 
         let builder = Self::apply_headers(client.get(url), &headers);
         let resp = builder
             .send()
             .await
-            .map_err(|e| PluginError::Failed(format!("HTTP GET failed: {}", e)))?;
+            .map_err(|e| PluginError::Failed(format!("HTTP GET failed: {e}")))?;
 
         Self::build_response(resp).await
     }
 
-    /// Execute an HTTP POST request (async).
+    /// Execute an HTTP POST request with a body.
     async fn do_post(&self, args: Vec<Value>) -> Result<Value, PluginError> {
         let client = self.client()?;
 
@@ -116,23 +155,18 @@ impl HttpBridgePlugin {
             .as_str()?
             .to_string();
 
-        let headers_json = args.get(2).and_then(|v| match v {
-            Value::String(s) => Some(s.as_str()),
-            Value::Null => None,
-            _ => None,
-        });
-        let headers = Self::parse_headers(headers_json)?;
+        let headers = Self::parse_headers(Self::extract_headers_json(&args, 2))?;
 
         let builder = Self::apply_headers(client.post(url).body(body), &headers);
         let resp = builder
             .send()
             .await
-            .map_err(|e| PluginError::Failed(format!("HTTP POST failed: {}", e)))?;
+            .map_err(|e| PluginError::Failed(format!("HTTP POST failed: {e}")))?;
 
         Self::build_response(resp).await
     }
 
-    /// Execute an HTTP PUT request (async).
+    /// Execute an HTTP PUT request with a body.
     async fn do_put(&self, args: Vec<Value>) -> Result<Value, PluginError> {
         let client = self.client()?;
 
@@ -147,23 +181,18 @@ impl HttpBridgePlugin {
             .as_str()?
             .to_string();
 
-        let headers_json = args.get(2).and_then(|v| match v {
-            Value::String(s) => Some(s.as_str()),
-            Value::Null => None,
-            _ => None,
-        });
-        let headers = Self::parse_headers(headers_json)?;
+        let headers = Self::parse_headers(Self::extract_headers_json(&args, 2))?;
 
         let builder = Self::apply_headers(client.put(url).body(body), &headers);
         let resp = builder
             .send()
             .await
-            .map_err(|e| PluginError::Failed(format!("HTTP PUT failed: {}", e)))?;
+            .map_err(|e| PluginError::Failed(format!("HTTP PUT failed: {e}")))?;
 
         Self::build_response(resp).await
     }
 
-    /// Execute an HTTP DELETE request (async).
+    /// Execute an HTTP DELETE request.
     async fn do_delete(&self, args: Vec<Value>) -> Result<Value, PluginError> {
         let client = self.client()?;
 
@@ -172,23 +201,18 @@ impl HttpBridgePlugin {
             .ok_or_else(|| PluginError::InvalidArg("missing argument: url".into()))?
             .as_str()?;
 
-        let headers_json = args.get(1).and_then(|v| match v {
-            Value::String(s) => Some(s.as_str()),
-            Value::Null => None,
-            _ => None,
-        });
-        let headers = Self::parse_headers(headers_json)?;
+        let headers = Self::parse_headers(Self::extract_headers_json(&args, 1))?;
 
         let builder = Self::apply_headers(client.delete(url), &headers);
         let resp = builder
             .send()
             .await
-            .map_err(|e| PluginError::Failed(format!("HTTP DELETE failed: {}", e)))?;
+            .map_err(|e| PluginError::Failed(format!("HTTP DELETE failed: {e}")))?;
 
         Self::build_response(resp).await
     }
 
-    /// Execute a generic HTTP request (async).
+    /// Execute a generic HTTP request with any method, optional headers and body.
     async fn do_request(&self, args: Vec<Value>) -> Result<Value, PluginError> {
         let client = self.client()?;
 
@@ -202,22 +226,16 @@ impl HttpBridgePlugin {
             .ok_or_else(|| PluginError::InvalidArg("missing argument: url".into()))?
             .as_str()?;
 
-        let headers_json = args.get(2).and_then(|v| match v {
-            Value::String(s) => Some(s.as_str()),
-            Value::Null => None,
-            _ => None,
-        });
-        let headers = Self::parse_headers(headers_json)?;
+        let headers = Self::parse_headers(Self::extract_headers_json(&args, 2))?;
 
         let body = args.get(3).and_then(|v| match v {
             Value::String(s) => Some(s.clone()),
-            Value::Null => None,
             _ => None,
         });
 
         let method: reqwest::Method = method_str
             .parse()
-            .map_err(|e| PluginError::InvalidArg(format!("invalid HTTP method '{}': {}", method_str, e)))?;
+            .map_err(|e| PluginError::InvalidArg(format!("invalid HTTP method '{method_str}': {e}")))?;
 
         let mut builder = client.request(method, url);
         builder = Self::apply_headers(builder, &headers);
@@ -228,7 +246,7 @@ impl HttpBridgePlugin {
         let resp = builder
             .send()
             .await
-            .map_err(|e| PluginError::Failed(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| PluginError::Failed(format!("HTTP request failed: {e}")))?;
 
         Self::build_response(resp).await
     }
@@ -238,6 +256,7 @@ impl HttpBridgePlugin {
 // Convention definitions helper
 // ---------------------------------------------------------------------------
 
+/// Shared side-effect declaration for all HTTP conventions.
 fn network_side_effect() -> Vec<SideEffect> {
     vec![SideEffect("network".into())]
 }
@@ -246,6 +265,7 @@ fn network_side_effect() -> Vec<SideEffect> {
 // SomaPlugin trait implementation
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::unnecessary_literal_bound)]
 impl SomaPlugin for HttpBridgePlugin {
     fn name(&self) -> &str {
         "http-bridge"
@@ -275,7 +295,7 @@ impl SomaPlugin for HttpBridgePlugin {
             .timeout(std::time::Duration::from_secs(30))
             .user_agent("soma-http-bridge/0.1.0")
             .build()
-            .map_err(|e| PluginError::Failed(format!("failed to create HTTP client: {}", e)))?;
+            .map_err(|e| PluginError::Failed(format!("failed to create HTTP client: {e}")))?;
         self.client = Some(client);
         Ok(())
     }
@@ -285,6 +305,7 @@ impl SomaPlugin for HttpBridgePlugin {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     fn conventions(&self) -> Vec<Convention> {
         vec![
             // 0: get
@@ -452,20 +473,17 @@ impl SomaPlugin for HttpBridgePlugin {
     fn execute(&self, convention_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
         // Use tokio's current runtime to block on the async implementation.
         // If no runtime is active, create a temporary one.
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                // We are inside a tokio runtime — use block_in_place + block_on
-                // to avoid blocking an async worker thread.
-                tokio::task::block_in_place(|| {
-                    handle.block_on(self.execute_async(convention_id, args))
-                })
-            }
-            Err(_) => {
-                // No runtime — spin up a temporary one.
-                let rt = tokio::runtime::Runtime::new()
-                    .map_err(|e| PluginError::Failed(format!("failed to create tokio runtime: {}", e)))?;
-                rt.block_on(self.execute_async(convention_id, args))
-            }
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            // We are inside a tokio runtime -- use block_in_place + block_on
+            // to avoid blocking an async worker thread.
+            tokio::task::block_in_place(|| {
+                handle.block_on(self.execute_async(convention_id, args))
+            })
+        } else {
+            // No runtime -- spin up a temporary one.
+            let rt = tokio::runtime::Runtime::new()
+                .map_err(|e| PluginError::Failed(format!("failed to create tokio runtime: {e}")))?;
+            rt.block_on(self.execute_async(convention_id, args))
         }
     }
 
@@ -482,8 +500,7 @@ impl SomaPlugin for HttpBridgePlugin {
                 3 => self.do_delete(args).await,
                 4 => self.do_request(args).await,
                 _ => Err(PluginError::NotFound(format!(
-                    "unknown convention_id: {}",
-                    convention_id
+                    "unknown convention_id: {convention_id}"
                 ))),
             }
         })
@@ -494,6 +511,11 @@ impl SomaPlugin for HttpBridgePlugin {
 // C ABI entry point
 // ---------------------------------------------------------------------------
 
+/// Create a heap-allocated `HttpBridgePlugin` and return a raw pointer for dynamic loading.
+///
+/// Called by the SOMA runtime's `libloading`-based plugin loader.  The runtime
+/// takes ownership of the pointer and drops it on unload.
+#[allow(improper_ctypes_definitions)]
 #[unsafe(no_mangle)]
 pub extern "C" fn soma_plugin_init() -> *mut dyn SomaPlugin {
     Box::into_raw(Box::new(HttpBridgePlugin::new()))

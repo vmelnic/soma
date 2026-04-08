@@ -1,6 +1,6 @@
 # Roadmap
 
-Consolidated from `00_ROADMAP.md` (11 milestones) and `SOMA_Whitepaper.md` Section 17 (13 milestones), cross-referenced against the actual codebase as of April 2026.
+Cross-referenced against the [Whitepaper](../SOMA_Whitepaper.md) Section 17 and the actual codebase as of April 2026.
 
 ---
 
@@ -126,7 +126,7 @@ Business logic for the first real SOMA application.
 
 ### Milestone 7: Web Frontend
 
-Pragmatic web interface. Not neural rendering (that is future research per `06_INTERFACE_SOMA.md`).
+Pragmatic web interface. Not neural rendering (that is future research — see [Web 4](web4.md)).
 
 | Step | Description | Status |
 |---|---|---|
@@ -207,17 +207,17 @@ Everything needed before real users touch the system.
 
 | Item | Spec Reference | Status |
 |---|---|---|
-| Startup failure handling | 01_CORE Section 11.2 | Partial (basic startup exists) |
-| Graceful shutdown | 01_CORE Section 16 | Partial (checkpoint on shutdown) |
-| Error retry loop | 01_CORE Section 13.3 | Not started |
-| Resource limits and backpressure | 01_CORE Section 20 | Not started |
-| MCP auth tokens | 09_INTERACTION Section 11 | Done (admin/builder/viewer roles) |
-| Destructive action confirmation | 09_INTERACTION Section 11.3 | Not started |
-| Structured logging with trace IDs | 01_CORE Section 18 | Partial (tracing crate in use, no trace IDs) |
-| Metrics export | 01_CORE Section 18.4 | Done (20 Prometheus counters, JSON + text) |
-| Connection recovery | 02_PROTOCOL Section 14 | Done (auto-reconnect in client) |
-| Rate limiting | 02_PROTOCOL Section 20 | Done (graduated response, blacklist) |
-| Plugin error cleanup | 03_PLUGINS Section 15 | Partial (crashed plugin tracking exists) |
+| Startup failure handling | [Architecture](architecture.md) | Partial (basic startup exists) |
+| Graceful shutdown | [Architecture](architecture.md) | Partial (checkpoint on shutdown) |
+| Error retry loop | [Architecture](architecture.md) | Not started |
+| Resource limits and backpressure | [Architecture](architecture.md) | Not started |
+| MCP auth tokens | [MCP Interface](mcp-interface.md) | Done (admin/builder/viewer roles) |
+| Destructive action confirmation | [MCP Interface](mcp-interface.md) | Not started |
+| Structured logging with trace IDs | [Architecture](architecture.md) | Partial (tracing crate in use, no trace IDs) |
+| Metrics export | [Architecture](architecture.md) | Done (20 Prometheus counters, JSON + text) |
+| Connection recovery | [Synaptic Protocol](synaptic-protocol.md) | Done (auto-reconnect in client) |
+| Rate limiting | [Synaptic Protocol](synaptic-protocol.md) | Done (graduated response, blacklist) |
+| Plugin error cleanup | [Plugin System](plugin-system.md) | Partial (crashed plugin tracking exists) |
 
 **Status: Partially Complete** &#9744;
 
@@ -241,7 +241,7 @@ These items appear in the whitepaper (milestones 12-13) and CLAUDE.md but are ex
 | Diffuse memory tier | Peer queries for distributed knowledge | Protocol, Memory |
 | Self-hosting SOMA | SOMA that synthesizes other SOMAs (whitepaper milestone 12) | All |
 | Neuromorphic hardware | Intel Loihi or equivalent (whitepaper milestone 13) | All |
-| Neural rendering | Interface SOMA per `06_INTERFACE_SOMA.md` | All |
+| Neural rendering | Interface SOMA (see [Web 4](web4.md)) | All |
 | Formal verification | Verify SOMA programs for correctness/safety | Core |
 
 ---

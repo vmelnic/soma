@@ -1,11 +1,50 @@
-//! SOMA Crypto Plugin — 13 cryptographic conventions.
+//! SOMA Crypto Plugin — 13 cryptographic conventions for the SOMA runtime.
 //!
-//! Provides: SHA-256 hashing, Argon2 password hashing/verification,
-//! cryptographic random generation, Ed25519 signing/verification,
-//! ChaCha20-Poly1305 AEAD encryption/decryption, JWT signing/verification,
-//! and HMAC-SHA256 message authentication.
+//! This plugin provides production-grade cryptographic primitives that the Mind
+//! can invoke through structured conventions. Every operation uses well-audited
+//! Rust crate implementations — no hand-rolled crypto.
+//!
+//! # Conventions
+//!
+//! | ID | Name | Description |
+//! |----|------|-------------|
+//! | 0 | `hash_sha256` | SHA-256 digest, returned as hex |
+//! | 1 | `hash_argon2` | Password hash with random salt (Argon2id, PHC string) |
+//! | 2 | `verify_argon2` | Verify password against Argon2 PHC hash |
+//! | 3 | `random_bytes` | Cryptographically secure random bytes (OS entropy) |
+//! | 4 | `random_hex` | Random bytes as hex string |
+//! | 5 | `random_uuid` | UUID v4 |
+//! | 6 | `sign_ed25519` | Ed25519 signature (deterministic, 64-byte output) |
+//! | 7 | `verify_ed25519` | Ed25519 signature verification |
+//! | 8 | `encrypt_aead` | ChaCha20-Poly1305 authenticated encryption |
+//! | 9 | `decrypt_aead` | ChaCha20-Poly1305 authenticated decryption |
+//! | 10 | `jwt_sign` | JWT signing with HS256 |
+//! | 11 | `jwt_verify` | JWT verification and claims extraction |
+//! | 12 | `hmac_sha256` | HMAC-SHA256 message authentication code |
+//!
+//! # Design choices
+//!
+//! - **Argon2id** (not bcrypt/scrypt): Winner of the Password Hashing Competition,
+//!   resistant to both GPU and side-channel attacks. The `id` variant combines
+//!   Argon2i (side-channel resistant) and Argon2d (GPU resistant).
+//!
+//! - **ChaCha20-Poly1305** (not AES-GCM): Constant-time without hardware AES
+//!   instructions, making it safe on any CPU. Avoids AES-GCM's catastrophic
+//!   nonce-reuse failure mode (`ChaCha20` degrades more gracefully). Also the
+//!   cipher used in the Synaptic Protocol wire format.
+//!
+//! - **Ed25519** (not ECDSA): Deterministic signatures (no nonce to leak),
+//!   faster verification, smaller keys. Uses the `ed25519-dalek` crate
+//!   (same as `soma-core`'s protocol encryption).
+//!
+//! - **Nonce handling for AEAD**: `encrypt_aead` generates a random 12-byte
+//!   nonce and prepends it to the ciphertext. `decrypt_aead` splits the first
+//!   12 bytes as the nonce. This self-contained format avoids nonce-management
+//!   bugs at the caller level.
 
-use soma_plugin_sdk::prelude::*;
+#![allow(clippy::unnecessary_wraps)] // Convention methods must return Result per trait contract
+
+use std::fmt::Write as _;
 
 use argon2::password_hash::rand_core::OsRng as Argon2OsRng;
 use argon2::password_hash::SaltString;
@@ -17,20 +56,27 @@ use hmac::Mac;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
+use soma_plugin_sdk::prelude::*;
 use uuid::Uuid;
 
 /// The SOMA crypto plugin.
+///
+/// Stateless — all keying material is supplied per-call via convention
+/// arguments. No secrets are held in memory between invocations.
 pub struct CryptoPlugin;
 
 impl SomaPlugin for CryptoPlugin {
+    #[allow(clippy::unnecessary_literal_bound)]
     fn name(&self) -> &str {
         "crypto"
     }
 
+    #[allow(clippy::unnecessary_literal_bound)]
     fn version(&self) -> &str {
         "0.1.0"
     }
 
+    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Cryptographic operations: hashing, signing, encryption, JWT, random generation"
     }
@@ -39,6 +85,7 @@ impl SomaPlugin for CryptoPlugin {
         TrustLevel::BuiltIn
     }
 
+    #[allow(clippy::too_many_lines)]
     fn conventions(&self) -> Vec<Convention> {
         vec![
             // 0: hash_sha256
@@ -358,22 +405,21 @@ impl SomaPlugin for CryptoPlugin {
 
     fn execute(&self, convention_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
         match convention_id {
-            0 => self.hash_sha256(args),
-            1 => self.hash_argon2(args),
-            2 => self.verify_argon2(args),
-            3 => self.random_bytes(args),
-            4 => self.random_hex(args),
-            5 => self.random_uuid(args),
-            6 => self.sign_ed25519(args),
-            7 => self.verify_ed25519(args),
-            8 => self.encrypt_aead(args),
-            9 => self.decrypt_aead(args),
-            10 => self.jwt_sign(args),
-            11 => self.jwt_verify(args),
-            12 => self.hmac_sha256(args),
+            0 => Self::hash_sha256(&args),
+            1 => Self::hash_argon2(&args),
+            2 => Self::verify_argon2(&args),
+            3 => Self::random_bytes(&args),
+            4 => Self::random_hex(&args),
+            5 => Self::random_uuid(),
+            6 => Self::sign_ed25519(&args),
+            7 => Self::verify_ed25519(&args),
+            8 => Self::encrypt_aead(&args),
+            9 => Self::decrypt_aead(&args),
+            10 => Self::jwt_sign(&args),
+            11 => Self::jwt_verify(&args),
+            12 => Self::hmac_sha256(&args),
             _ => Err(PluginError::NotFound(format!(
-                "unknown convention_id: {}",
-                convention_id
+                "unknown convention_id: {convention_id}"
             ))),
         }
     }
@@ -384,8 +430,8 @@ impl SomaPlugin for CryptoPlugin {
 // ---------------------------------------------------------------------------
 
 impl CryptoPlugin {
-    /// Convention 0: SHA-256 hash of a string, returned as hex.
-    fn hash_sha256(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 0 -- SHA-256 hash of a UTF-8 string, returned as lowercase hex.
+    fn hash_sha256(args: &[Value]) -> Result<Value, PluginError> {
         let data = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: data".into()))?
@@ -398,8 +444,11 @@ impl CryptoPlugin {
         Ok(Value::String(hex))
     }
 
-    /// Convention 1: Argon2 password hash with random salt, returned as PHC string.
-    fn hash_argon2(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 1 -- Argon2id password hash with random salt.
+    ///
+    /// Returns a PHC-format string (e.g. `$argon2id$v=19$m=19456,t=2,p=1$...`).
+    /// Uses OS-sourced entropy for the salt via `OsRng`.
+    fn hash_argon2(args: &[Value]) -> Result<Value, PluginError> {
         let password = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: password".into()))?
@@ -409,13 +458,16 @@ impl CryptoPlugin {
         let argon2 = Argon2::default();
         let hash = argon2
             .hash_password(password.as_bytes(), &salt)
-            .map_err(|e| PluginError::Failed(format!("argon2 hash failed: {}", e)))?;
+            .map_err(|e| PluginError::Failed(format!("argon2 hash failed: {e}")))?;
 
         Ok(Value::String(hash.to_string()))
     }
 
-    /// Convention 2: Verify a password against an Argon2 PHC hash string.
-    fn verify_argon2(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 2 -- Verify a password against an Argon2 PHC hash string.
+    ///
+    /// Returns `Value::Bool(true)` on match, `Value::Bool(false)` on mismatch.
+    /// Invalid PHC format is an `InvalidArg` error, not a false result.
+    fn verify_argon2(args: &[Value]) -> Result<Value, PluginError> {
         let password = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: password".into()))?
@@ -426,7 +478,7 @@ impl CryptoPlugin {
             .as_str()?;
 
         let parsed = PasswordHash::new(hash_str)
-            .map_err(|e| PluginError::InvalidArg(format!("invalid PHC hash string: {}", e)))?;
+            .map_err(|e| PluginError::InvalidArg(format!("invalid PHC hash string: {e}")))?;
         let argon2 = Argon2::default();
         let valid = argon2
             .verify_password(password.as_bytes(), &parsed)
@@ -435,8 +487,11 @@ impl CryptoPlugin {
         Ok(Value::Bool(valid))
     }
 
-    /// Convention 3: Generate cryptographically secure random bytes.
-    fn random_bytes(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 3 -- Generate cryptographically secure random bytes.
+    ///
+    /// Uses the OS CSPRNG via `rand::thread_rng()`. Count is clamped to
+    /// `[1, 65536]` to prevent accidental multi-megabyte allocations.
+    fn random_bytes(args: &[Value]) -> Result<Value, PluginError> {
         let count = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: count".into()))?
@@ -448,13 +503,17 @@ impl CryptoPlugin {
             ));
         }
 
+        // Safety: count is validated to be in [1, 65536], so the cast is lossless.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let mut buf = vec![0u8; count as usize];
         rand::thread_rng().fill_bytes(&mut buf);
         Ok(Value::Bytes(buf))
     }
 
-    /// Convention 4: Generate random bytes and return as hex string.
-    fn random_hex(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 4 -- Generate random bytes and return as lowercase hex string.
+    ///
+    /// The output string is `2 * count` characters long.
+    fn random_hex(args: &[Value]) -> Result<Value, PluginError> {
         let count = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: count".into()))?
@@ -466,18 +525,23 @@ impl CryptoPlugin {
             ));
         }
 
+        // Safety: count is validated to be in [1, 65536], so the cast is lossless.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let mut buf = vec![0u8; count as usize];
         rand::thread_rng().fill_bytes(&mut buf);
         Ok(Value::String(hex_encode(&buf)))
     }
 
-    /// Convention 5: Generate a UUID v4.
-    fn random_uuid(&self, _args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 5 -- Generate a random UUID v4 string.
+    fn random_uuid() -> Result<Value, PluginError> {
         Ok(Value::String(Uuid::new_v4().to_string()))
     }
 
-    /// Convention 6: Sign data with an Ed25519 private key (32 bytes).
-    fn sign_ed25519(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 6 -- Sign data with an Ed25519 private key (32 bytes seed).
+    ///
+    /// Returns the 64-byte signature as `Value::Bytes`. The signature is
+    /// deterministic for the same key+data pair (RFC 8032).
+    fn sign_ed25519(args: &[Value]) -> Result<Value, PluginError> {
         let data = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: data".into()))?
@@ -497,8 +561,11 @@ impl CryptoPlugin {
         Ok(Value::Bytes(signature.to_bytes().to_vec()))
     }
 
-    /// Convention 7: Verify an Ed25519 signature.
-    fn verify_ed25519(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 7 -- Verify an Ed25519 signature against data and public key.
+    ///
+    /// Returns `Value::Bool(true)` if valid, `Value::Bool(false)` if the
+    /// signature does not match. Malformed keys/signatures are `InvalidArg`.
+    fn verify_ed25519(args: &[Value]) -> Result<Value, PluginError> {
         let data = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: data".into()))?
@@ -521,14 +588,18 @@ impl CryptoPlugin {
 
         let signature = ed25519_dalek::Signature::from_bytes(&sig_array);
         let verifying_key = VerifyingKey::from_bytes(&pub_array)
-            .map_err(|e| PluginError::InvalidArg(format!("invalid Ed25519 public key: {}", e)))?;
+            .map_err(|e| PluginError::InvalidArg(format!("invalid Ed25519 public key: {e}")))?;
 
         let valid = verifying_key.verify(data, &signature).is_ok();
         Ok(Value::Bool(valid))
     }
 
-    /// Convention 8: Encrypt with ChaCha20-Poly1305. Returns nonce (12 bytes) + ciphertext.
-    fn encrypt_aead(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 8 -- Encrypt with ChaCha20-Poly1305 AEAD.
+    ///
+    /// Generates a random 12-byte nonce and prepends it to the ciphertext.
+    /// Output format: `[nonce: 12 bytes][ciphertext + 16-byte Poly1305 tag]`.
+    /// The key must be exactly 32 bytes.
+    fn encrypt_aead(args: &[Value]) -> Result<Value, PluginError> {
         let plaintext = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: plaintext".into()))?
@@ -545,18 +616,18 @@ impl CryptoPlugin {
         }
 
         let cipher = ChaCha20Poly1305::new_from_slice(key_bytes)
-            .map_err(|e| PluginError::Failed(format!("cipher init failed: {}", e)))?;
+            .map_err(|e| PluginError::Failed(format!("cipher init failed: {e}")))?;
 
-        // Generate random 12-byte nonce
+        // Generate random 12-byte nonce via OS CSPRNG
         let mut nonce_bytes = [0u8; 12];
         rand::thread_rng().fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         let ciphertext = cipher
             .encrypt(nonce, plaintext)
-            .map_err(|e| PluginError::Failed(format!("encryption failed: {}", e)))?;
+            .map_err(|e| PluginError::Failed(format!("encryption failed: {e}")))?;
 
-        // Prepend nonce to ciphertext
+        // Prepend nonce to ciphertext so decryption is self-contained
         let mut result = Vec::with_capacity(12 + ciphertext.len());
         result.extend_from_slice(&nonce_bytes);
         result.extend_from_slice(&ciphertext);
@@ -564,8 +635,12 @@ impl CryptoPlugin {
         Ok(Value::Bytes(result))
     }
 
-    /// Convention 9: Decrypt ChaCha20-Poly1305 ciphertext (nonce prepended).
-    fn decrypt_aead(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 9 -- Decrypt ChaCha20-Poly1305 ciphertext.
+    ///
+    /// Expects the nonce (12 bytes) prepended to the ciphertext, matching
+    /// the format produced by `encrypt_aead`. Authenticates before decrypting
+    /// (AEAD guarantee) -- returns `Failed` on tampered data.
+    fn decrypt_aead(args: &[Value]) -> Result<Value, PluginError> {
         let combined = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: ciphertext".into()))?
@@ -588,18 +663,21 @@ impl CryptoPlugin {
 
         let (nonce_bytes, ciphertext) = combined.split_at(12);
         let cipher = ChaCha20Poly1305::new_from_slice(key_bytes)
-            .map_err(|e| PluginError::Failed(format!("cipher init failed: {}", e)))?;
+            .map_err(|e| PluginError::Failed(format!("cipher init failed: {e}")))?;
         let nonce = Nonce::from_slice(nonce_bytes);
 
         let plaintext = cipher
             .decrypt(nonce, ciphertext)
-            .map_err(|e| PluginError::Failed(format!("decryption failed: {}", e)))?;
+            .map_err(|e| PluginError::Failed(format!("decryption failed: {e}")))?;
 
         Ok(Value::Bytes(plaintext))
     }
 
-    /// Convention 10: Sign a JWT with HS256. Claims is a JSON string.
-    fn jwt_sign(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 10 -- Sign a JWT with HS256.
+    ///
+    /// `claims` must be a valid JSON string. The `secret` is used as the HMAC
+    /// key. Returns the compact JWT string (`header.payload.signature`).
+    fn jwt_sign(args: &[Value]) -> Result<Value, PluginError> {
         let claims_json = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: claims".into()))?
@@ -610,20 +688,23 @@ impl CryptoPlugin {
             .as_str()?;
 
         let claims: serde_json::Value = serde_json::from_str(claims_json)
-            .map_err(|e| PluginError::InvalidArg(format!("invalid JSON claims: {}", e)))?;
+            .map_err(|e| PluginError::InvalidArg(format!("invalid JSON claims: {e}")))?;
 
         let token = encode(
             &Header::default(),
             &claims,
             &EncodingKey::from_secret(secret.as_bytes()),
         )
-        .map_err(|e| PluginError::Failed(format!("JWT signing failed: {}", e)))?;
+        .map_err(|e| PluginError::Failed(format!("JWT signing failed: {e}")))?;
 
         Ok(Value::String(token))
     }
 
-    /// Convention 11: Verify and decode a JWT. Returns claims JSON or error.
-    fn jwt_verify(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 11 -- Verify and decode a JWT signed with HS256.
+    ///
+    /// Validates the signature but does *not* enforce `exp` claims, allowing
+    /// the caller to handle expiration logic. Returns the claims as a JSON string.
+    fn jwt_verify(args: &[Value]) -> Result<Value, PluginError> {
         let token = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: token".into()))?
@@ -642,16 +723,19 @@ impl CryptoPlugin {
             &DecodingKey::from_secret(secret.as_bytes()),
             &validation,
         )
-        .map_err(|e| PluginError::Failed(format!("JWT verification failed: {}", e)))?;
+        .map_err(|e| PluginError::Failed(format!("JWT verification failed: {e}")))?;
 
         let claims_json = serde_json::to_string(&token_data.claims)
-            .map_err(|e| PluginError::Failed(format!("JSON serialization failed: {}", e)))?;
+            .map_err(|e| PluginError::Failed(format!("JSON serialization failed: {e}")))?;
 
         Ok(Value::String(claims_json))
     }
 
-    /// Convention 12: HMAC-SHA256 message authentication code.
-    fn hmac_sha256(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 12 -- HMAC-SHA256 message authentication code.
+    ///
+    /// Accepts arbitrary-length key and data. Returns the 32-byte MAC
+    /// as `Value::Bytes`.
+    fn hmac_sha256(args: &[Value]) -> Result<Value, PluginError> {
         let data = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: data".into()))?
@@ -662,7 +746,7 @@ impl CryptoPlugin {
             .as_bytes()?;
 
         let mut mac = <hmac::Hmac<Sha256> as Mac>::new_from_slice(key)
-            .map_err(|e| PluginError::Failed(format!("HMAC init failed: {}", e)))?;
+            .map_err(|e| PluginError::Failed(format!("HMAC init failed: {e}")))?;
         mac.update(data);
         let result = mac.finalize();
 
@@ -674,11 +758,15 @@ impl CryptoPlugin {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Encode bytes as lowercase hex string.
+/// Encode a byte slice as a lowercase hex string.
+///
+/// Uses `write!` into a pre-allocated `String` to avoid intermediate
+/// allocations per byte.
 fn hex_encode(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
-        s.push_str(&format!("{:02x}", b));
+        // write! to a String is infallible, but we must handle the Result.
+        let _ = write!(s, "{b:02x}");
     }
     s
 }
@@ -687,6 +775,11 @@ fn hex_encode(bytes: &[u8]) -> String {
 // C ABI entry point
 // ---------------------------------------------------------------------------
 
+/// FFI entry point called by the SOMA plugin loader (`plugin/dynamic.rs`).
+///
+/// Returns a heap-allocated `CryptoPlugin` as a trait object pointer.
+/// The caller takes ownership and is responsible for eventually dropping it.
+#[allow(improper_ctypes_definitions)] // Trait objects have no C equivalent; SOMA uses a known ABI.
 #[unsafe(no_mangle)]
 pub extern "C" fn soma_plugin_init() -> *mut dyn SomaPlugin {
     Box::into_raw(Box::new(CryptoPlugin))

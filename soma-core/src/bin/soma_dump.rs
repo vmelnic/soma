@@ -1,12 +1,23 @@
-//! soma-dump — Synaptic Protocol signal capture tool (Whitepaper Section 11.5).
+//! soma-dump -- Synaptic Protocol signal capture tool (Whitepaper Section 11.5).
 //!
-//! Connects to a SOMA's Synaptic Protocol server and captures signals
-//! for debugging, monitoring, and analysis. Outputs signals as JSON lines.
+//! A passive diagnostic tool that connects to a SOMA instance's Synaptic Protocol
+//! TCP server and decodes the binary wire frames in real time. Each captured signal
+//! is emitted as a single JSON line to stdout, making it suitable for piping into
+//! `jq`, log aggregators, or file archives. Diagnostic messages go to stderr.
 //!
-//! Usage:
-//!   soma-dump <address>                  # Capture all signals
-//!   soma-dump <address> --type intent    # Filter by signal type
-//!   soma-dump <address> --channel 5      # Filter by channel
+//! This binary implements a minimal, read-only frame parser rather than importing
+//! the full `soma` protocol stack, keeping the build lightweight and avoiding
+//! circular dependencies with the main crate.
+//!
+//! # Usage
+//!
+//! ```text
+//! soma-dump <address>                  # Capture all signals
+//! soma-dump <address> --type intent    # Filter by signal type
+//! soma-dump <address> --channel 5      # Filter by channel
+//! soma-dump <address> --raw            # Emit raw frame bytes to stdout
+//! soma-dump <address> --count 100      # Stop after 100 signals
+//! ```
 
 use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -15,9 +26,7 @@ use clap::Parser;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 
-// Re-use protocol types from soma crate
-// Since this is a separate binary, we inline the minimal codec needed.
-
+/// Command-line arguments for soma-dump.
 #[derive(Parser)]
 #[command(
     name = "soma-dump",
@@ -35,7 +44,7 @@ struct Cli {
     #[arg(long, short = 'c')]
     channel: Option<u32>,
 
-    /// Output raw bytes instead of JSON
+    /// Output raw frame bytes to stdout instead of JSON lines
     #[arg(long)]
     raw: bool,
 
@@ -48,8 +57,13 @@ struct Cli {
     id: String,
 }
 
-const MAGIC: [u8; 2] = [0x53, 0x4D]; // "SM"
+/// Synaptic Protocol magic bytes ("SM") that mark the start of every frame.
+const MAGIC: [u8; 2] = [0x53, 0x4D];
 
+/// Maps a signal type byte to its human-readable name.
+///
+/// Mirrors the 24 `SignalType` variants from `protocol::signal` but uses
+/// static strings to avoid pulling in the full protocol module.
 const fn signal_type_name(byte: u8) -> &'static str {
     match byte {
         0x01 => "handshake",
@@ -90,10 +104,13 @@ async fn main() -> anyhow::Result<()> {
     eprintln!("soma-dump: connected. Capturing signals (Ctrl+C to stop)");
 
     let mut captured: u64 = 0;
+    // Reusable buffer for payload reads; 64 KiB covers most signals without
+    // per-frame allocation. Payloads exceeding this are clamped (see below).
     let mut buf = vec![0u8; 64 * 1024];
 
+    // Frame-by-frame read loop. Each iteration parses one complete Synaptic
+    // Protocol frame per the wire layout defined in `protocol::codec`.
     loop {
-        // Read magic bytes
         let mut magic = [0u8; 2];
         match stream.read_exact(&mut magic).await {
             Ok(_) => {}
@@ -111,21 +128,20 @@ async fn main() -> anyhow::Result<()> {
             continue;
         }
 
-        // Read version + flags + signal_type
+        // version (1B, ignored) | flags (1B) | signal_type (1B)
         let mut header = [0u8; 3];
         stream.read_exact(&mut header).await?;
-        // header[0] is version (currently unused)
         let flags = header[1];
         let signal_type_byte = header[2];
         let signal_type = signal_type_name(signal_type_byte);
 
-        // Read channel_id (4 bytes) + sequence (4 bytes)
+        // channel_id (4B BE) | sequence (4B BE)
         let mut ids = [0u8; 8];
         stream.read_exact(&mut ids).await?;
         let channel_id = u32::from_be_bytes([ids[0], ids[1], ids[2], ids[3]]);
         let sequence = u32::from_be_bytes([ids[4], ids[5], ids[6], ids[7]]);
 
-        // Read sender_id length (1 byte) + sender_id
+        // sender_id: length-prefixed (1B length + N bytes)
         let mut sid_len_buf = [0u8; 1];
         stream.read_exact(&mut sid_len_buf).await?;
         let sid_len = sid_len_buf[0] as usize;
@@ -133,25 +149,24 @@ async fn main() -> anyhow::Result<()> {
         stream.read_exact(&mut sid_buf).await?;
         let sender_id = String::from_utf8_lossy(&sid_buf).to_string();
 
-        // Read metadata length (4 bytes) + metadata
+        // metadata: length-prefixed (4B BE length + N bytes), not decoded here
         let mut meta_len_buf = [0u8; 4];
         stream.read_exact(&mut meta_len_buf).await?;
         let meta_len = u32::from_be_bytes(meta_len_buf) as usize;
         let mut meta_buf = vec![0u8; meta_len];
         stream.read_exact(&mut meta_buf).await?;
 
-        // Read payload length (4 bytes) + payload
+        // payload: length-prefixed (4B BE length + N bytes), clamped to buf size
         let mut payload_len_buf = [0u8; 4];
         stream.read_exact(&mut payload_len_buf).await?;
         let payload_len = u32::from_be_bytes(payload_len_buf) as usize;
         let payload_len = payload_len.min(buf.len());
         stream.read_exact(&mut buf[..payload_len]).await?;
 
-        // Read CRC32 (4 bytes)
+        // CRC32 trailer (4B, read but not verified -- this is a diagnostic tool)
         let mut crc_buf = [0u8; 4];
         stream.read_exact(&mut crc_buf).await?;
 
-        // Apply filters
         if let Some(ref filter_type) = cli.signal_type
             && signal_type != filter_type.as_str() {
                 continue;
@@ -161,18 +176,19 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
 
-        // Output
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis();
 
         if cli.raw {
+            // In raw mode, re-emit the frame header bytes for downstream binary consumers.
             let _ = std::io::stdout().write_all(&magic);
             let _ = std::io::stdout().write_all(&header);
             let _ = std::io::stdout().write_all(&ids);
             let _ = std::io::stdout().flush();
         } else {
+            // Truncate large payloads in the preview to keep JSON lines readable.
             let payload_preview = if payload_len > 0 {
                 let text = String::from_utf8_lossy(&buf[..payload_len.min(200)]);
                 if payload_len > 200 {

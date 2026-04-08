@@ -393,6 +393,6 @@ soma_synthesizer/
 
 ## Spec Compliance
 
-Validated against `07_SYNTHESIZER.md` (14 sections, 89 items):
+Validated against the [synthesizer specification](../docs/synthesizer.md) (14 sections, 89 items):
 - 87 PASS
 - 2 documented-future (Transformer variant, paraphrase generation via external LLM)

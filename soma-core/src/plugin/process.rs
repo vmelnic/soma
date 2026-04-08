@@ -1,11 +1,11 @@
-//! Plugin child process management (for MCP Bridge and similar plugins).
-//! Allows plugins to spawn and manage external processes.
+//! Child process lifecycle management for plugins that spawn external programs
+//! (e.g., MCP Bridge plugin). All managed processes are killed on drop.
 
 use anyhow::Result;
 use std::collections::HashMap;
 use std::process::Stdio;
 
-/// A managed child process spawned by a plugin.
+/// A child process with captured stdio handles, owned by a plugin.
 #[allow(dead_code)] // Spec feature: MCP Bridge plugin child processes
 pub struct ManagedProcess {
     pub name: String,
@@ -14,7 +14,7 @@ pub struct ManagedProcess {
     pub stdout: Option<std::process::ChildStdout>,
 }
 
-/// Manager for plugin child processes.
+/// Named process registry. Ensures all spawned processes are cleaned up on drop.
 #[allow(dead_code)] // Spec feature: MCP Bridge plugin process management
 pub struct ProcessManager {
     processes: HashMap<String, ManagedProcess>,
@@ -26,7 +26,7 @@ impl ProcessManager {
         Self { processes: HashMap::new() }
     }
 
-    /// Spawn a child process.
+    /// Spawn a named child process with piped stdio and optional environment variables.
     pub fn spawn(
         &mut self,
         name: &str,
@@ -62,7 +62,7 @@ impl ProcessManager {
         Ok(self.processes.get(&key).unwrap())
     }
 
-    /// Kill a child process.
+    /// Kill and remove a managed process by name.
     pub fn kill(&mut self, name: &str) -> Result<()> {
         if let Some(mut proc) = self.processes.remove(name) {
             proc.child.kill()?;
@@ -71,7 +71,7 @@ impl ProcessManager {
         Ok(())
     }
 
-    /// Kill all child processes.
+    /// Kill all managed processes. Called during shutdown and by the `Drop` impl.
     pub fn kill_all(&mut self) {
         let names: Vec<String> = self.processes.keys().cloned().collect();
         for name in names {
@@ -79,7 +79,7 @@ impl ProcessManager {
         }
     }
 
-    /// Check if a process is running.
+    /// Check if a named process is still running (non-blocking wait).
     pub fn is_running(&mut self, name: &str) -> bool {
         if let Some(proc) = self.processes.get_mut(name) {
             matches!(proc.child.try_wait(), Ok(None))
@@ -88,7 +88,7 @@ impl ProcessManager {
         }
     }
 
-    /// List running processes.
+    /// List names of all managed processes (may include already-exited ones).
     pub fn list(&self) -> Vec<&str> {
         self.processes.keys().map(std::string::String::as_str).collect()
     }

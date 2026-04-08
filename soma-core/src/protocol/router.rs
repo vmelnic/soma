@@ -15,14 +15,16 @@ const DEFAULT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 #[allow(dead_code)] // Used by SignalRouter::register_pending
 const MAX_INFLIGHT: usize = 1000;
 
-/// Centralized router for correlating outgoing requests with incoming responses.
-/// When a SOMA sends an Intent to a peer and expects a Result, it stores
-/// a one-shot channel keyed by sequence number (Section 14.3).
+/// Correlates outgoing requests with incoming responses using one-shot channels
+/// keyed by sequence number (Spec Section 14.3).
+///
+/// Uses `DashMap` for lock-free concurrent access from multiple connection
+/// handlers. Entries are cleaned up on delivery, cancellation, or timeout.
 #[allow(dead_code)] // Spec feature for request-response correlation
 pub struct SignalRouter {
-    /// Pending request-response correlations: `sequence_id` -> response sender
+    /// `sequence_id` -> one-shot sender awaiting the correlated response.
     pending_requests: DashMap<u32, oneshot::Sender<Signal>>,
-    /// Response timeout
+    /// How long to wait for a response before declaring timeout.
     response_timeout: Duration,
 }
 
@@ -42,8 +44,8 @@ impl SignalRouter {
         }
     }
 
-    /// Register a pending request. Returns a receiver that will get the response.
-    /// Returns an error if the maximum number of inflight requests is reached.
+    /// Register a pending request and return a receiver for its response.
+    /// Fails if `MAX_INFLIGHT` (1000) would be exceeded.
     pub fn register_pending(&self, sequence_id: u32) -> Result<oneshot::Receiver<Signal>, RouterError> {
         if self.pending_requests.len() >= MAX_INFLIGHT {
             return Err(RouterError::MaxInflight(MAX_INFLIGHT));
@@ -53,8 +55,8 @@ impl SignalRouter {
         Ok(rx)
     }
 
-    /// Try to deliver a response to a pending request.
-    /// Returns true if delivered, false if no pending request for this sequence.
+    /// Deliver a response to a pending request, removing it from the map.
+    /// Returns `false` if no pending request exists for this sequence.
     pub fn deliver_response(&self, sequence_id: u32, signal: Signal) -> bool {
         if let Some((_, tx)) = self.pending_requests.remove(&sequence_id) {
             tx.send(signal).is_ok()
@@ -63,8 +65,9 @@ impl SignalRouter {
         }
     }
 
-    /// Send a request and wait for the correlated response with timeout.
-    /// The caller must send the signal separately; this just handles correlation.
+    /// Register a pending request and await its response with timeout.
+    /// The caller is responsible for actually sending the signal over the wire;
+    /// this method only handles the correlation and wait.
     pub async fn wait_for_response(&self, sequence_id: u32) -> Result<Signal, RouterError> {
         let rx = self.register_pending(sequence_id)?;
         match timeout(self.response_timeout, rx).await {
@@ -97,15 +100,13 @@ impl SignalRouter {
         // This is a no-op but provides a hook for future TTL-based cleanup.
     }
 
-    /// Fail all pending requests (e.g., when a peer is declared dead).
-    /// Removes every entry and drops the senders, causing all receivers
-    /// to get a `RecvError`.
+    /// Fail all pending requests (e.g., when a peer disconnects). Drops every
+    /// sender, causing all awaiting receivers to get `RecvError`.
     pub fn fail_all(&self) {
         let keys: Vec<u32> = self.pending_requests.iter().map(|e| *e.key()).collect();
         let count = keys.len();
         for key in keys {
             self.pending_requests.remove(&key);
-            // Sender is dropped here, causing the receiver to get RecvError
         }
         tracing::warn!(
             "Failed all pending requests ({} entries removed)",

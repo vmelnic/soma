@@ -1,38 +1,51 @@
-//! Rate limiting with graduated response (Spec Section 20).
+//! Per-connection rate limiting with graduated response (Spec Section 20).
 //!
-//! Tracks per-second signal count and byte throughput. When limits are
-//! exceeded the limiter returns a suggested `retry_after` interval and
-//! escalates through warning / sustained / severe violation levels.
+//! Enforces two independent per-second limits -- signal count and byte
+//! throughput. When either limit is exceeded, the limiter returns a
+//! `retry_after` interval and begins escalating through graduated
+//! violation levels:
+//!
+//! | Duration   | Level       | Action                           |
+//! |------------|-------------|----------------------------------|
+//! | < 10 s     | `Warning`   | Send CONTROL signal to peer      |
+//! | 10 -- 60 s | `Sustained` | Halve throughput windows         |
+//! | > 60 s     | `Severe`    | Close connection and blacklist   |
+//!
+//! The [`PeerBlacklist`] tracks peers that have been banned after severe
+//! violations, with automatic expiry after a configurable duration.
 
 use std::collections::HashMap;
 use std::time::Instant;
 
 use super::signal::{Signal, SignalType};
 
-/// Graduated violation levels for rate-limit enforcement.
-// CONTROL signal emission is implemented via `create_rate_limit_signal()`
-// (Section 20.3). Peer blacklisting after sustained violations is
-// handled by `PeerBlacklist` (Section 20.4).
+/// Graduated violation levels for rate-limit enforcement (Spec Section 20.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViolationLevel {
     /// No active violation.
     None,
-    /// First limit hit — warn the peer.
+    /// First limit hit (< 10 s continuous) -- warn the peer via CONTROL signal.
     Warning,
-    /// Continuous violation for >10 seconds.
+    /// Violation sustained for > 10 seconds -- throughput windows should be halved.
     Sustained,
-    /// Continuous violation for >60 seconds — connection should be closed.
+    /// Violation sustained for > 60 seconds -- connection should be closed and peer blacklisted.
     Severe,
 }
 
-/// Per-connection rate limiter.
+/// Per-connection rate limiter with sliding one-second windows.
+///
+/// Counters reset each second. When a limit is hit, `violation_start`
+/// is set and the violation level escalates based on elapsed time until
+/// a successful (within-limit) signal clears the violation state.
 pub struct RateLimiter {
+    /// Current signal-per-second limit (may be reduced by `reduce_window`).
     signals_per_second: u32,
+    /// Current byte-per-second limit (may be reduced by `reduce_window`).
     bytes_per_second: u64,
-    /// Original `signals_per_second` for restoration after `reduce_window`.
+    /// Snapshot of the original signal limit for `restore_window`.
     #[allow(dead_code)] // Used by reduce/restore_window
     original_signals_per_second: u32,
-    /// Original `bytes_per_second` for restoration after `reduce_window`.
+    /// Snapshot of the original byte limit for `restore_window`.
     #[allow(dead_code)] // Used by reduce/restore_window
     original_bytes_per_second: u64,
     #[allow(dead_code)] // Spec feature for channel limits
@@ -40,12 +53,12 @@ pub struct RateLimiter {
     #[allow(dead_code)] // Spec feature for subscription limits
     max_subscriptions: u32,
 
-    // Current-second tracking
     signal_count_this_second: u32,
     bytes_this_second: u64,
+    /// Start of the current one-second measurement window.
     second_start: Instant,
 
-    // Graduated response
+    /// When the current violation streak began (`None` if no active violation).
     violation_start: Option<Instant>,
 }
 
@@ -83,31 +96,30 @@ impl RateLimiter {
         }
     }
 
-    /// Check if a signal of `signal_bytes` size should be allowed.
+    /// Check whether a signal of `signal_bytes` should be admitted.
     ///
-    /// Returns `None` if the signal is within limits, or
-    /// `Some(retry_after_ms)` if the peer should back off.
+    /// Returns `None` if within limits. Returns `Some(retry_after_ms)` with
+    /// the suggested backoff when either the signal count or byte budget for
+    /// the current second is exhausted.
     pub fn check(&mut self, signal_bytes: usize) -> Option<u32> {
         let now = Instant::now();
 
-        // Reset counters if a full second has elapsed
+        // Slide the window forward when a full second has elapsed
         if now.duration_since(self.second_start).as_millis() >= 1000 {
             self.signal_count_this_second = 0;
             self.bytes_this_second = 0;
             self.second_start = now;
         }
 
-        // Check signals/sec
         if self.signal_count_this_second >= self.signals_per_second {
             self.start_violation(now);
-            // Suggest retrying after the current second window resets
+            // retry_after = time remaining in the current one-second window
             #[allow(clippy::cast_possible_truncation)] // elapsed within 1s, fits in u32
             let elapsed_in_second = now.duration_since(self.second_start).as_millis() as u32;
             let retry_after = 1000u32.saturating_sub(elapsed_in_second).max(10);
             return Some(retry_after);
         }
 
-        // Check bytes/sec
         if self.bytes_this_second + signal_bytes as u64 > self.bytes_per_second {
             self.start_violation(now);
             #[allow(clippy::cast_possible_truncation)] // elapsed within 1s, fits in u32
@@ -116,14 +128,14 @@ impl RateLimiter {
             return Some(retry_after);
         }
 
-        // Signal is allowed — record it and clear any violation
+        // Admitted -- record and clear any active violation streak
         self.signal_count_this_second += 1;
         self.bytes_this_second += signal_bytes as u64;
         self.violation_start = None;
         None
     }
 
-    /// Return the current graduated violation level.
+    /// Current graduated violation level based on how long the violation has persisted.
     pub fn violation_level(&self) -> ViolationLevel {
         self.violation_start.map_or(ViolationLevel::None, |start| {
             let duration = start.elapsed();
@@ -137,42 +149,34 @@ impl RateLimiter {
         })
     }
 
-    /// Check whether opening another channel would exceed the limit.
-    ///
-    /// Returns `true` if `current_channels < max_channels` (i.e. allowed),
-    /// `false` if the limit would be exceeded.
+    /// Returns `true` if opening another channel is within the limit.
     #[allow(dead_code)] // Spec feature for channel limits
     pub const fn check_channel_limit(&self, current_channels: usize) -> bool {
         current_channels < self.max_channels as usize
     }
 
-    /// Check whether adding another subscription would exceed the limit.
-    ///
-    /// Returns `true` if `current_subs < max_subscriptions` (i.e. allowed),
-    /// `false` if the limit would be exceeded.
+    /// Returns `true` if adding another subscription is within the limit.
     #[allow(dead_code)] // Spec feature for subscription limits
     pub const fn check_subscription_limit(&self, current_subs: usize) -> bool {
         current_subs < self.max_subscriptions as usize
     }
 
-    /// Halve the throughput windows as a graduated response to sustained
-    /// violations (Spec Section 20). The original values are preserved so
-    /// they can be restored later via `restore_window()`.
+    /// Halve both throughput limits as a graduated response to sustained violations.
+    /// Floors at 1 to avoid zero-limit deadlock. Call [`restore_window`](Self::restore_window) to undo.
     #[allow(dead_code)] // Spec feature for graduated response
     pub fn reduce_window(&mut self) {
         self.signals_per_second = (self.signals_per_second / 2).max(1);
         self.bytes_per_second = (self.bytes_per_second / 2).max(1);
     }
 
-    /// Restore throughput windows to their original values after a
-    /// previous `reduce_window()`.
+    /// Restore throughput limits to the values set at construction time.
     #[allow(dead_code)] // Spec feature for graduated response
     pub const fn restore_window(&mut self) {
         self.signals_per_second = self.original_signals_per_second;
         self.bytes_per_second = self.original_bytes_per_second;
     }
 
-    /// Reset all counters and violation state.
+    /// Clear all counters and violation state, starting a fresh measurement window.
     #[allow(dead_code)] // Spec feature for rate limit reset
     pub fn reset(&mut self) {
         self.signal_count_this_second = 0;
@@ -181,6 +185,7 @@ impl RateLimiter {
         self.violation_start = None;
     }
 
+    /// Record the start of a violation streak (idempotent within a streak).
     const fn start_violation(&mut self, now: Instant) {
         if self.violation_start.is_none() {
             self.violation_start = Some(now);
@@ -188,7 +193,7 @@ impl RateLimiter {
     }
 }
 
-/// Create a CONTROL signal for rate limiting (Section 20.3).
+/// Build a CONTROL signal informing the peer to back off for `retry_after_ms` milliseconds.
 pub fn create_rate_limit_signal(sender: &str, retry_after_ms: u32) -> Signal {
     let mut signal = Signal::new(SignalType::Control, sender.to_string());
     signal.metadata = serde_json::json!({
@@ -198,12 +203,14 @@ pub fn create_rate_limit_signal(sender: &str, retry_after_ms: u32) -> Signal {
     signal
 }
 
-/// Tracks blacklisted peers after sustained rate limit violations (Section 20.4).
+/// Time-limited ban list for peers after severe rate-limit violations (Spec Section 20.4).
+///
+/// Entries expire automatically after `blacklist_duration` (default 5 minutes).
+/// Call [`cleanup`](Self::cleanup) periodically to reclaim memory from expired entries.
 #[allow(dead_code)] // Spec feature for peer blacklisting
 pub struct PeerBlacklist {
-    /// `peer_addr` → `blacklist_until`
+    /// Maps peer address to the instant at which the ban expires.
     entries: HashMap<String, Instant>,
-    /// Default blacklist duration
     blacklist_duration: std::time::Duration,
 }
 
@@ -216,20 +223,20 @@ impl PeerBlacklist {
         }
     }
 
-    /// Blacklist a peer for the configured duration.
+    /// Ban a peer for the configured duration.
     pub fn blacklist(&mut self, peer_addr: String) {
         let until = Instant::now() + self.blacklist_duration;
         tracing::warn!(peer = %peer_addr, duration_secs = 300, "Peer blacklisted");
         self.entries.insert(peer_addr, until);
     }
 
-    /// Check if a peer is currently blacklisted.
+    /// Returns `true` if the peer is currently banned and the ban has not expired.
     pub fn is_blacklisted(&self, peer_addr: &str) -> bool {
         self.entries.get(peer_addr)
             .is_some_and(|until| Instant::now() < *until)
     }
 
-    /// Remove expired blacklist entries.
+    /// Evict expired entries to reclaim memory.
     pub fn cleanup(&mut self) {
         let now = Instant::now();
         self.entries.retain(|_, until| now < *until);

@@ -230,7 +230,7 @@ Session 3 (Friday, local Ollama):
 
 Three different LLMs. Three different sessions. Zero context loss. SOMA holds the truth.
 
-See *SOMA Whitepaper, Section 2.6* and *09_CONVERSATIONAL_INTERACTION, Section 4* for the full treatment.
+See *SOMA Whitepaper, Section 2.6* and *[MCP Interface](mcp-interface.md), Section 4* for the full treatment.
 
 ---
 
@@ -326,7 +326,7 @@ The Interface SOMA compiles to WebAssembly (~1-3MB). Synaptic Protocol runs over
 
 No React. No Webpack. No node_modules. A bootstrap HTML file and a WASM binary.
 
-See *06_INTERFACE_SOMA* for the complete rendering specification and *SOMA Whitepaper, Section 10* for the overview.
+See *[Architecture](architecture.md)* for the complete rendering specification and *SOMA Whitepaper, Section 10* for the overview.
 
 ---
 
@@ -414,7 +414,7 @@ ChatGPT: "I see 16 tables including a reviews table added 5 minutes ago."
 
 No Git conflicts. No merge issues. No PRs. Both LLMs query the same SOMA. SOMA is the shared truth.
 
-See *09_CONVERSATIONAL_INTERACTION, Section 7* for the complete interaction patterns.
+See *[MCP Interface](mcp-interface.md), Section 7* for the complete interaction patterns.
 
 ---
 
@@ -516,4 +516,4 @@ The seventy-year translation layer between human intent and machine execution is
 
 ---
 
-*For the complete technical specification, see the [SOMA Whitepaper](../SOMA_Whitepaper.md). For the conversational interaction model, see [09_CONVERSATIONAL_INTERACTION](../09_CONVERSATIONAL_INTERACTION.md). For the rendering architecture, see [06_INTERFACE_SOMA](../06_INTERFACE_SOMA.md).*
+*For the complete technical specification, see the [SOMA Whitepaper](../SOMA_Whitepaper.md). For the conversational interaction model, see [MCP Interface](mcp-interface.md). For the rendering architecture, see [Architecture](architecture.md).*

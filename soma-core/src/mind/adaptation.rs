@@ -1,52 +1,50 @@
-//! Runtime `LoRA` adaptation — learn from experience without Python.
+//! Runtime `LoRA` adaptation -- learning from successful experiences without Python.
 //!
-//! This module implements the adaptation cycle: using recorded successful
-//! experiences to update the Mind's `LoRA` layers via gradient descent.
-//! The key insight is that we don't backprop through the ONNX graph —
-//! instead we treat the decoder's hidden states as frozen features and
-//! only update the `LoRA` parameters (A and B matrices).
+//! The core insight: we do not backpropagate through the frozen ONNX graph.
+//! Instead, decoder hidden states are treated as fixed feature vectors and only
+//! the `LoRA` parameters (A, B matrices) are updated via SGD.
 //!
-//! The adaptation loop uses teacher forcing: for each experience, we
-//! run the encoder to get hidden states, then step through the decoder
-//! feeding the KNOWN correct opcode at each step (not the predicted one).
-//! At each step we collect (`hidden_state`, `target_opcode`) pairs and pass
-//! them to `LoRALayer::adapt()` for a gradient descent update.
+//! The adaptation loop uses teacher forcing: for each recorded experience, the
+//! decoder is stepped with the KNOWN correct opcode at each position (not the
+//! model's prediction). This produces `(hidden_state, target_opcode)` pairs that
+//! are batched and passed to `LoRALayer::adapt()`.
+//!
+//! Fast path: when `Program::cached_states` are available (populated during the
+//! original inference), the ONNX encoder/decoder are not re-run at all.
 
 use super::lora::LoRALayer;
 use super::onnx_engine::OnnxMindEngine;
 use crate::memory::experience::Experience;
 
-/// Configuration for the adaptation engine.
+/// Controls when and how adaptation runs.
 #[derive(Debug, Clone)]
 pub struct AdaptationConfig {
     #[allow(dead_code)] // Spec Section 4.7 — toggle for adaptation engine
     pub enabled: bool,
+    /// Run adaptation every N successful experiences.
     #[allow(dead_code)] // Spec Section 4.7 — adaptation frequency control
     pub adapt_every_n: usize,
+    /// Maximum number of experiences to sample per adaptation cycle.
     pub batch_size: usize,
     pub learning_rate: f32,
 }
 
-/// Result of one adaptation cycle.
+/// Metrics returned from a single adaptation cycle.
 #[derive(Debug, Clone)]
 pub struct AdaptationResult {
-    /// Average cross-entropy loss over the batch.
+    /// Mean cross-entropy loss over the batch.
     pub loss: f32,
-    /// How many adaptation cycles have been performed (cumulative).
+    /// Always 1 for a single cycle; the caller accumulates the cumulative count.
     pub cycle: u64,
-    /// Current `LoRA` magnitude after adaptation.
+    /// Sum of `LoRA` magnitudes across all active layers after adaptation.
     pub lora_magnitude: f32,
 }
 
-/// Run one adaptation cycle on the Mind's `LoRA` layers using recorded experiences.
+/// Run one adaptation cycle using the most recent experiences.
 ///
-/// This requires a WRITE lock on the `MindEngine` (caller must hold it).
-/// Steps:
-///   1. Sample `batch_size` experiences from the buffer
-///   2. For each experience, run encoder to get hidden states
-///   3. For each decoder step, collect (hidden, `target_opcode`) pairs
-///   4. Call `LoRALayer::adapt()` with the batch
-///   5. Return adaptation metrics
+/// Requires exclusive (`&mut`) access to the engine. Samples up to `batch_size`
+/// experiences, extracts `(hidden_state, target_opcode)` pairs (from cache or by
+/// re-running the ONNX model), and performs one SGD step on the opcode `LoRA` layer.
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::unnecessary_wraps)] // Result return is intentional for API consistency
 pub fn adapt_from_experience(
@@ -68,20 +66,17 @@ pub fn adapt_from_experience(
     let start_token = engine.start_token();
     let stop_id = engine.stop_id();
 
-    // Sample up to batch_size experiences (take most recent ones)
+    // Most recent experiences are most relevant -- recency bias
     let sample_count = config.batch_size.min(experiences.len());
     let sampled = &experiences[experiences.len() - sample_count..];
 
-    // Collect (hidden_state, target_opcode) pairs and corresponding base logits
-    // across ALL steps of ALL sampled experiences.
     let mut batch: Vec<(Vec<f32>, usize)> = Vec::new();
     let mut base_logits_batch: Vec<Vec<f32>> = Vec::new();
 
     for exp in sampled {
-        // Use cached states if available (fast path — no ONNX re-inference)
+        // Fast path: use cached hidden states from the original inference
         if !exp.cached_states.is_empty() {
             for (hidden, op_logits) in &exp.cached_states {
-                // Find the target opcode for this step from the program
                 let step_idx = batch.len() % exp.program.len().max(1);
                 if step_idx < exp.program.len() {
                     let (conv_id, _, _) = exp.program[step_idx];
@@ -95,8 +90,7 @@ pub fn adapt_from_experience(
             continue;
         }
 
-        // Slow path: re-run ONNX encoder+decoder to get hidden states.
-        // This is only used when cached_states are not available.
+        // Slow path: re-run ONNX model (only when cached_states are absent)
         let has_valid_steps = exp.program.iter()
             .any(|(conv_id, _, _)| *conv_id >= 0);
 
@@ -155,31 +149,19 @@ pub fn adapt_from_experience(
         });
     }
 
-    // Ensure LoRA layers exist for all output heads; create defaults if needed.
-    // The spec defines 11 output heads: opcode, a0t, a1t, s0s, s0e, s1s, s1e, r0, r1, lit0, lit1.
-    // Output dimensions vary per head type:
-    //   opcode: num_conventions
-    //   a0t/a1t: 4 (None, Span, Ref, Literal)
-    //   s0s/s0e/s1s/s1e: max_seq_len (span pointer over input)
-    //   r0/r1: max_steps (reference to prior step)
-    //   lit0/lit1: vocab_size (approximated by decoder_dim for default layers)
-    // Note: only opcode LoRA is trained currently; other heads are created so they're
-    // available for plugin-provided LoRA attachment and future multi-head training.
+    // Ensure all 11 output heads have LoRA layers. Only the opcode head is trained
+    // currently; others are created as attachment points for plugin-provided LoRA.
     let default_rank = 8;
     let default_alpha = 16.0;
 
+    // (head_name, out_features): dimensions match the decoder's output head sizes
     let head_specs: Vec<(&str, usize)> = vec![
         ("opcode", num_conventions),
-        ("a0t", 4),     // ArgType: None, Span, Ref, Literal
-        ("a1t", 4),
-        ("s0s", ms),    // Span start pointer over max_steps positions
-        ("s0e", ms),    // Span end pointer
-        ("s1s", ms),
-        ("s1e", ms),
-        ("r0", ms),     // Ref pointer to prior step
-        ("r1", ms),
-        ("lit0", dd),   // Literal — approximated by decoder_dim for default LoRA
-        ("lit1", dd),   // Plugin LoRA may provide correctly-sized layers
+        ("a0t", 4), ("a1t", 4),         // ArgType enum (4 variants)
+        ("s0s", ms), ("s0e", ms),       // span pointers
+        ("s1s", ms), ("s1e", ms),
+        ("r0", ms), ("r1", ms),         // step-ref pointers
+        ("lit0", dd), ("lit1", dd),     // literal vocab (approx by decoder_dim)
     ];
 
     for (head_name, out_features) in &head_specs {
@@ -204,7 +186,6 @@ pub fn adapt_from_experience(
         }
     }
 
-    // Run adaptation on the opcode LoRA layer
     let loss = {
         let lora_layers = engine.active_lora_mut();
         lora_layers.iter_mut()

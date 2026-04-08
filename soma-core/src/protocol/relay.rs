@@ -5,7 +5,8 @@
 
 use super::signal::Signal;
 
-/// Check if a signal should be relayed (recipient != us).
+/// Returns `true` if the signal has a `recipient` metadata field that
+/// differs from `our_id`, indicating it should be forwarded.
 pub fn should_relay(signal: &Signal, our_id: &str) -> bool {
     let recipient = signal
         .metadata
@@ -15,17 +16,18 @@ pub fn should_relay(signal: &Signal, our_id: &str) -> bool {
     !recipient.is_empty() && recipient != our_id
 }
 
-/// Prepare a signal for relay: increment `hop_count`, append to `relay_path`.
+/// Prepare a signal for relay by incrementing `hop_count` and appending
+/// `our_id` to `relay_path`.
 ///
-/// Returns an error if max hops would be exceeded or if a relay loop
-/// is detected (`our_id` already appears in the `relay_path`).
+/// Two safety checks prevent unbounded forwarding:
+/// - **Max hops**: fails if `hop_count >= max_hops` (default 3).
+/// - **Loop detection**: fails if `our_id` already appears in `relay_path`.
 pub fn prepare_relay(signal: &mut Signal, our_id: &str) -> Result<(), &'static str> {
     let metadata = signal
         .metadata
         .as_object_mut()
         .ok_or("invalid metadata")?;
 
-    // Check max_hops
     #[allow(clippy::cast_possible_truncation)] // hop counts are small values
     let max_hops = metadata
         .get("max_hops")
@@ -41,7 +43,6 @@ pub fn prepare_relay(signal: &mut Signal, our_id: &str) -> Result<(), &'static s
         return Err("max hops exceeded");
     }
 
-    // Check loop prevention
     let relay_path = metadata
         .get("relay_path")
         .and_then(|v| v.as_array())
@@ -56,7 +57,6 @@ pub fn prepare_relay(signal: &mut Signal, our_id: &str) -> Result<(), &'static s
         return Err("relay loop detected");
     }
 
-    // Update relay_path
     let mut new_path: Vec<serde_json::Value> = relay_path
         .iter()
         .map(|s| serde_json::Value::String(s.to_string()))
@@ -67,7 +67,6 @@ pub fn prepare_relay(signal: &mut Signal, our_id: &str) -> Result<(), &'static s
         serde_json::Value::Array(new_path),
     );
 
-    // Increment hop_count
     metadata.insert("hop_count".into(), serde_json::json!(hop_count + 1));
 
     Ok(())

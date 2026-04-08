@@ -1,11 +1,13 @@
-//! Built-in plugin: POSIX file/system operations via libc.
+//! Built-in POSIX plugin -- thin wrappers around libc and `std::fs` operations.
 //!
-//! One line per operation. Zero domain logic.
-//! The mind decides what to call. This plugin just executes.
+//! Provides 25 conventions (IDs 0-24): low-level fd-based file I/O via libc, directory
+//! traversal, system info queries, and high-level single-call filesystem operations.
+//! The Mind selects which conventions to call; this plugin just executes them.
 
 use super::interface::{Convention, PluginError, SomaPlugin, Value};
 use std::ffi::CString;
 
+/// Built-in plugin providing POSIX filesystem and system conventions.
 pub struct PosixPlugin {
     conventions: Vec<Convention>,
 }
@@ -13,13 +15,12 @@ pub struct PosixPlugin {
 impl PosixPlugin {
     pub fn new() -> Self {
         let conventions = vec![
-            // File operations — cleanup convention 4 (close_fd) for open handles
             conv(0,  "open_read",       "Open file for reading",
                 vec![arg("path", "string", true, "File path")],
-                "handle", 1, Some(4)),  // cleanup: close_fd
+                "handle", 1, Some(4)),
             conv(1,  "create_file",     "Create/truncate file for writing",
                 vec![arg("path", "string", true, "File path")],
-                "handle", 1, Some(4)),  // cleanup: close_fd
+                "handle", 1, Some(4)),
             conv(2,  "read_content",    "Read content from fd",
                 vec![arg("fd", "handle", true, "File descriptor")],
                 "string", 5, None),
@@ -30,10 +31,9 @@ impl PosixPlugin {
             conv(4,  "close_fd",        "Close file descriptor",
                 vec![arg("fd", "handle", true, "File descriptor")],
                 "int", 1, None),
-            // Directory operations — cleanup convention 7 (close_dir) for open handles
             conv(5,  "open_dir",        "Open directory",
                 vec![arg("path", "string", true, "Directory path")],
-                "handle", 1, Some(7)),  // cleanup: close_dir
+                "handle", 1, Some(7)),
             conv(6,  "read_dir_entries","Read directory entries",
                 vec![arg("dirp", "handle", true, "Directory handle")],
                 "list", 10, None),
@@ -62,7 +62,6 @@ impl PosixPlugin {
                 vec![], "string", 1, None),
             conv(15, "get_uname",       "Get system info",
                 vec![], "map", 1, None),
-            // High-level filesystem operations (Catalog Section 4)
             conv(16, "read_file",       "Read entire file contents",
                 vec![arg("path", "string", true, "File path")],
                 "string", 10, None),
@@ -101,6 +100,7 @@ impl PosixPlugin {
     }
 }
 
+/// Build an `ArgSpec` from shorthand string type names.
 fn arg(name: &str, arg_type: &str, required: bool, desc: &str) -> super::interface::ArgSpec {
     use super::interface::ArgType;
     let at = match arg_type {
@@ -120,6 +120,8 @@ fn arg(name: &str, arg_type: &str, required: bool, desc: &str) -> super::interfa
     }
 }
 
+/// Build a `Convention` descriptor. `cleanup` optionally references the convention ID
+/// that releases resources produced by this convention (e.g., `close_fd` for `open_read`).
 fn conv(id: u32, name: &str, desc: &str, args: Vec<super::interface::ArgSpec>, ret: &str,
         latency_ms: u32, cleanup: Option<u32>) -> Convention {
     use super::interface::{ReturnSpec, CleanupSpec, SideEffect};
@@ -133,12 +135,11 @@ fn conv(id: u32, name: &str, desc: &str, args: Vec<super::interface::ArgSpec>, r
         "bytes" => ReturnSpec::Value("bytes".into()),
         _ => ReturnSpec::Void,
     };
-    // Conventions with side effects: create/delete/rename/write/mkdir + high-level write/copy/append
+    // Mutating conventions: create/delete/rename/write/mkdir + high-level variants
     let side_effects = match id {
         1 | 3 | 8 | 9 | 10 | 17 | 19 | 21 | 23 | 24 => vec![SideEffect("filesystem".into())],
         _ => vec![],
     };
-    // Deterministic: stat, access, cwd, uname are deterministic-ish; reads depend on state
     let is_deterministic = matches!(id, 11 | 13);
     Convention {
         id,
@@ -155,6 +156,7 @@ fn conv(id: u32, name: &str, desc: &str, args: Vec<super::interface::ArgSpec>, r
     }
 }
 
+/// Extract a path string from a Value and convert to `CString` for libc calls.
 fn to_cstring(val: &Value) -> Result<CString, PluginError> {
     match val {
         Value::String(s) => CString::new(s.as_bytes())
@@ -163,6 +165,7 @@ fn to_cstring(val: &Value) -> Result<CString, PluginError> {
     }
 }
 
+/// Extract a file descriptor from a Handle or Int value.
 #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // fd values fit in i32
 fn get_fd(val: &Value) -> Result<i32, PluginError> {
     match val {
@@ -327,7 +330,6 @@ impl SomaPlugin for PosixPlugin {
             14 => {
                 let mut tv: libc::timeval = unsafe { std::mem::zeroed() };
                 unsafe { libc::gettimeofday(&raw mut tv, std::ptr::null_mut()); }
-                // Format as ISO timestamp
                 let secs = tv.tv_sec;
                 Ok(Value::String(format!("timestamp:{secs}")))
             }
@@ -344,15 +346,14 @@ impl SomaPlugin for PosixPlugin {
                     ("release".to_string(), Value::String(release)),
                 ])))
             }
-            // High-level filesystem operations (Catalog Section 4)
-            // read_file — single-call: reads entire file to string
+            // read_file
             16 => {
                 let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
                 let content = std::fs::read_to_string(&path)
                     .map_err(|e| PluginError::NotFound(format!("read_file failed: {e}")))?;
                 Ok(Value::String(content))
             }
-            // write_file — single-call: create/overwrite file
+            // write_file
             17 => {
                 let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
                 let content = match &args[1] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
@@ -360,7 +361,7 @@ impl SomaPlugin for PosixPlugin {
                     .map_err(|e| PluginError::Failed(format!("write_file failed: {e}")))?;
                 Ok(Value::Null)
             }
-            // list_dir_simple — single-call: list directory entries sorted
+            // list_dir_simple
             18 => {
                 let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
                 let mut entries = Vec::new();
@@ -371,14 +372,14 @@ impl SomaPlugin for PosixPlugin {
                 entries.sort_by(|a, b| format!("{a}").cmp(&format!("{b}")));
                 Ok(Value::List(entries))
             }
-            // copy_file — single-call: copy file
+            // copy_file
             19 => {
                 let from = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
                 let to = match &args[1] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
                 std::fs::copy(&from, &to).map_err(|e| PluginError::Failed(format!("copy failed: {e}")))?;
                 Ok(Value::Null)
             }
-            // read_chunk — read N bytes from fd (low-level handle, high-level size)
+            // read_chunk
             20 => {
                 let fd = get_fd(&args[0])?;
                 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // size comes from user intent, validated
@@ -390,7 +391,7 @@ impl SomaPlugin for PosixPlugin {
                 buf.truncate(n as usize);
                 Ok(Value::Bytes(buf))
             }
-            // append_file — single-call: append to file (create if missing)
+            // append_file
             21 => {
                 use std::io::Write;
                 let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
@@ -401,14 +402,14 @@ impl SomaPlugin for PosixPlugin {
                     .map_err(|e| PluginError::Failed(format!("append write failed: {e}")))?;
                 Ok(Value::Null)
             }
-            // read_bytes — single-call: read entire file as raw bytes
+            // read_bytes
             22 => {
                 let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
                 let bytes = std::fs::read(&path)
                     .map_err(|e| PluginError::NotFound(format!("read_bytes failed: {e}")))?;
                 Ok(Value::Bytes(bytes))
             }
-            // write_bytes — single-call: write raw bytes to file
+            // write_bytes
             23 => {
                 let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
                 let data = match &args[1] { Value::Bytes(b) => b.clone(), _ => return Err(PluginError::InvalidArg("expected bytes".into())) };
@@ -416,7 +417,7 @@ impl SomaPlugin for PosixPlugin {
                     .map_err(|e| PluginError::Failed(format!("write_bytes failed: {e}")))?;
                 Ok(Value::Null)
             }
-            // write_chunk — write bytes to open fd
+            // write_chunk
             24 => {
                 let fd = get_fd(&args[0])?;
                 let data = match &args[1] { Value::Bytes(b) => b.clone(), _ => return Err(PluginError::InvalidArg("expected bytes".into())) };

@@ -8,16 +8,23 @@ use std::collections::HashMap;
 
 use super::signal::{Signal, SignalType};
 
-/// Information about a known peer.
+/// Information about a known peer in the SOMA network.
 #[derive(Debug, Clone)]
 pub struct PeerInfo {
+    /// Unique identifier (same as `sender_id` in DISCOVER signals).
     pub name: String,
+    /// Network address (`host:port`) for direct connection.
     pub addr: String,
+    /// Plugin names this peer advertises.
     pub plugins: Vec<String>,
+    /// Convention names available on this peer.
     pub conventions: Vec<String>,
+    /// Current load factor (0.0 = idle, higher = busier) for routing decisions.
     pub load: f64,
+    /// Maximum concurrent requests this peer can handle.
     #[allow(dead_code)] // Spec feature for peer load balancing
     pub capacity: u64,
+    /// Unix timestamp of last DISCOVER or heartbeat from this peer.
     #[allow(dead_code)] // Spec feature for peer health tracking
     pub last_seen: u64,
 }
@@ -37,8 +44,10 @@ impl PeerInfo {
     }
 }
 
-/// Registry of known SOMA peers.
+/// Registry of known SOMA peers, populated from static config and DISCOVER signals.
 pub struct PeerRegistry {
+    /// Peer name -> info. Keyed by `sender_id` for discovered peers, or by
+    /// configured name for static peers.
     peers: HashMap<String, PeerInfo>,
 }
 
@@ -66,7 +75,9 @@ impl PeerRegistry {
         }
     }
 
-    /// Register or update a discovered peer from a DISCOVER signal.
+    /// Register or update a peer from an incoming DISCOVER signal.
+    /// Extracts address, plugins, conventions, load, and capacity from the
+    /// JSON payload and sets `last_seen` to now.
     pub fn register_from_discover(&mut self, signal: &Signal) {
         let sender = signal.sender_id.clone();
         let now = std::time::SystemTime::now()
@@ -74,7 +85,6 @@ impl PeerRegistry {
             .unwrap_or_default()
             .as_secs();
 
-        // Extract payload data (address, plugins, conventions, load)
         let payload: serde_json::Value = if signal.payload.is_empty() {
             serde_json::Value::Null
         } else {
@@ -170,7 +180,8 @@ impl PeerRegistry {
         }
     }
 
-    /// Create a DISCOVER signal announcing this SOMA's presence.
+    /// Create a DISCOVER signal announcing this SOMA's presence on the network.
+    /// The signal includes a TTL of 3 for chemical-gradient forwarding (Spec 7.1).
     #[allow(dead_code)] // Spec feature for peer discovery
     pub fn create_discover_signal(
         soma_id: &str,
@@ -191,7 +202,6 @@ impl PeerRegistry {
         }))
         .unwrap_or_default();
 
-        // Default TTL for discovery forwarding (chemical gradient, Spec 7.1)
         if let serde_json::Value::Object(ref mut map) = signal.metadata {
             map.insert("ttl".to_string(), serde_json::json!(3));
         }
@@ -222,8 +232,9 @@ impl PeerRegistry {
         signal
     }
 
-    /// Handle a `PEER_QUERY` signal: find peers matching the requested plugin.
-    /// Returns a `PEER_LIST` signal.
+    /// Handle a `PEER_QUERY` signal by finding peers whose plugin list contains
+    /// the requested `need_plugin`. Returns a `PEER_LIST` signal with matches.
+    /// If `need_plugin` is empty, all known peers are returned.
     pub fn handle_peer_query(&self, query: &Signal, soma_id: &str) -> Signal {
         let query_payload: serde_json::Value = if query.payload.is_empty() {
             serde_json::Value::Null
@@ -264,9 +275,9 @@ impl PeerRegistry {
     }
 }
 
-/// Check if a DISCOVER signal should be forwarded (TTL > 0).
-/// Returns a new signal with decremented TTL for forwarding, or None.
-/// Implements the chemical-gradient decay from Spec Section 7.1.
+/// Prepare a DISCOVER signal for TTL-based forwarding (chemical-gradient decay,
+/// Spec 7.1). Returns `None` if TTL has reached 0 or the signal originated from
+/// `our_id`. Appends `our_id` to `forward_path` for loop/path tracking.
 #[allow(dead_code)] // Spec feature for discovery forwarding
 pub fn prepare_forward_discover(signal: &Signal, our_id: &str) -> Option<Signal> {
     let ttl = signal
@@ -279,7 +290,6 @@ pub fn prepare_forward_discover(signal: &Signal, our_id: &str) -> Option<Signal>
         return None;
     }
 
-    // Don't forward our own discoveries
     if signal.sender_id == our_id {
         return None;
     }
@@ -287,7 +297,6 @@ pub fn prepare_forward_discover(signal: &Signal, our_id: &str) -> Option<Signal>
     let mut forwarded = signal.clone();
     if let serde_json::Value::Object(ref mut map) = forwarded.metadata {
         map.insert("ttl".to_string(), serde_json::json!(ttl - 1));
-        // Add forwarded_by to track gradient path
         let mut path: Vec<String> = map
             .get("forward_path")
             .and_then(|v| serde_json::from_value(v.clone()).ok())

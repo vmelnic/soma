@@ -1,11 +1,15 @@
-//! SOMA Configuration system (Spec Section 15).
-//! TOML-based configuration with sensible defaults.
+//! SOMA configuration system (Spec Section 15).
+//!
+//! Loads configuration from a TOML file with sensible defaults for all fields.
+//! Override order: compiled defaults < `soma.toml` < environment variables (`SOMA_*`) < CLI flags.
+//! Invalid values are clamped and logged rather than causing startup failure.
 
 use anyhow::Result;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Default instance ID derived from the machine hostname.
 fn default_id() -> String {
     let hostname = hostname::get().map_or_else(|_| "unknown".to_string(), |h| h.to_string_lossy().to_string());
     format!("soma-{hostname}")
@@ -155,6 +159,7 @@ const fn default_max_executions() -> usize {
     500
 }
 
+/// Top-level configuration for a SOMA instance, mapping 1:1 to `soma.toml` sections.
 #[derive(Debug, Clone, Deserialize)]
 #[derive(Default)]
 pub struct SomaConfig {
@@ -172,7 +177,7 @@ pub struct SomaConfig {
     pub mcp: McpSection,
     #[serde(default)]
     pub security: SecuritySection,
-    /// Per-plugin configuration sections: [plugins.postgres], [plugins.redis], etc.
+    /// Per-plugin configuration passed through as opaque TOML: `[plugins.postgres]`, `[plugins.redis]`, etc.
     #[serde(default)]
     pub plugins: HashMap<String, toml::Value>,
 }
@@ -181,6 +186,7 @@ fn default_trace_verbosity() -> String {
     "normal".to_string()
 }
 
+/// General instance identity and logging settings (`[soma]` section).
 #[derive(Debug, Clone, Deserialize)]
 pub struct SomaSection {
     #[serde(default = "default_id")]
@@ -199,6 +205,7 @@ const fn default_temperature() -> f32 {
     1.0
 }
 
+/// Neural inference engine settings (`[mind]` section).
 #[derive(Debug, Clone, Deserialize)]
 pub struct MindSection {
     #[serde(default = "default_backend")]
@@ -220,6 +227,7 @@ pub struct MindSection {
     pub lora: LoraConfig,
 }
 
+/// `LoRA` (Low-Rank Adaptation) parameters for runtime model adaptation (`[mind.lora]`).
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)] // Spec config fields: Section 15.1
 pub struct LoraConfig {
@@ -292,6 +300,7 @@ pub struct EncryptionConfig {
 }
 
 
+/// Checkpoint and experience buffer settings (`[memory]` section).
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)] // Spec config fields: Section 15.1
 pub struct MemorySection {
@@ -309,6 +318,7 @@ pub struct MemorySection {
     pub consolidation: ConsolidationConfig,
 }
 
+/// Synaptic protocol (SOMA-to-SOMA networking) settings (`[protocol]` section).
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)] // Spec config fields: Section 15.1
 pub struct ProtocolSection {
@@ -330,6 +340,7 @@ pub struct ProtocolSection {
     pub keepalive_interval_secs: u64,
 }
 
+/// Concurrency and memory limits (`[resources]` section).
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code, clippy::struct_field_names)] // Spec config fields: Section 15.1; all fields share "max" prefix by design
 pub struct ResourceSection {
@@ -576,12 +587,15 @@ impl SomaConfig {
     }
 }
 
-/// Helper to get hostname, kept simple for cross-platform.
+/// Hostname retrieval via libc. Used only for the default instance ID.
 mod hostname {
     use std::ffi::OsString;
 
+    /// Calls `gethostname(2)` and returns the result as an `OsString`.
+    /// Buffer is 256 bytes, which covers `HOST_NAME_MAX` on all supported platforms.
     pub fn get() -> Result<OsString, std::io::Error> {
         let mut buf = vec![0u8; 256];
+        // SAFETY: buf is a valid, mutable, properly-sized buffer for gethostname.
         let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast::<i8>(), buf.len()) };
         if rc != 0 {
             return Err(std::io::Error::last_os_error());

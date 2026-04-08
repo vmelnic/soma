@@ -405,7 +405,7 @@ soma [OPTIONS]
 ```
 
 There is no `--repl` flag. SOMA does not have an interactive shell. Humans interact
-through an LLM connected via MCP (per 09_CONVERSATIONAL_INTERACTION.md).
+through an LLM connected via MCP (see [MCP Interface](mcp-interface.md)).
 
 ### Configuration
 
@@ -416,6 +416,30 @@ Key environment variables:
 - `SOMA_LOG_JSON=1` (structured JSON logging)
 - `SOMA_MIND_TEMPERATURE` (inference temperature)
 - `SOMA_PROTOCOL_BIND` (Synaptic Protocol address)
+
+---
+
+## Error Type System
+
+All subsystem errors fold into a single `SomaError` enum (defined in `errors.rs`,
+per Whitepaper Section 11.3). This provides structured context for diagnostics,
+MCP error responses, and retry decisions.
+
+| Variant          | Covers                                                     |
+|------------------|------------------------------------------------------------|
+| `Inference`      | Model load, tokenization, decoding failures                |
+| `Plugin`         | Plugin execution failure (inline fields: plugin, message, retryable, step_index, convention) |
+| `PluginDetailed` | Plugin failure carrying a `PluginErrorDetail` struct       |
+| `Protocol`       | Synaptic Protocol connection, codec, routing errors        |
+| `Resource`       | Concurrency, memory, or plugin count limits exceeded       |
+| `Convention`     | Referenced convention does not exist in any loaded plugin   |
+| `Mcp`            | JSON-RPC server errors (auth, tool dispatch, serialization)|
+| `State`          | Decision log or execution history persistence errors       |
+| `Auth`           | Authentication or authorization failure                    |
+| `Other`          | Catch-all for external crate errors (via `anyhow`)         |
+
+Only `Plugin` and `PluginDetailed` carry a `retryable` flag. All other variants
+are non-retryable by default. `SomaError::is_retryable()` checks this.
 
 ---
 
@@ -468,6 +492,42 @@ with reduced capabilities. Cleanup conventions handle resource leaks.
 ```
 
 On embedded: save LoRA to flash with double-buffer for crash safety.
+
+---
+
+## Metrics and Observability
+
+`SomaMetrics` (in `metrics/mod.rs`, per Whitepaper Sections 11.5 and 18.4) provides
+20+ atomic counters exposed as both Prometheus text and JSON. All counters use
+`AtomicU64` with relaxed ordering for lock-free concurrent updates.
+
+| Metric                              | Type    | Description                          |
+|-------------------------------------|---------|--------------------------------------|
+| `soma_inferences_total`             | counter | Total inference requests              |
+| `soma_inferences_success`           | counter | Successful inferences                 |
+| `soma_inferences_failed`            | counter | Failed inferences                     |
+| `soma_inference_duration_sum_ms`    | counter | Cumulative inference duration (ms)    |
+| `soma_inference_confidence_avg`     | gauge   | Average inference confidence (0..1)   |
+| `soma_programs_executed`            | counter | Total programs executed                |
+| `soma_program_steps_executed`       | counter | Total program steps executed           |
+| `soma_plugin_calls_total`           | counter | Total plugin convention calls          |
+| `soma_plugin_errors_total`          | counter | Failed plugin calls                    |
+| `soma_plugin_retries`              | counter | Plugin call retries                    |
+| `soma_plugin_duration_sum_ms`       | counter | Cumulative plugin call duration (ms)   |
+| `soma_experience_buffer_size`       | gauge   | Current experience buffer entries      |
+| `soma_adaptations_total`            | counter | Total LoRA adaptations                 |
+| `soma_checkpoints_saved`            | counter | Total checkpoints saved                |
+| `soma_memory_rss_bytes`             | gauge   | Current resident set size (bytes)      |
+| `soma_lora_magnitude`               | gauge   | Current LoRA adapter magnitude         |
+| `soma_protocol_connections_active`  | gauge   | Active Synaptic Protocol connections   |
+| `soma_protocol_signals_sent`        | counter | Total signals sent                     |
+| `soma_protocol_signals_received`    | counter | Total signals received                 |
+| `soma_protocol_bytes_transferred`   | counter | Total bytes transferred                |
+| `soma_uptime_seconds`               | gauge   | Seconds since instance started         |
+
+Per-plugin metrics (calls, errors, duration) are tracked via `DashMap<String, PluginMetrics>`
+and emitted with a `{plugin="name"}` label. JSON exposition groups metrics by
+subsystem (inference, programs, plugins, memory, adaptation, protocol).
 
 ---
 
@@ -527,4 +587,4 @@ for contributors to understand.
 | **Synchronous postgres via `block_on()`** | The `SomaPlugin` trait is synchronous. Postgres plugin uses `block_on()` for `tokio-postgres` inside the sync interface. Connection pooled and cached. |
 | **BPE tokenizer in Rust** | Auto-detected from `tokenizer.json` format. Handles OOV, SQL, URLs. Character-level fallback for unknown subwords. |
 | **MCP is core, not a plugin** | MCP Server runs alongside Synaptic Protocol. Without MCP, no LLM can connect. Too critical to be optional. |
-| **No REPL** | Per 09_CONVERSATIONAL_INTERACTION.md. Humans interact through LLMs via MCP. SOMA does not converse. |
+| **No REPL** | Humans interact through LLMs via MCP (see [MCP Interface](mcp-interface.md)). SOMA does not converse. |

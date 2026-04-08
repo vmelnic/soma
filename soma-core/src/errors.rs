@@ -1,10 +1,11 @@
-//! SOMA error types (Whitepaper Section 11.3).
+//! SOMA error taxonomy (Whitepaper Section 11.3).
+//!
+//! Every subsystem error folds into [`SomaError`], which provides structured
+//! context for diagnostics, MCP error responses, and retry decisions.
 
 use thiserror::Error;
 
-/// Detailed plugin error information for rich error reporting.
-/// Used by the `SomaError::PluginDetailed` variant, which carries full
-/// context about what went wrong, where, and whether a retry might help.
+/// Structured plugin error with enough context for diagnostics and retry logic.
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // Spec feature: Section 11.3 rich error reporting
 pub struct PluginErrorDetail {
@@ -36,12 +37,19 @@ impl std::fmt::Display for PluginErrorDetail {
     }
 }
 
+/// Unified error type spanning all SOMA subsystems.
+///
+/// Variants map to the error categories in Spec Section 11.3.
+/// Only `Plugin` and `PluginDetailed` carry a `retryable` flag;
+/// all other variants are treated as non-retryable by default.
 #[derive(Error, Debug)]
 #[allow(dead_code)] // Spec feature: Section 11.3 error taxonomy
 pub enum SomaError {
+    /// Mind engine inference failure (model load, tokenization, decoding).
     #[error("inference error: {0}")]
     Inference(String),
 
+    /// Plugin execution failure with inline context fields.
     #[error("plugin error in {plugin}: {message}")]
     Plugin {
         plugin: String,
@@ -51,28 +59,35 @@ pub enum SomaError {
         convention: Option<String>,
     },
 
-    /// Rich plugin error with full context (structured alternative to Plugin).
+    /// Plugin execution failure carrying a [`PluginErrorDetail`] struct.
     #[error("plugin error: {0}")]
     PluginDetailed(PluginErrorDetail),
 
+    /// Synaptic protocol failure (connection, codec, routing).
     #[error("protocol error: {0}")]
     Protocol(String),
 
+    /// Resource limit exceeded (concurrency, memory, plugin count).
     #[error("resource exhausted: {0}")]
     Resource(String),
 
+    /// Referenced convention does not exist in any loaded plugin.
     #[error("convention not found: {0}")]
     Convention(String),
 
+    /// MCP JSON-RPC server error (auth, tool dispatch, serialization).
     #[error("MCP error: {0}")]
     Mcp(String),
 
+    /// State subsystem error (decision log, execution history persistence).
     #[error("state error: {0}")]
     State(String),
 
+    /// Authentication or authorization failure.
     #[error("auth error: {0}")]
     Auth(String),
 
+    /// Catch-all for errors from external crates via `anyhow`.
     #[error("{0}")]
     Other(#[from] anyhow::Error),
 }

@@ -1,5 +1,17 @@
-//! Synaptic Protocol v2 client — binary wire format with handshake
-//! and auto-reconnect with exponential backoff (Spec Sections 12, 14).
+//! Synaptic Protocol v2 client (Spec Sections 12, 14).
+//!
+//! Provides both one-shot and persistent connection modes for
+//! inter-SOMA communication over the binary wire format:
+//!
+//! - **One-shot**: [`SynapseClient::send`] connects, handshakes, sends a single
+//!   signal, reads the response, and disconnects.
+//! - **Persistent**: [`SynapseClient::connect`] / [`SynapseClient::connect_with_retry`]
+//!   establish a long-lived connection with auto-reconnect and subscription replay.
+//!
+//! Auto-reconnect uses a graduated backoff schedule (100 ms, 500 ms, 2 s, 5 s,
+//! then exponential doubling capped at 60 s). On successful reconnect, all
+//! tracked subscriptions are automatically replayed with their last-seen
+//! sequence numbers so the peer can resume delivery without data loss.
 
 use anyhow::{bail, Result};
 use std::sync::Arc;
@@ -11,8 +23,7 @@ use super::router::SignalRouter;
 use super::signal::{Signal, SignalType};
 
 #[allow(dead_code)] // Spec Section 14.2 — used by connect_with_retry
-/// Backoff schedule for auto-reconnect (Spec Section 14.2):
-/// 100ms, 500ms, 2s, 5s, then exponential up to 60s.
+/// Fixed portion of the backoff schedule; attempts beyond this use exponential doubling.
 const BACKOFF_SCHEDULE: &[Duration] = &[
     Duration::from_millis(100),
     Duration::from_millis(500),
@@ -20,32 +31,45 @@ const BACKOFF_SCHEDULE: &[Duration] = &[
     Duration::from_secs(5),
 ];
 #[allow(dead_code)] // Spec Section 14.2 — used by connect_with_retry
+/// Upper bound for the exponential portion of the backoff.
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 
-/// Record of an active subscription, kept for replay on reconnect (Section 14.3).
+/// Snapshot of an active subscription, kept so it can be replayed on reconnect (Spec Section 14.3).
+///
+/// `last_seen_sequence` is updated as signals arrive, allowing the server
+/// to resume delivery from the correct point after a reconnection.
 #[derive(Clone)]
 pub struct SubscriptionRecord {
     pub topic: String,
     pub channel_id: u32,
+    /// If `true`, the server retains messages while the client is disconnected.
     pub durable: bool,
+    /// Sequence number of the last signal received on this topic.
     pub last_seen_sequence: Option<u32>,
 }
 
-/// Client for sending signals to peer SOMA nodes using the binary
-/// Synaptic Protocol v2 wire format.
+/// Client for sending signals to peer SOMA nodes over the Synaptic Protocol v2 wire format.
+///
+/// Holds connection-independent state (identity, capabilities, subscription
+/// tracking, session token) that persists across reconnections.
 pub struct SynapseClient {
+    /// This node's SOMA identifier, sent during handshake.
     pub local_id: String,
+    /// Protocol capabilities advertised during handshake (e.g. "streaming", "chunked").
     pub capabilities: Vec<String>,
+    /// Plugin names advertised during handshake.
     pub plugins: Vec<String>,
+    /// Maximum signal payload size in bytes (default 10 MiB).
     pub max_signal_size: u32,
-    /// Active subscriptions for replay on reconnect (Section 14.3).
+    /// Subscriptions to replay after reconnect.
     active_subscriptions: Vec<SubscriptionRecord>,
-    /// Session token from last successful handshake, carried forward on reconnect (Section 14.5).
+    /// Session token from the last successful handshake, carried forward on reconnect
+    /// to allow the server to restore session state without a full re-handshake.
     session_token: Option<String>,
 }
 
 impl SynapseClient {
-    /// Create a new client with the given SOMA ID.
+    /// Create a new client with the given SOMA node ID and default capabilities.
     pub fn new(local_id: String) -> Self {
         Self {
             local_id,
@@ -57,7 +81,10 @@ impl SynapseClient {
         }
     }
 
-    /// Connect to a peer, perform handshake, and return the connection.
+    /// Connect to a peer via TCP, perform the binary handshake, and return the connection.
+    ///
+    /// If a session token exists from a prior connection, it is sent to
+    /// the server during handshake so session state can be restored.
     pub async fn connect(&mut self, addr: &str) -> Result<Arc<SynapseConnection>> {
         let stream = TcpStream::connect(addr).await?;
         let (reader, writer) = stream.into_split();
@@ -70,17 +97,17 @@ impl SynapseClient {
             self.max_signal_size,
         ));
 
-        // Carry forward session token from previous connection (Section 14.5)
+        // Carry forward session token so the server can restore prior state
         if let Some(ref token) = self.session_token {
             *conn.session_token.lock().await = token.clone();
         }
 
-        // Perform client-side handshake
+        // Exchange capabilities and establish session
         let cap_refs: Vec<&str> = self.capabilities.iter().map(std::string::String::as_str).collect();
         let plug_refs: Vec<&str> = self.plugins.iter().map(std::string::String::as_str).collect();
         let peer_id = conn.client_handshake(&cap_refs, &plug_refs).await?;
 
-        // Store the session token received from the server
+        // Persist the server-issued token for future reconnects
         let new_token = conn.session_token.lock().await.clone();
         if !new_token.is_empty() {
             self.session_token = Some(new_token);
@@ -96,15 +123,17 @@ impl SynapseClient {
     }
 
     #[allow(dead_code)] // Spec Section 14.2 — auto-reconnect with backoff
-    /// Connect with auto-reconnect. Retries with exponential backoff
-    /// per Spec Section 14.2. Returns the connection on success.
+    /// Connect with unlimited retries using graduated exponential backoff.
+    ///
+    /// The first four attempts use the fixed [`BACKOFF_SCHEDULE`]; subsequent
+    /// attempts double from 5 s up to [`MAX_BACKOFF`] (60 s). On success,
+    /// any tracked subscriptions are automatically replayed.
     pub async fn connect_with_retry(&mut self, addr: &str) -> Result<Arc<SynapseConnection>> {
         let mut attempt = 0u32;
 
         loop {
             match self.connect(addr).await {
                 Ok(conn) => {
-                    // Replay subscriptions on reconnect (Spec Section 14.3)
                     if !self.active_subscriptions.is_empty() {
                         self.replay_subscriptions(&conn).await?;
                     }
@@ -115,7 +144,7 @@ impl SynapseClient {
                     let delay = if (attempt as usize) < BACKOFF_SCHEDULE.len() {
                         BACKOFF_SCHEDULE[attempt as usize]
                     } else {
-                        // Exponential backoff: 5s * 2^(attempt - 3), capped at 60s
+                        // Exponential: 5 s * 2^(attempt - schedule_len), capped at MAX_BACKOFF
                         #[allow(clippy::cast_possible_truncation)] // schedule len fits in u32
                         let extra = attempt - BACKOFF_SCHEDULE.len() as u32;
                         let secs = 5u64.saturating_mul(1u64 << extra.min(10));
@@ -139,18 +168,14 @@ impl SynapseClient {
         }
     }
 
-    /// Send a single signal to a peer (connect, handshake, send, receive response, disconnect).
-    /// This is the simple one-shot API for sending intents.
+    /// One-shot send: connect, handshake, send a signal, read one response, disconnect.
     pub async fn send(addr: &str, local_id: &str, signal: &Signal) -> Result<Option<Signal>> {
         let mut client = Self::new(local_id.to_string());
         let conn = client.connect(addr).await?;
 
-        // Send the signal
         conn.send(signal).await?;
 
-        // Try to read a response
         if let Ok(response) = conn.recv().await {
-            // Send CLOSE
             let close = Signal::close(local_id);
             let _ = conn.send(&close).await;
             conn.mark_dead();
@@ -161,7 +186,7 @@ impl SynapseClient {
         }
     }
 
-    /// Send a ping to a peer and return whether it responded with a Pong.
+    /// Send a Ping and return `true` if the peer responds with a Pong.
     #[allow(dead_code)] // Spec feature for peer health checking
     pub async fn ping(addr: &str, sender: &str) -> Result<bool> {
         let mut signal = Signal::ping(sender);
@@ -172,8 +197,7 @@ impl SynapseClient {
         }
     }
 
-    /// Send an intent to a peer and wait for the response with timeout (Section 14.3).
-    /// Uses the `SignalRouter` for request-response correlation by sequence number.
+    /// Send an intent and wait up to 30 s for a correlated response via the [`SignalRouter`].
     #[allow(dead_code)] // Spec feature for correlated intent-result
     pub async fn send_intent_and_wait(
         addr: &str,
@@ -184,18 +208,17 @@ impl SynapseClient {
         let mut intent = Signal::new(SignalType::Intent, sender.to_string());
         intent.payload = text.as_bytes().to_vec();
 
-        // Register pending before sending
+        // Register the expected response before sending to avoid races
         let sequence = intent.sequence;
         let rx = router.register_pending(sequence)
             .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-        // Send the intent and deliver the response to the router
+        // One-shot send; response is routed by sequence number
         let response = Self::send(addr, sender, &intent).await?;
         if let Some(resp) = response {
             router.deliver_response(sequence, resp);
         }
 
-        // Wait for correlated response
         match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
             Ok(Ok(response)) => Ok(response),
             Ok(Err(_)) => bail!("Response channel closed"),
@@ -206,7 +229,7 @@ impl SynapseClient {
         }
     }
 
-    /// Send an Intent signal and wait for the Result/Error response.
+    /// One-shot intent send without router-based correlation.
     #[allow(dead_code)] // Spec feature for inter-SOMA communication
     pub async fn send_intent(
         addr: &str,
@@ -223,7 +246,7 @@ impl SynapseClient {
         }
     }
 
-    /// Track a subscription for replay on reconnect.
+    /// Register a subscription so it will be replayed on reconnect.
     #[allow(dead_code)] // Spec feature for subscription replay
     pub fn track_subscription(&mut self, topic: String, channel_id: u32, durable: bool) {
         self.active_subscriptions.push(SubscriptionRecord {
@@ -234,15 +257,13 @@ impl SynapseClient {
         });
     }
 
-    /// Remove a tracked subscription.
+    /// Stop tracking a subscription (it will not be replayed on reconnect).
     #[allow(dead_code)] // Spec feature for subscription replay
     pub fn untrack_subscription(&mut self, topic: &str) {
         self.active_subscriptions.retain(|s| s.topic != topic);
     }
 
-    /// Update the last-seen sequence number for a tracked subscription.
-    /// Should be called when a signal is received on a subscribed topic,
-    /// so that replay on reconnect can resume from the correct point.
+    /// Advance the last-seen sequence for a subscription so reconnect replay resumes correctly.
     #[allow(dead_code)] // Spec feature for subscription replay
     pub fn update_subscription_sequence(&mut self, topic: &str, sequence: u32) {
         if let Some(sub) = self.active_subscriptions.iter_mut().find(|s| s.topic == topic) {
@@ -250,7 +271,10 @@ impl SynapseClient {
         }
     }
 
-    /// Replay all tracked subscriptions on a connection (after reconnect).
+    /// Re-subscribe to all tracked topics on a freshly established connection.
+    ///
+    /// Each subscription signal includes `last_seen_sequence` (when available)
+    /// so the server can catch up the client from the correct point.
     #[allow(dead_code)] // Spec feature for subscription replay
     pub async fn replay_subscriptions(&self, conn: &Arc<SynapseConnection>) -> Result<()> {
         for sub in &self.active_subscriptions {

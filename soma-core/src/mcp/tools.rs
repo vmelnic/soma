@@ -1,17 +1,21 @@
-//! MCP tool definitions — state tools and action tools (Whitepaper Section 8.1).
+//! MCP tool definitions and result types (Whitepaper Section 8.1).
 //!
-//! State tools (query what exists):
-//!   `soma.get_state`, `soma.get_plugins`, `soma.get_conventions`, `soma.get_health`,
-//!   `soma.get_recent_activity`, `soma.get_peers`, `soma.get_experience`,
-//!   `soma.get_checkpoints`, `soma.get_config`, `soma.get_decisions`
-//!
-//! Action tools (do things):
-//!   soma.intent, soma.checkpoint, `soma.record_decision`, soma.confirm
-//!   + every loaded plugin convention as an MCP tool
+//! Defines the schema for all tools exposed over the MCP interface:
+//! - **State tools** (read-only): `soma.get_state`, `soma.get_plugins`, `soma.get_conventions`,
+//!   `soma.get_health`, `soma.get_recent_activity`, `soma.get_peers`, `soma.get_experience`,
+//!   `soma.get_checkpoints`, `soma.get_config`, `soma.get_decisions`, `soma.get_metrics`,
+//!   `soma.get_schema`, `soma.get_business_rules`, `soma.get_render_state`
+//! - **Action tools** (side effects): `soma.intent`, `soma.checkpoint`, `soma.record_decision`,
+//!   `soma.confirm`, `soma.install_plugin`, `soma.restore_checkpoint`, `soma.shutdown`,
+//!   `soma.uninstall_plugin`, `soma.configure_plugin`, `soma.reload_design`,
+//!   `soma.render_view`, `soma.update_view`
+//! - **Plugin convention tools**: dynamically generated as `soma.{plugin}.{convention}`
+//!   from every loaded plugin's conventions (Section 12.2).
 
 use serde::{Deserialize, Serialize};
 
-/// MCP tool definition for tools/list response.
+/// An MCP tool definition, serialized in `tools/list` responses. Each tool has a name,
+/// human-readable description, and a JSON Schema describing its accepted arguments.
 #[derive(Debug, Clone, Serialize)]
 pub struct McpTool {
     pub name: String,
@@ -20,7 +24,8 @@ pub struct McpTool {
     pub input_schema: serde_json::Value,
 }
 
-/// MCP tool call result.
+/// Result of a `tools/call` invocation, returned as the JSON-RPC result payload.
+/// Contains one or more content blocks and an optional error flag.
 #[derive(Debug, Serialize)]
 pub struct McpToolResult {
     pub content: Vec<McpContent>,
@@ -28,6 +33,7 @@ pub struct McpToolResult {
     pub is_error: Option<bool>,
 }
 
+/// A single content block within an `McpToolResult`. Currently only `"text"` type is used.
 #[derive(Debug, Serialize)]
 pub struct McpContent {
     #[serde(rename = "type")]
@@ -36,6 +42,7 @@ pub struct McpContent {
 }
 
 impl McpToolResult {
+    /// Wrap a plain string as a successful text result.
     pub fn text(s: String) -> Self {
         Self {
             content: vec![McpContent {
@@ -46,11 +53,13 @@ impl McpToolResult {
         }
     }
 
+    /// Pretty-print a JSON value as a successful text result.
     #[allow(clippy::needless_pass_by_value)] // Ergonomic: callers pass json!() directly
     pub fn json(val: serde_json::Value) -> Self {
         Self::text(serde_json::to_string_pretty(&val).unwrap_or_default())
     }
 
+    /// Wrap an error message. Sets `is_error: true` so the LLM knows the call failed.
     pub fn error(msg: String) -> Self {
         Self {
             content: vec![McpContent {
@@ -62,13 +71,14 @@ impl McpToolResult {
     }
 }
 
-/// Build the list of all available MCP tools (state + action + plugin conventions).
-/// Takes namespaced conventions: Vec<(`plugin_name`, Convention)>.
+/// Build the complete MCP tool catalog: built-in state tools, built-in action tools,
+/// and one tool per loaded plugin convention (namespaced as `soma.{plugin}.{convention}`).
+///
+/// Called on every `tools/list` request. Plugin conventions are passed in as
+/// `(plugin_name, Convention)` pairs from `PluginManager::namespaced_conventions()`.
 #[allow(clippy::too_many_lines)] // Tool list is declarative; splitting would harm readability
 pub fn build_tool_list(conventions: &[(String, crate::plugin::interface::Convention)]) -> Vec<McpTool> {
     let mut tools = Vec::new();
-
-    // -- State tools --
 
     tools.push(McpTool {
         name: "soma.get_state".into(),
@@ -204,8 +214,6 @@ pub fn build_tool_list(conventions: &[(String, crate::plugin::interface::Convent
             "properties": {},
         }),
     });
-
-    // -- Action tools --
 
     tools.push(McpTool {
         name: "soma.intent".into(),
@@ -351,8 +359,7 @@ pub fn build_tool_list(conventions: &[(String, crate::plugin::interface::Convent
         }),
     });
 
-    // -- Plugin convention tools --
-    // Each loaded convention is exposed as soma.{plugin}.{convention} (Section 12.2)
+    // Generate one tool per loaded plugin convention, using ArgType::json_type() for schema mapping.
     for (plugin_name, conv) in conventions {
         let mut properties = serde_json::Map::new();
         let mut required = Vec::new();
@@ -382,10 +389,12 @@ pub fn build_tool_list(conventions: &[(String, crate::plugin::interface::Convent
     tools
 }
 
-/// Arguments for tools/call.
+/// Deserialized payload from a `tools/call` JSON-RPC request.
 #[derive(Debug, Deserialize)]
 pub struct ToolCallArgs {
+    /// Fully-qualified tool name, e.g. `"soma.get_state"` or `"soma.postgres.query"`.
     pub name: String,
+    /// Tool-specific arguments. May contain `_meta.auth_token` or `_token` for auth.
     #[serde(default)]
     pub arguments: serde_json::Value,
 }

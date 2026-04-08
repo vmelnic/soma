@@ -1,8 +1,15 @@
-//! Chunked transfer support for large file uploads (Spec Section 6.3).
+//! Resumable chunked file transfer (Spec Section 6.3).
 //!
-//! Manages `CHUNK_START` / `CHUNK_DATA` / `CHUNK_END` / `CHUNK_ACK` lifecycle,
-//! including resumption from the last acknowledged chunk and SHA-256
-//! verification on reassembly.
+//! Implements the `CHUNK_START` / `CHUNK_DATA` / `CHUNK_END` / `CHUNK_ACK`
+//! signal lifecycle for large payloads that exceed a single signal's size limit.
+//!
+//! Key properties:
+//! - **Resumable**: transfers can restart from the last acknowledged chunk via
+//!   the `resume_from` metadata field, avoiding full retransmission.
+//! - **Integrity-verified**: reassembled payloads are checked against a SHA-256
+//!   checksum (when provided in `CHUNK_START` metadata).
+//! - **Ordered reassembly**: chunks are stored by sequence number and
+//!   concatenated in order during finalization, regardless of arrival order.
 
 use std::collections::HashMap;
 
@@ -11,7 +18,7 @@ use sha2::{Digest, Sha256};
 
 use super::signal::{Signal, SignalType};
 
-/// State for a single in-progress chunked transfer.
+/// Tracks the state of a single in-progress chunked transfer.
 pub struct ChunkTransfer {
     #[allow(dead_code)] // Stored for transfer tracking
     pub channel_id: u32,
@@ -20,12 +27,15 @@ pub struct ChunkTransfer {
     #[allow(dead_code)] // Stored for transfer metadata
     pub chunk_size: u32,
     pub total_chunks: u32,
+    /// Expected SHA-256 hex digest for the reassembled payload (empty if not provided).
     pub checksum_sha256: String,
+    /// Received chunk data keyed by zero-based sequence number.
     pub received_chunks: HashMap<u32, Vec<u8>>,
+    /// Highest acknowledged sequence number (used for resume position).
     pub last_ack_seq: u32,
 }
 
-/// Manages all active chunked transfers, keyed by `channel_id`.
+/// Registry of active chunked transfers, keyed by `channel_id`.
 pub struct ChunkManager {
     active_transfers: HashMap<u32, ChunkTransfer>,
 }
@@ -37,11 +47,11 @@ impl ChunkManager {
         }
     }
 
-    /// Handle `CHUNK_START`: create a new transfer from the signal metadata.
+    /// Begin a new chunked transfer from `CHUNK_START` metadata.
     ///
-    /// If metadata contains `resume_from`, the transfer starts expecting
-    /// chunks from that sequence number onward (chunks below it are
-    /// assumed already received in a prior session and are not required).
+    /// If `resume_from` is present in the metadata, `last_ack_seq` is set to
+    /// `resume_from - 1` so the sender knows which chunks to skip. Chunks
+    /// below the resume point are assumed delivered in a prior session.
     #[allow(clippy::unnecessary_wraps)] // Result kept for future validation logic
     pub fn start_transfer(
         &mut self,
@@ -94,9 +104,7 @@ impl ChunkManager {
             last_ack_seq: 0,
         };
 
-        // If resuming, mark all chunks before resume_from as implicitly received
-        // (they won't actually be stored — finalize will only work if the caller
-        // re-provides them or the transfer is truly complete).
+        // Advance the ack cursor so the sender skips already-delivered chunks
         if resume_from > 0 {
             transfer.last_ack_seq = resume_from.saturating_sub(1);
         }
@@ -105,9 +113,9 @@ impl ChunkManager {
         Ok(())
     }
 
-    /// Handle `CHUNK_DATA`: store chunk data and return a `CHUNK_ACK` signal.
+    /// Store a received chunk and return a `CHUNK_ACK` signal for the sender.
     ///
-    /// Returns `None` if the `channel_id` has no active transfer.
+    /// Returns `None` if no transfer is active on this `channel_id`.
     pub fn receive_chunk(
         &mut self,
         channel_id: u32,
@@ -127,16 +135,15 @@ impl ChunkManager {
         Some(ack)
     }
 
-    /// Handle `CHUNK_END`: verify all chunks received, reassemble in sequence
-    /// order, verify SHA-256 checksum (if provided), and return the complete
-    /// payload.
+    /// Finalize a transfer on `CHUNK_END`: verify completeness, reassemble
+    /// chunks in sequence order, and validate the SHA-256 checksum if one
+    /// was provided in the `CHUNK_START` metadata.
     pub fn finalize_transfer(&mut self, channel_id: u32) -> Result<Vec<u8>> {
         let Some(transfer) = self.active_transfers.remove(&channel_id) else {
             bail!("No active transfer on channel {channel_id}");
         };
 
-        // Determine expected chunk count from the map itself if total_chunks
-        // was not specified in the CHUNK_START metadata.
+        // Fall back to highest received sequence + 1 when total_chunks is unset
         let expected = if transfer.total_chunks > 0 {
             transfer.total_chunks
         } else if transfer.received_chunks.is_empty() {
@@ -146,7 +153,7 @@ impl ChunkManager {
             transfer.received_chunks.keys().max().copied().unwrap_or(0) + 1
         };
 
-        // Check for missing chunks
+        // Reject incomplete transfers (gaps in the sequence)
         for seq in 0..expected {
             if !transfer.received_chunks.contains_key(&seq) {
                 bail!(
@@ -158,7 +165,7 @@ impl ChunkManager {
             }
         }
 
-        // Reassemble in order
+        // Concatenate chunks in sequence order
         #[allow(clippy::cast_possible_truncation)] // file sizes within memory limits
         let mut assembled = Vec::with_capacity(transfer.total_size as usize);
         for seq in 0..expected {
@@ -167,7 +174,7 @@ impl ChunkManager {
             }
         }
 
-        // Verify SHA-256 if a checksum was provided
+        // Verify integrity when a checksum was declared at transfer start
         if !transfer.checksum_sha256.is_empty() {
             let mut hasher = Sha256::new();
             hasher.update(&assembled);
@@ -185,8 +192,7 @@ impl ChunkManager {
         Ok(assembled)
     }
 
-    /// Return the next expected sequence number for a transfer (useful for
-    /// communicating resume position to the sender).
+    /// Next expected sequence number, used to communicate the resume position to a sender.
     #[allow(dead_code)] // Spec feature for resumable transfers
     pub fn resume_from(&self, channel_id: u32) -> Option<u32> {
         let transfer = self.active_transfers.get(&channel_id)?;

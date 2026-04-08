@@ -1,11 +1,13 @@
-//! Unix Domain Socket transport for Synaptic Protocol (Section 3.1).
+//! Unix Domain Socket transport for the Synaptic Protocol (Section 3.1).
 //!
-//! Same-host SOMAs communicate via UDS for zero network overhead.
-//! The protocol frames are identical to TCP — only the transport changes.
+//! Provides zero-network-overhead IPC for SOMA instances on the same host.
+//! The wire format is identical to TCP — only the transport layer differs.
+//! Socket files are placed in `/tmp` by convention and cleaned up on
+//! shutdown via [`cleanup_socket`].
 //!
-//! Signal routing: after reading and decoding a Synaptic Protocol frame,
-//! the handler responds to PING (with PONG) and logs all other signal
-//! types. Full `SignalRouter` integration is deferred.
+//! Signal routing is minimal: only `PING` (responded with `PONG`) and
+//! `CLOSE` (terminates the connection) are handled. Full `SignalRouter`
+//! integration is deferred.
 
 #[cfg(unix)]
 use anyhow::Result;
@@ -15,15 +17,13 @@ use tokio::net::UnixListener;
 use super::codec;
 use super::signal::{Signal, SignalType};
 
-/// Start a Unix Domain Socket listener for Synaptic Protocol.
+/// Binds a Unix Domain Socket listener at `path` and spawns a task per connection.
 ///
-/// On startup, removes any stale socket file at `path`. On shutdown
-/// (when the accept loop ends or the task is cancelled), the caller
-/// should invoke [`cleanup_socket`] to remove the file.
+/// Removes any stale socket file at `path` before binding. The caller should
+/// invoke [`cleanup_socket`] on shutdown to remove the file.
 #[cfg(unix)]
 #[allow(dead_code)] // Spec feature for same-host transport
 pub async fn start_unix_server(path: &str) -> Result<()> {
-    // Remove stale socket file if exists
     let _ = std::fs::remove_file(path);
 
     let listener = UnixListener::bind(path)?;
@@ -39,7 +39,11 @@ pub async fn start_unix_server(path: &str) -> Result<()> {
     }
 }
 
-/// Handle a single UDS connection: read frames, decode signals, respond.
+/// Reads Synaptic Protocol frames from a UDS connection in a loop,
+/// responding to `PING` and terminating on `CLOSE` or I/O errors.
+///
+/// Disconnection errors (EOF, reset, broken pipe) are logged at debug
+/// level since they represent normal peer departure.
 #[cfg(unix)]
 #[allow(dead_code)] // Called by start_unix_server
 async fn handle_uds_connection(stream: tokio::net::UnixStream) {
@@ -47,15 +51,14 @@ async fn handle_uds_connection(stream: tokio::net::UnixStream) {
     let mut reader = tokio::io::BufReader::new(reader);
     let mut writer = writer;
 
-    // Maximum frame size consistent with the default (10 MB + overhead)
     let max_frame_size = codec::DEFAULT_MAX_FRAME_SIZE;
 
     loop {
-        // Read a complete Synaptic Protocol frame
         let frame = match codec::read_frame(&mut reader, max_frame_size).await {
             Ok(f) => f,
             Err(e) => {
                 let msg = e.to_string();
+                // Normal disconnection patterns — not worth warning about
                 if msg.contains("unexpected eof")
                     || msg.contains("connection reset")
                     || msg.contains("broken pipe")
@@ -68,7 +71,6 @@ async fn handle_uds_connection(stream: tokio::net::UnixStream) {
             }
         };
 
-        // Decode the frame into a Signal
         match codec::decode_frame(&frame, None) {
             Ok(Some(signal)) => {
                 tracing::debug!(
@@ -111,7 +113,8 @@ async fn handle_uds_connection(stream: tokio::net::UnixStream) {
     }
 }
 
-/// Remove the socket file on shutdown.
+/// Removes the socket file at `path`, logging a warning on failure
+/// (except `NotFound`, which is silently ignored).
 #[cfg(unix)]
 #[allow(dead_code)] // Spec feature for UDS cleanup
 pub fn cleanup_socket(path: &str) {
@@ -124,7 +127,7 @@ pub fn cleanup_socket(path: &str) {
     }
 }
 
-/// Path for the Unix Domain Socket (default: /tmp/soma-{id}.sock).
+/// Returns the conventional socket path for a SOMA instance: `/tmp/soma-{id}.sock`.
 #[allow(dead_code)] // Spec feature for UDS transport
 pub fn default_socket_path(soma_id: &str) -> String {
     format!("/tmp/soma-{soma_id}.sock")

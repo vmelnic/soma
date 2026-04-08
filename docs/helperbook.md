@@ -118,7 +118,7 @@ HelperBook loads seven plugins, configured in `soma.toml`:
 
 Plugin configuration in `soma.toml` includes database connection details for PostgreSQL (host, port, database, credentials via env var), Redis URL, and auth settings (session TTL, OTP TTL and length). The password is never stored in the config file -- `password_env = "SOMA_PG_PASSWORD"` reads from the environment.
 
-Future plugins from the catalog (see `05_PLUGIN_CATALOG.md`) can extend HelperBook without architectural changes: image processing, S3 storage, SMTP email, Twilio SMS, APNS/FCM push, AI inference for smart replies, text search, analytics, localization.
+Future plugins from the [catalog](plugin-catalog.md) can extend HelperBook without architectural changes: image processing, S3 storage, SMTP email, Twilio SMS, APNS/FCM push, AI inference for smart replies, text search, analytics, localization.
 
 
 ## Key Features
@@ -240,7 +240,7 @@ Human opens Claude with SOMA connected via MCP.
 
 Claude: -> soma.get_state()                        [sees fresh SOMA]
 Claude: "I see a fresh SOMA. What are we building?"
-Human:  "A service marketplace. Here's the spec."   [shares 04_HELPERBOOK.md]
+Human:  "A service marketplace. Here's the spec."   [shares the product spec]
 
 Claude: -> soma.install_plugin("postgres")
 Claude: -> soma.install_plugin("redis")

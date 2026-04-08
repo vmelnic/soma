@@ -178,7 +178,7 @@ JSON-RPC 2.0 over stdio. Milestone 3: "At this point, an LLM can drive SOMA."
 ### Memory (`memory/`)
 
 - **Checkpoint** — SOMA magic header, version 2 (backwards compat with v1), SHA-256 model hash, LoRA state, plugin states, plugin manifest, decisions, execution history
-- **Experience buffer** — ring buffer, records successes only (spec 17.1), bounded
+- **Experience buffer** — ring buffer, records successes only (Whitepaper Section 17.1), bounded
 - **Consolidation** — threshold check + merge structure (LoRA → base weight merge when integrated)
 
 ### State (`state/`)
@@ -362,14 +362,14 @@ src/
 
 ## Spec Compliance
 
-Validated against three specification documents with 10-agent parallel audits:
+Validated against specification documents with 10-agent parallel audits:
 
 | Spec | Items | Pass |
 |------|-------|------|
-| `01_CORE_REFACTORING.md` (20 sections) | 30 | 30 |
-| `02_SYNAPTIC_PROTOCOL.md` (23 sections) | 85 | 85 |
-| `03_PLUGINS.md` (20 sections) | 63 | 63 |
-| `05_PLUGIN_CATALOG.md` (40 plugins) | 61 | 61 |
+| [`architecture.md`](../docs/architecture.md) + [`mind-engine.md`](../docs/mind-engine.md) (20 sections) | 30 | 30 |
+| [`synaptic-protocol.md`](../docs/synaptic-protocol.md) (23 sections) | 85 | 85 |
+| [`plugin-system.md`](../docs/plugin-system.md) (20 sections) | 63 | 63 |
+| [`plugin-catalog.md`](../docs/plugin-catalog.md) (40 plugins) | 61 | 61 |
 | **Total** | **239** | **239** |
 
 ## Dependencies

@@ -8,20 +8,33 @@ use std::collections::HashMap;
 use anyhow::{bail, Result};
 
 /// State for a single active stream on a channel.
+///
+/// Each channel supports at most one concurrent stream. A stream transitions
+/// through: `start_stream` (active=true) -> data frames -> `end_stream` (active=false).
 #[allow(dead_code)] // Spec feature for stream lifecycle
 #[derive(Debug, Clone)]
 pub struct StreamState {
+    /// Channel this stream occupies (one stream per channel).
     pub channel_id: u32,
+    /// Application-defined type (e.g., "audio", "video", "data").
     pub stream_type: String,
+    /// Encoding format (e.g., "opus", "raw").
     pub codec: String,
+    /// `true` while the stream is open; `false` after end or interrupt.
     pub active: bool,
+    /// Frames sent by the local side (tracked via `on_stream_sent`).
     pub frames_sent: u64,
+    /// Frames received from the remote side (tracked via `on_stream_data`).
     pub frames_received: u64,
 }
 
 /// Manages the lifecycle of all active streams across channels.
+///
+/// Enforces single-stream-per-channel: attempting to start a second stream
+/// on an occupied channel returns an error.
 #[allow(dead_code)] // Spec feature for stream lifecycle
 pub struct StreamManager {
+    /// `channel_id` -> stream state. Only active streams are present.
     active_streams: HashMap<u32, StreamState>,
 }
 
@@ -33,8 +46,9 @@ impl StreamManager {
         }
     }
 
-    /// Handle `STREAM_START`: create a new stream on `channel_id` using
-    /// metadata fields `type` and `codec`.
+    /// Open a new stream on `channel_id`. Reads `type` and `codec` from
+    /// `metadata`, defaulting to `"data"` and `"raw"` respectively.
+    /// Fails if the channel already has an active stream.
     pub fn start_stream(
         &mut self,
         channel_id: u32,
@@ -73,8 +87,8 @@ impl StreamManager {
         Ok(())
     }
 
-    /// Handle `STREAM_DATA`: increment the received frame count for the
-    /// stream on `channel_id`.
+    /// Record an incoming data frame on `channel_id`. Fails if no active
+    /// stream exists on that channel.
     pub fn on_stream_data(&mut self, channel_id: u32) -> Result<()> {
         match self.active_streams.get_mut(&channel_id) {
             Some(state) if state.active => {
@@ -86,7 +100,7 @@ impl StreamManager {
         }
     }
 
-    /// Record that we sent a frame on a stream (called by the sender side).
+    /// Record an outgoing data frame on `channel_id` (sender side).
     pub fn on_stream_sent(&mut self, channel_id: u32) -> Result<()> {
         match self.active_streams.get_mut(&channel_id) {
             Some(state) if state.active => {
@@ -98,8 +112,8 @@ impl StreamManager {
         }
     }
 
-    /// Handle `STREAM_END`: mark the stream as inactive and remove it,
-    /// returning the final state.
+    /// Close the stream on `channel_id`, removing it from the active map
+    /// and returning its final state with `active = false`.
     pub fn end_stream(&mut self, channel_id: u32) -> Result<StreamState> {
         match self.active_streams.remove(&channel_id) {
             Some(mut state) => {
@@ -110,8 +124,8 @@ impl StreamManager {
         }
     }
 
-    /// Mark all streams as interrupted (e.g., on connection drop).
-    /// Returns the states of all streams that were active.
+    /// Forcibly close all streams (e.g., on connection drop). Returns
+    /// the final state of each stream that was active.
     pub fn interrupt_all(&mut self) -> Vec<StreamState> {
         let mut interrupted = Vec::new();
         for (_, mut state) in self.active_streams.drain() {

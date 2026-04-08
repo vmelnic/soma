@@ -23,9 +23,10 @@ use super::signal::{Signal, SignalFlags, SignalType};
 
 /// Conditionally compress a payload using zstd level 3.
 ///
-/// Skips compression if the payload is smaller than 256 bytes or if the
-/// signal is `StreamData` (latency-sensitive). If the compressed output
-/// is not smaller than the original, the original is returned unchanged.
+/// Returns `(data, was_compressed)`. Skips compression when:
+/// - Payload < 256 bytes (overhead not worth it)
+/// - Signal is `StreamData` or `Binary` (latency-sensitive, Spec Section 19)
+/// - Compressed output is not smaller than the original
 fn maybe_compress(payload: &[u8], signal_type: SignalType) -> (Vec<u8>, bool) {
     if payload.len() < 256 {
         return (payload.to_vec(), false);
@@ -73,7 +74,7 @@ pub fn encode_frame(signal: &Signal, session_keys: Option<&SessionKeys>) -> Vec<
     #[allow(clippy::cast_possible_truncation)] // clamped to 255 by min()
     let sender_len = sender_bytes.len().min(255) as u8;
 
-    // Serialize metadata: merge trace_id into metadata for wire
+    // Merge trace_id into metadata before wire encoding
     let metadata_value = {
         let mut meta = signal.metadata.clone();
         if !signal.trace_id.is_empty()
@@ -87,8 +88,8 @@ pub fn encode_frame(signal: &Signal, session_keys: Option<&SessionKeys>) -> Vec<
     };
     let metadata_bytes = rmp_serde::to_vec(&metadata_value).unwrap_or_default();
 
-    // Compression: apply if COMPRESSED flag is set OR payload > 1024 bytes,
-    // but only when payload >= 256 bytes and not StreamData (Spec Section 19).
+    // Auto-compress large payloads (>1024 bytes) or honor explicit COMPRESSED flag.
+    // maybe_compress() enforces the 256-byte minimum and StreamData exclusion.
     let should_try_compress =
         signal.flags.contains(SignalFlags::COMPRESSED) || signal.payload.len() > 1024;
     let (payload_bytes, was_compressed) = if should_try_compress {
@@ -104,10 +105,10 @@ pub fn encode_frame(signal: &Signal, session_keys: Option<&SessionKeys>) -> Vec<
         flags -= SignalFlags::COMPRESSED;
     }
 
-    // Encryption: if ENCRYPTED flag is set, encrypt payload (Section 9.4)
+    // AEAD encrypt payload when ENCRYPTED flag is set (Spec Section 9.4).
+    // Falls back to a deterministic test key when no session keys are provided.
     let payload_bytes = if flags.contains(SignalFlags::ENCRYPTED) {
         let (key, nonce) = session_keys.map_or(
-            // Fallback: hardcoded key/nonce for backwards compatibility / tests
             ([0x42u8; 32], [0u8; 12]),
             |sk| (sk.encrypt_key, sk.next_send_nonce()),
         );
@@ -124,41 +125,27 @@ pub fn encode_frame(signal: &Signal, session_keys: Option<&SessionKeys>) -> Vec<
         payload_bytes
     };
 
-    // Pre-allocate: header(13) + sender + meta_len(4) + meta + payload_len(4) + payload + checksum(4)
-    let total = 13
-        + (sender_len as usize)
-        + 4
-        + metadata_bytes.len()
-        + 4
-        + payload_bytes.len()
-        + 4;
+    // Assemble the frame (see module doc for layout)
+    let total = 13 + (sender_len as usize) + 4 + metadata_bytes.len()
+        + 4 + payload_bytes.len() + 4;
     let mut buf = Vec::with_capacity(total);
 
-    // Magic
     buf.extend_from_slice(&MAGIC);
-    // Version
     buf.push(VERSION);
-    // Flags
     buf.push(flags.bits());
-    // Signal type
     buf.push(signal.signal_type.to_u8());
-    // Channel ID (BE)
     buf.extend_from_slice(&signal.channel_id.to_be_bytes());
-    // Sequence (BE)
     buf.extend_from_slice(&signal.sequence.to_be_bytes());
-    // Sender ID length + sender ID
     buf.push(sender_len);
     buf.extend_from_slice(&sender_bytes[..sender_len as usize]);
-    // Metadata length (BE) + metadata
     #[allow(clippy::cast_possible_truncation)] // metadata length fits in u32 (wire format)
     buf.extend_from_slice(&(metadata_bytes.len() as u32).to_be_bytes());
     buf.extend_from_slice(&metadata_bytes);
-    // Payload length (BE) + payload
     #[allow(clippy::cast_possible_truncation)] // payload length fits in u32 (wire format)
     buf.extend_from_slice(&(payload_bytes.len() as u32).to_be_bytes());
     buf.extend_from_slice(&payload_bytes);
 
-    // CRC32 over everything so far
+    // CRC32 integrity check over the entire frame (excluding the checksum itself)
     let mut hasher = Hasher::new();
     hasher.update(&buf);
     let crc = hasher.finalize();
@@ -186,7 +173,6 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
         );
     }
 
-    // Check magic
     if data[0] != MAGIC[0] || data[1] != MAGIC[1] {
         bail!(
             "Invalid magic bytes: 0x{:02X} 0x{:02X} (expected 0x53 0x4D)",
@@ -195,7 +181,6 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
         );
     }
 
-    // Check version
     let version = data[2];
     if version != VERSION {
         bail!(
@@ -203,10 +188,9 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
         );
     }
 
-    // Parse flags
     let flags = SignalFlags::from_bits_truncate(data[3]);
 
-    // Parse signal type -- unknown types are silently ignored per Spec Section 12.3
+    // Unknown signal types are silently ignored per Spec Section 12.3
     let Some(signal_type) = SignalType::from_u8(data[4]) else {
         tracing::warn!(
             signal_type_byte = format_args!("0x{:02X}", data[4]),
@@ -215,12 +199,9 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
         return Ok(None);
     };
 
-    // Channel ID
     let channel_id = u32::from_be_bytes([data[5], data[6], data[7], data[8]]);
-    // Sequence
     let sequence = u32::from_be_bytes([data[9], data[10], data[11], data[12]]);
 
-    // Sender ID
     let sender_len = data[13] as usize;
     let mut offset = 14;
     if offset + sender_len > data.len() {
@@ -229,7 +210,6 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
     let sender_id = String::from_utf8_lossy(&data[offset..offset + sender_len]).to_string();
     offset += sender_len;
 
-    // Metadata
     if offset + 4 > data.len() {
         bail!("Frame truncated at metadata_length");
     }
@@ -245,9 +225,8 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
     }
     let metadata: serde_json::Value = if meta_len > 0 {
         let meta_bytes = &data[offset..offset + meta_len];
-        // Primary: MessagePack (per spec)
+        // Primary format: MessagePack. Debug builds also try JSON for dev convenience.
         rmp_serde::from_slice(meta_bytes).unwrap_or_else(|_| {
-            // Fallback in debug mode: try JSON for backward compat during development
             if cfg!(debug_assertions) {
                 serde_json::from_slice(meta_bytes)
                     .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
@@ -260,7 +239,6 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
     };
     offset += meta_len;
 
-    // Payload
     if offset + 4 > data.len() {
         bail!("Frame truncated at payload_length");
     }
@@ -277,10 +255,9 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
     let raw_payload = data[offset..offset + payload_len].to_vec();
     offset += payload_len;
 
-    // Decrypt payload if ENCRYPTED flag is set (Section 9.4)
+    // AEAD decrypt when ENCRYPTED flag is set; falls back to test key without session keys
     let raw_payload = if flags.contains(SignalFlags::ENCRYPTED) {
         let (key, nonce) = session_keys.map_or(
-            // Fallback: hardcoded key/nonce for backwards compatibility / tests
             ([0x42u8; 32], [0u8; 12]),
             |sk| (sk.encrypt_key, sk.next_recv_nonce()),
         );
@@ -296,10 +273,8 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
         raw_payload
     };
 
-    // Decompress payload if COMPRESSED flag is set (Spec Section 19)
     let payload = maybe_decompress(&raw_payload, flags.contains(SignalFlags::COMPRESSED))?;
 
-    // Checksum
     if offset + 4 > data.len() {
         bail!("Frame truncated at checksum");
     }
@@ -310,7 +285,7 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
         data[offset + 3],
     ]);
 
-    // Verify CRC32 over all bytes before the checksum
+    // CRC32 covers all bytes preceding the 4-byte checksum field
     let mut hasher = Hasher::new();
     hasher.update(&data[..offset]);
     let computed_crc = hasher.finalize();
@@ -320,7 +295,6 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
         );
     }
 
-    // Extract trace_id from metadata if present
     let trace_id = metadata
         .get("trace_id")
         .and_then(|v| v.as_str())
@@ -339,22 +313,20 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
     }))
 }
 
-/// Read a complete frame from an async reader.
-/// Reads length-prefixed: first reads the 13-byte fixed header to determine
-/// `sender_id_len`, then reads enough to get `metadata_len`, then `payload_len`,
-/// then the checksum.
+/// Incrementally read a complete frame from an async TCP stream.
 ///
-/// Returns the full frame bytes (ready for `decode_frame`).
+/// Reads the fixed 14-byte header first to learn `sender_id_len`, then
+/// progressively reads sender, metadata, payload, and checksum fields.
+/// Validates total size against `max_frame_size` before reading the payload.
+/// Returns the reassembled frame bytes ready for [`decode_frame`].
 pub async fn read_frame(
     reader: &mut (impl tokio::io::AsyncReadExt + Unpin),
     max_frame_size: usize,
 ) -> Result<Vec<u8>> {
-    // Read fixed header: magic(2) + version(1) + flags(1) + signal_type(1)
-    //                   + channel_id(4) + sequence(4) + sender_id_len(1) = 14 bytes
+    // Fixed header: magic(2) + version(1) + flags(1) + type(1) + channel(4) + seq(4) + sender_len(1)
     let mut header = [0u8; 14];
     reader.read_exact(&mut header).await?;
 
-    // Validate magic early
     if header[0] != MAGIC[0] || header[1] != MAGIC[1] {
         bail!(
             "Invalid magic bytes: 0x{:02X} 0x{:02X}",
@@ -365,7 +337,6 @@ pub async fn read_frame(
 
     let sender_len = header[13] as usize;
 
-    // Read sender_id + metadata_len(4)
     let mut sender_and_meta_len = vec![0u8; sender_len + 4];
     reader.read_exact(&mut sender_and_meta_len).await?;
 
@@ -377,7 +348,6 @@ pub async fn read_frame(
         sender_and_meta_len[meta_len_offset + 3],
     ]) as usize;
 
-    // Read metadata + payload_len(4)
     let mut meta_and_payload_len = vec![0u8; meta_len + 4];
     reader.read_exact(&mut meta_and_payload_len).await?;
 
@@ -389,7 +359,6 @@ pub async fn read_frame(
         meta_and_payload_len[payload_len_offset + 3],
     ]) as usize;
 
-    // Check total frame size
     let total = 14 + sender_len + 4 + meta_len + 4 + payload_len + 4;
     if total > max_frame_size {
         bail!(
@@ -397,11 +366,9 @@ pub async fn read_frame(
         );
     }
 
-    // Read payload + checksum(4)
     let mut payload_and_crc = vec![0u8; payload_len + 4];
     reader.read_exact(&mut payload_and_crc).await?;
 
-    // Assemble the full frame
     let mut frame = Vec::with_capacity(total);
     frame.extend_from_slice(&header);
     frame.extend_from_slice(&sender_and_meta_len);

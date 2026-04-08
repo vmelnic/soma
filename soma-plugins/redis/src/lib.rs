@@ -1,12 +1,34 @@
-//! SOMA Redis Plugin — 14 Redis conventions.
+//! SOMA Redis Plugin -- 14 conventions for Redis key-value operations.
 //!
-//! Provides: string get/set/delete/exists/incr, key expiry, hash operations
-//! (hget/hset/hgetall), list operations (lpush/lrange), pub/sub (publish),
+//! Provides string get/set/delete/exists/incr, key expiry, hash operations
+//! (hget/hset/hgetall), list operations (lpush/lrange), pub/sub (publish/subscribe),
 //! and key pattern search.
 //!
+//! # Connection strategy
+//!
 //! Uses `redis::aio::ConnectionManager` for connection multiplexing with
-//! automatic reconnection. All operations go through `execute_async()`;
-//! the sync `execute()` bridges via `tokio::runtime::Handle::current().block_on()`.
+//! automatic reconnection. All operations go through `execute_async_inner()`;
+//! the sync `execute()` bridges via `tokio::runtime::Handle::current().block_on()`
+//! when a Tokio runtime is available, or creates a temporary runtime otherwise.
+//!
+//! # Convention IDs
+//!
+//! | ID | Name      | Description                           |
+//! |----|-----------|---------------------------------------|
+//! |  0 | get       | Get string value by key               |
+//! |  1 | set       | Set string value with optional TTL    |
+//! |  2 | delete    | Delete a key                          |
+//! |  3 | exists    | Check if key exists                   |
+//! |  4 | incr      | Atomic increment                      |
+//! |  5 | expire    | Set TTL on existing key                |
+//! |  6 | hget      | Get hash field value                  |
+//! |  7 | hset      | Set hash field value                  |
+//! |  8 | hgetall   | Get all hash fields                   |
+//! |  9 | lpush     | Push to list head                     |
+//! | 10 | lrange    | Get list range                        |
+//! | 11 | publish   | Publish to pub/sub channel            |
+//! | 12 | subscribe | Subscribe (stub, streaming required)  |
+//! | 13 | keys      | Find keys matching glob pattern       |
 
 use soma_plugin_sdk::prelude::*;
 
@@ -17,14 +39,27 @@ use std::pin::Pin;
 use std::sync::Mutex;
 
 /// The SOMA Redis plugin.
+///
+/// Wraps an async `ConnectionManager` behind a `Mutex` so it can be shared
+/// across the sync `SomaPlugin` trait boundary. The connection is established
+/// in `on_load()` and dropped in `on_unload()`.
 pub struct RedisPlugin {
-    /// Async connection manager — initialized in `on_load()`.
+    /// Async connection manager -- initialized in `on_load()`.
     conn: Mutex<Option<redis::aio::ConnectionManager>>,
     /// Redis URL used for connection.
     url: Mutex<String>,
 }
 
+impl Default for RedisPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RedisPlugin {
+    /// Create a new `RedisPlugin` with default connection URL (`redis://localhost:6379/0`).
+    ///
+    /// The plugin is not connected until `on_load()` is called.
     pub fn new() -> Self {
         Self {
             conn: Mutex::new(None),
@@ -32,17 +67,18 @@ impl RedisPlugin {
         }
     }
 
-    /// Get a clone of the connection manager, or error if not connected.
+    /// Clone the connection manager, or return an error if not yet connected.
     fn get_conn(&self) -> Result<redis::aio::ConnectionManager, PluginError> {
         let guard = self.conn.lock().map_err(|e| {
-            PluginError::Failed(format!("lock poisoned: {}", e))
+            PluginError::Failed(format!("lock poisoned: {e}"))
         })?;
         guard.clone().ok_or_else(|| {
-            PluginError::ConnectionRefused("Redis not connected — call on_load first".into())
+            PluginError::ConnectionRefused("Redis not connected -- call on_load first".into())
         })
     }
 }
 
+#[allow(clippy::unnecessary_literal_bound)]
 impl SomaPlugin for RedisPlugin {
     fn name(&self) -> &str {
         "redis"
@@ -87,28 +123,28 @@ impl SomaPlugin for RedisPlugin {
             .unwrap_or("redis://localhost:6379/0")
             .to_string();
 
-        *self.url.lock().map_err(|e| {
-            PluginError::Failed(format!("lock poisoned: {}", e))
-        })? = url.clone();
+        (*self.url.lock().map_err(|e| {
+            PluginError::Failed(format!("lock poisoned: {e}"))
+        })?).clone_from(&url);
 
         // Build a single-threaded Tokio runtime for the blocking on_load call
         // to establish the initial connection.
         let rt = tokio::runtime::Runtime::new().map_err(|e| {
-            PluginError::Failed(format!("failed to create tokio runtime: {}", e))
+            PluginError::Failed(format!("failed to create tokio runtime: {e}"))
         })?;
 
         let client = redis::Client::open(url.as_str()).map_err(|e| {
-            PluginError::ConnectionRefused(format!("invalid Redis URL: {}", e))
+            PluginError::ConnectionRefused(format!("invalid Redis URL: {e}"))
         })?;
 
         let mgr = rt.block_on(async {
             redis::aio::ConnectionManager::new(client).await
         }).map_err(|e| {
-            PluginError::ConnectionRefused(format!("Redis connection failed: {}", e))
+            PluginError::ConnectionRefused(format!("Redis connection failed: {e}"))
         })?;
 
         *self.conn.lock().map_err(|e| {
-            PluginError::Failed(format!("lock poisoned: {}", e))
+            PluginError::Failed(format!("lock poisoned: {e}"))
         })? = Some(mgr);
 
         Ok(())
@@ -117,13 +153,14 @@ impl SomaPlugin for RedisPlugin {
     fn on_unload(&mut self) -> Result<(), PluginError> {
         // Drop the connection manager.
         *self.conn.lock().map_err(|e| {
-            PluginError::Failed(format!("lock poisoned: {}", e))
+            PluginError::Failed(format!("lock poisoned: {e}"))
         })? = None;
         Ok(())
     }
 
     // === Conventions ===
 
+    #[allow(clippy::too_many_lines)]
     fn conventions(&self) -> Vec<Convention> {
         vec![
             // 0: get
@@ -432,7 +469,7 @@ impl SomaPlugin for RedisPlugin {
             Convention {
                 id: 12,
                 name: "subscribe".into(),
-                description: "Subscribe to a channel (streaming — not yet supported)".into(),
+                description: "Subscribe to a channel (streaming -- not yet supported)".into(),
                 call_pattern: "subscribe(channel)".into(),
                 args: vec![ArgSpec {
                     name: "channel".into(),
@@ -469,30 +506,27 @@ impl SomaPlugin for RedisPlugin {
         ]
     }
 
-    // === Sync execution — bridges to async via current Tokio handle ===
+    // === Sync execution -- bridges to async via current Tokio handle ===
 
     fn execute(&self, convention_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
         // If we are already inside a Tokio runtime, use block_on from the
         // current handle. Otherwise, create a temporary runtime.
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                // We are inside an async runtime — use block_in_place + block_on
-                // so we don't deadlock a single-threaded runtime.
-                tokio::task::block_in_place(|| {
-                    handle.block_on(self.execute_async_inner(convention_id, args))
-                })
-            }
-            Err(_) => {
-                // No runtime — build a temporary one.
-                let rt = tokio::runtime::Runtime::new().map_err(|e| {
-                    PluginError::Failed(format!("failed to create tokio runtime: {}", e))
-                })?;
-                rt.block_on(self.execute_async_inner(convention_id, args))
-            }
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            // We are inside an async runtime -- use block_in_place + block_on
+            // so we don't deadlock a single-threaded runtime.
+            tokio::task::block_in_place(|| {
+                handle.block_on(self.execute_async_inner(convention_id, args))
+            })
+        } else {
+            // No runtime -- build a temporary one.
+            let rt = tokio::runtime::Runtime::new().map_err(|e| {
+                PluginError::Failed(format!("failed to create tokio runtime: {e}"))
+            })?;
+            rt.block_on(self.execute_async_inner(convention_id, args))
         }
     }
 
-    // === Async execution — the primary implementation ===
+    // === Async execution -- the primary implementation ===
 
     fn execute_async(
         &self,
@@ -505,6 +539,11 @@ impl SomaPlugin for RedisPlugin {
 
 impl RedisPlugin {
     /// Core async implementation for all 14 conventions.
+    ///
+    /// Dispatches on `convention_id` (0..=13) to the corresponding Redis command.
+    /// Each branch extracts arguments from the `args` vector, executes the command
+    /// via the async connection manager, and maps the result into a `Value`.
+    #[allow(clippy::too_many_lines)]
     async fn execute_async_inner(
         &self,
         convention_id: u32,
@@ -520,13 +559,10 @@ impl RedisPlugin {
                     .as_str()?;
 
                 let result: Option<String> = conn.get(key).await.map_err(|e| {
-                    PluginError::Failed(format!("Redis GET failed: {}", e))
+                    PluginError::Failed(format!("Redis GET failed: {e}"))
                 })?;
 
-                Ok(match result {
-                    Some(v) => Value::String(v),
-                    None => Value::Null,
-                })
+                Ok(result.map_or(Value::Null, Value::String))
             }
 
             // 1: set(key, value, ttl?) -> Null
@@ -541,33 +577,30 @@ impl RedisPlugin {
                 // Check for optional TTL (third argument).
                 if let Some(ttl_val) = args.get(2) {
                     // Allow Null to mean "no TTL"
-                    match ttl_val {
-                        Value::Null => {
-                            let _: () = conn.set(key, value).await.map_err(|e| {
-                                PluginError::Failed(format!("Redis SET failed: {}", e))
+                    if matches!(ttl_val, Value::Null) {
+                        let _: () = conn.set(key, value).await.map_err(|e| {
+                            PluginError::Failed(format!("Redis SET failed: {e}"))
+                        })?;
+                    } else {
+                        let ttl = ttl_val.as_int()?;
+                        if ttl <= 0 {
+                            return Err(PluginError::InvalidArg(
+                                "TTL must be positive".into(),
+                            ));
+                        }
+                        let _: () = redis::cmd("SETEX")
+                            .arg(key)
+                            .arg(ttl)
+                            .arg(value)
+                            .query_async(&mut conn)
+                            .await
+                            .map_err(|e| {
+                                PluginError::Failed(format!("Redis SETEX failed: {e}"))
                             })?;
-                        }
-                        _ => {
-                            let ttl = ttl_val.as_int()?;
-                            if ttl <= 0 {
-                                return Err(PluginError::InvalidArg(
-                                    "TTL must be positive".into(),
-                                ));
-                            }
-                            let _: () = redis::cmd("SETEX")
-                                .arg(key)
-                                .arg(ttl)
-                                .arg(value)
-                                .query_async(&mut conn)
-                                .await
-                                .map_err(|e| {
-                                    PluginError::Failed(format!("Redis SETEX failed: {}", e))
-                                })?;
-                        }
                     }
                 } else {
                     let _: () = conn.set(key, value).await.map_err(|e| {
-                        PluginError::Failed(format!("Redis SET failed: {}", e))
+                        PluginError::Failed(format!("Redis SET failed: {e}"))
                     })?;
                 }
 
@@ -581,7 +614,7 @@ impl RedisPlugin {
                     .as_str()?;
 
                 let deleted: i64 = conn.del(key).await.map_err(|e| {
-                    PluginError::Failed(format!("Redis DEL failed: {}", e))
+                    PluginError::Failed(format!("Redis DEL failed: {e}"))
                 })?;
 
                 Ok(Value::Bool(deleted > 0))
@@ -594,7 +627,7 @@ impl RedisPlugin {
                     .as_str()?;
 
                 let exists: bool = conn.exists(key).await.map_err(|e| {
-                    PluginError::Failed(format!("Redis EXISTS failed: {}", e))
+                    PluginError::Failed(format!("Redis EXISTS failed: {e}"))
                 })?;
 
                 Ok(Value::Bool(exists))
@@ -607,7 +640,7 @@ impl RedisPlugin {
                     .as_str()?;
 
                 let new_val: i64 = conn.incr(key, 1i64).await.map_err(|e| {
-                    PluginError::Failed(format!("Redis INCR failed: {}", e))
+                    PluginError::Failed(format!("Redis INCR failed: {e}"))
                 })?;
 
                 Ok(Value::Int(new_val))
@@ -623,7 +656,7 @@ impl RedisPlugin {
                     .as_int()?;
 
                 let set: bool = conn.expire(key, seconds).await.map_err(|e| {
-                    PluginError::Failed(format!("Redis EXPIRE failed: {}", e))
+                    PluginError::Failed(format!("Redis EXPIRE failed: {e}"))
                 })?;
 
                 Ok(Value::Bool(set))
@@ -639,13 +672,10 @@ impl RedisPlugin {
                     .as_str()?;
 
                 let result: Option<String> = conn.hget(key, field).await.map_err(|e| {
-                    PluginError::Failed(format!("Redis HGET failed: {}", e))
+                    PluginError::Failed(format!("Redis HGET failed: {e}"))
                 })?;
 
-                Ok(match result {
-                    Some(v) => Value::String(v),
-                    None => Value::Null,
-                })
+                Ok(result.map_or(Value::Null, Value::String))
             }
 
             // 7: hset(key, field, value) -> Bool
@@ -662,7 +692,7 @@ impl RedisPlugin {
 
                 // HSET returns the number of new fields added (1 if new, 0 if updated).
                 let added: i64 = conn.hset(key, field, value).await.map_err(|e| {
-                    PluginError::Failed(format!("Redis HSET failed: {}", e))
+                    PluginError::Failed(format!("Redis HSET failed: {e}"))
                 })?;
 
                 Ok(Value::Bool(added > 0))
@@ -676,7 +706,7 @@ impl RedisPlugin {
 
                 let result: HashMap<String, String> =
                     conn.hgetall(key).await.map_err(|e| {
-                        PluginError::Failed(format!("Redis HGETALL failed: {}", e))
+                        PluginError::Failed(format!("Redis HGETALL failed: {e}"))
                     })?;
 
                 let map: HashMap<String, Value> = result
@@ -697,13 +727,14 @@ impl RedisPlugin {
                     .as_str()?;
 
                 let len: i64 = conn.lpush(key, value).await.map_err(|e| {
-                    PluginError::Failed(format!("Redis LPUSH failed: {}", e))
+                    PluginError::Failed(format!("Redis LPUSH failed: {e}"))
                 })?;
 
                 Ok(Value::Int(len))
             }
 
             // 10: lrange(key, start, stop) -> List<String>
+            #[allow(clippy::cast_possible_truncation)]
             10 => {
                 let key = args.first()
                     .ok_or_else(|| PluginError::InvalidArg("missing argument: key".into()))?
@@ -717,7 +748,7 @@ impl RedisPlugin {
 
                 let result: Vec<String> =
                     conn.lrange(key, start, stop).await.map_err(|e| {
-                        PluginError::Failed(format!("Redis LRANGE failed: {}", e))
+                        PluginError::Failed(format!("Redis LRANGE failed: {e}"))
                     })?;
 
                 let list: Vec<Value> = result
@@ -738,13 +769,13 @@ impl RedisPlugin {
                     .as_str()?;
 
                 let receivers: i64 = conn.publish(channel, message).await.map_err(|e| {
-                    PluginError::Failed(format!("Redis PUBLISH failed: {}", e))
+                    PluginError::Failed(format!("Redis PUBLISH failed: {e}"))
                 })?;
 
                 Ok(Value::Int(receivers))
             }
 
-            // 12: subscribe — not supported in MVP
+            // 12: subscribe -- not supported in MVP
             12 => {
                 Err(PluginError::Failed(
                     "subscribe requires streaming, use publish/get pattern instead".into(),
@@ -758,7 +789,7 @@ impl RedisPlugin {
                     .as_str()?;
 
                 let result: Vec<String> = conn.keys(pattern).await.map_err(|e| {
-                    PluginError::Failed(format!("Redis KEYS failed: {}", e))
+                    PluginError::Failed(format!("Redis KEYS failed: {e}"))
                 })?;
 
                 let list: Vec<Value> = result
@@ -770,8 +801,7 @@ impl RedisPlugin {
             }
 
             _ => Err(PluginError::NotFound(format!(
-                "unknown convention id: {}",
-                convention_id
+                "unknown convention id: {convention_id}"
             ))),
         }
     }
@@ -779,6 +809,7 @@ impl RedisPlugin {
 
 // === Plugin export (C ABI) ===
 
+#[allow(improper_ctypes_definitions)]
 #[unsafe(no_mangle)]
 pub extern "C" fn soma_plugin_init() -> *mut dyn SomaPlugin {
     Box::into_raw(Box::new(RedisPlugin::new()))

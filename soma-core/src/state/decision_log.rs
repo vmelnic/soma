@@ -1,21 +1,32 @@
-//! Decision log — records what was built, why, when, and by which LLM session
-//! (Whitepaper Section 7.5).
+//! Decision log -- append-only record of what was built, why, and by which
+//! LLM session (Whitepaper Section 7.5).
+//!
+//! Decisions are never deleted or modified. The log grows monotonically and
+//! is serialized in full for MCP `get_state()` responses.
 
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// A recorded decision — what was done, why, and by whom.
+/// A single recorded decision: what was done, the rationale, and provenance.
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct Decision {
+    /// Monotonic identifier (`d-1`, `d-2`, ...).
     pub id: String,
+    /// What was done (e.g., "added users table").
     pub what: String,
+    /// Why it was done (e.g., "need user authentication for API access").
     pub why: String,
+    /// Unix timestamp in seconds when this decision was recorded.
     pub timestamp: u64,
+    /// Identifier of the LLM session that made this decision.
     pub session_id: String,
 }
 
-/// Persistent decision log. Every architectural choice, schema change,
-/// or configuration decision is recorded here.
+/// Append-only log of architectural and configuration decisions.
+///
+/// IDs are assigned via a monotonic counter (`next_id`), ensuring uniqueness
+/// within a single runtime session. Persistence across restarts is handled
+/// by the checkpoint system.
 pub struct DecisionLog {
     decisions: Vec<Decision>,
     next_id: u64,
@@ -29,7 +40,7 @@ impl DecisionLog {
         }
     }
 
-    /// Record a new decision.
+    /// Record a new decision and return a reference to it.
     pub fn record(&mut self, what: String, why: String, session_id: String) -> &Decision {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -48,7 +59,7 @@ impl DecisionLog {
         self.decisions.last().unwrap()
     }
 
-    /// Get all decisions.
+    /// Return all decisions in chronological order.
     pub fn list(&self) -> &[Decision] {
         &self.decisions
     }
@@ -59,7 +70,7 @@ impl DecisionLog {
         &self.decisions[start..]
     }
 
-    /// Search decisions by keyword in 'what' or 'why'.
+    /// Case-insensitive keyword search across `what` and `why` fields.
     pub fn search(&self, query: &str) -> Vec<&Decision> {
         let q = query.to_lowercase();
         self.decisions.iter()

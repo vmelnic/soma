@@ -1,33 +1,42 @@
-//! Offline signal queue for store-and-forward during disconnects
+//! Priority-ordered offline signal queue for store-and-forward delivery
 //! (Spec Section 21.4).
 //!
-//! Signals are queued with a priority and a maximum age. On reconnect
-//! the queue is drained in priority order, dropping expired entries.
+//! When a peer is disconnected, outbound signals are held in a bounded
+//! queue ordered by priority (highest first). On reconnect the queue is
+//! drained in priority order. Signals that exceed `max_age` are silently
+//! dropped during drain.
+//!
+//! When the queue is full, the lowest-priority entry is evicted to make
+//! room for a higher-priority signal. Each signal also carries a retry
+//! counter that is decremented on each failed delivery attempt; signals
+//! with zero retries remaining are permanently discarded.
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use super::signal::Signal;
 
-/// A signal waiting for delivery, annotated with priority and retry count.
+/// A signal awaiting delivery, annotated with scheduling metadata.
 #[allow(dead_code)] // Spec feature for offline signal queuing
 pub struct QueuedSignal {
     pub signal: Signal,
+    /// Timestamp used for max-age expiry checks.
     pub queued_at: Instant,
+    /// Higher values are delivered first; used for eviction when the queue is full.
     pub priority: u8,
+    /// Decremented on each failed delivery; discarded at zero.
     pub retries_left: u8,
 }
 
-/// Bounded offline queue that orders by priority and drops expired or
-/// lowest-priority signals when full.
+/// Bounded, priority-ordered offline signal queue.
 ///
-/// `max_age` is a queue-level setting (per spec): signals older than
-/// `max_age` are considered expired and silently dropped on drain.
+/// Internally stored as a `VecDeque` sorted by descending priority so
+/// that [`drain`](Self::drain) returns highest-priority signals first.
 #[allow(dead_code)] // Spec feature for offline signal queuing
 pub struct OfflineQueue {
     signals: VecDeque<QueuedSignal>,
     max_size: usize,
-    /// Maximum age for any queued signal before it is considered expired.
+    /// Signals older than this are silently dropped during [`drain`](Self::drain).
     max_age: Duration,
 }
 
@@ -52,12 +61,11 @@ impl OfflineQueue {
 
     /// Queue a signal for later delivery.
     ///
-    /// If the queue is full, the lowest-priority signal is dropped to make
-    /// room (unless the new signal itself has the lowest priority, in which
-    /// case it is silently discarded).
+    /// When full, evicts the lowest-priority entry to make room. If the
+    /// new signal has equal or lower priority than every queued entry,
+    /// it is silently discarded instead.
     pub fn enqueue(&mut self, signal: Signal, priority: u8) {
         if self.signals.len() >= self.max_size {
-            // Find the index of the lowest-priority entry
             let min_idx = self
                 .signals
                 .iter()
@@ -75,8 +83,7 @@ impl OfflineQueue {
             }
         }
 
-        // Insert maintaining priority order (highest first).
-        // Find the first position where the existing entry has lower priority.
+        // Insertion sort: find first position with lower priority
         let pos = self
             .signals
             .iter()
@@ -94,12 +101,10 @@ impl OfflineQueue {
         );
     }
 
-    /// Drain the queue on reconnect, returning signals in priority order
-    /// (highest first). Expired signals are silently dropped.
+    /// Drain all non-expired signals in priority order (highest first).
     ///
-    /// The caller should attempt delivery of each returned signal.
-    /// For signals that fail delivery, call `requeue()` to put them back
-    /// (with decremented `retries_left`).
+    /// Intended to be called on reconnect. Signals that fail delivery
+    /// should be returned via [`requeue`](Self::requeue).
     pub fn drain(&mut self) -> Vec<Signal> {
         let now = Instant::now();
         let mut result = Vec::with_capacity(self.signals.len());
@@ -114,18 +119,16 @@ impl OfflineQueue {
         result
     }
 
-    /// Re-queue a signal that failed delivery.
+    /// Return a signal to the queue after a failed delivery attempt.
     ///
-    /// Decrements `retries_left`. If no retries remain, the signal is
-    /// silently discarded. Expired signals are also discarded.
+    /// `retries_left` is stored as-is minus one. Signals with zero retries
+    /// are permanently discarded. Eviction rules match [`enqueue`](Self::enqueue).
     pub fn requeue(&mut self, signal: Signal, priority: u8, retries_left: u8) {
         if retries_left == 0 {
-            // No retries remaining — discard.
             return;
         }
 
-        // Check if re-enqueueing would exceed max_size; apply same
-        // lowest-priority eviction as enqueue().
+        // Same overflow eviction policy as enqueue()
         if self.signals.len() >= self.max_size {
             let min_idx = self
                 .signals
@@ -159,7 +162,7 @@ impl OfflineQueue {
         );
     }
 
-    /// Number of signals currently queued (including potentially expired ones).
+    /// Number of signals currently queued (may include expired entries not yet drained).
     pub fn len(&self) -> usize {
         self.signals.len()
     }

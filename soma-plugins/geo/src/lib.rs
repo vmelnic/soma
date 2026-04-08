@@ -1,27 +1,40 @@
-//! SOMA Geo Plugin — 5 geolocation conventions.
+//! SOMA Geo Plugin -- geolocation conventions for the SOMA runtime.
 //!
-//! Provides: Haversine distance calculation, radius-based point filtering,
-//! bounding box computation, geocoding (stub), and reverse geocoding (stub).
+//! Five conventions:
 //!
-//! All distance math is pure Rust with no external dependencies.
-//! Geocoding conventions return mock data for well-known locations;
-//! a production implementation would use Nominatim or a similar API.
+//! | ID | Name              | Description                                       |
+//! |----|-------------------|---------------------------------------------------|
+//! | 0  | `distance`        | Haversine great-circle distance between two points |
+//! | 1  | `within_radius`   | Filter a JSON point array to entries within radius |
+//! | 2  | `bounding_box`    | Lat/lon bounding box for a radius around a point   |
+//! | 3  | `geocode`         | Address to coordinates (stub, mock data)           |
+//! | 4  | `reverse_geocode` | Coordinates to address (stub, mock data)           |
+//!
+//! All distance math uses the Haversine formula in pure Rust with no external
+//! dependencies.  Haversine was chosen over Vincenty because it is simpler,
+//! faster, and accurate to ~0.3% for most use cases.  Vincenty adds complexity
+//! for the ellipsoidal correction that only matters at geodetic-survey precision.
+//!
+//! Geocoding conventions return mock data for well-known locations.  A production
+//! deployment would replace the stub lookup table with calls to Nominatim
+//! (OpenStreetMap) or a similar geocoding API, respecting its rate-limit policy
+//! (1 req/s for the public Nominatim instance).
 
 use soma_plugin_sdk::prelude::*;
 use std::collections::HashMap;
 
-/// Earth's mean radius in kilometers.
+/// Earth's mean radius in kilometers (WGS-84 volumetric mean).
 const EARTH_RADIUS_KM: f64 = 6371.0;
-
-/// The SOMA geo plugin.
-pub struct GeoPlugin;
 
 // ---------------------------------------------------------------------------
 // Haversine helper
 // ---------------------------------------------------------------------------
 
 /// Compute the great-circle distance between two points using the Haversine
-/// formula.  All arguments in decimal degrees; result in km.
+/// formula.  All arguments are in decimal degrees; result is in kilometers.
+///
+/// The Haversine formula is numerically stable for small distances and avoids
+/// the antipodal-point issues of the spherical law of cosines.
 fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let dlat = (lat2 - lat1).to_radians();
     let dlon = (lon2 - lon1).to_radians();
@@ -29,17 +42,29 @@ fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let lat1_rad = lat1.to_radians();
     let lat2_rad = lat2.to_radians();
 
-    let a = (dlat / 2.0).sin().powi(2)
-        + lat1_rad.cos() * lat2_rad.cos() * (dlon / 2.0).sin().powi(2);
+    let a = (lat1_rad.cos() * lat2_rad.cos()).mul_add(
+        (dlon / 2.0).sin().powi(2),
+        (dlat / 2.0).sin().powi(2),
+    );
     let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
 
     EARTH_RADIUS_KM * c
 }
 
 // ---------------------------------------------------------------------------
+// Plugin struct
+// ---------------------------------------------------------------------------
+
+/// The SOMA geo plugin.
+///
+/// Stateless -- all computation is pure math or table lookup.
+pub struct GeoPlugin;
+
+// ---------------------------------------------------------------------------
 // SomaPlugin implementation
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::unnecessary_literal_bound)]
 impl SomaPlugin for GeoPlugin {
     fn name(&self) -> &str {
         "geo"
@@ -57,6 +82,7 @@ impl SomaPlugin for GeoPlugin {
         TrustLevel::BuiltIn
     }
 
+    #[allow(clippy::too_many_lines)]
     fn conventions(&self) -> Vec<Convention> {
         vec![
             // 0: distance
@@ -174,7 +200,7 @@ impl SomaPlugin for GeoPlugin {
             Convention {
                 id: 3,
                 name: "geocode".into(),
-                description: "Convert address to coordinates (stub — returns mock data for well-known places)".into(),
+                description: "Convert address to coordinates (stub -- returns mock data for well-known places)".into(),
                 call_pattern: "geocode(address)".into(),
                 args: vec![ArgSpec {
                     name: "address".into(),
@@ -193,7 +219,7 @@ impl SomaPlugin for GeoPlugin {
             Convention {
                 id: 4,
                 name: "reverse_geocode".into(),
-                description: "Convert coordinates to address (stub — returns mock data for known areas)".into(),
+                description: "Convert coordinates to address (stub -- returns mock data for known areas)".into(),
                 call_pattern: "reverse_geocode(lat, lon)".into(),
                 args: vec![
                     ArgSpec {
@@ -221,14 +247,13 @@ impl SomaPlugin for GeoPlugin {
 
     fn execute(&self, convention_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
         match convention_id {
-            0 => self.distance(args),
-            1 => self.within_radius(args),
-            2 => self.bounding_box(args),
-            3 => self.geocode(args),
-            4 => self.reverse_geocode(args),
+            0 => self.distance(&args),
+            1 => self.within_radius(&args),
+            2 => self.bounding_box(&args),
+            3 => self.geocode(&args),
+            4 => self.reverse_geocode(&args),
             _ => Err(PluginError::NotFound(format!(
-                "unknown convention_id: {}",
-                convention_id
+                "unknown convention_id: {convention_id}"
             ))),
         }
     }
@@ -239,8 +264,9 @@ impl SomaPlugin for GeoPlugin {
 // ---------------------------------------------------------------------------
 
 impl GeoPlugin {
-    /// Convention 0: Haversine distance between two lat/lon points (km).
-    fn distance(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 0 -- Haversine distance between two lat/lon points (km).
+    #[allow(clippy::unused_self)]
+    fn distance(&self, args: &[Value]) -> Result<Value, PluginError> {
         let lat1 = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: lat1".into()))?
@@ -261,10 +287,14 @@ impl GeoPlugin {
         Ok(Value::Float(haversine(lat1, lon1, lat2, lon2)))
     }
 
-    /// Convention 1: Filter a JSON array of points to those within `radius_km`
-    /// of the given center.  Each input object must have `lat` and `lon` fields.
-    /// Returns a JSON array with a `distance_km` field added to each match.
-    fn within_radius(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 1 -- Filter a JSON array of points to those within `radius_km`
+    /// of the given center.
+    ///
+    /// Each input object must have `lat` and `lon` numeric fields.
+    /// Returns a JSON array with a `distance_km` field added to each match,
+    /// rounded to three decimal places.
+    #[allow(clippy::unused_self)]
+    fn within_radius(&self, args: &[Value]) -> Result<Value, PluginError> {
         let center_lat = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: lat".into()))?
@@ -283,20 +313,20 @@ impl GeoPlugin {
             .as_str()?;
 
         let points: Vec<serde_json::Value> = serde_json::from_str(points_json)
-            .map_err(|e| PluginError::InvalidArg(format!("invalid JSON points array: {}", e)))?;
+            .map_err(|e| PluginError::InvalidArg(format!("invalid JSON points array: {e}")))?;
 
         let mut results: Vec<serde_json::Value> = Vec::new();
 
         for point in &points {
             let lat = point
                 .get("lat")
-                .and_then(|v| v.as_f64())
+                .and_then(serde_json::Value::as_f64)
                 .ok_or_else(|| {
                     PluginError::InvalidArg("each point must have a numeric 'lat' field".into())
                 })?;
             let lon = point
                 .get("lon")
-                .and_then(|v| v.as_f64())
+                .and_then(serde_json::Value::as_f64)
                 .ok_or_else(|| {
                     PluginError::InvalidArg("each point must have a numeric 'lon' field".into())
                 })?;
@@ -320,13 +350,17 @@ impl GeoPlugin {
         }
 
         let json = serde_json::to_string(&results)
-            .map_err(|e| PluginError::Failed(format!("JSON serialization failed: {}", e)))?;
+            .map_err(|e| PluginError::Failed(format!("JSON serialization failed: {e}")))?;
         Ok(Value::String(json))
     }
 
-    /// Convention 2: Compute a lat/lon bounding box for a radius around a point.
-    /// Useful for pre-filtering database queries before applying exact Haversine.
-    fn bounding_box(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 2 -- Compute a lat/lon bounding box for a radius around a point.
+    ///
+    /// Returns a map with `min_lat`, `max_lat`, `min_lon`, `max_lon`.
+    /// Useful for pre-filtering database queries (e.g. a SQL `WHERE` clause)
+    /// before applying the exact Haversine distance check.
+    #[allow(clippy::unused_self)]
+    fn bounding_box(&self, args: &[Value]) -> Result<Value, PluginError> {
         let lat = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: lat".into()))?
@@ -363,11 +397,13 @@ impl GeoPlugin {
         Ok(Value::Map(map))
     }
 
-    /// Convention 3: Geocode an address to lat/lon (stub implementation).
+    /// Convention 3 -- Geocode an address to lat/lon (stub implementation).
     ///
     /// Returns mock coordinates for well-known places.  A production version
     /// would call Nominatim (OpenStreetMap) or a similar geocoding API.
-    fn geocode(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Returns `Value::Null` when the address is not recognized.
+    #[allow(clippy::unused_self)]
+    fn geocode(&self, args: &[Value]) -> Result<Value, PluginError> {
         let address = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: address".into()))?
@@ -445,11 +481,11 @@ impl GeoPlugin {
                     let mut map = HashMap::new();
                     map.insert("lat".into(), Value::Float(*lat));
                     map.insert("lon".into(), Value::Float(*lon));
-                    map.insert("display_name".into(), Value::String(display_name.to_string()));
+                    map.insert("display_name".into(), Value::String((*display_name).to_string()));
                     map.insert(
                         "note".into(),
                         Value::String(
-                            "stub result — real geocoding requires Nominatim or similar API"
+                            "stub result -- real geocoding requires Nominatim or similar API"
                                 .into(),
                         ),
                     );
@@ -462,11 +498,13 @@ impl GeoPlugin {
         Ok(Value::Null)
     }
 
-    /// Convention 4: Reverse geocode lat/lon to an address (stub implementation).
+    /// Convention 4 -- Reverse geocode lat/lon to an address (stub implementation).
     ///
-    /// Returns mock addresses for coordinates near well-known cities.
+    /// Returns mock addresses for coordinates near well-known cities (within 50 km).
     /// A production version would call Nominatim or a similar API.
-    fn reverse_geocode(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Returns `Value::Null` when no city is within the threshold.
+    #[allow(clippy::unused_self)]
+    fn reverse_geocode(&self, args: &[Value]) -> Result<Value, PluginError> {
         let lat = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing argument: lat".into()))?
@@ -496,10 +534,10 @@ impl GeoPlugin {
 
         for &(clat, clon, address, city, country) in cities {
             let dist = haversine(lat, lon, clat, clon);
-            if dist <= threshold_km {
-                if best.is_none() || dist < best.unwrap().0 {
-                    best = Some((dist, address, city, country));
-                }
+            if dist <= threshold_km
+                && (best.is_none() || dist < best.unwrap().0)
+            {
+                best = Some((dist, address, city, country));
             }
         }
 
@@ -512,7 +550,7 @@ impl GeoPlugin {
                 map.insert(
                     "note".into(),
                     Value::String(
-                        "stub result — real reverse geocoding requires Nominatim or similar API"
+                        "stub result -- real reverse geocoding requires Nominatim or similar API"
                             .into(),
                     ),
                 );
@@ -527,6 +565,11 @@ impl GeoPlugin {
 // C ABI entry point
 // ---------------------------------------------------------------------------
 
+/// Create a heap-allocated `GeoPlugin` and return a raw pointer for dynamic loading.
+///
+/// Called by the SOMA runtime's `libloading`-based plugin loader.  The runtime
+/// takes ownership of the pointer and drops it on unload.
+#[allow(improper_ctypes_definitions)]
 #[unsafe(no_mangle)]
 pub extern "C" fn soma_plugin_init() -> *mut dyn SomaPlugin {
     Box::into_raw(Box::new(GeoPlugin))

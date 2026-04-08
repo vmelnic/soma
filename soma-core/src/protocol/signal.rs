@@ -1,49 +1,51 @@
-//! Synaptic Protocol v2 signal types (Spec Sections 4.2, 4.3).
+//! Signal types, flags, and the `Signal` struct — the fundamental unit of
+//! Synaptic Protocol v2 communication.
+//!
+//! Every protocol interaction is expressed as a `Signal` with a type, flags,
+//! channel, sequence number, sender identity, metadata, and payload.
+//! Spec reference: Sections 4.2, 4.3.
 
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 
-/// All signal types defined by the Synaptic Protocol v2 spec.
+/// The 24 signal types defined by Synaptic Protocol v2.
+///
+/// Wire encoding: single byte, grouped by function into ranges
+/// (0x01-0x03 lifecycle, 0x10-0x11 intent, 0x20-0x24 data/streams,
+/// 0x30-0x33 chunked, 0x40-0x43 discovery, 0x50-0x51 pubsub,
+/// 0xF0-0xFF keepalive/control).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum SignalType {
-    // Connection lifecycle
     Handshake = 0x01,
     HandshakeAck = 0x02,
     Close = 0x03,
 
-    // Intent / result
     Intent = 0x10,
     Result = 0x11,
 
-    // Data transfer
     Data = 0x20,
     Binary = 0x21,
     StreamStart = 0x22,
     StreamData = 0x23,
     StreamEnd = 0x24,
 
-    // Chunked transfer
     ChunkStart = 0x30,
     ChunkData = 0x31,
     ChunkEnd = 0x32,
     ChunkAck = 0x33,
 
-    // Discovery
     Discover = 0x40,
     DiscoverAck = 0x41,
     PeerQuery = 0x42,
     PeerList = 0x43,
 
-    // Pub/sub
     Subscribe = 0x50,
     Unsubscribe = 0x51,
 
-    // Keepalive
     Ping = 0xF0,
     Pong = 0xF1,
 
-    // Protocol-level
     Error = 0xFE,
     Control = 0xFF,
 }
@@ -107,8 +109,8 @@ bitflags! {
     }
 }
 
-// Manual Serialize/Deserialize for SignalFlags since bitflags doesn't
-// support derive(Serialize, Deserialize) on its internal type.
+// bitflags! does not support derive(Serialize, Deserialize), so we
+// serialize as the raw u8 bits value and truncate unknown bits on deser.
 impl Serialize for SignalFlags {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         serializer.serialize_u8(self.bits())
@@ -122,20 +124,28 @@ impl<'de> Deserialize<'de> for SignalFlags {
     }
 }
 
-/// A Synaptic Protocol v2 signal. The fundamental unit of communication
-/// between SOMAs.
-#[allow(clippy::struct_field_names)] // signal_type and trace_id are descriptive names
+/// The fundamental unit of inter-SOMA communication.
+///
+/// A signal carries a typed message over a multiplexed channel with
+/// sequence numbering, optional compression/encryption flags, JSON
+/// metadata (`MessagePack` on wire), and an arbitrary binary payload.
+#[allow(clippy::struct_field_names)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Signal {
     pub signal_type: SignalType,
     pub flags: SignalFlags,
+    /// Multiplexed channel (0 = control channel, must be used for lifecycle signals).
     pub channel_id: u32,
+    /// Monotonically increasing per-connection; used for ack correlation and RTT.
     pub sequence: u32,
+    /// SOMA instance ID of the sender.
     pub sender_id: String,
+    /// Extensible key-value metadata. Encoded as `MessagePack` on the wire.
     pub metadata: serde_json::Value,
+    /// Raw binary payload (intent text, result data, chunk bytes, etc.).
     pub payload: Vec<u8>,
-    /// Trace ID for distributed tracing. Stored in metadata on the wire,
-    /// but kept as a top-level field for convenience.
+    /// Distributed tracing ID. Merged into metadata for wire encoding,
+    /// extracted back into this field on decode for ergonomic access.
     #[serde(default)]
     pub trace_id: String,
 }
@@ -221,7 +231,8 @@ impl Signal {
     }
 
     #[allow(dead_code)] // Used by WebSocket handler
-    /// Convenience: read `trace_id` from metadata if the field is empty.
+    /// Returns the trace ID, falling back to the `trace_id` key in metadata
+    /// when the top-level field is empty (e.g., signals decoded from older peers).
     pub fn effective_trace_id(&self) -> String {
         if !self.trace_id.is_empty() {
             return self.trace_id.clone();

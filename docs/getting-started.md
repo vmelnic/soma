@@ -252,7 +252,11 @@ Key environment variables:
 | `SOMA_MCP_VIEWER_TOKEN` | MCP viewer auth token |
 | `SOMA_LOG_JSON=1` | JSON-structured log output |
 | `SOMA_MIND_TEMPERATURE` | Softmax temperature override |
+| `SOMA_MIND_MAX_PROGRAM_STEPS` | Maximum program steps per inference |
 | `SOMA_PROTOCOL_BIND` | Synaptic Protocol bind address override |
+| `SOMA_SOMA_ID` | Instance ID override |
+| `SOMA_SOMA_LOG_LEVEL` | Log level override (trace/debug/info/warn/error) |
+| `SOMA_MEMORY_CHECKPOINT_DIR` | Checkpoint directory override |
 
 ## What's Next
 
@@ -261,4 +265,4 @@ Key environment variables:
 - [docs/mind-engine.md](mind-engine.md) -- how the neural Mind generates programs
 - [docs/plugin-development.md](plugin-development.md) -- build a plugin
 - [docs/web4.md](web4.md) -- SOMA as Web 4 infrastructure
-- [08_DEVELOPER_GUIDE.md](../08_DEVELOPER_GUIDE.md) -- full developer guide for building with SOMA
+- [docs/building-apps.md](building-apps.md) -- build applications with SOMA

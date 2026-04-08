@@ -1,24 +1,26 @@
-//! MCP authentication — role-based access control (Whitepaper Section 8.3).
+//! MCP authentication and authorization.
 //!
-//! Three levels: admin (full access), builder (read + execute), viewer (read-only).
-//! Destructive actions require two-step confirmation.
+//! Implements role-based access control per Whitepaper Section 8.3. Three token-based
+//! roles (admin, builder, viewer) gate access to MCP tools. Destructive actions
+//! (checkpoint restore, plugin uninstall) require two-step confirmation with a 60-second
+//! expiry window. Tokens are registered from environment variables or config at startup.
 
 use serde::Serialize;
 use std::collections::HashMap;
 
-/// Auth level for MCP connections (Section 8.3).
+/// Authorization tier for MCP connections, checked on every tool call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum AuthLevel {
-    /// Full access: read, execute, admin operations
+    /// Full access: state queries, intent execution, plugin management, shutdown.
     Admin,
-    /// Read + execute: can query state and run intents
+    /// Read + execute: state queries and intent execution, no admin operations.
     Builder,
-    /// Read-only: can only query state
+    /// Read-only: state queries only, no side effects.
     Viewer,
 }
 
 impl AuthLevel {
-    /// Check if this level can perform the given action category.
+    /// Returns true if this level permits side-effecting operations (intents, plugin calls).
     pub const fn can_execute(self) -> bool {
         matches!(self, Self::Admin | Self::Builder)
     }
@@ -43,17 +45,23 @@ impl std::fmt::Display for AuthLevel {
     }
 }
 
-/// A registered auth token.
+/// A registered authentication token bound to a session and role.
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // Spec feature: Section 8.3 auth token fields
 pub struct AuthToken {
     pub token: String,
     pub level: AuthLevel,
+    /// Identifies the session; `"config"` for tokens registered from env/config at startup.
     pub session_id: String,
+    /// Unix timestamp (seconds) of token creation.
     pub created_at: u64,
 }
 
-/// Pending action awaiting two-step confirmation (Section 8.3).
+/// A destructive action awaiting explicit user confirmation before execution.
+///
+/// Stores the original tool name and arguments so that `soma.confirm` can
+/// re-dispatch the call without the caller having to resend the full request.
+/// Expires after 60 seconds (Section 8.3).
 #[derive(Debug)]
 #[allow(dead_code)] // Spec feature: Section 8.3 confirmation fields
 pub struct PendingConfirmation {
@@ -61,17 +69,20 @@ pub struct PendingConfirmation {
     pub description: String,
     pub created_at: std::time::Instant,
     pub token: String,
-    /// The original tool name that requires confirmation (for re-dispatch on confirm).
     pub tool_name: String,
-    /// The original arguments for the tool call (for re-dispatch on confirm).
     pub arguments: serde_json::Value,
 }
 
-/// Auth manager for MCP connections.
+/// Manages token validation and two-step confirmation for MCP connections.
+///
+/// When `require_auth` is false (the default for local stdio), all requests
+/// pass without a token. When enabled, every tool call must present a valid
+/// token with sufficient privileges.
 pub struct AuthManager {
     tokens: HashMap<String, AuthToken>,
     pending_confirmations: HashMap<String, PendingConfirmation>,
     require_auth: bool,
+    /// Monotonic counter for generating unique `confirm-N` action IDs.
     next_action_id: u64,
 }
 
@@ -85,7 +96,7 @@ impl AuthManager {
         }
     }
 
-    /// Create a new auth token for the given level.
+    /// Generate a new UUID-based auth token for the given role level.
     #[allow(dead_code)] // Spec feature: Section 8.3 dynamic token creation
     pub fn create_token(&mut self, level: AuthLevel) -> String {
         let token = uuid::Uuid::new_v4().to_string();
@@ -105,22 +116,22 @@ impl AuthManager {
         token
     }
 
-    /// Register a pre-configured admin token (from config or env).
+    /// Register a pre-configured admin token (typically from `SOMA_MCP_ADMIN_TOKEN`).
     pub fn register_admin_token(&mut self, token: String) {
         self.register_token(token, AuthLevel::Admin);
     }
 
-    /// Register a pre-configured builder token (from env).
+    /// Register a pre-configured builder token (typically from `SOMA_MCP_BUILDER_TOKEN`).
     pub fn register_builder_token(&mut self, token: String) {
         self.register_token(token, AuthLevel::Builder);
     }
 
-    /// Register a pre-configured viewer token (from env).
+    /// Register a pre-configured viewer token (typically from `SOMA_MCP_VIEWER_TOKEN`).
     pub fn register_viewer_token(&mut self, token: String) {
         self.register_token(token, AuthLevel::Viewer);
     }
 
-    /// Register a token with a given auth level.
+    /// Internal: insert a token with `session_id = "config"` (pre-configured, not dynamic).
     fn register_token(&mut self, token: String, level: AuthLevel) {
         let session_id = "config".to_string();
         let created_at = std::time::SystemTime::now()
@@ -136,16 +147,17 @@ impl AuthManager {
         });
     }
 
-    /// Validate a token and return the auth info.
+    /// Look up a token and return its metadata, or `None` if auth is disabled.
     #[allow(dead_code)] // Spec feature: Section 8.3 token validation
     pub fn validate(&self, token: &str) -> Option<&AuthToken> {
         if !self.require_auth {
-            return None; // auth disabled, all requests pass
+            return None;
         }
         self.tokens.get(token)
     }
 
-    /// Check if a request is authorized. Returns the `session_id` if authorized.
+    /// Authorize a request. Returns the `session_id` on success, or a human-readable
+    /// error describing the missing privilege. When auth is disabled, returns `"anonymous"`.
     pub fn check_request(&self, token: Option<&str>, needs_execute: bool, needs_admin: bool) -> Result<String, String> {
         if !self.require_auth {
             return Ok("anonymous".to_string());
@@ -165,8 +177,8 @@ impl AuthManager {
         Ok(auth.session_id.clone())
     }
 
-    /// Create a pending confirmation for a destructive action.
-    /// Stores the original `tool_name` and arguments so that `soma.confirm` can re-dispatch.
+    /// Register a destructive action for two-step confirmation. Returns the `action_id`
+    /// that the caller must pass to `soma.confirm` within 60 seconds.
     pub fn create_confirmation(
         &mut self,
         description: String,
@@ -189,17 +201,16 @@ impl AuthManager {
         action_id
     }
 
-    /// Confirm a pending action. Returns the pending confirmation if valid.
+    /// Consume and return a pending confirmation if it exists and has not expired (60s TTL).
     pub fn confirm(&mut self, action_id: &str) -> Option<PendingConfirmation> {
         let pending = self.pending_confirmations.remove(action_id)?;
-        // Expire after 60 seconds (spec: 60s confirmation timeout)
         if pending.created_at.elapsed().as_secs() > 60 {
             return None;
         }
         Some(pending)
     }
 
-    /// Clean up expired confirmations.
+    /// Evict all confirmations older than 60 seconds.
     #[allow(dead_code)] // Spec feature: Section 8.3 confirmation cleanup
     pub fn cleanup_expired(&mut self) {
         self.pending_confirmations.retain(|_, p| {

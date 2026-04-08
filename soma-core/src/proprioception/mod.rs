@@ -5,14 +5,21 @@
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// Runtime statistics and self-knowledge for the SOMA instance.
+/// The SOMA instance's self-model: cumulative statistics, loaded capabilities,
+/// and resource usage. Queried by the MCP health endpoint and the REPL status command.
+///
+/// Unlike [`SomaMetrics`](crate::metrics::SomaMetrics) (lock-free atomics for
+/// Prometheus scraping), this struct uses plain `u64`/`f32` fields and requires
+/// `&mut self` for updates -- it is owned by the main orchestration loop.
 pub struct Proprioception {
     pub start_time: Instant,
+    /// Unix timestamp (seconds) captured at startup, for serialization to JSON.
     pub start_timestamp: u64,
     pub total_inferences: u64,
     pub successful_inferences: u64,
     pub failed_inferences: u64,
     pub total_adaptations: u64,
+    /// Total experience records (successes + failures) seen during this session.
     pub experience_count: u64,
     pub checkpoints_saved: u64,
     pub consolidations: u64,
@@ -21,12 +28,9 @@ pub struct Proprioception {
     #[allow(dead_code)] // Spec feature: Section 11 protocol tracking
     pub total_signals_processed: u64,
     pub total_decisions_recorded: u64,
-    /// Names of currently loaded plugins.
     pub loaded_plugins: Vec<String>,
-    /// Current `LoRA` adapter magnitude.
     pub lora_magnitude: f32,
-    /// Current CPU usage percentage.
-    /// CPU tracking requires platform-specific implementation.
+    /// CPU tracking requires platform-specific implementation; currently always 0.0.
     pub cpu_usage_percent: f32,
 }
 
@@ -55,34 +59,37 @@ impl Proprioception {
         }
     }
 
-    /// Record a successful inference+execution cycle.
+    /// Record a successful inference + execution cycle (increments experience count).
     pub const fn record_success(&mut self) {
         self.total_inferences += 1;
         self.successful_inferences += 1;
         self.experience_count += 1;
     }
 
-    /// Record a failed inference or execution cycle.
+    /// Record a failed inference or execution cycle (increments experience count).
     pub const fn record_failure(&mut self) {
         self.total_inferences += 1;
         self.failed_inferences += 1;
         self.experience_count += 1;
     }
 
-    /// Record that a `LoRA` adaptation was performed.
+    /// Record that a `LoRA` adaptation pass was performed.
     pub const fn record_adaptation(&mut self) {
         self.total_adaptations += 1;
     }
 
+    /// Record that a checkpoint was saved to disk.
     pub const fn record_checkpoint(&mut self) {
         self.checkpoints_saved += 1;
     }
 
+    /// Record that a `LoRA` consolidation (merge into base weights) occurred.
     #[allow(dead_code)] // Spec feature: Section 11 consolidation tracking
     pub const fn record_consolidation(&mut self) {
         self.consolidations += 1;
     }
 
+    /// Record that a decision was written to the decision log.
     pub const fn record_decision(&mut self) {
         self.total_decisions_recorded += 1;
     }
@@ -146,15 +153,12 @@ impl Proprioception {
         )
     }
 
-    /// Get peak RSS in bytes via `getrusage(2)`.
+    /// Return peak (high-water-mark) RSS in bytes via `getrusage(2)`.
     ///
-    /// Note: `ru_maxrss` reports **peak** (high-water-mark) RSS, not the
-    /// *current* resident set size.  Retrieving current RSS on macOS would
-    /// require `mach_task_basic_info` via the Mach kernel API, which adds
-    /// significant platform-specific complexity.  On Linux, `/proc/self/statm`
-    /// could be used instead.  For now this function is named `peak_rss_bytes`
-    /// to accurately reflect what it measures.
+    /// This is **peak** RSS, not current. Current RSS would require
+    /// `mach_task_basic_info` (macOS) or `/proc/self/statm` (Linux).
     pub fn peak_rss_bytes() -> u64 {
+        // SAFETY: zeroed rusage is valid, and RUSAGE_SELF is always a valid argument.
         let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
         let rc = unsafe { libc::getrusage(libc::RUSAGE_SELF, &raw mut usage) };
         if rc == 0 {
@@ -180,11 +184,10 @@ impl Proprioception {
         self.lora_magnitude = mag;
     }
 
-    /// Update CPU usage estimate.
-    /// CPU tracking requires platform-specific implementation.
+    /// Refresh CPU usage estimate. Currently a no-op (returns 0.0) pending
+    /// platform-specific implementation (`proc_pidinfo` on macOS, `/proc/self/stat` on Linux).
     #[allow(dead_code)] // Spec feature: Section 11 resource tracking
     pub const fn update_cpu(&mut self) {
-        // CPU tracking requires platform-specific implementation.
         self.cpu_usage_percent = 0.0;
     }
 

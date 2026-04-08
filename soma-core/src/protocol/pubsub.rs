@@ -7,20 +7,27 @@ use std::collections::{HashMap, VecDeque};
 
 use super::signal::{Signal, SignalType};
 
-/// A single subscription entry.
+/// A single subscription entry binding a connection to a topic pattern.
 pub struct Subscription {
+    /// Topic pattern this subscription matches against (may contain `:*` wildcard).
     #[allow(dead_code)] // Stored for subscription management
     pub topic: String,
+    /// Logical channel within the connection for multiplexing.
     pub channel_id: u32,
+    /// Owning connection — used for fan-out routing and cleanup.
     pub connection_id: u64,
+    /// Highest sequence number delivered to this subscriber (for catch-up).
     pub last_seen_sequence: u32,
+    /// Durable subscriptions survive disconnects; non-durable are removed.
     pub durable: bool,
 }
 
-/// Ring buffer of recent signals for a topic, used for durable subscription
-/// catch-up on reconnect.
+/// Ring buffer of recent signals for a topic, enabling durable subscribers
+/// to catch up after reconnecting.
 pub struct TopicBuffer {
+    /// Buffered `(sequence_number, payload)` pairs, oldest at front.
     pub signals: VecDeque<(u32, Vec<u8>)>,
+    /// When full, the oldest entry is evicted on push.
     pub max_size: usize,
 }
 
@@ -42,8 +49,11 @@ impl TopicBuffer {
 
 /// Manages pub/sub subscriptions, topic buffers, and fan-out delivery.
 pub struct PubSubManager {
+    /// Topic pattern -> list of active subscriptions (wildcard patterns are keys).
     subscriptions: HashMap<String, Vec<Subscription>>,
+    /// Topic (exact) -> ring buffer of recent payloads for catch-up replay.
     topic_buffers: HashMap<String, TopicBuffer>,
+    /// Topic (exact) -> monotonically increasing sequence counter.
     next_sequence: HashMap<String, u32>,
     /// Default max buffer size for new topics.
     default_buffer_size: usize,
@@ -59,8 +69,9 @@ impl PubSubManager {
         }
     }
 
-    /// Handle a SUBSCRIBE signal. If `last_seen_sequence` is provided the
-    /// subscriber will receive catch-up signals from the topic buffer.
+    /// Register a subscription. When `last_seen_sequence` is provided, the
+    /// caller should follow up with [`catch_up`](Self::catch_up) to replay
+    /// buffered signals the subscriber missed.
     pub fn subscribe(
         &mut self,
         topic: &str,
@@ -82,14 +93,13 @@ impl PubSubManager {
             .or_default()
             .push(sub);
 
-        // Ensure a buffer exists for the topic
         self.topic_buffers
             .entry(topic.to_string())
             .or_insert_with(|| TopicBuffer::new(self.default_buffer_size));
     }
 
-    /// Handle an UNSUBSCRIBE signal: remove all subscriptions for a
-    /// connection on the given topic.
+    /// Remove all subscriptions for `connection_id` on the given topic.
+    /// Cleans up the topic entry entirely if no subscribers remain.
     pub fn unsubscribe(&mut self, topic: &str, connection_id: u64) {
         if let Some(subs) = self.subscriptions.get_mut(topic) {
             subs.retain(|s| s.connection_id != connection_id);
@@ -109,7 +119,6 @@ impl PubSubManager {
         payload: &[u8],
         channel_id: u32,
     ) -> Vec<(u64, Signal)> {
-        // Assign the next sequence number for this topic
         let seq = {
             let entry = self.next_sequence.entry(topic.to_string()).or_insert(0);
             let s = *entry;
@@ -117,16 +126,14 @@ impl PubSubManager {
             s
         };
 
-        // Buffer the signal for durable catch-up
         self.topic_buffers
             .entry(topic.to_string())
             .or_insert_with(|| TopicBuffer::new(self.default_buffer_size))
             .push(seq, payload.to_vec());
 
-        // Fan-out to matching subscribers
         let mut results: Vec<(u64, Signal)> = Vec::new();
 
-        // Collect matching topic keys first to avoid borrow issues
+        // Collect matching keys first to avoid borrowing `self` mutably and immutably.
         let matching_topics: Vec<String> = self
             .subscriptions
             .keys()
@@ -156,8 +163,8 @@ impl PubSubManager {
         results
     }
 
-    /// Get catch-up signals for a subscriber that reconnected and wants
-    /// signals after `last_seen_sequence`.
+    /// Replay buffered signals with sequence numbers strictly greater than
+    /// `last_seen_sequence`. Used for durable subscriber catch-up on reconnect.
     pub fn catch_up(&self, topic: &str, last_seen_sequence: u32) -> Vec<Signal> {
         let mut signals = Vec::new();
 
@@ -176,21 +183,20 @@ impl PubSubManager {
         signals
     }
 
-    /// Remove all subscriptions for a given connection (e.g., on disconnect).
-    /// Durable subscriptions are kept so the subscriber can catch up later.
+    /// Remove all non-durable subscriptions for a disconnected connection.
+    /// Durable subscriptions are retained so the subscriber can catch up later.
     pub fn remove_connection(&mut self, connection_id: u64) {
         for subs in self.subscriptions.values_mut() {
             subs.retain(|s| s.durable || s.connection_id != connection_id);
-            // For durable subs that match, just mark them by keeping them
-            // (they still belong to connection_id but the connection is gone;
-            // on reconnect the subscriber will re-subscribe and catch up).
         }
-        // Clean up empty topic entries
         self.subscriptions.retain(|_, subs| !subs.is_empty());
     }
 
-    /// Match a topic against a subscription pattern. Supports `:*` suffix
-    /// as a wildcard (e.g. `chat:*` matches `chat:room-1`).
+    /// Match a topic against a subscription pattern.
+    ///
+    /// Wildcard rules: `chat:*` matches `chat` itself and any `chat:<suffix>`,
+    /// but not unrelated prefixes like `chatroom`. Exact patterns require
+    /// exact equality.
     fn topic_matches(pattern: &str, topic: &str) -> bool {
         pattern.strip_suffix(":*").map_or_else(
             || pattern == topic,

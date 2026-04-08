@@ -9,55 +9,50 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use dashmap::DashMap;
 
-/// Per-plugin metric counters.
+/// Atomic counters for a single plugin, keyed by name in [`SomaMetrics::per_plugin`].
 pub struct PluginMetrics {
     pub calls: AtomicU64,
     pub errors: AtomicU64,
     pub duration_sum_ms: AtomicU64,
 }
 
-/// SOMA runtime metrics — Prometheus-compatible counters and gauges.
+/// Lock-free runtime metrics exposed as both Prometheus text and JSON.
+///
+/// All counters use `AtomicU64` with `Relaxed` ordering -- eventual consistency
+/// is acceptable for observability data and avoids contention on hot paths.
 pub struct SomaMetrics {
-    // Inference metrics
     pub inferences_total: AtomicU64,
     pub inferences_success: AtomicU64,
     pub inferences_failed: AtomicU64,
     pub inference_duration_sum_ms: AtomicU64,
-    /// Sum of confidence scores (Section 18.4); divide by `inferences_total` for average.
+    /// Running sum of confidence scores scaled by 1e6 for integer storage.
+    /// Divide by `inferences_total` and 1e6 to recover average confidence.
     pub inference_confidence_sum: AtomicU64,
 
-    // Program execution metrics
     pub programs_executed: AtomicU64,
     pub program_steps_executed: AtomicU64,
 
-    // Plugin metrics
     pub plugin_calls_total: AtomicU64,
     pub plugin_calls_failed: AtomicU64,
     pub plugin_retries: AtomicU64,
-    /// Sum of plugin call durations in ms (Section 18.4).
     pub plugin_duration_sum_ms: AtomicU64,
 
-    // Memory metrics
     pub experience_buffer_size: AtomicU64,
     pub adaptations_total: AtomicU64,
     pub checkpoints_saved: AtomicU64,
-    /// Current resident set size in bytes (Section 18.4).
     pub memory_rss_bytes: AtomicU64,
 
-    // Adaptation metrics (Section 18.4)
-    /// Current `LoRA` adapter magnitude, stored as f32 bits via `f32::to_bits`.
+    /// `LoRA` adapter magnitude stored as raw `f32::to_bits` inside a `u64`.
     pub lora_magnitude: AtomicU64,
 
-    // Protocol metrics
     pub protocol_connections_active: AtomicU64,
     pub protocol_signals_sent: AtomicU64,
     pub protocol_signals_received: AtomicU64,
     pub protocol_bytes_transferred: AtomicU64,
 
-    // Per-plugin metrics (Section 18.4)
+    /// Per-plugin counters, lazily populated on first call to each plugin.
     pub per_plugin: DashMap<String, PluginMetrics>,
 
-    // Uptime tracking
     pub start_time: Instant,
 }
 
@@ -89,7 +84,7 @@ impl SomaMetrics {
         }
     }
 
-    /// Record inference start.
+    /// Record a completed inference attempt (success or failure) and its wall-clock duration.
     pub fn record_inference(&self, success: bool, duration_ms: u64) {
         self.inferences_total.fetch_add(1, Ordering::Relaxed);
         self.inference_duration_sum_ms.fetch_add(duration_ms, Ordering::Relaxed);
@@ -100,7 +95,7 @@ impl SomaMetrics {
         }
     }
 
-    /// Record program execution.
+    /// Record a completed program execution and its step count.
     pub fn record_program(&self, steps: u64) {
         self.programs_executed.fetch_add(1, Ordering::Relaxed);
         self.program_steps_executed.fetch_add(steps, Ordering::Relaxed);
@@ -142,19 +137,16 @@ impl SomaMetrics {
         self.plugin_retries.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Record an inference confidence score (Section 18.4).
-    /// The f32 value is decomposed into integer mantissa-scaled addition
-    /// so the running sum can be kept in an `AtomicU64`.
+    /// Accumulate an inference confidence score into the running sum.
+    /// Stored as `(confidence * 1e6)` to preserve ~6 decimal digits in integer form.
     #[allow(dead_code)] // Spec feature: Section 18.4
     pub fn record_confidence(&self, confidence: f32) {
-        // Store confidence * 1_000_000 as integer to preserve ~6 decimal digits.
-        // Confidence is 0.0..1.0, so scaled fits in u64 without sign/truncation issues.
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let scaled = (f64::from(confidence) * 1_000_000.0) as u64;
         self.inference_confidence_sum.fetch_add(scaled, Ordering::Relaxed);
     }
 
-    /// Record the duration of a single plugin call in ms (Section 18.4).
+    /// Accumulate a plugin call duration (global counter only, no per-plugin tracking).
     #[allow(dead_code)] // Spec feature: Section 18.4
     pub fn record_plugin_duration(&self, duration_ms: u64) {
         self.plugin_duration_sum_ms.fetch_add(duration_ms, Ordering::Relaxed);
@@ -197,7 +189,7 @@ impl SomaMetrics {
         self.inference_duration_sum_ms.load(Ordering::Relaxed) as f64 / total as f64
     }
 
-    /// Serialize per-plugin metrics to JSON.
+    /// Collect per-plugin counters into a JSON object keyed by plugin name.
     fn per_plugin_json(&self) -> serde_json::Value {
         let mut map = serde_json::Map::new();
         for entry in &self.per_plugin {
@@ -304,13 +296,13 @@ impl SomaMetrics {
         self.protocol_connections_active.store(count, Ordering::Relaxed);
     }
 
-    /// Record protocol signal.
+    /// Record an outbound protocol signal and its byte size.
     pub fn record_signal_sent(&self, bytes: u64) {
         self.protocol_signals_sent.fetch_add(1, Ordering::Relaxed);
         self.protocol_bytes_transferred.fetch_add(bytes, Ordering::Relaxed);
     }
 
-    /// Record protocol signal received.
+    /// Record an inbound protocol signal and its byte size.
     pub fn record_signal_received(&self, bytes: u64) {
         self.protocol_signals_received.fetch_add(1, Ordering::Relaxed);
         self.protocol_bytes_transferred.fetch_add(bytes, Ordering::Relaxed);
@@ -357,10 +349,12 @@ impl SomaMetrics {
     }
 }
 
+/// Write a single Prometheus metric (HELP + TYPE + value) for a u64 counter/gauge.
 fn prom(out: &mut String, name: &str, ptype: &str, help: &str, value: u64) {
     let _ = write!(out, "# HELP {name} {help}\n# TYPE {name} {ptype}\n{name} {value}\n");
 }
 
+/// Write a single Prometheus metric (HELP + TYPE + value) for an f64 gauge.
 fn prom_f64(out: &mut String, name: &str, ptype: &str, help: &str, value: f64) {
     let _ = write!(out, "# HELP {name} {help}\n# TYPE {name} {ptype}\n{name} {value}\n");
 }

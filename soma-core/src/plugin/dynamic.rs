@@ -1,23 +1,22 @@
-//! Dynamic plugin loading from .so/.dylib files (Section 5.3).
+//! Dynamic plugin loading from `.so`/`.dylib` shared libraries (Section 5.3).
 //!
-//! Plugins are compiled as cdylib crates that export a C ABI init function.
-//! The function signature is:
-//!   extern "C" fn `soma_plugin_init()` -> *mut dyn `SomaPlugin`
+//! Each plugin crate is compiled as `cdylib` and must export:
+//! ```ignore
+//! #[no_mangle]
+//! pub extern "C" fn soma_plugin_init() -> *mut dyn SomaPlugin {
+//!     Box::into_raw(Box::new(MyPlugin::new()))
+//! }
+//! ```
 //!
-//! Example plugin crate:
-//!   #[`no_mangle`]
-//!   pub extern "C" fn `soma_plugin_init()` -> *mut dyn `SomaPlugin` {
-//!       `Box::into_raw(Box::new(MyPlugin::new()))`
-//!   }
+//! Loading supports optional Ed25519 signature verification via sidecar `.sig`/`.pub` files,
+//! manifest-based metadata parsing, and platform compatibility filtering.
 
 use anyhow::{Context, Result};
 use std::path::Path;
 
 use super::interface::SomaPlugin;
 
-/// Verify Ed25519 signature of a plugin file (Section 20.4).
-/// `signature` contains 64-byte raw Ed25519 signature.
-/// `public_key` is the signer's 32-byte Ed25519 public key.
+/// Verify Ed25519 signature of a plugin binary against a known public key.
 pub fn verify_plugin_signature(
     plugin_path: &Path,
     signature: &[u8; 64],
@@ -27,15 +26,13 @@ pub fn verify_plugin_signature(
     crate::protocol::encryption::verify(public_key, &plugin_bytes, signature)
 }
 
-/// Load a plugin from a shared library file.
-/// The library must export `soma_plugin_init` returning a raw pointer to `SomaPlugin`.
+/// Load a plugin from a shared library, calling its `soma_plugin_init` symbol.
 ///
-/// If a signature file (`<path>.sig`) and public key file (`<path>.pub`) exist alongside
-/// the plugin library, Ed25519 signature verification is performed before loading.
-/// Verification is mandatory when signature files are present — a failed check is an error.
-/// When no signature files exist, the plugin loads without verification (with a debug log).
+/// When sidecar signature files exist (`<path>.sig` + `<path>.pub`), Ed25519 verification
+/// is mandatory -- a failed check returns an error. Without sidecar files, the plugin
+/// loads unverified. The library is intentionally leaked (`mem::forget`) because the
+/// plugin holds references to symbols within it.
 pub fn load_plugin_from_path(path: &Path) -> Result<Box<dyn SomaPlugin>> {
-    // Check for signature file (Section 20.4)
     let ext_str = path.extension().unwrap_or_default().to_str().unwrap_or("");
     let sig_path = path.with_extension(format!("{ext_str}.sig"));
     let pub_path = path.with_extension(format!("{ext_str}.pub"));
@@ -81,8 +78,7 @@ pub fn load_plugin_from_path(path: &Path) -> Result<Box<dyn SomaPlugin>> {
 
     let plugin = unsafe { Box::from_raw(plugin_ptr) };
 
-    // Keep the library alive — leak it intentionally.
-    // The plugin uses symbols from the library, so it must stay loaded.
+    // Leak the library -- plugin holds live references to its symbols
     std::mem::forget(lib);
 
     tracing::info!(
@@ -95,12 +91,8 @@ pub fn load_plugin_from_path(path: &Path) -> Result<Box<dyn SomaPlugin>> {
     Ok(plugin)
 }
 
-/// Scan a directory for .so/.dylib plugin files.
-///
-/// Finds plugin libraries in two locations:
-/// 1. Top-level shared library files (e.g. `plugins/libfoo.dylib`)
-/// 2. Subdirectories containing a `manifest.json` or `manifest.toml` with a matching
-///    library file named `lib<dirname>.<ext>` (the `.soma-plugin` package layout)
+/// Find plugin libraries in a directory: both top-level `.so`/`.dylib` files and
+/// subdirectories with a `manifest.json`/`.toml` containing `lib<dirname>.<ext>`.
 pub fn scan_plugin_directory(dir: &Path) -> Vec<std::path::PathBuf> {
     let ext = if cfg!(target_os = "macos") { "dylib" }
               else if cfg!(target_os = "windows") { "dll" }
@@ -112,7 +104,6 @@ pub fn scan_plugin_directory(dir: &Path) -> Vec<std::path::PathBuf> {
         Ok(entries) => {
             let entries: Vec<_> = entries.filter_map(std::result::Result::ok).collect();
 
-            // Top-level library files
             for entry in &entries {
                 let path = entry.path();
                 if path.extension().is_some_and(|x| x == ext) {
@@ -120,22 +111,20 @@ pub fn scan_plugin_directory(dir: &Path) -> Vec<std::path::PathBuf> {
                 }
             }
 
-            // Also check subdirectories with manifest.json or manifest.toml
+            // Subdirectories with manifest: expect lib<dirname>.<ext> inside
             for entry in &entries {
                 let path = entry.path();
                 if path.is_dir() {
                     let manifest_json = path.join("manifest.json");
                     let manifest_toml = path.join("manifest.toml");
-                    if manifest_json.exists() || manifest_toml.exists() {
-                        // Look for the library file inside the subdirectory
-                        if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+                    if (manifest_json.exists() || manifest_toml.exists())
+                        && let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
                             let lib_name = format!("lib{dir_name}.{ext}");
                             let lib_path = path.join(&lib_name);
                             if lib_path.exists() {
                                 results.push(lib_path);
                             }
                         }
-                    }
                 }
             }
         }
@@ -147,7 +136,7 @@ pub fn scan_plugin_directory(dir: &Path) -> Vec<std::path::PathBuf> {
     results
 }
 
-/// Plugin manifest parsed from manifest.toml (`05_PLUGIN_CATALOG.md` Section 4).
+/// Parsed plugin metadata from `manifest.toml` (Plugin Catalog spec Section 4).
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // Spec feature: manifest fields for plugin catalog
 pub struct PluginManifest {
@@ -160,7 +149,7 @@ pub struct PluginManifest {
     pub dependencies: Vec<String>,
 }
 
-/// Parse a plugin manifest.toml file.
+/// Parse `manifest.toml` from a plugin directory, returning `None` if absent or malformed.
 pub fn parse_manifest(plugin_dir: &Path) -> Option<PluginManifest> {
     let manifest_path = plugin_dir.join("manifest.toml");
     if !manifest_path.exists() {
@@ -211,7 +200,7 @@ pub fn parse_manifest(plugin_dir: &Path) -> Option<PluginManifest> {
     })
 }
 
-/// Check if a plugin manifest is compatible with the current platform.
+/// Check if a manifest's declared platforms include the current target.
 pub fn is_platform_compatible(manifest: &PluginManifest) -> bool {
     if manifest.platforms.contains(&"*".to_string()) {
         return true;
@@ -230,23 +219,15 @@ pub fn is_platform_compatible(manifest: &PluginManifest) -> bool {
     manifest.platforms.iter().any(|p| p == current)
 }
 
-/// Discover plugins from a directory, reading manifests for metadata.
-///
-/// This is the primary entry point for plugin discovery. It:
-/// 1. Calls `scan_plugin_directory` to find all plugin libraries (top-level and subdirectory packages)
-/// 2. Parses manifests for each discovered plugin
-/// 3. Filters out plugins incompatible with the current platform (via `is_platform_compatible`)
-///
-/// Plugins without manifests are always included (platform filtering requires a manifest).
+/// Primary entry point for plugin discovery: scans a directory, parses manifests,
+/// and filters out platform-incompatible plugins. Plugins without manifests are always included.
 pub fn discover_plugins(dir: &Path) -> Vec<(std::path::PathBuf, Option<PluginManifest>)> {
     let mut result = Vec::new();
 
-    // scan_plugin_directory handles both top-level libs and subdirectory packages
     for path in scan_plugin_directory(dir) {
         let parent = path.parent().unwrap_or(dir);
         let manifest = parse_manifest(parent);
 
-        // Filter by platform compatibility when a manifest is available
         if let Some(ref m) = manifest
             && !is_platform_compatible(m) {
                 tracing::debug!(

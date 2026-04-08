@@ -22,16 +22,21 @@ Mind Engine (ONNX inference) + Plugin Manager + Memory System
 ```
 soma/
   SOMA_Whitepaper.md          # Master specification (v0.3)
-  01_CORE_REFACTORING.md      # Core binary spec (20 sections)
-  02_SYNAPTIC_PROTOCOL.md     # Binary wire protocol spec (23 sections)
-  03_PLUGINS.md               # Plugin system spec (20 sections)
-  04_HELPERBOOK.md            # First application spec
-  05_PLUGIN_CATALOG.md        # 40 plugin catalog
-  06_INTERFACE_SOMA.md        # Frontend renderer spec
-  07_SYNTHESIZER.md           # Training pipeline spec (14 sections)
-  08_DEVELOPER_GUIDE.md       # Plugin development guide
-  09_CONVERSATIONAL_INTERACTION.md
-  00_ROADMAP.md               # Milestone ordering
+  README.md                   # Project overview + quick links
+  docs/
+    web4.md                   # Web 4 vision: neural execution paradigm
+    architecture.md           # 6 core components, design decisions, runtime behavior
+    getting-started.md        # Build, install, run SOMA
+    building-apps.md          # Step-by-step: new app from scratch
+    mind-engine.md            # Neural inference, LoRA, tokenizer, memory system
+    synaptic-protocol.md      # Binary wire protocol spec (SOMA-to-SOMA)
+    mcp-interface.md          # LLM integration, all MCP tools, auth
+    plugin-system.md          # Plugin architecture: trait, conventions, Value, loading
+    plugin-catalog.md         # All plugins + conventions reference
+    plugin-development.md     # Tutorial: build a plugin end-to-end
+    synthesizer.md            # Training pipeline (PyTorch to ONNX)
+    helperbook.md             # HelperBook application guide
+    roadmap.md                # Status, milestones, deferred items
 
   soma-core/                  # Rust runtime
     Cargo.toml                # 26 crate dependencies
@@ -184,19 +189,24 @@ All config in `soma.toml` (see `soma.toml.example`). Override order: defaults < 
 
 Key env vars: `SOMA_MCP_ADMIN_TOKEN`, `SOMA_MCP_BUILDER_TOKEN`, `SOMA_MCP_VIEWER_TOKEN`, `SOMA_LOG_JSON=1`, `SOMA_MIND_TEMPERATURE`, `SOMA_PROTOCOL_BIND`.
 
-## Spec Compliance
+## Documentation
 
-Implementation validated against specs with 10-agent parallel audits:
+The `docs/` directory contains all consolidated documentation. The `SOMA_Whitepaper.md` is the master specification. Each doc in `docs/` covers one topic with zero redundancy:
 
-| Spec | Items | Pass |
-|------|-------|------|
-| `01_CORE_REFACTORING.md` | 30 | 30 |
-| `02_SYNAPTIC_PROTOCOL.md` | 85 | 85 |
-| `03_PLUGINS.md` | 63 | 63 |
-| `05_PLUGIN_CATALOG.md` | 61 | 61 |
-| `07_SYNTHESIZER.md` | 89 | 87 (+2 documented-future) |
-| `04_HELPERBOOK.md` | - | In progress (first application) |
-| **Total** | **328+** | **326+** |
+| Doc | Covers |
+|-----|--------|
+| `docs/architecture.md` | 6 core components, design decisions, runtime behavior |
+| `docs/mind-engine.md` | Neural inference, LoRA, tokenizer, memory system |
+| `docs/synaptic-protocol.md` | Binary wire protocol (SOMA-to-SOMA) |
+| `docs/mcp-interface.md` | LLM integration, all MCP tools, auth |
+| `docs/plugin-system.md` | Plugin architecture, trait, conventions, Value |
+| `docs/plugin-catalog.md` | All plugins + conventions reference |
+| `docs/plugin-development.md` | Tutorial: build a plugin |
+| `docs/synthesizer.md` | Training pipeline (PyTorch to ONNX) |
+| `docs/building-apps.md` | Step-by-step app building guide |
+| `docs/helperbook.md` | HelperBook application guide |
+| `docs/web4.md` | Web 4 vision document |
+| `docs/roadmap.md` | Status and milestones |
 
 ## Rules
 
@@ -207,7 +217,7 @@ Implementation validated against specs with 10-agent parallel audits:
 ### Rust (soma-core)
 - Run `cargo test` after changes — must stay at 101+ tests passing.
 - Run `cargo build` — 0 errors required, warnings OK.
-- The spec documents (01-09) are the source of truth. Code should match specs.
+- The docs in `docs/` and `SOMA_Whitepaper.md` are the source of truth. Code should match docs.
 - Don't remove "unused" code that implements spec features not yet wired.
 - Plugin interface changes ripple to: builtin.rs, manager.rs, mcp/server.rs, mcp/tools.rs, main.rs.
 - Convention struct and Value enum are core types — changes affect almost everything.

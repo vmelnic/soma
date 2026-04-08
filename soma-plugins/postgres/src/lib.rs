@@ -1,19 +1,33 @@
-//! SOMA PostgreSQL Plugin — database operations via synchronous postgres crate.
+//! SOMA `PostgreSQL` plugin -- database operations via the synchronous `postgres` crate.
 //!
-//! Provides 15 conventions for PostgreSQL interaction: query, execute,
-//! query_one, begin/commit/rollback (MVP: unsupported), create_table,
-//! alter_table, table_exists, list_tables, table_schema, find, find_one,
-//! count, aggregate.
+//! # Overview
 //!
-//! Conventions 11-14 provide ORM-style structured query building via JSON
-//! specs — like Prisma/Eloquent/Doctrine. The Mind generates a JSON spec
-//! instead of raw SQL, and the plugin builds safe SQL from it.
+//! Provides 15 conventions for `PostgreSQL` interaction:
 //!
-//! Uses the synchronous `postgres` crate for blocking database access.
-//! No tokio runtime required — avoids reactor TLS issues in cdylib plugins.
+//! - **Raw SQL** (0-2): `query`, `execute`, `query_one`
+//! - **Transactions** (3-5): `begin`, `commit`, `rollback` (MVP: stub, not yet wired)
+//! - **DDL** (6-7): `create_table`, `alter_table`
+//! - **Schema introspection** (8-10): `table_exists`, `list_tables`, `table_schema`
+//! - **ORM-style query builder** (11-14): `find`, `find_one`, `count`, `aggregate`
+//!
+//! Conventions 11-14 accept a JSON spec instead of raw SQL. The Mind generates
+//! a structured JSON object (table, select, where, join, `group_by`, having,
+//! `order_by`, limit, offset) and the plugin builds safe SQL from it -- similar to
+//! Prisma, Eloquent, or Doctrine query builders.
+//!
+//! # Why synchronous `postgres` instead of `tokio-postgres`?
+//!
+//! This crate compiles as a `cdylib` plugin loaded at runtime by the SOMA core
+//! binary. The core's tokio reactor lives in the host process; a `cdylib` cannot
+//! reliably share that reactor due to TLS (thread-local storage) boundary issues.
+//! The synchronous `postgres` crate sidesteps this entirely -- each call opens a
+//! blocking connection, executes, and returns. This is sufficient for SOMA's
+//! request-per-intent execution model where database calls are infrequent and
+//! latency is dominated by network round-trips, not connection setup.
 
 use soma_plugin_sdk::prelude::*;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::sync::OnceLock;
 
 use postgres::types::Type;
@@ -22,38 +36,69 @@ use postgres::types::Type;
 // Plugin struct
 // ---------------------------------------------------------------------------
 
+/// The SOMA `PostgreSQL` plugin.
+///
+/// Holds a lazily-initialized connection string set during [`SomaPlugin::on_load`].
+/// Each convention call creates a fresh [`postgres::Client`] from this string.
 pub struct PostgresPlugin {
     conn_string: OnceLock<String>,
 }
 
+impl Default for PostgresPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PostgresPlugin {
-    pub fn new() -> Self {
+    /// Create a new unconfigured plugin instance.
+    ///
+    /// The connection string is not set until [`SomaPlugin::on_load`] is called
+    /// by the plugin manager with the appropriate `PluginConfig`.
+    pub const fn new() -> Self {
         Self {
             conn_string: OnceLock::new(),
         }
     }
 
-    /// Get a fresh database connection.
-    /// Each call creates a new connection — simple but sufficient for SOMA's
-    /// request-per-intent model.
+    /// Establish a fresh database connection using the stored connection string.
+    ///
+    /// Each call creates a new TCP connection to `PostgreSQL`. This is intentionally
+    /// simple -- SOMA's execution model is one-intent-at-a-time, so connection
+    /// pooling adds complexity without meaningful benefit.
     fn connect(&self) -> Result<postgres::Client, PluginError> {
-        let conn_str = self.conn_string.get()
-            .ok_or_else(|| PluginError::Failed("postgres not configured — call on_load first".into()))?;
+        let conn_str = self
+            .conn_string
+            .get()
+            .ok_or_else(|| PluginError::Failed("postgres not configured -- call on_load first".into()))?;
         let client = postgres::Client::connect(conn_str, postgres::NoTls)
-            .map_err(|e| PluginError::ConnectionRefused(format!("PostgreSQL: {}", e)))?;
+            .map_err(|e| PluginError::ConnectionRefused(format!("PostgreSQL: {e}")))?;
         Ok(client)
     }
 
-    /// Format a postgres error with full detail from the database.
+    /// Format a `postgres::Error` with full detail from the database server.
+    ///
+    /// When the error originates from the database (as opposed to a connection
+    /// failure), this extracts severity, message, and SQLSTATE code. Otherwise
+    /// falls back to the generic `Display` output.
     fn format_pg_error(e: &postgres::Error) -> String {
-        if let Some(db_err) = e.as_db_error() {
-            format!("{}: {} ({})", db_err.severity(), db_err.message(), db_err.code().code())
-        } else {
-            e.to_string()
-        }
+        e.as_db_error().map_or_else(
+            || e.to_string(),
+            |db_err| {
+                format!(
+                    "{}: {} ({})",
+                    db_err.severity(),
+                    db_err.message(),
+                    db_err.code().code()
+                )
+            },
+        )
     }
 
-    /// Convert a `postgres::Row` into `Value::Map`.
+    /// Convert a [`postgres::Row`] into a [`Value::Map`].
+    ///
+    /// Iterates over every column in the row, mapping each `PostgreSQL` type to
+    /// the corresponding [`Value`] variant via [`Self::column_value`].
     fn row_to_value(row: &postgres::Row) -> Value {
         let mut map = HashMap::new();
         for (i, col) in row.columns().iter().enumerate() {
@@ -64,84 +109,88 @@ impl PostgresPlugin {
         Value::Map(map)
     }
 
-    /// Extract a single column value, mapping PG types to `Value`.
+    /// Extract a single column value from a row, mapping `PostgreSQL` types to [`Value`].
+    ///
+    /// Supported type mappings:
+    /// - `BOOL` -> `Value::Bool`
+    /// - `INT2`, `INT4`, `INT8` -> `Value::Int` (widened via `From`)
+    /// - `FLOAT4`, `FLOAT8` -> `Value::Float` (widened via `From`)
+    /// - `TEXT`, `VARCHAR`, `BPCHAR`, `NAME` -> `Value::String`
+    /// - `JSON`, `JSONB` -> `Value::String` (serialized JSON text)
+    /// - `UUID` -> `Value::String` (hyphenated form)
+    /// - `TIMESTAMP`, `TIMESTAMPTZ` -> `Value::String` (ISO 8601)
+    /// - `NUMERIC` -> `Value::String` (exact decimal representation)
+    /// - Everything else -> attempted as `String`, with a fallback placeholder
+    #[allow(clippy::too_many_lines)]
     fn column_value(row: &postgres::Row, idx: usize, ty: &Type) -> Value {
         match *ty {
             Type::BOOL => match row.try_get::<_, Option<bool>>(idx) {
                 Ok(Some(v)) => Value::Bool(v),
-                Ok(None) => Value::Null,
-                Err(_) => Value::Null,
+                Ok(None) | Err(_) => Value::Null,
             },
             Type::INT2 => match row.try_get::<_, Option<i16>>(idx) {
-                Ok(Some(v)) => Value::Int(v as i64),
-                Ok(None) => Value::Null,
-                Err(_) => Value::Null,
+                Ok(Some(v)) => Value::Int(i64::from(v)),
+                Ok(None) | Err(_) => Value::Null,
             },
             Type::INT4 => match row.try_get::<_, Option<i32>>(idx) {
-                Ok(Some(v)) => Value::Int(v as i64),
-                Ok(None) => Value::Null,
-                Err(_) => Value::Null,
+                Ok(Some(v)) => Value::Int(i64::from(v)),
+                Ok(None) | Err(_) => Value::Null,
             },
             Type::INT8 => match row.try_get::<_, Option<i64>>(idx) {
                 Ok(Some(v)) => Value::Int(v),
-                Ok(None) => Value::Null,
-                Err(_) => Value::Null,
+                Ok(None) | Err(_) => Value::Null,
             },
             Type::FLOAT4 => match row.try_get::<_, Option<f32>>(idx) {
-                Ok(Some(v)) => Value::Float(v as f64),
-                Ok(None) => Value::Null,
-                Err(_) => Value::Null,
+                Ok(Some(v)) => Value::Float(f64::from(v)),
+                Ok(None) | Err(_) => Value::Null,
             },
             Type::FLOAT8 => match row.try_get::<_, Option<f64>>(idx) {
                 Ok(Some(v)) => Value::Float(v),
-                Ok(None) => Value::Null,
-                Err(_) => Value::Null,
+                Ok(None) | Err(_) => Value::Null,
             },
             Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME => {
                 match row.try_get::<_, Option<String>>(idx) {
                     Ok(Some(v)) => Value::String(v),
-                    Ok(None) => Value::Null,
-                    Err(_) => Value::Null,
+                    Ok(None) | Err(_) => Value::Null,
                 }
             }
             Type::JSON | Type::JSONB => {
                 match row.try_get::<_, Option<serde_json::Value>>(idx) {
                     Ok(Some(v)) => Value::String(v.to_string()),
-                    Ok(None) => Value::Null,
-                    Err(_) => Value::Null,
+                    Ok(None) | Err(_) => Value::Null,
                 }
             }
-            // UUID
             Type::UUID => match row.try_get::<_, Option<uuid::Uuid>>(idx) {
                 Ok(Some(v)) => Value::String(v.to_string()),
-                Ok(None) => Value::Null,
-                Err(_) => Value::Null,
+                Ok(None) | Err(_) => Value::Null,
             },
-            // Timestamps
-            Type::TIMESTAMP | Type::TIMESTAMPTZ => match row.try_get::<_, Option<chrono::NaiveDateTime>>(idx) {
-                Ok(Some(v)) => Value::String(v.format("%Y-%m-%dT%H:%M:%S").to_string()),
-                Ok(None) => Value::Null,
-                Err(_) => match row.try_get::<_, Option<String>>(idx) {
-                    Ok(Some(v)) => Value::String(v),
-                    _ => Value::Null,
-                },
-            },
-            // Numeric/Decimal
+            Type::TIMESTAMP | Type::TIMESTAMPTZ => {
+                match row.try_get::<_, Option<chrono::NaiveDateTime>>(idx) {
+                    Ok(Some(v)) => Value::String(v.format("%Y-%m-%dT%H:%M:%S").to_string()),
+                    Ok(None) => Value::Null,
+                    Err(_) => match row.try_get::<_, Option<String>>(idx) {
+                        Ok(Some(v)) => Value::String(v),
+                        _ => Value::Null,
+                    },
+                }
+            }
             Type::NUMERIC => match row.try_get::<_, Option<String>>(idx) {
                 Ok(Some(v)) => Value::String(v),
-                Ok(None) => Value::Null,
-                Err(_) => Value::Null,
+                Ok(None) | Err(_) => Value::Null,
             },
-            // Fallback: try to get as string
             _ => match row.try_get::<_, Option<String>>(idx) {
                 Ok(Some(v)) => Value::String(v),
                 Ok(None) => Value::Null,
-                Err(_) => Value::String(format!("<unsupported type: {}>", ty)),
+                Err(_) => Value::String(format!("<unsupported type: {ty}>")),
             },
         }
     }
 
-    /// Extract optional params list from args. Returns empty vec if not provided.
+    /// Extract an optional parameter list from convention arguments.
+    ///
+    /// If `args[1]` is a `Value::List`, each element is converted to its string
+    /// representation. A single scalar at `args[1]` is treated as a one-element
+    /// list. Returns an empty `Vec` when no parameters are provided.
     fn extract_params(args: &[Value]) -> Vec<String> {
         if args.len() < 2 {
             return Vec::new();
@@ -156,27 +205,48 @@ impl PostgresPlugin {
                     Value::Float(n) => n.to_string(),
                     Value::Bool(b) => b.to_string(),
                     Value::Null => String::new(),
-                    other => format!("{}", other),
+                    other => format!("{other}"),
                 })
                 .collect(),
-            // Single value treated as one-element list
             Value::String(s) => vec![s.clone()],
             Value::Int(n) => vec![n.to_string()],
-            other => vec![format!("{}", other)],
+            other => vec![format!("{other}")],
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// QueryBuilder — ORM-style structured query building from JSON specs
+// QueryBuilder -- ORM-style structured query building from JSON specs
 // ---------------------------------------------------------------------------
 
+/// A single JOIN clause parsed from the JSON query spec.
 struct JoinClause {
     table: String,
     on: String,
-    join_type: String, // "LEFT", "RIGHT", "INNER"
+    /// One of `"LEFT"`, `"RIGHT"`, or `"INNER"`.
+    join_type: String,
 }
 
+/// Builds SQL statements from a parsed JSON query specification.
+///
+/// The JSON spec format accepted by [`Self::from_json`]:
+///
+/// ```json
+/// {
+///   "table": "users",                          // required
+///   "select": ["id", "name"],                  // optional, default ["*"]
+///   "where": {"active": true, "age": {">": 18}},
+///   "join": [{"table": "orders", "on": "users.id = orders.user_id", "type": "LEFT"}],
+///   "group_by": ["status"],
+///   "having": {"count": {">": 5}},
+///   "order_by": [{"field": "name", "dir": "asc"}],
+///   "limit": 10,
+///   "offset": 20
+/// }
+/// ```
+///
+/// WHERE clause operators: `=`, `>`, `>=`, `<`, `<=`, `!=`, `<>`, `like`, `in`, `not`.
+/// Setting a field to `null` produces `IS NULL`; `{"not": null}` produces `IS NOT NULL`.
 struct QueryBuilder {
     table: String,
     select: Vec<String>,
@@ -184,18 +254,19 @@ struct QueryBuilder {
     where_clauses: Vec<String>,
     group_by: Vec<String>,
     having_clauses: Vec<String>,
-    order_by: Vec<(String, String)>, // (field, direction)
+    order_by: Vec<(String, String)>,
     limit: Option<i64>,
     offset: Option<i64>,
 }
 
 impl QueryBuilder {
-    /// Validate that a name (table, column, alias) contains only safe characters:
-    /// alphanumeric, underscore, dot (for qualified names), parentheses and commas
-    /// (for aggregate functions like COUNT(*), AVG(rating)).
+    /// Validate that a SQL identifier contains only safe characters.
+    ///
+    /// Allows alphanumeric, underscore, dot (qualified names like `users.id`),
+    /// parentheses and comma (aggregate expressions like `COUNT(*)`), and spaces
+    /// (for `AS` aliases). Rejects semicolons, quotes, and other SQL injection
+    /// vectors.
     fn validate_identifier(name: &str) -> Result<(), PluginError> {
-        // Allow expressions like "AVG(rating) as avg_rating", "COUNT(*)", "users.id"
-        // Reject anything with semicolons, quotes, or other SQL injection vectors.
         let trimmed = name.trim();
         if trimmed.is_empty() {
             return Err(PluginError::InvalidArg("empty identifier".into()));
@@ -213,14 +284,16 @@ impl QueryBuilder {
                 continue;
             }
             return Err(PluginError::InvalidArg(format!(
-                "invalid character '{}' in identifier '{}'",
-                ch, trimmed
+                "invalid character '{ch}' in identifier '{trimmed}'"
             )));
         }
         Ok(())
     }
 
-    /// Parse a JSON spec into a QueryBuilder.
+    /// Parse a JSON spec object into a `QueryBuilder`.
+    ///
+    /// See the struct-level documentation for the full spec format.
+    #[allow(clippy::too_many_lines)]
     fn from_json(spec: &serde_json::Value) -> Result<Self, PluginError> {
         let obj = spec.as_object().ok_or_else(|| {
             PluginError::InvalidArg("query spec must be a JSON object".into())
@@ -275,7 +348,7 @@ impl QueryBuilder {
                     .ok_or_else(|| {
                         PluginError::InvalidArg("join missing 'on'".into())
                     })?;
-                // Validate the ON clause — allow = sign in addition to identifiers
+                // Validate the ON clause -- allow = sign in addition to identifiers
                 for part in j_on.split('=') {
                     Self::validate_identifier(part.trim())?;
                 }
@@ -286,8 +359,7 @@ impl QueryBuilder {
                     .to_uppercase();
                 if !["LEFT", "RIGHT", "INNER"].contains(&j_type.as_str()) {
                     return Err(PluginError::InvalidArg(format!(
-                        "invalid join type '{}', must be LEFT, RIGHT, or INNER",
-                        j_type
+                        "invalid join type '{j_type}', must be LEFT, RIGHT, or INNER"
                     )));
                 }
                 joins.push(JoinClause {
@@ -326,7 +398,7 @@ impl QueryBuilder {
             Vec::new()
         };
 
-        // having (optional) — same structure as where
+        // having (optional) -- same structure as where
         let having_clauses = if let Some(h) = obj.get("having") {
             Self::parse_where_clause(h)?
         } else {
@@ -357,8 +429,7 @@ impl QueryBuilder {
                     .to_uppercase();
                 if dir != "ASC" && dir != "DESC" {
                     return Err(PluginError::InvalidArg(format!(
-                        "invalid order direction '{}', must be ASC or DESC",
-                        dir
+                        "invalid order direction '{dir}', must be ASC or DESC"
                     )));
                 }
                 orders.push((field.to_string(), dir));
@@ -369,10 +440,10 @@ impl QueryBuilder {
         };
 
         // limit (optional)
-        let limit = obj.get("limit").and_then(|v| v.as_i64());
+        let limit = obj.get("limit").and_then(serde_json::Value::as_i64);
 
         // offset (optional)
-        let offset = obj.get("offset").and_then(|v| v.as_i64());
+        let offset = obj.get("offset").and_then(serde_json::Value::as_i64);
 
         Ok(Self {
             table,
@@ -387,14 +458,15 @@ impl QueryBuilder {
         })
     }
 
-    /// Parse a WHERE/HAVING clause from a JSON object.
-    /// Supports:
-    ///   {"field": "value"}          → field = 'value'
-    ///   {"field": {">": 5}}         → field > 5
-    ///   {"field": {"like": "%x%"}}  → field LIKE '%x%'
-    ///   {"field": {"in": [1,2,3]}}  → field IN (1, 2, 3)
-    ///   {"field": null}             → field IS NULL
-    ///   {"field": {"not": null}}    → field IS NOT NULL
+    /// Parse a WHERE or HAVING clause from a JSON object.
+    ///
+    /// Supported patterns:
+    /// - `{"field": "value"}` -> `field = 'value'`
+    /// - `{"field": {">": 5}}` -> `field > 5`
+    /// - `{"field": {"like": "%x%"}}` -> `field LIKE '%x%'`
+    /// - `{"field": {"in": [1,2,3]}}` -> `field IN (1, 2, 3)`
+    /// - `{"field": null}` -> `field IS NULL`
+    /// - `{"field": {"not": null}}` -> `field IS NOT NULL`
     fn parse_where_clause(
         val: &serde_json::Value,
     ) -> Result<Vec<String>, PluginError> {
@@ -406,17 +478,17 @@ impl QueryBuilder {
             Self::validate_identifier(field)?;
             match condition {
                 serde_json::Value::Null => {
-                    clauses.push(format!("{} IS NULL", field));
+                    clauses.push(format!("{field} IS NULL"));
                 }
                 serde_json::Value::Bool(b) => {
-                    clauses.push(format!("{} = {}", field, b));
+                    clauses.push(format!("{field} = {b}"));
                 }
                 serde_json::Value::Number(n) => {
-                    clauses.push(format!("{} = {}", field, n));
+                    clauses.push(format!("{field} = {n}"));
                 }
                 serde_json::Value::String(s) => {
                     let escaped = s.replace('\'', "''");
-                    clauses.push(format!("{} = '{}'", field, escaped));
+                    clauses.push(format!("{field} = '{escaped}'"));
                 }
                 serde_json::Value::Object(ops) => {
                     for (op, val) in ops {
@@ -424,7 +496,7 @@ impl QueryBuilder {
                         match op_lower.as_str() {
                             ">" | ">=" | "<" | "<=" | "!=" | "<>" => {
                                 let formatted = Self::format_value(val);
-                                clauses.push(format!("{} {} {}", field, op, formatted));
+                                clauses.push(format!("{field} {op} {formatted}"));
                             }
                             "like" => {
                                 let s = val.as_str().ok_or_else(|| {
@@ -433,7 +505,7 @@ impl QueryBuilder {
                                     )
                                 })?;
                                 let escaped = s.replace('\'', "''");
-                                clauses.push(format!("{} LIKE '{}'", field, escaped));
+                                clauses.push(format!("{field} LIKE '{escaped}'"));
                             }
                             "in" => {
                                 let arr = val.as_array().ok_or_else(|| {
@@ -444,27 +516,21 @@ impl QueryBuilder {
                                 let items: Vec<String> =
                                     arr.iter().map(Self::format_value).collect();
                                 clauses.push(format!(
-                                    "{} IN ({})",
-                                    field,
+                                    "{field} IN ({})",
                                     items.join(", ")
                                 ));
                             }
                             "not" => {
                                 if val.is_null() {
-                                    clauses
-                                        .push(format!("{} IS NOT NULL", field));
+                                    clauses.push(format!("{field} IS NOT NULL"));
                                 } else {
                                     let formatted = Self::format_value(val);
-                                    clauses.push(format!(
-                                        "{} != {}",
-                                        field, formatted
-                                    ));
+                                    clauses.push(format!("{field} != {formatted}"));
                                 }
                             }
                             _ => {
                                 return Err(PluginError::InvalidArg(format!(
-                                    "unsupported operator '{}'",
-                                    op
+                                    "unsupported operator '{op}'"
                                 )));
                             }
                         }
@@ -472,8 +538,7 @@ impl QueryBuilder {
                 }
                 serde_json::Value::Array(_) => {
                     return Err(PluginError::InvalidArg(format!(
-                        "where value for '{}' cannot be a bare array; use {{\"in\": [...]}}",
-                        field
+                        "where value for '{field}' cannot be a bare array; use {{\"in\": [...]}}"
                     )));
                 }
             }
@@ -481,7 +546,7 @@ impl QueryBuilder {
         Ok(clauses)
     }
 
-    /// Format a JSON value as a SQL literal.
+    /// Format a JSON value as a SQL literal for embedding in generated queries.
     fn format_value(val: &serde_json::Value) -> String {
         match val {
             serde_json::Value::Null => "NULL".to_string(),
@@ -489,79 +554,81 @@ impl QueryBuilder {
             serde_json::Value::Number(n) => n.to_string(),
             serde_json::Value::String(s) => {
                 let escaped = s.replace('\'', "''");
-                format!("'{}'", escaped)
+                format!("'{escaped}'")
             }
             other => {
                 let escaped = other.to_string().replace('\'', "''");
-                format!("'{}'", escaped)
+                format!("'{escaped}'")
             }
         }
     }
 
-    /// Build a SELECT SQL statement from the parsed spec.
+    /// Build a `SELECT` SQL statement from the parsed spec.
     fn build_select(&self) -> String {
         let mut sql = format!("SELECT {} FROM {}", self.select.join(", "), self.table);
 
         for join in &self.joins {
-            sql.push_str(&format!(
+            let _ = write!(
+                sql,
                 " {} JOIN {} ON {}",
                 join.join_type, join.table, join.on
-            ));
+            );
         }
 
         if !self.where_clauses.is_empty() {
-            sql.push_str(&format!(" WHERE {}", self.where_clauses.join(" AND ")));
+            let _ = write!(sql, " WHERE {}", self.where_clauses.join(" AND "));
         }
 
         if !self.group_by.is_empty() {
-            sql.push_str(&format!(" GROUP BY {}", self.group_by.join(", ")));
+            let _ = write!(sql, " GROUP BY {}", self.group_by.join(", "));
         }
 
         if !self.having_clauses.is_empty() {
-            sql.push_str(&format!(" HAVING {}", self.having_clauses.join(" AND ")));
+            let _ = write!(sql, " HAVING {}", self.having_clauses.join(" AND "));
         }
 
         if !self.order_by.is_empty() {
             let orders: Vec<String> = self
                 .order_by
                 .iter()
-                .map(|(f, d)| format!("{} {}", f, d))
+                .map(|(f, d)| format!("{f} {d}"))
                 .collect();
-            sql.push_str(&format!(" ORDER BY {}", orders.join(", ")));
+            let _ = write!(sql, " ORDER BY {}", orders.join(", "));
         }
 
         if let Some(limit) = self.limit {
-            sql.push_str(&format!(" LIMIT {}", limit));
+            let _ = write!(sql, " LIMIT {limit}");
         }
 
         if let Some(offset) = self.offset {
-            sql.push_str(&format!(" OFFSET {}", offset));
+            let _ = write!(sql, " OFFSET {offset}");
         }
 
         sql
     }
 
-    /// Build a COUNT(*) SQL statement from the parsed spec.
+    /// Build a `SELECT COUNT(*)` SQL statement from the parsed spec.
     fn build_count(&self) -> String {
         let mut sql = format!("SELECT COUNT(*) FROM {}", self.table);
 
         for join in &self.joins {
-            sql.push_str(&format!(
+            let _ = write!(
+                sql,
                 " {} JOIN {} ON {}",
                 join.join_type, join.table, join.on
-            ));
+            );
         }
 
         if !self.where_clauses.is_empty() {
-            sql.push_str(&format!(" WHERE {}", self.where_clauses.join(" AND ")));
+            let _ = write!(sql, " WHERE {}", self.where_clauses.join(" AND "));
         }
 
         if !self.group_by.is_empty() {
-            sql.push_str(&format!(" GROUP BY {}", self.group_by.join(", ")));
+            let _ = write!(sql, " GROUP BY {}", self.group_by.join(", "));
         }
 
         if !self.having_clauses.is_empty() {
-            sql.push_str(&format!(" HAVING {}", self.having_clauses.join(" AND ")));
+            let _ = write!(sql, " HAVING {}", self.having_clauses.join(" AND "));
         }
 
         sql
@@ -569,32 +636,37 @@ impl QueryBuilder {
 }
 
 // ---------------------------------------------------------------------------
-// Synchronous implementation helpers
+// Convention implementation helpers
 // ---------------------------------------------------------------------------
 
 impl PostgresPlugin {
-    fn do_query(&self, args: Vec<Value>) -> Result<Value, PluginError> {
-        let raw_sql = args.first()
+    /// Convention 0: `query` -- execute a SELECT and return all rows.
+    ///
+    /// If the argument looks like a bare table name (no spaces, no SQL keywords),
+    /// it is auto-wrapped in `SELECT * FROM <name>`. This handles the common case
+    /// where the Mind extracts just the table name from an intent like "find all users".
+    fn do_query(&self, args: &[Value]) -> Result<Value, PluginError> {
+        let raw_sql = args
+            .first()
             .ok_or_else(|| PluginError::InvalidArg("missing sql argument".into()))?
             .as_str()?;
 
-        // If the argument looks like a bare table name (no SQL keywords),
-        // auto-wrap it in SELECT * FROM. This handles the common case where
-        // the Mind extracts just the table name from an intent like "find all users".
         let sql = if !raw_sql.trim().is_empty()
             && !raw_sql.trim_start().to_uppercase().starts_with("SELECT")
             && !raw_sql.trim_start().to_uppercase().starts_with("WITH")
             && !raw_sql.contains(' ')
             && raw_sql.chars().all(|c| c.is_alphanumeric() || c == '_')
         {
-            format!("SELECT * FROM {}", raw_sql)
+            format!("SELECT * FROM {raw_sql}")
         } else {
             raw_sql.to_string()
         };
 
-        let params = Self::extract_params(&args);
-        let param_refs: Vec<&(dyn postgres::types::ToSql + Sync)> =
-            params.iter().map(|s| s as &(dyn postgres::types::ToSql + Sync)).collect();
+        let params = Self::extract_params(args);
+        let param_refs: Vec<&(dyn postgres::types::ToSql + Sync)> = params
+            .iter()
+            .map(|s| s as &(dyn postgres::types::ToSql + Sync))
+            .collect();
 
         let mut client = self.connect()?;
 
@@ -606,13 +678,17 @@ impl PostgresPlugin {
         Ok(Value::List(values))
     }
 
-    fn do_execute(&self, args: Vec<Value>) -> Result<Value, PluginError> {
-        let sql = args.first()
+    /// Convention 1: `execute` -- run an INSERT/UPDATE/DELETE and return rows affected.
+    fn do_execute(&self, args: &[Value]) -> Result<Value, PluginError> {
+        let sql = args
+            .first()
             .ok_or_else(|| PluginError::InvalidArg("missing sql argument".into()))?
             .as_str()?;
-        let params = Self::extract_params(&args);
-        let param_refs: Vec<&(dyn postgres::types::ToSql + Sync)> =
-            params.iter().map(|s| s as &(dyn postgres::types::ToSql + Sync)).collect();
+        let params = Self::extract_params(args);
+        let param_refs: Vec<&(dyn postgres::types::ToSql + Sync)> = params
+            .iter()
+            .map(|s| s as &(dyn postgres::types::ToSql + Sync))
+            .collect();
 
         let mut client = self.connect()?;
 
@@ -620,16 +696,23 @@ impl PostgresPlugin {
             .execute(sql, &param_refs)
             .map_err(|e| PluginError::Failed(Self::format_pg_error(&e)))?;
 
+        // Row count from execute() is u64; Value::Int is i64.
+        // Wrapping is acceptable -- row counts exceeding i64::MAX are not realistic.
+        #[allow(clippy::cast_possible_wrap)]
         Ok(Value::Int(count as i64))
     }
 
-    fn do_query_one(&self, args: Vec<Value>) -> Result<Value, PluginError> {
-        let sql = args.first()
+    /// Convention 2: `query_one` -- execute a query expecting zero or one row.
+    fn do_query_one(&self, args: &[Value]) -> Result<Value, PluginError> {
+        let sql = args
+            .first()
             .ok_or_else(|| PluginError::InvalidArg("missing sql argument".into()))?
             .as_str()?;
-        let params = Self::extract_params(&args);
-        let param_refs: Vec<&(dyn postgres::types::ToSql + Sync)> =
-            params.iter().map(|s| s as &(dyn postgres::types::ToSql + Sync)).collect();
+        let params = Self::extract_params(args);
+        let param_refs: Vec<&(dyn postgres::types::ToSql + Sync)> = params
+            .iter()
+            .map(|s| s as &(dyn postgres::types::ToSql + Sync))
+            .collect();
 
         let mut client = self.connect()?;
 
@@ -637,26 +720,27 @@ impl PostgresPlugin {
             .query_opt(sql, &param_refs)
             .map_err(|e| PluginError::Failed(Self::format_pg_error(&e)))?;
 
-        match row_opt {
-            Some(row) => Ok(Self::row_to_value(&row)),
-            None => Ok(Value::Null),
-        }
+        Ok(row_opt.map_or(Value::Null, |row| Self::row_to_value(&row)))
     }
 
-    fn do_create_table(&self, args: Vec<Value>) -> Result<Value, PluginError> {
-        let name = args.first()
+    /// Convention 6: `create_table` -- DDL CREATE TABLE IF NOT EXISTS.
+    fn do_create_table(&self, args: &[Value]) -> Result<Value, PluginError> {
+        let name = args
+            .first()
             .ok_or_else(|| PluginError::InvalidArg("missing table name".into()))?
             .as_str()?;
-        let columns = args.get(1)
+        let columns = args
+            .get(1)
             .ok_or_else(|| PluginError::InvalidArg("missing columns definition".into()))?
             .as_str()?;
 
-        // Basic SQL injection guard on table name
         if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-            return Err(PluginError::InvalidArg("table name must be alphanumeric/underscore".into()));
+            return Err(PluginError::InvalidArg(
+                "table name must be alphanumeric/underscore".into(),
+            ));
         }
 
-        let sql = format!("CREATE TABLE IF NOT EXISTS {} ({})", name, columns);
+        let sql = format!("CREATE TABLE IF NOT EXISTS {name} ({columns})");
         let mut client = self.connect()?;
 
         client
@@ -666,19 +750,24 @@ impl PostgresPlugin {
         Ok(Value::Null)
     }
 
-    fn do_alter_table(&self, args: Vec<Value>) -> Result<Value, PluginError> {
-        let name = args.first()
+    /// Convention 7: `alter_table` -- DDL ALTER TABLE.
+    fn do_alter_table(&self, args: &[Value]) -> Result<Value, PluginError> {
+        let name = args
+            .first()
             .ok_or_else(|| PluginError::InvalidArg("missing table name".into()))?
             .as_str()?;
-        let changes = args.get(1)
+        let changes = args
+            .get(1)
             .ok_or_else(|| PluginError::InvalidArg("missing changes definition".into()))?
             .as_str()?;
 
         if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-            return Err(PluginError::InvalidArg("table name must be alphanumeric/underscore".into()));
+            return Err(PluginError::InvalidArg(
+                "table name must be alphanumeric/underscore".into(),
+            ));
         }
 
-        let sql = format!("ALTER TABLE {} {}", name, changes);
+        let sql = format!("ALTER TABLE {name} {changes}");
         let mut client = self.connect()?;
 
         client
@@ -688,8 +777,10 @@ impl PostgresPlugin {
         Ok(Value::Null)
     }
 
-    fn do_table_exists(&self, args: Vec<Value>) -> Result<Value, PluginError> {
-        let name = args.first()
+    /// Convention 8: `table_exists` -- check whether a table exists in the public schema.
+    fn do_table_exists(&self, args: &[Value]) -> Result<Value, PluginError> {
+        let name = args
+            .first()
             .ok_or_else(|| PluginError::InvalidArg("missing table name".into()))?
             .as_str()?;
 
@@ -704,6 +795,7 @@ impl PostgresPlugin {
         Ok(Value::Bool(exists))
     }
 
+    /// Convention 9: `list_tables` -- list all tables in the public schema.
     fn do_list_tables(&self) -> Result<Value, PluginError> {
         let sql = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name";
         let mut client = self.connect()?;
@@ -723,18 +815,24 @@ impl PostgresPlugin {
         Ok(Value::List(tables))
     }
 
-    fn do_table_schema(&self, args: Vec<Value>) -> Result<Value, PluginError> {
-        let name = args.first()
+    /// Convention 10: `table_schema` -- return column metadata for a table.
+    ///
+    /// Queries `information_schema.columns` and returns each column as a map with
+    /// keys: `name`, `type`, `nullable`, and optionally `default`, `max_length`,
+    /// `precision`.
+    fn do_table_schema(&self, args: &[Value]) -> Result<Value, PluginError> {
+        let name = args
+            .first()
             .ok_or_else(|| PluginError::InvalidArg("missing table name".into()))?
             .as_str()?;
 
-        let sql = r#"
+        let sql = r"
             SELECT column_name, data_type, is_nullable, column_default,
                    character_maximum_length, numeric_precision
             FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name = $1
             ORDER BY ordinal_position
-        "#;
+        ";
 
         let mut client = self.connect()?;
 
@@ -756,10 +854,10 @@ impl PostgresPlugin {
                     map.insert("default".to_string(), Value::String(def));
                 }
                 if let Ok(Some(len)) = r.try_get::<_, Option<i32>>(4) {
-                    map.insert("max_length".to_string(), Value::Int(len as i64));
+                    map.insert("max_length".to_string(), Value::Int(i64::from(len)));
                 }
                 if let Ok(Some(prec)) = r.try_get::<_, Option<i32>>(5) {
-                    map.insert("precision".to_string(), Value::Int(prec as i64));
+                    map.insert("precision".to_string(), Value::Int(i64::from(prec)));
                 }
                 Value::Map(map)
             })
@@ -768,34 +866,34 @@ impl PostgresPlugin {
         Ok(Value::List(columns))
     }
 
-    /// Convention 11: `find` — Structured SELECT query builder.
-    fn do_find(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 11: `find` -- structured SELECT via JSON spec.
+    fn do_find(&self, args: &[Value]) -> Result<Value, PluginError> {
         let spec_str = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing spec argument".into()))?
             .as_str()?;
         let spec: serde_json::Value = serde_json::from_str(spec_str)
-            .map_err(|e| PluginError::InvalidArg(format!("invalid JSON spec: {}", e)))?;
+            .map_err(|e| PluginError::InvalidArg(format!("invalid JSON spec: {e}")))?;
         let builder = QueryBuilder::from_json(&spec)?;
         let sql = builder.build_select();
 
         let mut client = self.connect()?;
         let rows = client
             .query(&*sql, &[])
-            .map_err(|e| PluginError::Failed(format!("{} — SQL: {}", e, sql)))?;
+            .map_err(|e| PluginError::Failed(format!("{e} -- SQL: {sql}")))?;
 
         let values: Vec<Value> = rows.iter().map(Self::row_to_value).collect();
         Ok(Value::List(values))
     }
 
-    /// Convention 12: `find_one` — Single result structured query.
-    fn do_find_one(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 12: `find_one` -- structured single-row query (forces LIMIT 1).
+    fn do_find_one(&self, args: &[Value]) -> Result<Value, PluginError> {
         let spec_str = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing spec argument".into()))?
             .as_str()?;
         let mut spec: serde_json::Value = serde_json::from_str(spec_str)
-            .map_err(|e| PluginError::InvalidArg(format!("invalid JSON spec: {}", e)))?;
+            .map_err(|e| PluginError::InvalidArg(format!("invalid JSON spec: {e}")))?;
         // Force LIMIT 1 for find_one
         spec.as_object_mut()
             .ok_or_else(|| PluginError::InvalidArg("spec must be a JSON object".into()))?
@@ -806,49 +904,46 @@ impl PostgresPlugin {
         let mut client = self.connect()?;
         let row_opt = client
             .query_opt(&*sql, &[])
-            .map_err(|e| PluginError::Failed(format!("{} — SQL: {}", e, sql)))?;
+            .map_err(|e| PluginError::Failed(format!("{e} -- SQL: {sql}")))?;
 
-        match row_opt {
-            Some(row) => Ok(Self::row_to_value(&row)),
-            None => Ok(Value::Null),
-        }
+        Ok(row_opt.map_or(Value::Null, |row| Self::row_to_value(&row)))
     }
 
-    /// Convention 13: `count` — Count with conditions.
-    fn do_count(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 13: `count` -- count rows matching a JSON spec.
+    fn do_count(&self, args: &[Value]) -> Result<Value, PluginError> {
         let spec_str = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing spec argument".into()))?
             .as_str()?;
         let spec: serde_json::Value = serde_json::from_str(spec_str)
-            .map_err(|e| PluginError::InvalidArg(format!("invalid JSON spec: {}", e)))?;
+            .map_err(|e| PluginError::InvalidArg(format!("invalid JSON spec: {e}")))?;
         let builder = QueryBuilder::from_json(&spec)?;
         let sql = builder.build_count();
 
         let mut client = self.connect()?;
         let row = client
             .query_one(&*sql, &[])
-            .map_err(|e| PluginError::Failed(format!("{} — SQL: {}", e, sql)))?;
+            .map_err(|e| PluginError::Failed(format!("{e} -- SQL: {sql}")))?;
 
         let count: i64 = row.get(0);
         Ok(Value::Int(count))
     }
 
-    /// Convention 14: `aggregate` — Aggregation query with GROUP BY.
-    fn do_aggregate(&self, args: Vec<Value>) -> Result<Value, PluginError> {
+    /// Convention 14: `aggregate` -- aggregation query with GROUP BY via JSON spec.
+    fn do_aggregate(&self, args: &[Value]) -> Result<Value, PluginError> {
         let spec_str = args
             .first()
             .ok_or_else(|| PluginError::InvalidArg("missing spec argument".into()))?
             .as_str()?;
         let spec: serde_json::Value = serde_json::from_str(spec_str)
-            .map_err(|e| PluginError::InvalidArg(format!("invalid JSON spec: {}", e)))?;
+            .map_err(|e| PluginError::InvalidArg(format!("invalid JSON spec: {e}")))?;
         let builder = QueryBuilder::from_json(&spec)?;
         let sql = builder.build_select();
 
         let mut client = self.connect()?;
         let rows = client
             .query(&*sql, &[])
-            .map_err(|e| PluginError::Failed(format!("{} — SQL: {}", e, sql)))?;
+            .map_err(|e| PluginError::Failed(format!("{e} -- SQL: {sql}")))?;
 
         let values: Vec<Value> = rows.iter().map(Self::row_to_value).collect();
         Ok(Value::List(values))
@@ -859,6 +954,7 @@ impl PostgresPlugin {
 // SomaPlugin trait implementation
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::unnecessary_literal_bound)]
 impl SomaPlugin for PostgresPlugin {
     fn name(&self) -> &str {
         "postgres"
@@ -876,6 +972,7 @@ impl SomaPlugin for PostgresPlugin {
         TrustLevel::Community
     }
 
+    #[allow(clippy::too_many_lines)]
     fn conventions(&self) -> Vec<Convention> {
         vec![
             Convention {
@@ -1109,7 +1206,7 @@ impl SomaPlugin for PostgresPlugin {
                 side_effects: vec![],
                 cleanup: None,
             },
-            // ----- ORM-style query builder conventions (11-14) -----
+            // ORM-style query builder conventions (11-14)
             Convention {
                 id: 11,
                 name: "find".into(),
@@ -1194,7 +1291,11 @@ impl SomaPlugin for PostgresPlugin {
             .get_str("host")
             .unwrap_or("localhost")
             .to_string();
+
+        // Port config is i64 from JSON; truncation to u16 is safe for valid port numbers.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let port = config.get_int("port").unwrap_or(5432) as u16;
+
         let database = config
             .get_str("database")
             .unwrap_or("soma")
@@ -1204,17 +1305,16 @@ impl SomaPlugin for PostgresPlugin {
             .unwrap_or("soma")
             .to_string();
 
-        // Read password from env var named in password_env config field
-        let password = if let Some(env_name) = config.get_str("password_env") {
-            std::env::var(env_name).ok()
-        } else {
-            // Fall back to SOMA_POSTGRES_PASSWORD
-            std::env::var("SOMA_POSTGRES_PASSWORD").ok()
-        };
+        // Read password from the env var named in the password_env config field,
+        // falling back to SOMA_POSTGRES_PASSWORD if not specified.
+        let password = config.get_str("password_env").map_or_else(
+            || std::env::var("SOMA_POSTGRES_PASSWORD").ok(),
+            |env_name| std::env::var(env_name).ok(),
+        );
 
         let conn_string = format!(
-            "host={} port={} dbname={} user={} password={}",
-            host, port, database, username, password.as_deref().unwrap_or("")
+            "host={host} port={port} dbname={database} user={username} password={}",
+            password.as_deref().unwrap_or("")
         );
 
         self.conn_string
@@ -1254,32 +1354,35 @@ impl SomaPlugin for PostgresPlugin {
 }
 
 // ---------------------------------------------------------------------------
-// Dispatch — routes convention_id to the right sync method
+// Dispatch -- routes convention_id to the appropriate handler
 // ---------------------------------------------------------------------------
 
 impl PostgresPlugin {
+    /// Route a convention call to the corresponding implementation method.
+    ///
+    /// Takes `Vec<Value>` by value to match the `SomaPlugin::execute` trait signature.
+    #[allow(clippy::needless_pass_by_value)]
     fn dispatch(&self, convention_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
         match convention_id {
-            0 => self.do_query(args),
-            1 => self.do_execute(args),
-            2 => self.do_query_one(args),
-            3 | 4 | 5 => Err(PluginError::Failed(
+            0 => self.do_query(&args),
+            1 => self.do_execute(&args),
+            2 => self.do_query_one(&args),
+            3..=5 => Err(PluginError::Failed(
                 "transactions (begin/commit/rollback) are not yet supported in this MVP; \
                  use execute(\"BEGIN; ...; COMMIT\") for multi-statement transactions"
                     .into(),
             )),
-            6 => self.do_create_table(args),
-            7 => self.do_alter_table(args),
-            8 => self.do_table_exists(args),
+            6 => self.do_create_table(&args),
+            7 => self.do_alter_table(&args),
+            8 => self.do_table_exists(&args),
             9 => self.do_list_tables(),
-            10 => self.do_table_schema(args),
-            11 => self.do_find(args),
-            12 => self.do_find_one(args),
-            13 => self.do_count(args),
-            14 => self.do_aggregate(args),
+            10 => self.do_table_schema(&args),
+            11 => self.do_find(&args),
+            12 => self.do_find_one(&args),
+            13 => self.do_count(&args),
+            14 => self.do_aggregate(&args),
             _ => Err(PluginError::NotFound(format!(
-                "unknown convention id: {}",
-                convention_id
+                "unknown convention id: {convention_id}"
             ))),
         }
     }
@@ -1289,6 +1392,11 @@ impl PostgresPlugin {
 // C ABI export
 // ---------------------------------------------------------------------------
 
+/// FFI entry point called by the SOMA plugin manager to instantiate this plugin.
+///
+/// Returns a heap-allocated trait object. The caller (plugin manager) takes
+/// ownership and is responsible for dropping it.
+#[allow(improper_ctypes_definitions)]
 #[unsafe(no_mangle)]
 pub extern "C" fn soma_plugin_init() -> *mut dyn SomaPlugin {
     Box::into_raw(Box::new(PostgresPlugin::new()))

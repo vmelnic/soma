@@ -1,10 +1,10 @@
-//! MCP Server — JSON-RPC 2.0 over stdio (Whitepaper Section 8).
+//! MCP server -- JSON-RPC 2.0 over stdio (Whitepaper Section 8, Milestone 3).
 //!
-//! This is Milestone 3: "At this point, an LLM can drive SOMA."
-//!
-//! Protocol: Model Context Protocol (MCP) — JSON-RPC 2.0 messages,
-//! one per line on stdin/stdout. The server exposes SOMA's state and
-//! actions as MCP tools that any LLM can call.
+//! Reads newline-delimited JSON-RPC 2.0 messages from stdin, dispatches them to
+//! tool handlers, and writes responses to stdout. This is the primary interface
+//! for LLMs to drive SOMA: querying state, executing intents, managing plugins,
+//! and calling plugin conventions. Every tool call is logged for audit (Section 12.1)
+//! and gated by role-based auth (Section 8.3).
 
 use std::path::Path;
 use std::sync::{Arc, RwLock};
@@ -26,7 +26,7 @@ use crate::proprioception::Proprioception;
 use crate::protocol::discovery::PeerRegistry;
 use crate::state::SomaState;
 
-/// JSON-RPC 2.0 request.
+/// Inbound JSON-RPC 2.0 request parsed from a single stdin line.
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
     #[allow(dead_code)] // Required by JSON-RPC 2.0 spec, validated by serde
@@ -38,7 +38,7 @@ struct JsonRpcRequest {
     params: serde_json::Value,
 }
 
-/// JSON-RPC 2.0 response.
+/// Outbound JSON-RPC 2.0 response written as a single stdout line.
 #[derive(Debug, Serialize)]
 struct JsonRpcResponse {
     jsonrpc: String,
@@ -75,7 +75,11 @@ impl JsonRpcResponse {
     }
 }
 
-/// MCP Server — holds references to all SOMA subsystems.
+/// Central MCP server holding `Arc` references to all SOMA subsystems.
+///
+/// Each tool handler acquires read or write locks on the relevant subsystems as needed.
+/// The server itself is not `Clone`; it is created once in `main.rs` and moved into
+/// `run_stdio()`.
 pub struct McpServer {
     pub config: SomaConfig,
     pub mind: Arc<RwLock<OnnxMindEngine>>,
@@ -140,29 +144,21 @@ impl McpServer {
         Ok(())
     }
 
-    /// Handle a single JSON-RPC request.
+    /// Route a JSON-RPC request to the appropriate handler by method name.
     #[allow(clippy::future_not_send)]
     async fn handle_request(&self, req: &JsonRpcRequest) -> JsonRpcResponse {
         match req.method.as_str() {
-            // MCP lifecycle
             "initialize" => self.handle_initialize(&req.id),
             "initialized" | "ping" => JsonRpcResponse::success(req.id.clone(), serde_json::json!({})),
-
-            // MCP tool discovery
             "tools/list" => self.handle_tools_list(&req.id),
-
-            // MCP tool execution
             "tools/call" => self.handle_tools_call(&req.id, &req.params).await,
-
-            // MCP resource discovery and read
             "resources/list" => self.handle_resources_list(&req.id),
             "resources/read" => self.handle_resources_read(&req.id, &req.params),
-
             _ => JsonRpcResponse::method_not_found(req.id.clone(), &req.method),
         }
     }
 
-    /// Handle initialize — return server info and capabilities.
+    /// MCP `initialize` handshake: returns server identity, protocol version, and capabilities.
     fn handle_initialize(&self, id: &serde_json::Value) -> JsonRpcResponse {
         JsonRpcResponse::success(id.clone(), serde_json::json!({
             "protocolVersion": "2024-11-05",
@@ -178,7 +174,7 @@ impl McpServer {
         }))
     }
 
-    /// Handle tools/list — return all available tools.
+    /// Return the full tool catalog including dynamically-registered plugin conventions.
     fn handle_tools_list(&self, id: &serde_json::Value) -> JsonRpcResponse {
         let conventions = self.plugins.read().unwrap().namespaced_conventions();
         let tool_list = tools::build_tool_list(&conventions);
@@ -187,7 +183,7 @@ impl McpServer {
         }))
     }
 
-    /// Handle resources/list — return available resources.
+    /// Expose MCP resources: `soma://state` (full runtime state) and `soma://metrics` (Prometheus).
     #[allow(clippy::unused_self)] // Method signature kept consistent with other handle_* methods
     fn handle_resources_list(&self, id: &serde_json::Value) -> JsonRpcResponse {
         JsonRpcResponse::success(id.clone(), serde_json::json!({
@@ -208,7 +204,7 @@ impl McpServer {
         }))
     }
 
-    /// Handle resources/read — return resource content by URI.
+    /// Read a resource by URI. Dispatches `soma://state` and `soma://metrics`.
     fn handle_resources_read(&self, id: &serde_json::Value, params: &serde_json::Value) -> JsonRpcResponse {
         let uri = params.get("uri").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -243,8 +239,8 @@ impl McpServer {
         }
     }
 
-    /// Handle tools/call — dispatch to the appropriate tool handler.
-    /// Every call is logged for audit trail (Section 12.1).
+    /// Dispatch a `tools/call` request: parse arguments, enforce auth, route to the
+    /// correct tool handler, and log the outcome for the audit trail (Section 12.1).
     #[allow(clippy::future_not_send)]
     async fn handle_tools_call(
         &self,
@@ -261,11 +257,10 @@ impl McpServer {
             }
         };
 
-        // Audit trail: log every MCP action with spec-required fields (Section 12.1)
         let audit_trace_id = uuid::Uuid::new_v4().to_string()[..12].to_string();
 
-        // Auth enforcement (Section 8.3): check permissions for action tools.
-        // Any plugin convention (soma.X.Y with 2+ dots) is an action tool, not just posix.
+        // Classify tool: action tools need execute permission, admin tools need admin.
+        // Plugin convention calls (soma.X.Y, 2+ dots) are action tools.
         let is_action = call.name == "soma.intent"
             || call.name == "soma.checkpoint"
             || call.name == "soma.record_decision"
@@ -283,9 +278,7 @@ impl McpServer {
 
         let auth_role = {
             let auth = self.auth.read().unwrap();
-            // MCP auth: token can be in _meta.auth_token (MCP extension),
-            // in a top-level _token field, or passed during initialize.
-            // For stdio transport, auth is typically handled at the process level.
+            // Token location: _meta.auth_token (MCP convention) or _token (SOMA shorthand).
             let token = call.arguments.get("_meta")
                 .and_then(|m| m.get("auth_token"))
                 .and_then(|v| v.as_str())
@@ -308,7 +301,6 @@ impl McpServer {
         };
 
         let result = match call.name.as_str() {
-            // State tools
             "soma.get_state" => self.tool_get_state(),
             "soma.get_plugins" => self.tool_get_plugins(),
             "soma.get_conventions" => self.tool_get_conventions(),
@@ -324,7 +316,6 @@ impl McpServer {
             "soma.get_business_rules" => self.tool_get_business_rules(),
             "soma.get_render_state" => self.tool_get_render_state(),
 
-            // Action tools
             "soma.intent" => self.tool_intent(&call.arguments),
             "soma.checkpoint" => self.tool_checkpoint(&call.arguments),
             "soma.record_decision" => self.tool_record_decision(&call.arguments),
@@ -339,7 +330,7 @@ impl McpServer {
                 "message": "Not yet connected to Interface SOMA. This tool will work when an Interface SOMA connects via Synaptic Protocol.",
             })),
 
-            // Plugin convention tools — dynamically namespaced: soma.{plugin}.{convention}
+            // Catch-all: plugin convention tools (soma.{plugin}.{convention})
             name if name.starts_with("soma.") && name.matches('.').count() >= 2 => {
                 self.tool_plugin_call(name, &call.arguments).await
             }
@@ -347,7 +338,6 @@ impl McpServer {
             _ => McpToolResult::error(format!("Unknown tool: {}", call.name)),
         };
 
-        // Audit trail: log every MCP action with spec-required fields (Section 12.1)
         let is_err = result.is_error.unwrap_or(false);
         tracing::info!(
             component = "mcp",
@@ -362,8 +352,7 @@ impl McpServer {
         JsonRpcResponse::success(id.clone(), serde_json::to_value(&result).unwrap_or_default())
     }
 
-    // ---- State tool implementations ----
-
+    /// Aggregate snapshot of SOMA: mind info, state, experience, peers, plugins, and health.
     fn tool_get_state(&self) -> McpToolResult {
         let state = self.state.read().unwrap();
         let state_json = state.to_json();
@@ -424,9 +413,9 @@ impl McpServer {
         McpToolResult::json(result)
     }
 
+    /// List all loaded plugins with their conventions, versions, and health status.
     fn tool_get_plugins(&self) -> McpToolResult {
         let plugins = self.plugins.read().unwrap();
-        // Show namespaced conventions with full metadata including cleanup
         let namespaced = plugins.namespaced_conventions();
         let mut plugins_map: std::collections::HashMap<String, Vec<serde_json::Value>> =
             std::collections::HashMap::new();
@@ -449,9 +438,8 @@ impl McpServer {
             plugins_map.entry(plugin_name.clone()).or_default().push(entry);
         }
 
-        // Per-plugin health status (Section 11.3 — dead plugin detection)
         let health_warnings = plugins.check_plugin_health();
-        // Convert borrowed &str warnings to owned Strings so we can drop the plugin guard
+        // Own the warning strings before dropping the read guard
         let warning_map: std::collections::HashMap<String, String> = health_warnings.iter()
             .map(|(name, msg)| (name.clone(), (*msg).to_string()))
             .collect();
@@ -483,13 +471,13 @@ impl McpServer {
         McpToolResult::json(serde_json::to_value(&conventions).unwrap_or_default())
     }
 
+    /// Runtime health: proprioception snapshot, Prometheus metrics, and plugin warnings.
     fn tool_get_health(&self) -> McpToolResult {
         let proprio = self.proprio.read().unwrap();
         let proprio_json = proprio.to_json();
         drop(proprio);
         let metrics = self.metrics.to_json();
 
-        // Check plugin health (Section 11.3 — dead plugin detection)
         let pm_guard = self.plugins.read().unwrap();
         let plugin_warnings = pm_guard.check_plugin_health();
         let status = if plugin_warnings.is_empty() { "healthy" } else { "degraded" };
@@ -536,6 +524,7 @@ impl McpServer {
         }))
     }
 
+    /// Experience buffer stats: size, success/failure counts, `LoRA` adaptation state.
     fn tool_get_experience(&self) -> McpToolResult {
         let exp = self.experience.read().unwrap();
         let exp_len = exp.len();
@@ -566,6 +555,7 @@ impl McpServer {
         }))
     }
 
+    /// Enumerate checkpoint files in the configured checkpoint directory.
     fn tool_get_checkpoints(&self) -> McpToolResult {
         let ckpt_dir = Path::new(&self.config.memory.checkpoint_dir);
         let checkpoints = Checkpoint::list_checkpoints(ckpt_dir).map_or_else(
@@ -588,8 +578,8 @@ impl McpServer {
         }))
     }
 
+    /// Return the current SOMA configuration, excluding secrets and auth tokens.
     fn tool_get_config(&self) -> McpToolResult {
-        // Serialize config (safe fields only — no tokens/secrets)
         McpToolResult::json(serde_json::json!({
             "soma": {
                 "id": self.config.soma.id,
@@ -638,6 +628,7 @@ impl McpServer {
         }))
     }
 
+    /// Query the decision log. Supports `n` (recent count) and `search` (keyword filter).
     #[allow(clippy::cast_possible_truncation)] // u64 from JSON capped to reasonable values
     fn tool_get_decisions(&self, args: &serde_json::Value) -> McpToolResult {
         let state = self.state.read().unwrap();
@@ -667,10 +658,10 @@ impl McpServer {
         resp
     }
 
+    /// Query database schema via the postgres plugin. Returns table names and column metadata.
+    /// If `table` is specified, returns that table's schema with sample rows.
     #[allow(clippy::future_not_send, clippy::await_holding_lock, clippy::significant_drop_tightening)]
-    // RwLockReadGuard held across await is intentional for plugin manager
     async fn tool_get_schema(&self, args: &serde_json::Value) -> McpToolResult {
-        // Check if a database plugin (postgres or sqlite) is loaded
         let pm = self.plugins.read().unwrap();
         let has_postgres = pm.plugin_names().iter().any(|n| n == "postgres");
 
@@ -682,14 +673,13 @@ impl McpServer {
             }));
         }
 
-        // If a specific table is requested, query only that table's schema with sample rows
         if let Some(table_name) = args.get("table").and_then(|v| v.as_str()) {
+            // Convention 10 = table_schema, convention 11 = sample_rows (postgres plugin)
             let schema_args = vec![crate::plugin::interface::Value::String(table_name.to_string())];
             let columns = match pm.execute_by_plugin_async("postgres", 10, schema_args).await {
                 Ok(cols) => format!("{cols}"),
                 Err(e) => return McpToolResult::error(format!("Failed to query table schema: {e}")),
             };
-            // Try to get sample rows (convention id 11 = sample_rows, if available)
             let sample_args = vec![
                 crate::plugin::interface::Value::String(table_name.to_string()),
                 crate::plugin::interface::Value::Int(5),
@@ -707,13 +697,12 @@ impl McpServer {
             return McpToolResult::json(result);
         }
 
-        // Query list_tables convention (id 9 in postgres plugin)
+        // Convention 9 = list_tables, then 10 = table_schema for each table
         let tables = match pm.execute_by_plugin_async("postgres", 9, vec![]).await {
             Ok(crate::plugin::interface::Value::List(table_list)) => {
                 let mut result = Vec::new();
                 for table_val in &table_list {
                     if let crate::plugin::interface::Value::String(table_name) = table_val {
-                        // Query table_schema convention (id 10) for each table
                         let schema_args = vec![crate::plugin::interface::Value::String(table_name.clone())];
                         let columns = pm.execute_by_plugin_async("postgres", 10, schema_args).await
                             .map_or_else(|_| "[]".to_string(), |cols| format!("{cols}"));
@@ -743,8 +732,8 @@ impl McpServer {
         }))
     }
 
+    /// Extract business rules from the decision log by keyword matching.
     fn tool_get_business_rules(&self) -> McpToolResult {
-        // Business rules derived from decisions and configuration
         let state = self.state.read().unwrap();
         let rules: Vec<serde_json::Value> = state.decisions.list().iter()
             .filter(|d| d.what.to_lowercase().contains("rule")
@@ -767,9 +756,9 @@ impl McpServer {
         }))
     }
 
+    /// Stub: returns empty render state until an Interface SOMA connects via Synaptic Protocol.
     #[allow(clippy::unused_self)] // Will use self when Interface SOMA is connected
     fn tool_get_render_state(&self) -> McpToolResult {
-        // Render state — populated when Interface SOMA is connected.
         McpToolResult::json(serde_json::json!({
             "active_views": [],
             "pending_updates": [],
@@ -786,9 +775,9 @@ impl McpServer {
         }
     }
 
-    // ---- Action tool implementations ----
-
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // as_millis() fits u64; token ids are non-negative
+    /// Execute a natural language intent: infer a program via the Mind, execute it via
+    /// `PluginManager`, record metrics/experience/history, and return the result.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn tool_intent(&self, args: &serde_json::Value) -> McpToolResult {
         let Some(text) = args.get("text").and_then(|v| v.as_str()) else {
             return McpToolResult::error("Missing required argument: text".into());
@@ -809,11 +798,9 @@ impl McpServer {
 
                 let execution_time_ms = exec_start.elapsed().as_millis() as u64;
 
-                // Record metrics
                 self.metrics.record_inference(result.success, execution_time_ms);
                 self.metrics.record_program(program.steps.len() as u64);
 
-                // Record in execution history
                 if let Ok(mut state) = self.state.write() {
                     state.executions.record(
                         text.to_string(),
@@ -826,13 +813,12 @@ impl McpServer {
                     );
                 }
 
-                // Update proprioception
                 if let Ok(mut p) = self.proprio.write() {
                     if result.success { p.record_success(); }
                     else { p.record_failure(); }
                 }
 
-                // Record experience
+                // Record experience (Section 17.1: successes only)
                 let tokens: Vec<u32> = mind_guard.tokenizer.encode(text)
                     .iter().map(|&t| t as u32).collect();
                 drop(mind_guard);
@@ -843,7 +829,6 @@ impl McpServer {
                     (s.conv_id, a0, a1)
                 }).collect();
                 if let Ok(mut buf) = self.experience.write() {
-                    // Section 17.1: Only successful executions are recorded
                     if result.success {
                         buf.record(crate::memory::experience::Experience {
                             intent_tokens: tokens,
@@ -854,7 +839,6 @@ impl McpServer {
                             cached_states: Vec::new(), // MCP path doesn't cache states yet
                         });
                     }
-                    // Update experience buffer gauge
                     self.metrics.experience_buffer_size.store(
                         buf.len() as u64,
                         std::sync::atomic::Ordering::Relaxed,
@@ -895,13 +879,14 @@ impl McpServer {
         }
     }
 
+    /// Save a checkpoint: `LoRA` state, experience counts, plugin states, decisions, and history.
     fn tool_checkpoint(&self, args: &serde_json::Value) -> McpToolResult {
         let label = args.get("label").and_then(|v| v.as_str());
         let ckpt_dir = Path::new(&self.config.memory.checkpoint_dir);
         let filename = label.map_or_else(
             || Checkpoint::filename(&self.config.soma.id),
             |lbl| {
-                // Include label in filename: soma-{id}-{label}-{timestamp}.ckpt
+                // Filename format: soma-{id}-{label}-{unix_timestamp}.ckpt
                 let ts = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -916,7 +901,6 @@ impl McpServer {
             (p.experience_count, p.total_adaptations)
         };
 
-        // Collect plugin state (same as do_checkpoint in main.rs)
         let plugin_states = self.plugins.read().unwrap().collect_plugin_states();
         let plugin_state_entries: Vec<crate::memory::checkpoint::PluginStateEntry> = plugin_states
             .into_iter()
@@ -940,7 +924,6 @@ impl McpServer {
             .map(|(name, version)| crate::memory::checkpoint::PluginManifestEntry { name, version })
             .collect();
 
-        // Persist decisions and execution history
         if let Ok(st) = self.state.read() {
             ckpt.decisions = serde_json::to_value(st.decisions.list())
                 .ok()
@@ -973,6 +956,8 @@ impl McpServer {
         }
     }
 
+    /// Record a decision in the permanent log. Enriches `what`/`why` with optional
+    /// context, related tables, and related plugins for searchability.
     fn tool_record_decision(&self, args: &serde_json::Value) -> McpToolResult {
         let what = match args.get("what").and_then(|v| v.as_str()) {
             Some(w) => w.to_string(),
@@ -983,7 +968,6 @@ impl McpServer {
             None => return McpToolResult::error("Missing required argument: why".into()),
         };
 
-        // Optional enrichment fields
         let context = args.get("context").and_then(|v| v.as_str()).map(std::string::ToString::to_string);
         let related_tables: Option<Vec<String>> = args.get("related_tables")
             .and_then(|v| v.as_array())
@@ -992,13 +976,11 @@ impl McpServer {
             .and_then(|v| v.as_array())
             .map(|arr| arr.iter().filter_map(|v| v.as_str().map(std::string::ToString::to_string)).collect());
 
-        // Build enriched 'what' with context if provided
         let enriched_what = context.as_ref().map_or_else(
             || what.clone(),
             |ctx| format!("{what} [context: {ctx}]"),
         );
 
-        // Build enriched 'why' with related info if provided
         let mut enriched_why = why;
         if let Some(tables) = &related_tables {
             enriched_why = format!("{enriched_why} [tables: {}]", tables.join(", "));
@@ -1007,7 +989,6 @@ impl McpServer {
             enriched_why = format!("{enriched_why} [plugins: {}]", plugins.join(", "));
         }
 
-        // Session ID from auth token or anonymous
         let session_id = "mcp-session".to_string();
 
         let Ok(mut state) = self.state.write() else {
@@ -1034,6 +1015,8 @@ impl McpServer {
         McpToolResult::json(resp)
     }
 
+    /// Complete a two-step confirmation: validate the action ID, then re-dispatch
+    /// the original tool call with `confirmed: true` injected into the arguments.
     #[allow(clippy::future_not_send)]
     async fn tool_confirm(&self, args: &serde_json::Value) -> McpToolResult {
         let Some(action_id) = args.get("action_id").and_then(|v| v.as_str()) else {
@@ -1047,7 +1030,6 @@ impl McpServer {
 
         match pending {
             Some(pending) => {
-                // Re-dispatch the original tool call with confirmed:true injected
                 let mut confirmed_args = pending.arguments.clone();
                 if let Some(obj) = confirmed_args.as_object_mut() {
                     obj.insert("confirmed".to_string(), serde_json::json!(true));
@@ -1064,12 +1046,12 @@ impl McpServer {
         }
     }
 
+    /// Load a plugin shared library from the plugins directory and register it at runtime.
     fn tool_install_plugin(&self, args: &serde_json::Value) -> McpToolResult {
         let Some(name) = args.get("name").and_then(|v| v.as_str()) else {
             return McpToolResult::error("Missing required argument: name".into());
         };
 
-        // Look for plugin .so/.dylib in plugins directory
         let plugins_dir = std::path::Path::new(&self.config.soma.plugins_directory);
         let ext = if cfg!(target_os = "macos") { "dylib" } else { "so" };
         let plugin_path = plugins_dir.join(format!("lib{name}.{ext}"));
@@ -1085,7 +1067,7 @@ impl McpServer {
 
         match crate::plugin::dynamic::load_plugin_from_path(&plugin_path) {
             Ok(mut plugin) => {
-                // Build plugin config from [plugins.<name>] section
+                // Populate PluginConfig from [plugins.<name>] TOML section if present
                 let mut pc = crate::plugin::interface::PluginConfig::default();
                 if let Some(toml_val) = self.config.plugins.get(name)
                     && let Some(table) = toml_val.as_table()
@@ -1102,7 +1084,6 @@ impl McpServer {
                 let pname = plugin.name().to_string();
                 let pversion = plugin.version().to_string();
                 let conv_count = plugin.conventions().len();
-                // Register dynamically via write lock
                 let mut pm = self.plugins.write().unwrap();
                 pm.register(plugin);
                 drop(pm);
@@ -1118,12 +1099,13 @@ impl McpServer {
         }
     }
 
+    /// Restore SOMA state from a checkpoint file. Requires two-step confirmation
+    /// when `require_confirmation` is enabled (destructive: overwrites current `LoRA` state).
     fn tool_restore_checkpoint(&self, args: &serde_json::Value) -> McpToolResult {
         let Some(path_str) = args.get("path").and_then(|v| v.as_str()) else {
             return McpToolResult::error("Missing required argument: path".into());
         };
 
-        // Destructive action: require two-step confirmation (Section 12.1)
         if self.config.security.require_confirmation
             && args.get("confirmed").and_then(serde_json::Value::as_bool) != Some(true)
         {
@@ -1150,7 +1132,6 @@ impl McpServer {
                     p.experience_count = ckpt.experience_count;
                     p.total_adaptations = ckpt.adaptation_count;
                 }
-                // Restore decisions into SomaState (Section 7.5)
                 let decisions_restored = ckpt.decisions.len();
                 if let Ok(mut st) = self.state.write() {
                     for decision_val in &ckpt.decisions {
@@ -1187,6 +1168,7 @@ impl McpServer {
         }
     }
 
+    /// Signal the main loop to initiate graceful shutdown.
     fn tool_shutdown(&self) -> McpToolResult {
         tracing::info!(component = "mcp", action = "shutdown", "Graceful shutdown requested via MCP");
         self.shutdown_requested.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1196,6 +1178,7 @@ impl McpServer {
         }))
     }
 
+    /// Unregister a loaded plugin by name, removing all its conventions.
     fn tool_uninstall_plugin(&self, args: &serde_json::Value) -> McpToolResult {
         let Some(name) = args.get("name").and_then(|v| v.as_str()) else {
             return McpToolResult::error("Missing required argument: name".into());
@@ -1212,6 +1195,7 @@ impl McpServer {
         }
     }
 
+    /// Update a plugin's configuration. The plugin may require a restart to apply changes.
     fn tool_configure_plugin(&self, args: &serde_json::Value) -> McpToolResult {
         let Some(name) = args.get("name").and_then(|v| v.as_str()) else {
             return McpToolResult::error("Missing required argument: name".into());
@@ -1220,7 +1204,6 @@ impl McpServer {
             return McpToolResult::error("Missing required argument: config".into());
         };
 
-        // Build a PluginConfig from the provided JSON object
         let mut pc = crate::plugin::interface::PluginConfig::default();
         if let Some(obj) = config_val.as_object() {
             for (k, v) in obj {
@@ -1228,7 +1211,6 @@ impl McpServer {
             }
         }
 
-        // Find the plugin and call on_load with new config (acts as config update)
         let pm = self.plugins.write().unwrap();
         let plugin_names: Vec<String> = pm.plugin_names();
         drop(pm);
@@ -1236,7 +1218,6 @@ impl McpServer {
             return McpToolResult::error(format!("Plugin not found: {name}"));
         }
 
-        // on_load is the lifecycle hook for configuration; there is no separate on_config_changed
         tracing::info!(
             component = "mcp",
             plugin = %name,
@@ -1251,9 +1232,11 @@ impl McpServer {
         }))
     }
 
-    #[allow(clippy::future_not_send, clippy::await_holding_lock)] // RwLockReadGuard held across await is intentional
+    /// Execute a plugin convention by its namespaced tool name (`soma.{plugin}.{convention}`).
+    /// Converts JSON arguments to `Value` instances based on the convention's `ArgType` specs,
+    /// then delegates to `PluginManager::execute_by_plugin_async`.
+    #[allow(clippy::future_not_send, clippy::await_holding_lock)]
     async fn tool_plugin_call(&self, tool_name: &str, args: &serde_json::Value) -> McpToolResult {
-        // Dynamic plugin namespacing: soma.{plugin}.{convention} (Section 12.2)
         let parts: Vec<&str> = tool_name.splitn(3, '.').collect();
         if parts.len() < 3 {
             return McpToolResult::error(format!("Invalid tool name: {tool_name}"));
@@ -1266,7 +1249,6 @@ impl McpServer {
             return McpToolResult::error(format!("Unknown convention: {conv_name}"));
         };
 
-        // Build args from JSON, supporting List and Map types for complex arguments
         let mut plugin_args = Vec::new();
         for arg_spec in &conv.args {
             if let Some(val) = args.get(&arg_spec.name) {
@@ -1299,12 +1281,10 @@ impl McpServer {
                     format!("Missing required argument: {}", arg_spec.name)
                 );
             } else {
-                // Optional argument not provided — push Null as placeholder
                 plugin_args.push(crate::plugin::interface::Value::Null);
             }
         }
 
-        // Use async execution for I/O-bound plugins (postgres, redis, http, etc.)
         let conv_id = conv.id;
         let pm = self.plugins.read().unwrap();
         match pm.execute_by_plugin_async(plugin_name, conv_id, plugin_args).await {
@@ -1317,7 +1297,10 @@ impl McpServer {
     }
 }
 
-/// Convert a JSON value to a plugin Value, preserving structure for complex types.
+/// Recursively convert a `serde_json::Value` to a SOMA plugin `Value`.
+///
+/// Numbers that fit in `i64` become `Value::Int`; others become `Value::Float`.
+/// Arrays and objects map to `Value::List` and `Value::Map` respectively.
 fn json_to_value(val: &serde_json::Value) -> crate::plugin::interface::Value {
     match val {
         serde_json::Value::Null => crate::plugin::interface::Value::Null,

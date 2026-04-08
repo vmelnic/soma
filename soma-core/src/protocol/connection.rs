@@ -1,5 +1,13 @@
-//! `SynapseConnection` — managed TCP connection with binary framing,
-//! heartbeat, and handshake (Spec Sections 11.1, 12, 18).
+//! Managed Synaptic Protocol v2 TCP connection.
+//!
+//! `SynapseConnection` owns a split TCP stream and provides:
+//! - Version-negotiated handshake (client and server sides)
+//! - Multiplexed channels with per-channel flow control (recv window)
+//! - Heartbeat with RTT measurement and dead-peer detection
+//! - Session tokens for reconnect identification (24h expiry)
+//!
+//! Spec reference: Sections 9.2 (flow control), 11.1 (connections),
+//! 12 (handshake), 14.5 (sessions), 18 (heartbeat).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -14,29 +22,29 @@ use tokio::sync::Mutex;
 use super::codec;
 use super::signal::{Signal, SignalType};
 
-/// Default keepalive interval (Spec Section 18.1).
+/// Interval between keepalive PINGs when idle (Spec Section 18.1).
 pub const DEFAULT_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
-/// Default pong timeout.
+/// How long to wait for a PONG before counting it as missed.
 pub const DEFAULT_PONG_TIMEOUT: Duration = Duration::from_secs(10);
-/// Max missed pongs before declaring peer dead.
+/// Consecutive missed PONGs before declaring the peer dead (Spec Section 18.3).
 pub const DEFAULT_MAX_MISSED_PONGS: u32 = 3;
 
-/// Connection quality metrics derived from RTT measurements (Spec Section 12.4).
+/// Connection quality metrics derived from PING/PONG RTT measurements.
+///
+/// Maintains a sliding window of up to 100 RTT samples and computes
+/// smoothed RTT and jitter (standard deviation). Spec Section 12.4.
 #[derive(Debug, Clone)]
 pub struct ConnectionQuality {
-    /// Smoothed round-trip time in milliseconds.
+    /// Smoothed round-trip time (average of recent samples).
     pub rtt_ms: f32,
-    /// RTT jitter (standard deviation) in milliseconds.
+    /// RTT jitter (standard deviation of recent samples).
     pub rtt_jitter_ms: f32,
-    /// How long this connection has been alive.
     pub connection_age_secs: u64,
     #[allow(dead_code)] // Spec feature for connection quality tracking
-    /// Fraction of signals lost (0.0 = none, 1.0 = all). Spec Section 12.4.
     pub signal_loss_rate: f32,
     #[allow(dead_code)] // Spec feature for connection quality tracking
-    /// Estimated bandwidth in bytes per second. Spec Section 12.4.
     pub bandwidth_bytes_sec: f64,
-    /// Recent RTT samples for computing averages.
+    /// Sliding window of recent RTT observations (max 100).
     rtt_samples: Vec<f32>,
 }
 
@@ -54,8 +62,7 @@ impl Default for ConnectionQuality {
 }
 
 impl ConnectionQuality {
-    /// Record a new RTT observation. Keeps the last 100 samples and
-    /// recomputes the smoothed RTT and jitter (stddev).
+    /// Record an RTT observation and recompute smoothed RTT and jitter.
     pub fn record_rtt(&mut self, rtt_ms: f32) {
         self.rtt_samples.push(rtt_ms);
         if self.rtt_samples.len() > 100 {
@@ -76,19 +83,20 @@ impl ConnectionQuality {
 }
 
 #[allow(dead_code)] // Used internally by channel flow control
-/// Default receive window size: 1 MB (Spec Section 9.2).
+/// Default receive window size per channel (Spec Section 9.2).
 pub const DEFAULT_RECV_WINDOW: u64 = 1_048_576;
 
-/// State for a multiplexed channel on a connection.
+/// Per-channel flow control state for a multiplexed connection.
+///
+/// Tracks a receive window: the sender must not exceed `recv_window - bytes_in_flight`
+/// bytes without an acknowledgment. When `bytes_in_flight` drops below 50% of
+/// `recv_window_max`, the window is restored (Spec Section 9.2).
 #[derive(Debug, Clone)]
 pub struct ChannelState {
     pub id: u32,
     pub active: bool,
-    /// Bytes remaining in the receive window (flow control).
     pub recv_window: u64,
-    /// Maximum window size (default 1 MB).
     pub recv_window_max: u64,
-    /// Unacknowledged bytes sent on this channel.
     pub bytes_in_flight: u64,
 }
 
@@ -98,53 +106,43 @@ pub const DEFAULT_MAX_CHANNELS: usize = 256;
 /// Protocol versions supported by this implementation.
 pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2.0"];
 
-/// A managed Synaptic Protocol v2 connection. Owns the TCP read/write halves
-/// and tracks per-connection state: channels, sequence counter, heartbeat,
-/// and negotiated parameters.
+/// A managed Synaptic Protocol v2 connection.
+///
+/// Owns the split TCP stream halves and tracks all per-connection state:
+/// peer identity, multiplexed channels, sequence numbering, heartbeat
+/// timing, negotiated parameters, and session tokens.
+///
+/// The writer is `Arc`'d so the heartbeat task can send PINGs concurrently
+/// with the main signal loop. All mutable state uses `Mutex` or atomics
+/// for safe shared access.
 pub struct SynapseConnection {
-    /// Peer's SOMA ID (learned during handshake).
+    /// Peer's SOMA ID, populated during handshake.
     pub peer_id: Mutex<String>,
-    /// Read half of the TCP stream.
     reader: Mutex<OwnedReadHalf>,
-    /// Write half, Arc'd so heartbeat task can share it.
+    /// `Arc`'d so the heartbeat task can share the write half.
     writer: Arc<Mutex<OwnedWriteHalf>>,
-    /// Active channels on this connection.
     channels: Mutex<HashMap<u32, ChannelState>>,
-    /// Monotonically increasing sequence number.
     sequence_counter: AtomicU32,
-    /// When we last received ANY data from the peer (resets heartbeat).
+    /// Timestamp of last received data; any frame resets the heartbeat counter.
     pub last_received: Mutex<Instant>,
-    /// When we last sent data to the peer.
     pub last_sent: Mutex<Instant>,
-    /// Missed PONG count for dead peer detection.
     pub missed_pong_count: AtomicU32,
-    /// Negotiated max frame size (from handshake). Uses `AtomicU32` for
-    /// interior mutability so handshake can update it through &self.
+    /// Negotiated max frame size. Atomic so handshake can update through `&self`.
     pub negotiated_max_signal_size: AtomicU32,
     #[allow(dead_code)] // Spec feature for channel limit negotiation
-    /// Maximum number of multiplexed channels allowed on this connection.
     pub max_channels: usize,
-    /// Negotiated capability set.
     pub negotiated_capabilities: Mutex<Vec<String>>,
-    /// Our SOMA ID.
     pub local_id: String,
-    /// Whether the connection is alive.
     pub alive: std::sync::atomic::AtomicBool,
-    /// Session token for reconnect identification (Spec Section 14.5).
+    /// Session token for reconnect identification (24h expiry, Spec Section 14.5).
     pub session_token: Mutex<String>,
-    /// When the current session token was created (for expiry checks, Spec Section 14.5).
     pub session_token_created: Mutex<Option<Instant>>,
-    /// Connection quality metrics (RTT, jitter).
     pub quality: Mutex<ConnectionQuality>,
-    /// Timestamp of the last PING we sent, keyed by sequence number,
-    /// so we can compute RTT when the matching PONG arrives.
+    /// `(sequence, sent_at)` of the last PING, for RTT computation on PONG.
     pub ping_sent_at: Mutex<Option<(u32, Instant)>>,
-    /// When this connection was established.
     pub created_at: Instant,
-    /// Channel for notifying when this peer is declared dead (Spec Section 18.3).
-    /// The heartbeat loop sends the `peer_id` through this channel so that the
-    /// server connection handler can perform cleanup (cancel subscriptions,
-    /// remove from peer registry, etc.).
+    /// Heartbeat loop sends `peer_id` here when the peer is declared dead,
+    /// allowing the server to clean up subscriptions, peer registry, etc.
     pub dead_peer_tx: Mutex<Option<tokio::sync::mpsc::Sender<String>>>,
 }
 
@@ -202,7 +200,6 @@ impl SynapseConnection {
 
         let payload_len = signal.payload.len() as u64;
 
-        // Channel flow control check (Spec Section 9.2)
         {
             let channels = self.channels.lock().await;
             if let Some(ch) = channels.get(&signal.channel_id)
@@ -219,8 +216,7 @@ impl SynapseConnection {
                             available,
                             "Channel flow control: payload exceeds available window"
                         );
-                        // NOTE: Blocking/back-pressure would require async
-                        // refactoring; for now we log and proceed.
+                        // Back-pressure not yet implemented; log and proceed
                     }
                 }
         }
@@ -232,7 +228,6 @@ impl SynapseConnection {
         drop(writer);
         *self.last_sent.lock().await = Instant::now();
 
-        // Update bytes_in_flight after successful send
         {
             let mut channels = self.channels.lock().await;
             if let Some(ch) = channels.get_mut(&signal.channel_id)
@@ -270,12 +265,11 @@ impl SynapseConnection {
             let frame =
                 codec::read_frame(&mut *reader, max_size as usize).await?;
 
-            // Any received frame resets the heartbeat counter (Spec Section 18.3)
+            // Any received frame resets the missed-pong counter
             *self.last_received.lock().await = Instant::now();
             self.missed_pong_count.store(0, Ordering::Relaxed);
 
             if let Some(signal) = codec::decode_frame(&frame, None)? {
-                // Update channel flow control: decrease bytes_in_flight
                 let payload_len = signal.payload.len() as u64;
                 if payload_len > 0 {
                     let mut channels = self.channels.lock().await;
@@ -283,13 +277,11 @@ impl SynapseConnection {
                         ch.bytes_in_flight =
                             ch.bytes_in_flight.saturating_sub(payload_len);
 
-                        // Check if window has opened up enough to consider
-                        // sending a window update (Spec Section 9.2)
+                        // Restore window when in-flight drops below 50%
                         let half_window = ch.recv_window_max / 2;
                         if ch.bytes_in_flight < half_window
                             && ch.recv_window < ch.recv_window_max
                         {
-                            // Restore recv_window to max when in-flight drops
                             ch.recv_window = ch.recv_window_max;
                             tracing::debug!(
                                 channel = ch.id,
@@ -396,11 +388,11 @@ impl SynapseConnection {
         created.is_some_and(|t| t.elapsed() < SESSION_EXPIRY)
     }
 
-    /// Check if a signal type is allowed by negotiated capabilities
-    /// (Spec Section 12.4). Returns `true` if the signal may proceed.
+    /// Check whether a signal type is permitted by negotiated capabilities.
+    /// Lifecycle, intent, data, and discovery signals are always allowed;
+    /// streaming, chunked, and pubsub require their respective capability.
     pub async fn is_signal_allowed(&self, signal_type: SignalType) -> bool {
         match signal_type {
-            // Always allowed (no capability needed)
             SignalType::Handshake
             | SignalType::HandshakeAck
             | SignalType::Close
@@ -417,13 +409,11 @@ impl SynapseConnection {
             | SignalType::PeerList
             | SignalType::Binary => true,
 
-            // Requires "streaming" capability
             SignalType::StreamStart | SignalType::StreamData | SignalType::StreamEnd => {
                 let caps = self.negotiated_capabilities.lock().await;
                 caps.iter().any(|c| c == "streaming")
             }
 
-            // Requires "chunked" capability
             SignalType::ChunkStart
             | SignalType::ChunkData
             | SignalType::ChunkEnd
@@ -432,7 +422,6 @@ impl SynapseConnection {
                 caps.iter().any(|c| c == "chunked")
             }
 
-            // Requires "pubsub" capability
             SignalType::Subscribe | SignalType::Unsubscribe => {
                 let caps = self.negotiated_capabilities.lock().await;
                 caps.iter().any(|c| c == "pubsub")
@@ -440,15 +429,13 @@ impl SynapseConnection {
         }
     }
 
-    /// Check if a specific capability was negotiated during handshake
-    /// (Spec Section 12.4).
+    /// Check if a specific capability was negotiated during handshake.
     pub async fn is_capability_negotiated(&self, cap: &str) -> bool {
         let caps = self.negotiated_capabilities.lock().await;
         caps.iter().any(|c| c == cap)
     }
 
-    /// Record a PONG response and compute RTT if we have a matching
-    /// PING timestamp for the given sequence number.
+    /// Match a PONG sequence to the outstanding PING and record the RTT.
     pub async fn record_pong_rtt(&self, pong_sequence: u32) {
         let mut ping_info = self.ping_sent_at.lock().await;
         if let Some((seq, sent_at)) = ping_info.take() {
@@ -466,7 +453,6 @@ impl SynapseConnection {
                     "RTT recorded"
                 );
             } else {
-                // Put it back if sequence doesn't match
                 *ping_info = Some((seq, sent_at));
             }
         }
@@ -496,10 +482,9 @@ impl SynapseConnection {
             .unwrap_or("unknown")
             .to_string();
 
-        // --- Gap 2: Store peer_id on the connection struct ---
         *self.peer_id.lock().await = peer_soma_id.clone();
 
-        // --- Gap 1: Protocol version negotiation ---
+        // Protocol version negotiation: find highest mutually supported version
         let peer_version = hs
             .metadata
             .get("protocol_version")
@@ -515,7 +500,6 @@ impl SynapseConnection {
                     .collect()
             });
 
-        // Find the highest mutually supported version
         let our_supported: std::collections::HashSet<&str> =
             SUPPORTED_PROTOCOL_VERSIONS.iter().copied().collect();
         let mut mutual_versions: Vec<&String> = peer_supported
@@ -547,7 +531,7 @@ impl SynapseConnection {
             );
         };
 
-        // Extract peer capabilities
+        // Capability negotiation: intersection of both sides' capabilities
         let peer_caps: Vec<String> = hs
             .metadata
             .get("capabilities")
@@ -559,7 +543,6 @@ impl SynapseConnection {
             })
             .unwrap_or_default();
 
-        // Negotiate: intersection of capabilities
         let our_caps_set: std::collections::HashSet<&str> =
             our_capabilities.iter().copied().collect();
         let negotiated: Vec<String> = peer_caps
@@ -568,7 +551,7 @@ impl SynapseConnection {
             .cloned()
             .collect();
 
-        // Negotiate max_signal_size: minimum of both sides
+        // Max signal size: use the minimum of both sides
         #[allow(clippy::cast_possible_truncation)] // signal sizes fit in u32 (max 10MB)
         let peer_max_size = hs
             .metadata
@@ -578,13 +561,9 @@ impl SynapseConnection {
         let our_max_size = self.negotiated_max_signal_size.load(Ordering::Relaxed);
         let negotiated_size = peer_max_size.min(our_max_size);
 
-        // --- Gap 3: Write negotiated_max_signal_size back to connection ---
         self.negotiated_max_signal_size.store(negotiated_size, Ordering::Relaxed);
-
-        // Store negotiated params
         *self.negotiated_capabilities.lock().await = negotiated.clone();
 
-        // Negotiate max_channels from peer (use min of both sides)
         #[allow(clippy::cast_possible_truncation)] // channel count fits in usize
         let _peer_max_channels = hs
             .metadata
@@ -592,12 +571,10 @@ impl SynapseConnection {
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(DEFAULT_MAX_CHANNELS as u64) as usize;
 
-        // Generate session token (Spec Section 14.5)
         let session_token = uuid::Uuid::new_v4().to_string();
         *self.session_token.lock().await = session_token.clone();
         *self.session_token_created.lock().await = Some(Instant::now());
 
-        // Check if the peer sent a previous session token (reconnect)
         let peer_session_token = hs
             .metadata
             .get("session_token")
@@ -613,9 +590,7 @@ impl SynapseConnection {
             );
         }
 
-        // Send HANDSHAKE_ACK with negotiated_version included
         let mut ack = Signal::handshake_ack(&self.local_id, &negotiated, negotiated_size);
-        // Include our plugins, session token, and negotiated version in the ack metadata
         if let serde_json::Value::Object(ref mut map) = ack.metadata {
             map.insert(
                 "plugins".to_string(),
@@ -653,7 +628,6 @@ impl SynapseConnection {
         our_capabilities: &[&str],
         our_plugins: &[&str],
     ) -> Result<String> {
-        // Send HANDSHAKE (include previous session token if reconnecting)
         let mut hs = Signal::handshake(&self.local_id, our_capabilities, our_plugins);
         let prev_token = self.session_token.lock().await.clone();
         if !prev_token.is_empty()
@@ -666,7 +640,6 @@ impl SynapseConnection {
         hs.sequence = self.next_sequence();
         self.send(&hs).await?;
 
-        // Receive HANDSHAKE_ACK
         let ack = self.recv().await?;
         if ack.signal_type != SignalType::HandshakeAck {
             bail!(
@@ -682,10 +655,8 @@ impl SynapseConnection {
             .unwrap_or("unknown")
             .to_string();
 
-        // --- Gap 2: Store peer_id on the connection struct ---
         *self.peer_id.lock().await = peer_soma_id.clone();
 
-        // Extract negotiated capabilities
         let negotiated: Vec<String> = ack
             .metadata
             .get("negotiated_capabilities")
@@ -699,7 +670,6 @@ impl SynapseConnection {
 
         *self.negotiated_capabilities.lock().await = negotiated.clone();
 
-        // --- Gap 3: Write negotiated_max_signal_size from the ack ---
         #[allow(clippy::cast_possible_truncation)] // signal sizes fit in u32 (max 10MB)
         let ack_max_size = ack
             .metadata
@@ -710,7 +680,6 @@ impl SynapseConnection {
         let negotiated_size = ack_max_size.min(our_max_size);
         self.negotiated_max_signal_size.store(negotiated_size, Ordering::Relaxed);
 
-        // Store session token from server (Spec Section 14.5)
         let server_session_token = ack
             .metadata
             .get("session_token")
@@ -739,11 +708,12 @@ impl SynapseConnection {
         self.peer_id.lock().await.clone()
     }
 
-    /// Run the heartbeat loop. Sends PING when idle, tracks missed PONGs,
-    /// and declares the peer dead after too many misses.
+    /// Heartbeat loop: sends PING after `keepalive_interval` of idle time,
+    /// waits `pong_timeout` for a response, and declares the peer dead after
+    /// `max_missed` consecutive misses (Spec Section 18.3).
     ///
-    /// This should be spawned as a separate task. It terminates when the
-    /// connection is marked dead.
+    /// Must be spawned as a separate tokio task. Terminates when the
+    /// connection is marked dead or the peer is declared dead.
     pub async fn heartbeat_loop(
         conn: Arc<Self>,
         keepalive_interval: Duration,
@@ -759,18 +729,15 @@ impl SynapseConnection {
                 break;
             }
 
-            // Check if we need to send a PING
             let elapsed_since_recv = {
                 let last = conn.last_received.lock().await;
                 last.elapsed()
             };
 
             if elapsed_since_recv >= keepalive_interval {
-                // Send PING and record the send time for RTT measurement
                 let mut ping = Signal::ping(&conn.local_id);
                 ping.sequence = conn.next_sequence();
                 let ping_seq = ping.sequence;
-                // Store (sequence, Instant) so we can compute RTT when PONG arrives
                 *conn.ping_sent_at.lock().await = Some((ping_seq, Instant::now()));
                 let peer_display = conn.peer_id.lock().await.clone();
                 if conn.send(&ping).await.is_err() {
@@ -779,10 +746,8 @@ impl SynapseConnection {
                     break;
                 }
 
-                // Wait for pong_timeout
                 tokio::time::sleep(pong_timeout).await;
 
-                // Check if we received anything since the PING
                 let elapsed_after_ping = {
                     let last = conn.last_received.lock().await;
                     last.elapsed()
@@ -805,14 +770,10 @@ impl SynapseConnection {
                             missed
                         );
 
-                        // --- Dead peer handling (Spec Section 18.3) ---
-                        // Step 1: Mark connection dead
                         conn.mark_dead();
 
-                        // Steps 2-5: Notify server via dead_peer_tx channel.
-                        // The server connection handler selects on this channel
-                        // and performs cleanup: cancel subscriptions (PubSubManager),
-                        // remove from peer list (PeerRegistry), etc.
+                        // Notify the server handler via dead_peer_tx so it can
+                        // clean up subscriptions, peer registry, etc.
                         {
                             let tx_guard = conn.dead_peer_tx.lock().await;
                             if let Some(ref tx) = *tx_guard {
@@ -829,8 +790,6 @@ impl SynapseConnection {
                                     );
                                 }
                             } else {
-                                // No channel set — log remaining TODOs for
-                                // cleanup that requires external managers.
                                 tracing::debug!(peer = %peer_display, "TODO: fail pending requests via SignalRouter");
                                 tracing::debug!(peer = %peer_display, "TODO: interrupt active streams via StreamManager");
                                 tracing::debug!(peer = %peer_display, "TODO: remove from PeerRegistry");
@@ -838,11 +797,7 @@ impl SynapseConnection {
                             }
                         }
 
-                        // Step 6: Log (done above with tracing::error)
-
-                        // Step 7: Trigger auto-reconnect.
-                        // For server-side connections, we only log — the peer's client
-                        // is responsible for reconnecting via connect_with_retry.
+                        // Server-side only logs; the peer's client reconnects via connect_with_retry
                         tracing::info!(
                             peer = %peer_display,
                             "Dead peer cleanup complete; client-side reconnect handled by connect_with_retry"

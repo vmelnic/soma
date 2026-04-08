@@ -1,15 +1,19 @@
-//! WebSocket transport adapter for Synaptic Protocol (Section 3.1).
+//! WebSocket transport adapter for the Synaptic Protocol (Section 3.1).
 //!
-//! Browser-based renderers cannot open raw TCP connections.
-//! This adapter wraps/unwraps Synaptic Protocol frames inside
-//! WebSocket binary messages.
+//! Browser-based renderers cannot open raw TCP connections, so this adapter
+//! wraps Synaptic Protocol frames inside WebSocket binary messages using
+//! `tungstenite`. Each WebSocket connection enforces a handshake gate:
+//! the first signal must be `HANDSHAKE`, mirroring the TCP transport's
+//! session establishment.
 //!
-//! Signal routing: after decoding a Synaptic Protocol frame, the
-//! handler responds to HANDSHAKE (with `HANDSHAKE_ACK`), PING (with
-//! PONG), and INTENT (with an acknowledgment DATA signal). Other
-//! signal types are logged but not routed — full `SignalRouter`
-//! integration is deferred until the TCP server handler is
-//! refactored into a shared trait.
+//! A global connection limit (default 64) prevents resource exhaustion.
+//! The counter uses `Relaxed` ordering because occasional over-admission
+//! by one connection is acceptable — the limit is a soft guard, not a
+//! security boundary.
+//!
+//! Signal routing is minimal: `HANDSHAKE`, `PING`, `INTENT`, and `CLOSE`
+//! are handled inline. Full `SignalRouter` integration is deferred until
+//! the TCP server handler is refactored into a shared trait.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -21,18 +25,24 @@ use tokio_tungstenite::accept_async;
 use super::codec;
 use super::signal::{Signal, SignalType};
 
-/// Maximum number of concurrent WebSocket connections.
+/// Soft upper bound on concurrent WebSocket connections.
 #[allow(dead_code)] // Used by start_ws_server
 const DEFAULT_MAX_WS_CONNECTIONS: usize = 64;
 
-/// Start a WebSocket server that wraps Synaptic Protocol.
-/// Each incoming WS connection is bridged to a minimal signal handler.
+/// Starts a WebSocket server on `bind_addr` with the default connection limit.
+///
+/// Delegates to [`start_ws_server_with_limit`] with [`DEFAULT_MAX_WS_CONNECTIONS`].
 #[allow(dead_code)] // Spec feature for browser-based renderers
 pub async fn start_ws_server(bind_addr: &str) -> Result<()> {
     start_ws_server_with_limit(bind_addr, DEFAULT_MAX_WS_CONNECTIONS).await
 }
 
-/// Start a WebSocket server with an explicit connection limit.
+/// Starts a WebSocket server that bridges WebSocket binary frames to
+/// Synaptic Protocol signals.
+///
+/// Each accepted TCP connection is upgraded to WebSocket via `tungstenite`,
+/// then handed to [`handle_ws_connection`]. Connections beyond
+/// `max_connections` are dropped immediately before the upgrade handshake.
 #[allow(dead_code)] // Spec feature for browser-based renderers
 pub async fn start_ws_server_with_limit(bind_addr: &str, max_connections: usize) -> Result<()> {
     let listener = TcpListener::bind(bind_addr).await?;
@@ -43,7 +53,6 @@ pub async fn start_ws_server_with_limit(bind_addr: &str, max_connections: usize)
     loop {
         let (stream, addr) = listener.accept().await?;
 
-        // Enforce connection limit
         let current = active_connections.load(Ordering::Relaxed);
         if current >= max_connections {
             tracing::warn!(
@@ -73,6 +82,15 @@ pub async fn start_ws_server_with_limit(bind_addr: &str, max_connections: usize)
     }
 }
 
+/// Processes a single WebSocket connection through its full lifecycle.
+///
+/// Enforces a handshake gate: the first binary frame must decode to a
+/// `HANDSHAKE` signal, otherwise the connection is terminated with an
+/// error signal. After handshake, routes `PING`, `INTENT`, and `CLOSE`
+/// signals; all others are logged and ignored.
+///
+/// WebSocket-level pings (distinct from Synaptic Protocol `PING` signals)
+/// are answered with pongs to keep the connection alive through proxies.
 #[allow(dead_code)] // Called by start_ws_server_with_limit
 #[allow(clippy::too_many_lines)]
 async fn handle_ws_connection(
@@ -89,7 +107,6 @@ async fn handle_ws_connection(
     while let Some(msg) = read.next().await {
         match msg {
             Ok(Message::Binary(data)) => {
-                // data is a complete Synaptic Protocol frame
                 match codec::decode_frame(&data, None) {
                     Ok(Some(signal)) => {
                         tracing::debug!(
@@ -99,7 +116,7 @@ async fn handle_ws_connection(
                             "WS frame received"
                         );
 
-                        // Handshake gate: first message must be HANDSHAKE
+                        // Handshake gate: reject pre-handshake non-HANDSHAKE signals
                         if !handshake_done {
                             if signal.signal_type != SignalType::Handshake {
                                 tracing::warn!(
@@ -113,7 +130,6 @@ async fn handle_ws_connection(
                                 break;
                             }
 
-                            // Send HANDSHAKE_ACK
                             let caps = vec!["streaming".to_string()];
                             let ack = Signal::handshake_ack(server_id, &caps, 10_485_760);
                             let frame = codec::encode_frame(&ack, None);
@@ -130,7 +146,6 @@ async fn handle_ws_connection(
                             continue;
                         }
 
-                        // Route known signal types
                         let response = match signal.signal_type {
                             SignalType::Ping => {
                                 Some(Signal::pong(server_id, signal.sequence))
@@ -143,9 +158,8 @@ async fn handle_ws_connection(
                                     intent = %intent_text,
                                     "WS intent received"
                                 );
-                                // Acknowledge with a DATA signal containing the
-                                // received intent. Full mind-engine routing is
-                                // deferred until the handler trait is shared.
+                                // Echo the intent back as a DATA ack. Full mind-engine
+                                // routing is deferred until the handler trait is shared.
                                 let mut ack =
                                     Signal::new(SignalType::Data, server_id.to_string());
                                 ack.payload =
@@ -196,14 +210,14 @@ async fn handle_ws_connection(
                 break;
             }
             Ok(Message::Ping(data)) => {
-                // WebSocket-level ping/pong (not Synaptic Protocol level)
+                // WS-level ping/pong (distinct from Synaptic Protocol PING signals)
                 let _ = write.send(Message::Pong(data)).await;
             }
             Err(e) => {
                 tracing::warn!(peer = %addr, error = %e, "WebSocket error");
                 break;
             }
-            _ => {} // ignore text messages
+            _ => {} // Text frames are not part of the Synaptic Protocol
         }
     }
 

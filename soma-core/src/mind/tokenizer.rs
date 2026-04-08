@@ -1,10 +1,9 @@
-//! SOMA Tokenizer — word-level and BPE vocabulary lookup.
+//! Tokenizer supporting word-level and BPE modes, auto-detected from the JSON format.
 //!
-//! Supports two modes, auto-detected from the tokenizer.json format:
-//! - **Word-level**: flat `{"token": idx, ...}` — splits on whitespace, direct lookup.
-//! - **BPE**: `{"vocab": {"token": idx, ...}, "merges": ["X Y", ...]}` — splits on
-//!   whitespace, then applies Byte Pair Encoding merges to each word for subword
-//!   tokenization with character-level fallback (Spec Section 10.2).
+//! - **Word-level**: flat `{"token": idx, ...}` -- splits on whitespace, direct lookup.
+//! - **BPE**: `{"vocab": {...}, "merges": ["X Y", ...]}` -- splits on whitespace, then
+//!   applies Byte Pair Encoding merges for subword tokenization with character-level
+//!   fallback for OOV words (Spec Section 10.2).
 
 use anyhow::Result;
 use serde_json::Value;
@@ -13,14 +12,16 @@ use std::path::Path;
 
 #[allow(dead_code)] // Spec Section 10.2 — padding token index
 pub const PAD_IDX: i64 = 0;
+/// Unknown token index -- used for OOV words and unrecognized BPE subwords.
 pub const UNK_IDX: i64 = 1;
+/// Null prefix token prepended by `encode_with_null()` to offset span indices by 1.
 pub const NULL_IDX: i64 = 2;
 
+/// Bidirectional vocabulary mapping with optional BPE merge rules.
 pub struct Tokenizer {
     word2idx: HashMap<String, i64>,
     idx2word: HashMap<i64, String>,
     /// BPE merge rules in priority order (lowest index = highest priority).
-    /// Each entry is `(left, right)` meaning merge tokens `left` and `right` into `left+right`.
     /// Empty when operating in word-level mode.
     merges: Vec<(String, String)>,
 }
@@ -41,7 +42,6 @@ impl Tokenizer {
         let mut merges = Vec::new();
 
         if let Some(merges_val) = root.get("merges") {
-            // BPE format: {"vocab": {...}, "merges": ["X Y", ...]}
             let vocab_obj = root.get("vocab")
                 .and_then(|v| v.as_object())
                 .ok_or_else(|| anyhow::anyhow!("BPE tokenizer.json has 'merges' but missing 'vocab' object"))?;
@@ -54,18 +54,15 @@ impl Tokenizer {
 
             if let Some(merges_arr) = merges_val.as_array() {
                 for entry in merges_arr {
-                    if let Some(rule) = entry.as_str() {
-                        // Format: "X Y" — split on first space to get left and right
-                        if let Some(space_pos) = rule.find(' ') {
+                    if let Some(rule) = entry.as_str()
+                        && let Some(space_pos) = rule.find(' ') {
                             let left = rule[..space_pos].to_string();
                             let right = rule[space_pos + 1..].to_string();
                             merges.push((left, right));
                         }
-                    }
                 }
             }
         } else {
-            // Word-level format: flat {"token": idx, ...}
             let map: HashMap<String, Value> = serde_json::from_value(root)?;
             for (word, val) in &map {
                 let idx = val.as_i64().unwrap_or(0);
@@ -77,18 +74,15 @@ impl Tokenizer {
         Ok(Self { word2idx, idx2word, merges })
     }
 
-    /// Returns `true` if BPE merge rules are loaded.
     pub const fn is_bpe(&self) -> bool {
         !self.merges.is_empty()
     }
 
     /// Apply BPE merges to a single word, returning subword tokens.
     ///
-    /// Algorithm:
-    /// 1. Split the word into individual characters.
-    /// 2. Repeatedly find the adjacent pair with the lowest merge index (highest priority).
-    /// 3. Merge that pair into a single token.
-    /// 4. Repeat until no more merges apply.
+    /// Starts with individual characters, then repeatedly merges the highest-priority
+    /// adjacent pair (lowest index in the merge table) until no merges apply.
+    /// All occurrences of the winning pair are merged in a single pass (left-to-right).
     pub fn bpe_tokenize(&self, word: &str) -> Vec<String> {
         let mut symbols: Vec<String> = word.chars().map(|c| c.to_string()).collect();
         if symbols.len() <= 1 {
@@ -96,12 +90,10 @@ impl Tokenizer {
         }
 
         loop {
-            // Find the pair with the lowest index in the merges list (highest priority)
             let mut best_merge_idx: Option<usize> = None;
             let mut best_pair_pos: Option<usize> = None;
 
             for i in 0..symbols.len() - 1 {
-                // Look up this pair in the merges list
                 if let Some(merge_idx) = self.find_merge(&symbols[i], &symbols[i + 1])
                     && (best_merge_idx.is_none() || merge_idx < best_merge_idx.unwrap()) {
                         best_merge_idx = Some(merge_idx);
@@ -111,7 +103,6 @@ impl Tokenizer {
 
             match (best_merge_idx, best_pair_pos) {
                 (Some(_), Some(_)) => {
-                    // Apply the merge: scan left to right merging all occurrences
                     let (ref left, ref right) = self.merges[best_merge_idx.unwrap()];
                     let merged = format!("{left}{right}");
                     let mut new_symbols = Vec::with_capacity(symbols.len());
@@ -137,13 +128,11 @@ impl Tokenizer {
         symbols
     }
 
-    /// Find the index of a merge rule for the given pair, or `None` if not found.
     fn find_merge(&self, left: &str, right: &str) -> Option<usize> {
         self.merges.iter().position(|(l, r)| l == left && r == right)
     }
 
-    /// Tokenize text. In BPE mode, splits on whitespace then applies BPE to each word.
-    /// In word-level mode, splits on whitespace only.
+    /// Tokenize text into subword or word-level tokens (lowercased).
     pub fn tokenize(&self, text: &str) -> Vec<String> {
         let lower = text.to_lowercase();
         if self.is_bpe() {
@@ -157,7 +146,7 @@ impl Tokenizer {
         }
     }
 
-    /// Encode text to token indices. Uses BPE or word-level depending on loaded config.
+    /// Encode text to vocabulary indices. Unknown tokens map to `UNK_IDX`.
     pub fn encode(&self, text: &str) -> Vec<i64> {
         self.tokenize(text)
             .iter()
@@ -165,8 +154,6 @@ impl Tokenizer {
             .collect()
     }
 
-    /// Encode with BPE explicitly, mapping subword tokens to indices.
-    /// Unknown subwords map to `UNK_IDX`.
     #[allow(dead_code)] // Spec Section 10.2 — explicit BPE encode path
     pub fn encode_bpe(&self, text: &str) -> Vec<i64> {
         let lower = text.to_lowercase();
@@ -176,7 +163,8 @@ impl Tokenizer {
             .collect()
     }
 
-    /// Encode with NULL prefix (for decoder span extraction)
+    /// Encode with a `NULL_IDX` prefix so span pointer index 0 means "no span"
+    /// and actual tokens start at index 1.
     pub fn encode_with_null(&self, text: &str) -> Vec<i64> {
         let mut ids = vec![NULL_IDX];
         ids.extend(self.encode(text));
@@ -187,15 +175,15 @@ impl Tokenizer {
         self.word2idx.len()
     }
 
-    /// Decode a single vocabulary index back to its word string.
-    /// Returns "<UNK>" if the index is not found in the vocabulary.
+    /// Map a vocabulary index back to its string. Returns `"<UNK>"` if not found.
     pub fn decode_index(&self, idx: usize) -> String {
         #[allow(clippy::cast_possible_wrap)] // vocab indices are small positive values
         self.idx2word.get(&(idx as i64)).cloned().unwrap_or_else(|| "<UNK>".to_string())
     }
 
+    /// Extract text from token span indices. Indices are 1-based (0 = NULL prefix),
+    /// so `start=1, end=2` extracts the first two tokens.
     #[allow(clippy::unused_self)] // method semantically belongs to Tokenizer
-    /// Extract text from token span (offset by 1 for NULL prefix)
     pub fn extract_span(&self, tokens: &[String], start: usize, end: usize) -> String {
         if start == 0 && end == 0 {
             return String::new();
@@ -211,7 +199,6 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    /// Helper to create a temporary tokenizer JSON file and load it.
     fn load_from_json(json: &str) -> Tokenizer {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("tokenizer.json");
