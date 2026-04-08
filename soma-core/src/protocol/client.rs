@@ -10,6 +10,7 @@ use super::connection::SynapseConnection;
 use super::router::SignalRouter;
 use super::signal::{Signal, SignalType};
 
+#[allow(dead_code)] // Spec Section 14.2 — used by connect_with_retry
 /// Backoff schedule for auto-reconnect (Spec Section 14.2):
 /// 100ms, 500ms, 2s, 5s, then exponential up to 60s.
 const BACKOFF_SCHEDULE: &[Duration] = &[
@@ -18,6 +19,7 @@ const BACKOFF_SCHEDULE: &[Duration] = &[
     Duration::from_secs(2),
     Duration::from_secs(5),
 ];
+#[allow(dead_code)] // Spec Section 14.2 — used by connect_with_retry
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 
 /// Record of an active subscription, kept for replay on reconnect (Section 14.3).
@@ -74,8 +76,8 @@ impl SynapseClient {
         }
 
         // Perform client-side handshake
-        let cap_refs: Vec<&str> = self.capabilities.iter().map(|s| s.as_str()).collect();
-        let plug_refs: Vec<&str> = self.plugins.iter().map(|s| s.as_str()).collect();
+        let cap_refs: Vec<&str> = self.capabilities.iter().map(std::string::String::as_str).collect();
+        let plug_refs: Vec<&str> = self.plugins.iter().map(std::string::String::as_str).collect();
         let peer_id = conn.client_handshake(&cap_refs, &plug_refs).await?;
 
         // Store the session token received from the server
@@ -93,6 +95,7 @@ impl SynapseClient {
         Ok(conn)
     }
 
+    #[allow(dead_code)] // Spec Section 14.2 — auto-reconnect with backoff
     /// Connect with auto-reconnect. Retries with exponential backoff
     /// per Spec Section 14.2. Returns the connection on success.
     pub async fn connect_with_retry(&mut self, addr: &str) -> Result<Arc<SynapseConnection>> {
@@ -108,20 +111,24 @@ impl SynapseClient {
                     return Ok(conn);
                 }
                 Err(e) => {
+                    #[allow(clippy::cast_possible_truncation)] // attempt count is small
                     let delay = if (attempt as usize) < BACKOFF_SCHEDULE.len() {
                         BACKOFF_SCHEDULE[attempt as usize]
                     } else {
                         // Exponential backoff: 5s * 2^(attempt - 3), capped at 60s
-                        let extra = attempt as u32 - BACKOFF_SCHEDULE.len() as u32;
+                        #[allow(clippy::cast_possible_truncation)] // schedule len fits in u32
+                        let extra = attempt - BACKOFF_SCHEDULE.len() as u32;
                         let secs = 5u64.saturating_mul(1u64 << extra.min(10));
                         Duration::from_secs(secs).min(MAX_BACKOFF)
                     };
 
+                    #[allow(clippy::cast_possible_truncation)] // delay ≤ 60s, fits in u64
+                    let retry_in_ms = delay.as_millis() as u64;
                     tracing::warn!(
                         addr = %addr,
                         attempt = attempt + 1,
                         error = %e,
-                        retry_in_ms = delay.as_millis() as u64,
+                        retry_in_ms,
                         "Connection failed, retrying"
                     );
 
@@ -135,29 +142,27 @@ impl SynapseClient {
     /// Send a single signal to a peer (connect, handshake, send, receive response, disconnect).
     /// This is the simple one-shot API for sending intents.
     pub async fn send(addr: &str, local_id: &str, signal: &Signal) -> Result<Option<Signal>> {
-        let mut client = SynapseClient::new(local_id.to_string());
+        let mut client = Self::new(local_id.to_string());
         let conn = client.connect(addr).await?;
 
         // Send the signal
         conn.send(signal).await?;
 
         // Try to read a response
-        match conn.recv().await {
-            Ok(response) => {
-                // Send CLOSE
-                let close = Signal::close(local_id);
-                let _ = conn.send(&close).await;
-                conn.mark_dead();
-                Ok(Some(response))
-            }
-            Err(_) => {
-                conn.mark_dead();
-                Ok(None)
-            }
+        if let Ok(response) = conn.recv().await {
+            // Send CLOSE
+            let close = Signal::close(local_id);
+            let _ = conn.send(&close).await;
+            conn.mark_dead();
+            Ok(Some(response))
+        } else {
+            conn.mark_dead();
+            Ok(None)
         }
     }
 
     /// Send a ping to a peer and return whether it responded with a Pong.
+    #[allow(dead_code)] // Spec feature for peer health checking
     pub async fn ping(addr: &str, sender: &str) -> Result<bool> {
         let mut signal = Signal::ping(sender);
         signal.channel_id = 0;
@@ -168,7 +173,8 @@ impl SynapseClient {
     }
 
     /// Send an intent to a peer and wait for the response with timeout (Section 14.3).
-    /// Uses the SignalRouter for request-response correlation by sequence number.
+    /// Uses the `SignalRouter` for request-response correlation by sequence number.
+    #[allow(dead_code)] // Spec feature for correlated intent-result
     pub async fn send_intent_and_wait(
         addr: &str,
         sender: &str,
@@ -181,7 +187,7 @@ impl SynapseClient {
         // Register pending before sending
         let sequence = intent.sequence;
         let rx = router.register_pending(sequence)
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
 
         // Send the intent and deliver the response to the router
         let response = Self::send(addr, sender, &intent).await?;
@@ -201,6 +207,7 @@ impl SynapseClient {
     }
 
     /// Send an Intent signal and wait for the Result/Error response.
+    #[allow(dead_code)] // Spec feature for inter-SOMA communication
     pub async fn send_intent(
         addr: &str,
         sender: &str,
@@ -217,6 +224,7 @@ impl SynapseClient {
     }
 
     /// Track a subscription for replay on reconnect.
+    #[allow(dead_code)] // Spec feature for subscription replay
     pub fn track_subscription(&mut self, topic: String, channel_id: u32, durable: bool) {
         self.active_subscriptions.push(SubscriptionRecord {
             topic,
@@ -227,13 +235,15 @@ impl SynapseClient {
     }
 
     /// Remove a tracked subscription.
+    #[allow(dead_code)] // Spec feature for subscription replay
     pub fn untrack_subscription(&mut self, topic: &str) {
         self.active_subscriptions.retain(|s| s.topic != topic);
     }
 
-    /// Update the last seen sequence number for a tracked subscription.
+    /// Update the last-seen sequence number for a tracked subscription.
     /// Should be called when a signal is received on a subscribed topic,
     /// so that replay on reconnect can resume from the correct point.
+    #[allow(dead_code)] // Spec feature for subscription replay
     pub fn update_subscription_sequence(&mut self, topic: &str, sequence: u32) {
         if let Some(sub) = self.active_subscriptions.iter_mut().find(|s| s.topic == topic) {
             sub.last_seen_sequence = Some(sequence);
@@ -241,6 +251,7 @@ impl SynapseClient {
     }
 
     /// Replay all tracked subscriptions on a connection (after reconnect).
+    #[allow(dead_code)] // Spec feature for subscription replay
     pub async fn replay_subscriptions(&self, conn: &Arc<SynapseConnection>) -> Result<()> {
         for sub in &self.active_subscriptions {
             let mut signal = Signal::new(SignalType::Subscribe, self.local_id.clone());

@@ -6,6 +6,7 @@ use thiserror::Error;
 /// Used by the `SomaError::PluginDetailed` variant, which carries full
 /// context about what went wrong, where, and whether a retry might help.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Spec feature: Section 11.3 rich error reporting
 pub struct PluginErrorDetail {
     /// Name of the plugin that produced the error.
     pub plugin: String,
@@ -23,10 +24,10 @@ impl std::fmt::Display for PluginErrorDetail {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "plugin '{}': {}", self.plugin, self.message)?;
         if let Some(idx) = self.step_index {
-            write!(f, " (step {})", idx)?;
+            write!(f, " (step {idx})")?;
         }
         if let Some(ref conv) = self.convention {
-            write!(f, " [convention: {}]", conv)?;
+            write!(f, " [convention: {conv}]")?;
         }
         if self.retryable {
             write!(f, " [retryable]")?;
@@ -36,6 +37,7 @@ impl std::fmt::Display for PluginErrorDetail {
 }
 
 #[derive(Error, Debug)]
+#[allow(dead_code)] // Spec feature: Section 11.3 error taxonomy
 pub enum SomaError {
     #[error("inference error: {0}")]
     Inference(String),
@@ -75,10 +77,11 @@ pub enum SomaError {
     Other(#[from] anyhow::Error),
 }
 
+#[allow(dead_code)] // Spec feature: Section 11.3 error constructors
 impl SomaError {
     /// Convenience constructor for a simple plugin error.
     pub fn plugin(plugin: impl Into<String>, message: impl Into<String>) -> Self {
-        SomaError::Plugin {
+        Self::Plugin {
             plugin: plugin.into(),
             message: message.into(),
             retryable: false,
@@ -88,15 +91,15 @@ impl SomaError {
     }
 
     /// Convenience constructor for a detailed plugin error.
-    pub fn plugin_detailed(detail: PluginErrorDetail) -> Self {
-        SomaError::PluginDetailed(detail)
+    pub const fn plugin_detailed(detail: PluginErrorDetail) -> Self {
+        Self::PluginDetailed(detail)
     }
 
     /// Whether this error is considered retryable.
-    pub fn is_retryable(&self) -> bool {
+    pub const fn is_retryable(&self) -> bool {
         match self {
-            SomaError::Plugin { retryable, .. } => *retryable,
-            SomaError::PluginDetailed(d) => d.retryable,
+            Self::Plugin { retryable, .. } => *retryable,
+            Self::PluginDetailed(d) => d.retryable,
             _ => false,
         }
     }

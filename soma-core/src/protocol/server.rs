@@ -28,6 +28,7 @@ pub trait SignalHandler: Send + Sync {
     fn handle(&self, signal: Signal) -> Option<Signal>;
 }
 
+#[allow(dead_code)] // Spec feature for basic protocol testing
 /// A simple handler that responds to Ping with Pong and logs everything else.
 pub struct DefaultHandler {
     pub name: String,
@@ -35,16 +36,13 @@ pub struct DefaultHandler {
 
 impl SignalHandler for DefaultHandler {
     fn handle(&self, signal: Signal) -> Option<Signal> {
-        match signal.signal_type {
-            SignalType::Ping => Some(Signal::pong(&self.name, signal.sequence)),
-            _ => {
-                tracing::debug!(
-                    signal_type = ?signal.signal_type,
-                    sender = %signal.sender_id,
-                    "Received signal (no handler)"
-                );
-                None
-            }
+        if signal.signal_type == SignalType::Ping { Some(Signal::pong(&self.name, signal.sequence)) } else {
+            tracing::debug!(
+                signal_type = ?signal.signal_type,
+                sender = %signal.sender_id,
+                "Received signal (no handler)"
+            );
+            None
         }
     }
 }
@@ -64,14 +62,11 @@ impl SignalHandler for SomaSignalHandler {
             SignalType::Ping => Some(Signal::pong(&self.name, signal.sequence)),
             SignalType::Intent => {
                 // Extract intent text from payload
-                let intent_text = match String::from_utf8(signal.payload.clone()) {
-                    Ok(text) => text,
-                    Err(_) => {
-                        return Some(Signal::error(
-                            &self.name,
-                            "Invalid UTF-8 in intent payload",
-                        ));
-                    }
+                let Ok(intent_text) = String::from_utf8(signal.payload.clone()) else {
+                    return Some(Signal::error(
+                        &self.name,
+                        "Invalid UTF-8 in intent payload",
+                    ));
                 };
 
                 // Propagate trace_id from incoming signal
@@ -109,10 +104,10 @@ impl SignalHandler for SomaSignalHandler {
                         );
 
                         let mut resp = if result.success {
-                            let output_str = match &result.output {
-                                Some(val) => format!("{}", val),
-                                None => "Done.".to_string(),
-                            };
+                            let output_str = result.output.as_ref().map_or_else(
+                                || "Done.".to_string(),
+                                |val| format!("{val}"),
+                            );
                             let mut r =
                                 Signal::new(SignalType::Result, self.name.clone());
                             r.payload = output_str.into_bytes();
@@ -133,7 +128,7 @@ impl SignalHandler for SomaSignalHandler {
                     Err(e) => {
                         let mut resp = Signal::error(
                             &self.name,
-                            &format!("Inference error: {}", e),
+                            &format!("Inference error: {e}"),
                         );
                         resp.trace_id = trace_id;
                         resp.channel_id = signal.channel_id;
@@ -153,7 +148,7 @@ impl SignalHandler for SomaSignalHandler {
     }
 }
 
-/// Configuration for the SynapseServer.
+/// Configuration for the `SynapseServer`.
 pub struct ServerConfig {
     pub max_signal_size: u32,
     pub max_connections: usize,
@@ -204,7 +199,8 @@ impl SynapseServer {
         }
     }
 
-    pub fn with_config(name: String, bind_addr: String, config: ServerConfig) -> Self {
+    #[allow(dead_code)] // Spec feature for custom server configuration
+    pub const fn with_config(name: String, bind_addr: String, config: ServerConfig) -> Self {
         Self {
             name,
             bind_addr,
@@ -224,10 +220,11 @@ impl SynapseServer {
         self
     }
 
+    #[allow(clippy::too_many_lines)]
     /// Start listening for incoming connections. Runs until the task is cancelled.
     pub async fn start(
         &self,
-        handler: impl SignalHandler + Send + Sync + 'static,
+        handler: impl SignalHandler + 'static,
     ) -> Result<()> {
         let listener = TcpListener::bind(&self.bind_addr).await?;
         tracing::info!(
@@ -289,8 +286,8 @@ impl SynapseServer {
                 ));
 
                 // Perform server-side handshake
-                let cap_refs: Vec<&str> = capabilities.iter().map(|s| s.as_str()).collect();
-                let plug_refs: Vec<&str> = plugins.iter().map(|s| s.as_str()).collect();
+                let cap_refs: Vec<&str> = capabilities.iter().map(std::string::String::as_str).collect();
+                let plug_refs: Vec<&str> = plugins.iter().map(std::string::String::as_str).collect();
                 let peer_id = match conn.server_handshake(&cap_refs, &plug_refs).await {
                     Ok(id) => id,
                     Err(e) => {
@@ -358,6 +355,7 @@ impl SynapseServer {
                                 {
                                     let mut ps = pubsub.lock().await;
                                     ps.remove_connection(conn_id);
+                                    drop(ps);
                                     tracing::info!(
                                         peer = %dead_id,
                                         conn_id,
@@ -466,10 +464,11 @@ impl SynapseServer {
                             // Pub/Sub subscribe (Section 9.4)
                             let topic = String::from_utf8_lossy(&signal.payload).to_string();
                             let durable = signal.metadata.get("durable")
-                                .and_then(|v| v.as_bool()).unwrap_or(false);
+                                .and_then(serde_json::Value::as_bool).unwrap_or(false);
                             let mut ps = pubsub.lock().await;
+                            #[allow(clippy::cast_possible_truncation)] // sequence numbers fit in u32
                             let last_seen = signal.metadata.get("last_seen_sequence")
-                                .and_then(|v| v.as_u64()).map(|v| v as u32);
+                                .and_then(serde_json::Value::as_u64).map(|v| v as u32);
                             ps.subscribe(
                                 &topic,
                                 signal.channel_id,
@@ -506,6 +505,7 @@ impl SynapseServer {
                             let topic = String::from_utf8_lossy(&signal.payload).to_string();
                             let mut ps = pubsub.lock().await;
                             ps.unsubscribe(&topic, conn_id);
+                            drop(ps);
                             tracing::info!(peer = %peer_id, topic = %topic, "Unsubscribed");
                             continue;
                         }
@@ -545,6 +545,7 @@ impl SynapseServer {
                             if let Some(ref registry) = peer_registry {
                                 let mut pr = registry.write().unwrap();
                                 pr.register_from_discover(&signal);
+                                drop(pr);
                                 tracing::info!(
                                     peer = %peer_id,
                                     sender = %signal.sender_id,
@@ -577,6 +578,7 @@ impl SynapseServer {
                             if let Some(ref registry) = peer_registry {
                                 let mut pr = registry.write().unwrap();
                                 pr.register_from_discover(&signal);
+                                drop(pr);
                                 tracing::info!(
                                     peer = %peer_id,
                                     "PEER_LIST received, peers updated"
@@ -588,7 +590,9 @@ impl SynapseServer {
                         // Chunked transfer signals (Spec Section 6.3)
                         SignalType::ChunkStart => {
                             let mut cm = chunk_mgr.lock().await;
-                            if let Err(e) = cm.start_transfer(signal.channel_id, &signal.metadata) {
+                            let result = cm.start_transfer(signal.channel_id, &signal.metadata);
+                            drop(cm);
+                            if let Err(e) = result {
                                 tracing::warn!(
                                     peer = %peer_id,
                                     channel = signal.channel_id,
@@ -597,7 +601,7 @@ impl SynapseServer {
                                 );
                                 let mut err = Signal::error(
                                     &server_name,
-                                    &format!("chunk_start_failed: {}", e),
+                                    &format!("chunk_start_failed: {e}"),
                                 );
                                 err.sequence = conn.next_sequence();
                                 err.channel_id = signal.channel_id;
@@ -613,11 +617,13 @@ impl SynapseServer {
                         }
                         SignalType::ChunkData => {
                             let mut cm = chunk_mgr.lock().await;
-                            if let Some(mut ack) = cm.receive_chunk(
+                            let ack_opt = cm.receive_chunk(
                                 signal.channel_id,
                                 signal.sequence,
                                 signal.payload.clone(),
-                            ) {
+                            );
+                            drop(cm);
+                            if let Some(mut ack) = ack_opt {
                                 ack.sender_id = server_name.clone();
                                 ack.sequence = conn.next_sequence();
                                 if let Err(e) = conn.send(&ack).await {
@@ -634,7 +640,9 @@ impl SynapseServer {
                         }
                         SignalType::ChunkEnd => {
                             let mut cm = chunk_mgr.lock().await;
-                            match cm.finalize_transfer(signal.channel_id) {
+                            let result = cm.finalize_transfer(signal.channel_id);
+                            drop(cm);
+                            match result {
                                 Ok(data) => {
                                     tracing::info!(
                                         peer = %peer_id,
@@ -664,7 +672,7 @@ impl SynapseServer {
                                     );
                                     let mut err = Signal::error(
                                         &server_name,
-                                        &format!("chunk_finalize_failed: {}", e),
+                                        &format!("chunk_finalize_failed: {e}"),
                                     );
                                     err.sequence = conn.next_sequence();
                                     err.channel_id = signal.channel_id;
@@ -719,13 +727,13 @@ impl SynapseServer {
                     }
 
                     // PubSub fan-out: if DATA or STREAM_DATA has a topic, publish to subscribers
-                    if matches!(signal.signal_type, SignalType::Data | SignalType::StreamData) {
-                        if let Some(topic) = signal.metadata.get("topic").and_then(|v| v.as_str()) {
+                    if matches!(signal.signal_type, SignalType::Data | SignalType::StreamData)
+                        && let Some(topic) = signal.metadata.get("topic").and_then(|v| v.as_str()) {
                             let topic = topic.to_string();
                             let mut ps = pubsub.lock().await;
                             let fan_out = ps.publish(
                                 &topic,
-                                signal.payload.clone(),
+                                &signal.payload,
                                 signal.channel_id,
                             );
                             drop(ps);
@@ -758,7 +766,6 @@ impl SynapseServer {
                                 break;
                             }
                         }
-                    }
 
                     // Relay capability gating (Sec 12.4)
                     if super::relay::should_relay(&signal, &server_name) {
@@ -786,7 +793,7 @@ impl SynapseServer {
                                             recipient = %recipient,
                                             address = %addr,
                                             hop_count = relay_signal.metadata.get("hop_count")
-                                                .and_then(|v| v.as_u64()).unwrap_or(0),
+                                                .and_then(serde_json::Value::as_u64).unwrap_or(0),
                                             "Relaying signal to peer (via SynapseClient)"
                                         );
                                         // Forward the signal to the target peer

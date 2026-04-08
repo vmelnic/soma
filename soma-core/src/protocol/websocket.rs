@@ -5,9 +5,9 @@
 //! WebSocket binary messages.
 //!
 //! Signal routing: after decoding a Synaptic Protocol frame, the
-//! handler responds to HANDSHAKE (with HANDSHAKE_ACK), PING (with
+//! handler responds to HANDSHAKE (with `HANDSHAKE_ACK`), PING (with
 //! PONG), and INTENT (with an acknowledgment DATA signal). Other
-//! signal types are logged but not routed — full SignalRouter
+//! signal types are logged but not routed — full `SignalRouter`
 //! integration is deferred until the TCP server handler is
 //! refactored into a shared trait.
 
@@ -22,15 +22,18 @@ use super::codec;
 use super::signal::{Signal, SignalType};
 
 /// Maximum number of concurrent WebSocket connections.
+#[allow(dead_code)] // Used by start_ws_server
 const DEFAULT_MAX_WS_CONNECTIONS: usize = 64;
 
 /// Start a WebSocket server that wraps Synaptic Protocol.
 /// Each incoming WS connection is bridged to a minimal signal handler.
+#[allow(dead_code)] // Spec feature for browser-based renderers
 pub async fn start_ws_server(bind_addr: &str) -> Result<()> {
     start_ws_server_with_limit(bind_addr, DEFAULT_MAX_WS_CONNECTIONS).await
 }
 
 /// Start a WebSocket server with an explicit connection limit.
+#[allow(dead_code)] // Spec feature for browser-based renderers
 pub async fn start_ws_server_with_limit(bind_addr: &str, max_connections: usize) -> Result<()> {
     let listener = TcpListener::bind(bind_addr).await?;
     tracing::info!(bind = %bind_addr, max_connections, "WebSocket transport started");
@@ -70,6 +73,8 @@ pub async fn start_ws_server_with_limit(bind_addr: &str, max_connections: usize)
     }
 }
 
+#[allow(dead_code)] // Called by start_ws_server_with_limit
+#[allow(clippy::too_many_lines)]
 async fn handle_ws_connection(
     ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     addr: std::net::SocketAddr,
@@ -144,7 +149,7 @@ async fn handle_ws_connection(
                                 let mut ack =
                                     Signal::new(SignalType::Data, server_id.to_string());
                                 ack.payload =
-                                    format!("ack:intent:{}", intent_text).into_bytes();
+                                    format!("ack:intent:{intent_text}").into_bytes();
                                 ack.channel_id = signal.channel_id;
                                 ack.trace_id = signal.effective_trace_id();
                                 Some(ack)

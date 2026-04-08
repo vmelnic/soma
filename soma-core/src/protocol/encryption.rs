@@ -5,7 +5,7 @@
 //! - Ed25519 identity keys for SOMA authentication
 //!
 //! Encryption is negotiated during handshake. If both peers support it,
-//! all subsequent signals are encrypted. The ENCRYPTED flag in SignalFlags
+//! all subsequent signals are encrypted. The ENCRYPTED flag in `SignalFlags`
 //! indicates per-signal encryption status.
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,6 +16,7 @@ use sha2::{Sha256, Digest};
 
 /// Ed25519 identity keypair for a SOMA instance (Section 12.3).
 /// Used for peer authentication and plugin signing.
+#[allow(dead_code)] // Spec feature for SOMA identity
 pub struct SomaIdentity {
     /// Ed25519 signing key (32 bytes seed)
     pub signing_key: [u8; 32],
@@ -27,6 +28,7 @@ pub struct SomaIdentity {
     pub x25519_public: [u8; 32],
 }
 
+#[allow(dead_code)] // Spec feature for SOMA identity
 impl SomaIdentity {
     /// Generate a new random identity.
     pub fn generate() -> Self {
@@ -78,6 +80,7 @@ pub struct SessionKeys {
     pub recv_nonce: AtomicU64,
 }
 
+#[allow(dead_code)] // Spec feature for session encryption
 impl SessionKeys {
     /// Derive session keys from our secret and peer's public key via X25519 ECDH.
     /// Uses SHA-256 with a domain separator for proper key derivation rather than
@@ -121,7 +124,7 @@ impl SessionKeys {
     }
 
     /// Get the next nonce for encryption (12 bytes for ChaCha20-Poly1305).
-    /// Legacy method — delegates to next_send_nonce for backwards compatibility.
+    /// Legacy method — delegates to `next_send_nonce` for backwards compatibility.
     pub fn next_nonce(&self) -> [u8; 12] {
         self.next_send_nonce()
     }
@@ -138,7 +141,7 @@ pub fn encrypt_payload(
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
     let nonce = Nonce::from_slice(nonce);
     cipher.encrypt(nonce, chacha20poly1305::aead::Payload { msg: plaintext, aad })
-        .map_err(|e| anyhow::anyhow!("encryption failed: {}", e))
+        .map_err(|e| anyhow::anyhow!("encryption failed: {e}"))
 }
 
 /// Decrypt a signal payload using ChaCha20-Poly1305 AEAD.
@@ -153,10 +156,11 @@ pub fn decrypt_payload(
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
     let nonce = Nonce::from_slice(nonce);
     cipher.decrypt(nonce, chacha20poly1305::aead::Payload { msg: ciphertext, aad })
-        .map_err(|e| anyhow::anyhow!("decryption failed: {}", e))
+        .map_err(|e| anyhow::anyhow!("decryption failed: {e}"))
 }
 
 /// Sign data with Ed25519.
+#[allow(dead_code)] // Spec feature for Ed25519 signing
 pub fn sign(signing_key: &[u8; 32], data: &[u8]) -> [u8; 64] {
     use ed25519_dalek::{SigningKey, Signer};
     let key = SigningKey::from_bytes(signing_key);

@@ -5,12 +5,10 @@
 //!
 //! Signal routing: after reading and decoding a Synaptic Protocol frame,
 //! the handler responds to PING (with PONG) and logs all other signal
-//! types. Full SignalRouter integration is deferred.
+//! types. Full `SignalRouter` integration is deferred.
 
 #[cfg(unix)]
 use anyhow::Result;
-#[cfg(unix)]
-use tokio::io::AsyncReadExt;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 
@@ -23,6 +21,7 @@ use super::signal::{Signal, SignalType};
 /// (when the accept loop ends or the task is cancelled), the caller
 /// should invoke [`cleanup_socket`] to remove the file.
 #[cfg(unix)]
+#[allow(dead_code)] // Spec feature for same-host transport
 pub async fn start_unix_server(path: &str) -> Result<()> {
     // Remove stale socket file if exists
     let _ = std::fs::remove_file(path);
@@ -42,6 +41,7 @@ pub async fn start_unix_server(path: &str) -> Result<()> {
 
 /// Handle a single UDS connection: read frames, decode signals, respond.
 #[cfg(unix)]
+#[allow(dead_code)] // Called by start_unix_server
 async fn handle_uds_connection(stream: tokio::net::UnixStream) {
     let (reader, writer) = stream.into_split();
     let mut reader = tokio::io::BufReader::new(reader);
@@ -95,12 +95,11 @@ async fn handle_uds_connection(stream: tokio::net::UnixStream) {
                     }
                 };
 
-                if let Some(resp) = response {
-                    if let Err(e) = codec::write_frame(&mut writer, &resp).await {
+                if let Some(resp) = response
+                    && let Err(e) = codec::write_frame(&mut writer, &resp).await {
                         tracing::warn!(error = %e, "UDS failed to send response");
                         break;
                     }
-                }
             }
             Ok(None) => {
                 tracing::debug!("UDS frame with unknown signal type, ignoring");
@@ -114,6 +113,7 @@ async fn handle_uds_connection(stream: tokio::net::UnixStream) {
 
 /// Remove the socket file on shutdown.
 #[cfg(unix)]
+#[allow(dead_code)] // Spec feature for UDS cleanup
 pub fn cleanup_socket(path: &str) {
     if let Err(e) = std::fs::remove_file(path) {
         if e.kind() != std::io::ErrorKind::NotFound {
@@ -125,6 +125,7 @@ pub fn cleanup_socket(path: &str) {
 }
 
 /// Path for the Unix Domain Socket (default: /tmp/soma-{id}.sock).
+#[allow(dead_code)] // Spec feature for UDS transport
 pub fn default_socket_path(soma_id: &str) -> String {
-    format!("/tmp/soma-{}.sock", soma_id)
+    format!("/tmp/soma-{soma_id}.sock")
 }

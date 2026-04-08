@@ -1,6 +1,6 @@
 //! Streaming lifecycle management (Spec Section 6.4).
 //!
-//! Tracks STREAM_START / STREAM_DATA / STREAM_END on per-channel streams,
+//! Tracks `STREAM_START` / `STREAM_DATA` / `STREAM_END` on per-channel streams,
 //! counting frames and handling connection-drop interrupts.
 
 use std::collections::HashMap;
@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use anyhow::{bail, Result};
 
 /// State for a single active stream on a channel.
+#[allow(dead_code)] // Spec feature for stream lifecycle
 #[derive(Debug, Clone)]
 pub struct StreamState {
     pub channel_id: u32,
@@ -19,10 +20,12 @@ pub struct StreamState {
 }
 
 /// Manages the lifecycle of all active streams across channels.
+#[allow(dead_code)] // Spec feature for stream lifecycle
 pub struct StreamManager {
     active_streams: HashMap<u32, StreamState>,
 }
 
+#[allow(dead_code)] // Spec feature for stream lifecycle
 impl StreamManager {
     pub fn new() -> Self {
         Self {
@@ -30,7 +33,7 @@ impl StreamManager {
         }
     }
 
-    /// Handle STREAM_START: create a new stream on `channel_id` using
+    /// Handle `STREAM_START`: create a new stream on `channel_id` using
     /// metadata fields `type` and `codec`.
     pub fn start_stream(
         &mut self,
@@ -39,8 +42,7 @@ impl StreamManager {
     ) -> Result<()> {
         if self.active_streams.contains_key(&channel_id) {
             bail!(
-                "Stream already active on channel {} — send STREAM_END first",
-                channel_id
+                "Stream already active on channel {channel_id} — send STREAM_END first"
             );
         }
 
@@ -71,7 +73,7 @@ impl StreamManager {
         Ok(())
     }
 
-    /// Handle STREAM_DATA: increment the received frame count for the
+    /// Handle `STREAM_DATA`: increment the received frame count for the
     /// stream on `channel_id`.
     pub fn on_stream_data(&mut self, channel_id: u32) -> Result<()> {
         match self.active_streams.get_mut(&channel_id) {
@@ -79,8 +81,8 @@ impl StreamManager {
                 state.frames_received += 1;
                 Ok(())
             }
-            Some(_) => bail!("Stream on channel {} is not active", channel_id),
-            None => bail!("No stream on channel {}", channel_id),
+            Some(_) => bail!("Stream on channel {channel_id} is not active"),
+            None => bail!("No stream on channel {channel_id}"),
         }
     }
 
@@ -91,12 +93,12 @@ impl StreamManager {
                 state.frames_sent += 1;
                 Ok(())
             }
-            Some(_) => bail!("Stream on channel {} is not active", channel_id),
-            None => bail!("No stream on channel {}", channel_id),
+            Some(_) => bail!("Stream on channel {channel_id} is not active"),
+            None => bail!("No stream on channel {channel_id}"),
         }
     }
 
-    /// Handle STREAM_END: mark the stream as inactive and remove it,
+    /// Handle `STREAM_END`: mark the stream as inactive and remove it,
     /// returning the final state.
     pub fn end_stream(&mut self, channel_id: u32) -> Result<StreamState> {
         match self.active_streams.remove(&channel_id) {
@@ -104,7 +106,7 @@ impl StreamManager {
                 state.active = false;
                 Ok(state)
             }
-            None => bail!("No stream on channel {} to end", channel_id),
+            None => bail!("No stream on channel {channel_id} to end"),
         }
     }
 

@@ -50,6 +50,7 @@ impl ConventionStats {
     pub fn record_duration(&mut self, duration_ms: u64) {
         if self.recent_durations.len() >= STATS_RING_SIZE {
             // Overwrite oldest entry (ring buffer behavior)
+            #[allow(clippy::cast_possible_truncation)] // ring buffer index always < 100
             let idx = (self.call_count as usize - 1) % STATS_RING_SIZE;
             self.recent_durations[idx] = duration_ms;
         } else {
@@ -57,6 +58,8 @@ impl ConventionStats {
         }
     }
 
+    #[allow(dead_code)] // Spec Section 19.3 — exposed via metrics/proprioception
+    #[allow(clippy::cast_precision_loss)] // duration values fit comfortably in f64
     /// Compute average duration from recent samples.
     pub fn avg_duration_ms(&self) -> f64 {
         if self.recent_durations.is_empty() {
@@ -66,16 +69,19 @@ impl ConventionStats {
         sum as f64 / self.recent_durations.len() as f64
     }
 
+    #[allow(dead_code)] // Spec Section 19.3 — exposed via metrics/proprioception
     /// Compute p50 (median) from recent samples.
     pub fn p50_duration_ms(&self) -> u64 {
         self.percentile(50)
     }
 
+    #[allow(dead_code)] // Spec Section 19.3 — exposed via metrics/proprioception
     /// Compute p99 from recent samples.
     pub fn p99_duration_ms(&self) -> u64 {
         self.percentile(99)
     }
 
+    #[allow(dead_code)] // Used by p50/p99 methods above
     fn percentile(&self, pct: usize) -> u64 {
         if self.recent_durations.is_empty() {
             return 0;
@@ -89,20 +95,20 @@ impl ConventionStats {
 
 pub struct PluginManager {
     plugins: Vec<Box<dyn SomaPlugin>>,
-    /// Maps global convention ID (plugin_idx*1000+local_id) -> (plugin_index, plugin_convention_id)
+    /// Maps global convention ID (`plugin_idx`*`1000+local_id`) -> (`plugin_index`, `plugin_convention_id`)
     routing: std::collections::HashMap<u32, (usize, u32)>,
-    /// Tracks crashed plugins via interior mutability — execute_step(&self) can mark
+    /// Tracks crashed plugins via interior mutability — `execute_step(&self)` can mark
     /// crashed plugins without &mut self (Section 11.3).
     crashed_plugins: std::sync::RwLock<std::collections::HashSet<usize>>,
-    /// Name-based convention lookup (Section 5.4). Maps "plugin.convention" → global_id.
+    /// Name-based convention lookup (Section 5.4). Maps "plugin.convention" → `global_id`.
     name_routing: std::collections::HashMap<String, u32>,
     /// Maps model catalog IDs → global routing IDs. Populated by `build_catalog_routing`.
-    /// When the Mind outputs catalog_id=34 (e.g. "postgres.execute"), this maps to
+    /// When the Mind outputs `catalog_id=34` (e.g. "postgres.execute"), this maps to
     /// the correct global routing ID (e.g. 1001).
     catalog_routing: std::collections::HashMap<u32, u32>,
     /// Optional metrics reference for tracking plugin calls
     metrics: Option<std::sync::Arc<crate::metrics::SomaMetrics>>,
-    /// Per-convention stats: global_id -> stats (Section 19.3)
+    /// Per-convention stats: `global_id` -> stats (Section 19.3)
     convention_stats: std::sync::RwLock<std::collections::HashMap<u32, ConventionStats>>,
     /// Plugins whose execution is denied (Section 12.2 permission enforcement).
     denied_plugins: std::sync::RwLock<std::collections::HashSet<String>>,
@@ -127,8 +133,9 @@ impl PluginManager {
         self.metrics = Some(metrics);
     }
 
-    /// Populate denied_plugins from a list of plugin names (Section 12.2).
-    /// Called during startup with config.security.denied_plugins.
+    #[allow(dead_code)] // Spec Section 12.2 — called during startup with config
+    /// Populate `denied_plugins` from a list of plugin names (Section 12.2).
+    /// Called during startup with `config.security.denied_plugins`.
     pub fn set_denied_plugins(&self, names: &[String]) {
         if let Ok(mut denied) = self.denied_plugins.write() {
             denied.clear();
@@ -141,6 +148,7 @@ impl PluginManager {
         }
     }
 
+    #[allow(dead_code)] // Spec Section 12.2 — runtime plugin denial via MCP
     /// Deny a single plugin by name at runtime.
     pub fn deny_plugin(&self, name: &str) {
         if let Ok(mut denied) = self.denied_plugins.write() {
@@ -149,6 +157,7 @@ impl PluginManager {
         }
     }
 
+    #[allow(dead_code)] // Spec Section 12.2 — runtime plugin re-enable via MCP
     /// Allow a previously denied plugin.
     pub fn allow_plugin(&self, name: &str) {
         if let Ok(mut denied) = self.denied_plugins.write() {
@@ -157,6 +166,7 @@ impl PluginManager {
         }
     }
 
+    #[allow(dead_code)] // Spec Section 12.2 — queried by MCP tools
     /// Check whether a plugin is denied.
     pub fn is_plugin_denied(&self, name: &str) -> bool {
         self.denied_plugins
@@ -199,6 +209,7 @@ impl PluginManager {
         let plugin_idx = self.plugins.len();
         // Convention IDs are namespaced: global_id = plugin_idx * 1000 + local_id
         // This prevents routing conflicts when multiple plugins use the same local IDs.
+        #[allow(clippy::cast_possible_truncation)] // plugin count is small
         let id_offset = (plugin_idx as u32) * 1000;
         let conventions = plugin.conventions();
         let mut registered = 0;
@@ -227,20 +238,13 @@ impl PluginManager {
         self.plugins.push(plugin);
     }
 
+    #[allow(dead_code)] // Spec Section 6.7 — batch plugin registration with toposort
     /// Register multiple plugins in dependency-resolved order (Section 6.7).
     /// Uses topological sort to determine correct loading order.
     /// Detects dependency cycles and skips cyclic plugins.
     pub fn register_all(&mut self, mut plugins: Vec<Box<dyn SomaPlugin>>) {
-        // Build dependency graph
-        let names: Vec<String> = plugins.iter().map(|p| p.name().to_string()).collect();
-
         // Cycle detection using DFS with three-color marking:
         // 0 = white (unvisited), 1 = gray (in progress), 2 = black (done)
-        let n = plugins.len();
-        let mut color = vec![0u8; n];
-        let mut order: Vec<usize> = Vec::new();
-        let mut in_cycle: Vec<bool> = vec![false; n];
-
         fn visit_with_cycle_check(
             idx: usize,
             plugins: &[Box<dyn SomaPlugin>],
@@ -255,20 +259,26 @@ impl PluginManager {
             color[idx] = 1; // mark gray (in progress)
 
             for dep in plugins[idx].dependencies() {
-                if let Some(dep_idx) = names.iter().position(|n| n == &dep.name) {
-                    if visit_with_cycle_check(dep_idx, plugins, names, color, order, in_cycle) {
+                if let Some(dep_idx) = names.iter().position(|n| n == &dep.name)
+                    && visit_with_cycle_check(dep_idx, plugins, names, color, order, in_cycle) {
                         // Cycle found — mark both this node and dep as cyclic
                         in_cycle[idx] = true;
                         in_cycle[dep_idx] = true;
                         return true;
                     }
-                }
             }
 
             color[idx] = 2; // mark black (done)
             order.push(idx);
             false
         }
+
+        // Build dependency graph
+        let names: Vec<String> = plugins.iter().map(|p| p.name().to_string()).collect();
+        let n = plugins.len();
+        let mut color = vec![0u8; n];
+        let mut order: Vec<usize> = Vec::new();
+        let mut in_cycle: Vec<bool> = vec![false; n];
 
         for i in 0..n {
             if color[i] == 0 {
@@ -287,8 +297,8 @@ impl PluginManager {
         }
 
         // Register in topological order, skipping cyclic plugins
-        let mut indexed: Vec<(usize, Box<dyn SomaPlugin>)> = plugins
-            .drain(..)
+        let mut indexed: Vec<(usize, Box<dyn SomaPlugin>)> = std::mem::take(&mut plugins)
+            .into_iter()
             .enumerate()
             .collect();
 
@@ -304,26 +314,27 @@ impl PluginManager {
     }
 
     /// Execute a single step by routing to the correct plugin.
-    /// Wrapped in catch_unwind to prevent plugin panics from crashing SOMA.
+    /// Wrapped in `catch_unwind` to prevent plugin panics from crashing SOMA.
     /// Crashed plugins are marked and disabled (Whitepaper Section 11.3).
     ///
-    /// Gap #29: When a convention declares max_latency_ms and a tokio runtime is
-    /// available, execution is wrapped with tokio::time::timeout for preemptive
+    /// Gap #29: When a convention declares `max_latency_ms` and a tokio runtime is
+    /// available, execution is wrapped with `tokio::time::timeout` for preemptive
     /// timeout enforcement (not just post-execution checking).
     ///
     /// Gap #30: Permission enforcement is real — denied plugins are refused
-    /// via the denied_plugins set, and plugin permission declarations are logged.
+    /// via the `denied_plugins` set, and plugin permission declarations are logged.
+    #[allow(clippy::too_many_lines)]
     fn execute_step(&self, conv_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
         let (plugin_idx, plugin_conv_id) = self.routing.get(&conv_id)
             .ok_or_else(|| PluginError::NotFound(
-                format!("No plugin for convention {}", conv_id)))?;
+                format!("No plugin for convention {conv_id}")))?;
 
         let idx = *plugin_idx;
         let cid = *plugin_conv_id;
 
         // Refuse to call a crashed plugin (Section 11.3: "unloaded")
         {
-            let crashed = self.crashed_plugins.read().unwrap_or_else(|e| e.into_inner());
+            let crashed = self.crashed_plugins.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             if crashed.contains(&idx) {
                 return Err(PluginError::Failed(format!(
                     "plugin '{}' was disabled after crash",
@@ -337,7 +348,7 @@ impl PluginManager {
         // Permission enforcement (Section 12.2, Gap #30)
         // Check denied_plugins list — if plugin is denied, refuse execution.
         {
-            let denied = self.denied_plugins.read().unwrap_or_else(|e| e.into_inner());
+            let denied = self.denied_plugins.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             if denied.contains(&plugin_name) {
                 tracing::warn!(
                     plugin = %plugin_name,
@@ -345,8 +356,7 @@ impl PluginManager {
                     "Plugin execution denied — plugin is in denied_plugins list"
                 );
                 return Err(PluginError::PermissionDenied(format!(
-                    "plugin '{}' is denied by configuration",
-                    plugin_name
+                    "plugin '{plugin_name}' is denied by configuration"
                 )));
             }
         }
@@ -374,8 +384,7 @@ impl PluginManager {
             let plugin_convs = self.plugins[idx].conventions();
             plugin_convs.iter()
                 .find(|c| c.id == cid)
-                .map(|c| c.max_latency_ms as u64)
-                .unwrap_or(0)
+                .map_or(0, |c| u64::from(c.max_latency_ms))
         };
 
         let start = std::time::Instant::now();
@@ -408,8 +417,7 @@ impl PluginManager {
                             stats.timeout_count += 1;
                         }
                         Err(PluginError::Failed(format!(
-                            "plugin '{}' convention {} timed out after {}ms",
-                            plugin_name, conv_id, timeout_ms
+                            "plugin '{plugin_name}' convention {conv_id} timed out after {timeout_ms}ms"
                         )))
                     }
                 }
@@ -437,6 +445,7 @@ impl PluginManager {
             )
         };
 
+        #[allow(clippy::cast_possible_truncation)] // plugin calls won't exceed u64::MAX ms
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
         // Record per-plugin and global metrics
@@ -449,8 +458,8 @@ impl PluginManager {
         // still has a max_latency_ms for advisory logging)
         if timeout_ms == 0 {
             let plugin_convs = self.plugins[idx].conventions();
-            if let Some(conv) = plugin_convs.iter().find(|c| c.id == cid) {
-                if conv.max_latency_ms > 0 && elapsed_ms > conv.max_latency_ms as u64 {
+            if let Some(conv) = plugin_convs.iter().find(|c| c.id == cid)
+                && conv.max_latency_ms > 0 && elapsed_ms > u64::from(conv.max_latency_ms) {
                     tracing::warn!(
                         plugin = self.plugins[idx].name(),
                         conv_id,
@@ -463,7 +472,6 @@ impl PluginManager {
                         stats.timeout_count += 1;
                     }
                 }
-            }
         }
 
         // Track per-convention stats (Section 19.3)
@@ -480,8 +488,9 @@ impl PluginManager {
         outcome
     }
 
-    /// Execute a plugin call with catch_unwind for panic safety.
+    /// Execute a plugin call with `catch_unwind` for panic safety.
     /// Extracted helper to avoid duplication between timeout and non-timeout paths.
+    #[allow(clippy::borrowed_box)] // Box<dyn SomaPlugin> needed for catch_unwind AssertUnwindSafe
     fn execute_with_catch_unwind(
         plugin: &Box<dyn SomaPlugin>,
         plugin_name: &str,
@@ -496,13 +505,13 @@ impl PluginManager {
         })) {
             Ok(result) => result,
             Err(panic_info) => {
-                let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
-                    format!("plugin '{}' panicked: {}", plugin_name, s)
-                } else if let Some(s) = panic_info.downcast_ref::<String>() {
-                    format!("plugin '{}' panicked: {}", plugin_name, s)
-                } else {
-                    format!("plugin '{}' panicked (unknown cause)", plugin_name)
-                };
+                let msg = panic_info.downcast_ref::<&str>().map_or_else(
+                    || panic_info.downcast_ref::<String>().map_or_else(
+                        || format!("plugin '{plugin_name}' panicked (unknown cause)"),
+                        |s| format!("plugin '{plugin_name}' panicked: {s}"),
+                    ),
+                    |s| format!("plugin '{plugin_name}' panicked: {s}"),
+                );
                 tracing::error!(conv_id, plugin = %plugin_name, "Plugin crash — disabling plugin");
                 // Mark as crashed via interior mutability — SOMA continues with reduced capabilities
                 if let Ok(mut crashed) = crashed_plugins.write() {
@@ -535,6 +544,8 @@ impl PluginManager {
 
     /// Execute a full program generated by the mind.
     /// `max_steps` caps the number of steps executed (0 = unlimited).
+    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // conv_id/handle casts are bounded
     pub fn execute_program(&self, steps: &[ProgramStep], max_steps: usize) -> ProgramResult {
         let mut results: Vec<Value> = Vec::new();
         let mut output: Option<Value> = None;
@@ -543,7 +554,7 @@ impl PluginManager {
 
         for (i, step) in steps.iter().enumerate() {
             if i >= step_limit {
-                let err = format!("Program exceeded max_steps limit ({})", max_steps);
+                let err = format!("Program exceeded max_steps limit ({max_steps})");
                 trace.push(TraceEntry {
                     step: i, op: "LIMIT".into(), success: false, summary: err.clone(),
                 });
@@ -566,11 +577,10 @@ impl PluginManager {
             }
 
             if step.conv_id == EMIT_ID {
-                if let ArgValue::Ref(r) = &step.arg0_value {
-                    if *r < results.len() {
+                if let ArgValue::Ref(r) = &step.arg0_value
+                    && *r < results.len() {
                         output = Some(results[*r].clone());
                     }
-                }
                 trace.push(TraceEntry {
                     step: i, op: "EMIT".into(), success: true, summary: String::new(),
                 });
@@ -587,7 +597,7 @@ impl PluginManager {
                     ArgValue::Span(s) => {
                         // Expand ~ in paths
                         let expanded = if s.starts_with('~') {
-                            shellexpand::tilde(s).to_string()
+                            shellexpand::tilde(s).clone()
                         } else {
                             s.clone()
                         };
@@ -597,7 +607,7 @@ impl PluginManager {
                         if *r < results.len() {
                             resolved.push(results[*r].clone());
                         } else {
-                            let err = format!("Step {} invalid ref ${}", i, r);
+                            let err = format!("Step {i} invalid ref ${r}");
                             trace.push(TraceEntry {
                                 step: i, op: "?".into(), success: false, summary: err.clone(),
                             });
@@ -627,7 +637,7 @@ impl PluginManager {
                     results.push(result);
                 }
                 Err(e) => {
-                    let err = format!("Step {}: {}", i, e);
+                    let err = format!("Step {i}: {e}");
                     trace.push(TraceEntry {
                         step: i,
                         op: format!("conv:{}", step.conv_id),
@@ -648,8 +658,8 @@ impl PluginManager {
                         // Find which plugin owns this convention via the routing table
                         if let Some(&(owner_plugin_idx, local_conv_id)) = self.routing.get(&global_step_id) {
                             let plugin_convs = self.plugins[owner_plugin_idx].conventions();
-                            if let Some(conv) = plugin_convs.iter().find(|c| c.id == local_conv_id) {
-                                if let Some(ref cleanup_spec) = conv.cleanup {
+                            if let Some(conv) = plugin_convs.iter().find(|c| c.id == local_conv_id)
+                                && let Some(ref cleanup_spec) = conv.cleanup {
                                     // CleanupSpec convention_id is local to the plugin.
                                     // Compute global cleanup ID for execute_step.
                                     let global_cleanup_id = (owner_plugin_idx as u32) * 1000 + cleanup_spec.convention_id;
@@ -670,7 +680,6 @@ impl PluginManager {
                                         }
                                     }
                                 }
-                            }
                         }
                     }
 
@@ -690,6 +699,8 @@ impl PluginManager {
         ProgramResult { success: true, output, trace, error: None }
     }
 
+    #[allow(dead_code)] // Spec Section 5.4 — direct convention execution via MCP
+    #[allow(clippy::cast_possible_truncation)] // plugin count is small
     /// Execute a convention by plugin name + local convention ID (for MCP tool calls).
     /// Resolves to global routing ID via plugin index offset.
     pub fn execute_direct(&self, conv_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
@@ -704,25 +715,27 @@ impl PluginManager {
                 return self.execute_step_with_retry(global_id, args);
             }
         }
-        Err(PluginError::NotFound(format!("No plugin for convention {}", conv_id)))
+        Err(PluginError::NotFound(format!("No plugin for convention {conv_id}")))
     }
 
+    #[allow(dead_code)] // Spec Section 5.4 — plugin-namespaced convention execution
+    #[allow(clippy::cast_possible_truncation)] // plugin count is small
     /// Execute a convention by plugin name + local ID (multi-plugin safe).
     pub fn execute_by_plugin(&self, plugin_name: &str, conv_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
         let plugin_idx = self.plugins.iter().position(|p| p.name() == plugin_name)
-            .ok_or_else(|| PluginError::NotFound(format!("Plugin '{}' not loaded", plugin_name)))?;
+            .ok_or_else(|| PluginError::NotFound(format!("Plugin '{plugin_name}' not loaded")))?;
         let global_id = (plugin_idx as u32) * 1000 + conv_id;
         self.execute_step_with_retry(global_id, args)
     }
 
-    /// Async variant of execute_by_plugin — uses plugin's execute_async for I/O-bound operations.
+    /// Async variant of `execute_by_plugin` — uses plugin's `execute_async` for I/O-bound operations.
     pub async fn execute_by_plugin_async(&self, plugin_name: &str, conv_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
         let plugin_idx = self.plugins.iter().position(|p| p.name() == plugin_name)
-            .ok_or_else(|| PluginError::NotFound(format!("Plugin '{}' not loaded", plugin_name)))?;
+            .ok_or_else(|| PluginError::NotFound(format!("Plugin '{plugin_name}' not loaded")))?;
 
         // Check if plugin is crashed
         if self.crashed_plugins.read().unwrap().contains(&plugin_idx) {
-            return Err(PluginError::Failed(format!("Plugin '{}' is crashed", plugin_name)));
+            return Err(PluginError::Failed(format!("Plugin '{plugin_name}' is crashed")));
         }
 
         let plugin = &self.plugins[plugin_idx];
@@ -730,7 +743,7 @@ impl PluginManager {
     }
 
     /// Resolve a convention by name (Section 5.4).
-    /// Format: "plugin_name.convention_name" → global routing ID.
+    /// Format: "`plugin_name.convention_name`" → global routing ID.
     pub fn resolve_by_name(&self, name: &str) -> Option<u32> {
         self.name_routing.get(name).copied()
     }
@@ -747,7 +760,8 @@ impl PluginManager {
     /// Build a mapping from model catalog IDs to plugin manager global routing IDs.
     /// Call this after all plugins are loaded and the model catalog is available.
     /// Each catalog entry has a `full_name` like "postgres.query" and a `catalog_id`.
-    /// This maps catalog_id → name_routing[full_name] (the global routing ID).
+    /// This maps `catalog_id` to `name_routing[full_name]` (the global routing ID).
+    #[allow(clippy::cast_possible_truncation)] // catalog IDs are small
     pub fn build_catalog_routing(&mut self, catalog: &[super::super::mind::CatalogEntry]) {
         self.catalog_routing.clear();
         for entry in catalog {
@@ -786,12 +800,11 @@ impl PluginManager {
     /// Restore plugin states from checkpoint data.
     pub fn restore_plugin_states(&mut self, states: &[(String, serde_json::Value)]) {
         for (name, state) in states {
-            for plugin in self.plugins.iter_mut() {
-                if plugin.name() == name {
-                    if let Err(e) = plugin.restore_state(state) {
+            for plugin in &mut self.plugins {
+                if plugin.name() == name
+                    && let Err(e) = plugin.restore_state(state) {
                         tracing::warn!(plugin = name, error = %e, "Failed to restore plugin state");
                     }
-                }
             }
         }
     }
@@ -801,6 +814,7 @@ impl PluginManager {
         self.plugins.iter().map(|p| (p.name().to_string(), p.version().to_string())).collect()
     }
 
+    #[allow(dead_code)] // Spec Section 19.3 — exposed via metrics/proprioception
     /// Get per-convention execution stats snapshot (Section 19.3).
     pub fn get_convention_stats(&self) -> std::collections::HashMap<u32, ConventionStats> {
         self.convention_stats.read()
@@ -824,8 +838,8 @@ impl PluginManager {
             .collect()
     }
 
-    /// Check which plugins provide LoRA weights (Section 7.3).
-    /// Returns a list of plugin names that have LoRA knowledge available.
+    /// Check which plugins provide `LoRA` weights (Section 7.3).
+    /// Returns a list of plugin names that have `LoRA` knowledge available.
     pub fn plugins_with_lora_weights(&self) -> Vec<String> {
         self.plugins.iter()
             .filter(|p| p.lora_weights().is_some())
@@ -833,14 +847,14 @@ impl PluginManager {
             .collect()
     }
 
-    /// Get LoRA weights bytes for a specific plugin by name (Section 7.3).
+    /// Get `LoRA` weights bytes for a specific plugin by name (Section 7.3).
     pub fn get_plugin_lora_weights(&self, name: &str) -> Option<Vec<u8>> {
         self.plugins.iter()
             .find(|p| p.name() == name)
             .and_then(|p| p.lora_weights())
     }
 
-    /// Call on_unload for all plugins during shutdown (Section 11.4).
+    /// Call `on_unload` for all plugins during shutdown (Section 11.4).
     /// Unloads in reverse registration order (Whitepaper Section 16.2 step 6).
     pub fn unload_all(&mut self) {
         for i in (0..self.plugins.len()).rev() {
@@ -853,11 +867,11 @@ impl PluginManager {
         }
     }
 
-    /// Unregister a plugin by name. Calls on_unload, removes from plugins Vec,
-    /// and cleans up routing and name_routing entries.
+    /// Unregister a plugin by name. Calls `on_unload`, removes from plugins Vec,
+    /// and cleans up routing and `name_routing` entries.
     pub fn unregister(&mut self, name: &str) -> Result<(), String> {
         let idx = self.plugins.iter().position(|p| p.name() == name)
-            .ok_or_else(|| format!("Plugin not found: {}", name))?;
+            .ok_or_else(|| format!("Plugin not found: {name}"))?;
 
         // Call on_unload
         if let Err(e) = self.plugins[idx].on_unload() {
@@ -865,6 +879,7 @@ impl PluginManager {
         }
 
         // Compute the ID offset for this plugin
+        #[allow(clippy::cast_possible_truncation)] // plugin count is small
         let id_offset = (idx as u32) * 1000;
 
         // Remove routing entries for this plugin
@@ -884,16 +899,17 @@ impl PluginManager {
     }
 
     /// Dead plugin detection stub (Section 11.3).
-    /// Checks each plugin's error rate from ConventionStats and returns warnings
+    /// Checks each plugin's error rate from `ConventionStats` and returns warnings
     /// for plugins with >50% error rate.
+    #[allow(clippy::significant_drop_tightening)] // stats_map lock needed for entire iteration
     pub fn check_plugin_health(&self) -> Vec<(String, &str)> {
         let mut warnings = Vec::new();
-        let stats_map = match self.convention_stats.read() {
-            Ok(s) => s,
-            Err(_) => return warnings,
+        let Ok(stats_map) = self.convention_stats.read() else {
+            return warnings;
         };
 
         for (idx, plugin) in self.plugins.iter().enumerate() {
+            #[allow(clippy::cast_possible_truncation)] // plugin count is small
             let id_offset = (idx as u32) * 1000;
             let mut total_calls: u64 = 0;
             let mut total_errors: u64 = 0;
@@ -919,7 +935,7 @@ impl PluginManager {
 }
 
 /// Validate a plugin's config against its declared schema (Section 5.2).
-/// Called during register() to catch misconfigurations early.
+/// Called during `register()` to catch misconfigurations early.
 fn validate_plugin_config(plugin: &dyn SomaPlugin) {
     if let Some(schema) = plugin.config_schema() {
         let config = super::interface::PluginConfig::default();
@@ -939,16 +955,14 @@ fn validate_plugin_config(plugin: &dyn SomaPlugin) {
 // shellexpand for ~ paths
 mod shellexpand {
     pub fn tilde(path: &str) -> String {
-        if let Some(rest) = path.strip_prefix("~/") {
-            if let Ok(home) = std::env::var("HOME") {
-                return format!("{}/{}", home, rest);
+        if let Some(rest) = path.strip_prefix("~/")
+            && let Ok(home) = std::env::var("HOME") {
+                return format!("{home}/{rest}");
             }
-        }
-        if path == "~" {
-            if let Ok(home) = std::env::var("HOME") {
+        if path == "~"
+            && let Ok(home) = std::env::var("HOME") {
                 return home;
             }
-        }
         path.to_string()
     }
 }

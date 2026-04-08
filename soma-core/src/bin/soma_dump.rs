@@ -50,7 +50,7 @@ struct Cli {
 
 const MAGIC: [u8; 2] = [0x53, 0x4D]; // "SM"
 
-fn signal_type_name(byte: u8) -> &'static str {
+const fn signal_type_name(byte: u8) -> &'static str {
     match byte {
         0x01 => "handshake",
         0x02 => "handshake_ack",
@@ -98,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
         match stream.read_exact(&mut magic).await {
             Ok(_) => {}
             Err(e) => {
-                eprintln!("soma-dump: connection closed: {}", e);
+                eprintln!("soma-dump: connection closed: {e}");
                 break;
             }
         }
@@ -114,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
         // Read version + flags + signal_type
         let mut header = [0u8; 3];
         stream.read_exact(&mut header).await?;
-        let _version = header[0];
+        // header[0] is version (currently unused)
         let flags = header[1];
         let signal_type_byte = header[2];
         let signal_type = signal_type_name(signal_type_byte);
@@ -152,16 +152,14 @@ async fn main() -> anyhow::Result<()> {
         stream.read_exact(&mut crc_buf).await?;
 
         // Apply filters
-        if let Some(ref filter_type) = cli.signal_type {
-            if signal_type != filter_type.as_str() {
+        if let Some(ref filter_type) = cli.signal_type
+            && signal_type != filter_type.as_str() {
                 continue;
             }
-        }
-        if let Some(filter_channel) = cli.channel {
-            if channel_id != filter_channel {
+        if let Some(filter_channel) = cli.channel
+            && channel_id != filter_channel {
                 continue;
             }
-        }
 
         // Output
         let timestamp = SystemTime::now()
@@ -178,7 +176,7 @@ async fn main() -> anyhow::Result<()> {
             let payload_preview = if payload_len > 0 {
                 let text = String::from_utf8_lossy(&buf[..payload_len.min(200)]);
                 if payload_len > 200 {
-                    format!("{}... ({} bytes)", text, payload_len)
+                    format!("{text}... ({payload_len} bytes)")
                 } else {
                     text.to_string()
                 }
@@ -203,11 +201,11 @@ async fn main() -> anyhow::Result<()> {
 
         captured += 1;
         if cli.count > 0 && captured >= cli.count {
-            eprintln!("soma-dump: captured {} signals, stopping", captured);
+            eprintln!("soma-dump: captured {captured} signals, stopping");
             break;
         }
     }
 
-    eprintln!("soma-dump: total captured: {} signals", captured);
+    eprintln!("soma-dump: total captured: {captured} signals");
     Ok(())
 }

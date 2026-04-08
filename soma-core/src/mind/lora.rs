@@ -1,10 +1,10 @@
-//! LoRA layer management — experiential memory.
-//! Placeholder for Rust-native LoRA. Currently adaptation is done in Python.
-//! This module defines the types that the MindEngine trait uses.
+//! `LoRA` layer management — experiential memory.
+//! Placeholder for Rust-native `LoRA`. Currently adaptation is done in Python.
+//! This module defines the types that the `MindEngine` trait uses.
 
-/// A LoRA adaptation layer (Section 4.7).
+/// A `LoRA` adaptation layer (Section 4.7).
 /// When integrated, this is applied during inference: output = base(x) + scale * (x @ A.T) @ B.T
-/// Currently a data structure — integration with OnnxMindEngine is tracked as a future milestone.
+/// Currently a data structure — integration with `OnnxMindEngine` is tracked as a future milestone.
 pub struct LoRALayer {
     pub name: String,
     pub base_weight_shape: (usize, usize), // (out_features, in_features)
@@ -16,6 +16,7 @@ pub struct LoRALayer {
 
 impl LoRALayer {
     pub fn new(name: String, in_features: usize, out_features: usize, rank: usize, alpha: f32) -> Self {
+        #[allow(clippy::cast_precision_loss)] // rank is small (typically 4-16)
         let scale = alpha / rank as f32;
         Self {
             name,
@@ -34,7 +35,7 @@ impl LoRALayer {
         sum * self.scale
     }
 
-    /// Reset LoRA to zero (after merge into base weights).
+    /// Reset `LoRA` to zero (after merge into base weights).
     pub fn reset(&mut self) {
         self.a.iter_mut().for_each(|x| *x = 0.01);
         self.b.iter_mut().for_each(|x| *x = 0.0);
@@ -43,10 +44,10 @@ impl LoRALayer {
     /// Compute the weight delta: `scale * B @ A`.
     ///
     /// Returns a flat `Vec<f32>` of shape `(out_features, in_features)` in row-major order.
-    /// This represents the effective weight change that LoRA applies:
+    /// This represents the effective weight change that `LoRA` applies:
     /// `W_effective = W_base + scale * B @ A`
     ///
-    /// B is (out_features x rank), A is (rank x in_features), so B @ A is (out_features x in_features).
+    /// B is (`out_features` x rank), A is (rank x `in_features`), so B @ A is (`out_features` x `in_features`).
     /// After consolidation, this delta is stored separately and applied during inference
     /// since tract-onnx models are frozen and we cannot modify base weights in-place.
     pub fn compute_weight_delta(&self) -> Vec<f32> {
@@ -74,8 +75,8 @@ impl LoRALayer {
         delta
     }
 
-    /// Compute the LoRA delta for a given input hidden state.
-    /// Returns: scale * (hidden @ A.T) @ B.T as Vec<f32> of length out_features.
+    /// Compute the `LoRA` delta for a given input hidden state.
+    /// Returns: scale * (hidden @ A.T) @ B.T as Vec<f32> of length `out_features`.
     pub fn forward(&self, hidden: &[f32]) -> Vec<f32> {
         let (out_features, in_features) = self.base_weight_shape;
         let rank = self.rank;
@@ -84,33 +85,33 @@ impl LoRALayer {
         // A is rank x in_features (row-major), so A.T column r = A row r
         let mut ha = vec![0.0f32; rank];
         let usable_in = in_features.min(hidden.len());
-        for r in 0..rank {
+        for (r, ha_r) in ha.iter_mut().enumerate() {
             let row_offset = r * in_features;
-            for d in 0..usable_in {
-                ha[r] += hidden[d] * self.a[row_offset + d];
+            for (d, hidden_d) in hidden.iter().enumerate().take(usable_in) {
+                *ha_r += hidden_d * self.a[row_offset + d];
             }
         }
 
         // ha @ B.T -> out_features-dimensional
         // B is out_features x rank (row-major)
         let mut delta = vec![0.0f32; out_features];
-        for o in 0..out_features.min(self.b.len() / rank) {
+        for (o, delta_o) in delta.iter_mut().enumerate().take(out_features.min(self.b.len() / rank)) {
             let row_offset = o * rank;
-            for r in 0..rank {
-                delta[o] += ha[r] * self.b[row_offset + r];
+            for (r, ha_r) in ha.iter().enumerate() {
+                *delta_o += ha_r * self.b[row_offset + r];
             }
-            delta[o] *= self.scale;
+            *delta_o *= self.scale;
         }
 
         delta
     }
 
-    /// Update LoRA weights from a batch of (hidden_state, target_opcode) pairs.
+    /// Update `LoRA` weights from a batch of (`hidden_state`, `target_opcode`) pairs.
     /// This is a simplified SGD step:
-    ///   loss = cross_entropy(base_logits + lora_delta, target_opcode)
-    ///   grad_A, grad_B = d(loss) / d(A), d(loss) / d(B)
-    ///   A -= lr * grad_A
-    ///   B -= lr * grad_B
+    ///   loss = `cross_entropy(base_logits` + `lora_delta`, `target_opcode`)
+    ///   `grad_A`, `grad_B` = d(loss) / d(A), d(loss) / d(B)
+    ///   A -= lr * `grad_A`
+    ///   B -= lr * `grad_B`
     ///
     /// Returns the average loss over the batch.
     pub fn adapt(&mut self, batch: &[(Vec<f32>, usize)], base_logits: &[Vec<f32>], learning_rate: f32) -> f32 {
@@ -131,10 +132,10 @@ impl LoRALayer {
 
             // 1. Compute ha = hidden @ A.T (rank-dimensional)
             let mut ha = vec![0.0f32; rank];
-            for r in 0..rank {
+            for (r, ha_r) in ha.iter_mut().enumerate() {
                 let row_offset = r * in_features;
-                for d in 0..usable_in {
-                    ha[r] += hidden[d] * self.a[row_offset + d];
+                for (d, hidden_d) in hidden.iter().enumerate().take(usable_in) {
+                    *ha_r += hidden_d * self.a[row_offset + d];
                 }
             }
 
@@ -142,13 +143,13 @@ impl LoRALayer {
             let base = &base_logits[i];
             let num_ops = out_features.min(base.len());
             let mut logits = vec![0.0f32; num_ops];
-            for o in 0..num_ops {
+            for (o, logits_o) in logits.iter_mut().enumerate().take(num_ops) {
                 let row_offset = o * rank;
                 let mut delta = 0.0f32;
-                for r in 0..rank {
-                    delta += ha[r] * self.b[row_offset + r];
+                for (r, ha_r) in ha.iter().enumerate() {
+                    delta += ha_r * self.b[row_offset + r];
                 }
-                logits[o] = base[o] + delta * self.scale;
+                *logits_o = delta.mul_add(self.scale, base[o]);
             }
 
             // 3. Softmax
@@ -167,43 +168,44 @@ impl LoRALayer {
             }
 
             // 6. Backprop through B: d_B[o][r] += d_logits[o] * scale * ha[r]
-            for o in 0..num_ops.min(out_features) {
+            for (o, dl_o) in d_logits.iter().enumerate().take(num_ops.min(out_features)) {
                 let row_offset = o * rank;
-                let dl_scaled = d_logits[o] * self.scale;
-                for r in 0..rank {
-                    grad_b[row_offset + r] += dl_scaled * ha[r];
+                let dl_scaled = dl_o * self.scale;
+                for (r, ha_r) in ha.iter().enumerate() {
+                    grad_b[row_offset + r] += dl_scaled * ha_r;
                 }
             }
 
             // 7. Backprop through A: d_ha[r] = sum_o(d_logits[o] * scale * B[o][r])
             //    d_A[r][d] += d_ha[r] * hidden[d]
             let mut d_ha = vec![0.0f32; rank];
-            for o in 0..num_ops.min(out_features) {
+            for (o, dl_o) in d_logits.iter().enumerate().take(num_ops.min(out_features)) {
                 let row_offset = o * rank;
-                let dl_scaled = d_logits[o] * self.scale;
-                for r in 0..rank {
-                    d_ha[r] += dl_scaled * self.b[row_offset + r];
+                let dl_scaled = dl_o * self.scale;
+                for (r, d_ha_r) in d_ha.iter_mut().enumerate() {
+                    *d_ha_r += dl_scaled * self.b[row_offset + r];
                 }
             }
-            for r in 0..rank {
+            for (r, d_ha_r) in d_ha.iter().enumerate() {
                 let row_offset = r * in_features;
-                for d in 0..usable_in {
-                    grad_a[row_offset + d] += d_ha[r] * hidden[d];
+                for (d, hidden_d) in hidden.iter().enumerate().take(usable_in) {
+                    grad_a[row_offset + d] += d_ha_r * hidden_d;
                 }
             }
         }
 
         // Average gradients over batch
+        #[allow(clippy::cast_precision_loss)] // batch size is small
         let batch_size = batch.len() as f32;
         let inv_batch = 1.0 / batch_size;
 
         // Update: A -= lr * grad_A / batch_size
-        for i in 0..self.a.len() {
-            self.a[i] -= learning_rate * grad_a[i] * inv_batch;
+        for (a_i, grad_a_i) in self.a.iter_mut().zip(grad_a.iter()) {
+            *a_i -= learning_rate * grad_a_i * inv_batch;
         }
         // Update: B -= lr * grad_B / batch_size
-        for i in 0..self.b.len() {
-            self.b[i] -= learning_rate * grad_b[i] * inv_batch;
+        for (b_i, grad_b_i) in self.b.iter_mut().zip(grad_b.iter()) {
+            *b_i -= learning_rate * grad_b_i * inv_batch;
         }
 
         total_loss / batch_size
@@ -215,16 +217,17 @@ fn softmax(logits: &[f32]) -> Vec<f32> {
     if logits.is_empty() {
         return Vec::new();
     }
-    let max_val = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let max_val = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let exps: Vec<f32> = logits.iter().map(|x| (x - max_val).exp()).collect();
     let sum: f32 = exps.iter().sum();
-    if sum == 0.0 {
+    if sum.abs() < f32::EPSILON {
+        #[allow(clippy::cast_precision_loss)] // logits length is small
         return vec![1.0 / logits.len() as f32; logits.len()];
     }
     exps.iter().map(|x| x / sum).collect()
 }
 
-/// LoRA weights for a single layer.
+/// `LoRA` weights for a single layer.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LoRAWeights {
     pub name: String,
@@ -234,7 +237,7 @@ pub struct LoRAWeights {
     pub b: Vec<f32>,  // out_features x rank (row-major)
 }
 
-/// Serializable LoRA checkpoint.
+/// Serializable `LoRA` checkpoint.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LoRACheckpoint {
     pub layers: Vec<LoRALayerState>,
@@ -251,8 +254,8 @@ pub struct LoRALayerState {
     pub b: Vec<f32>,
 }
 
-/// Serializable bundle of LoRA weights for a plugin (Section 7.3).
-/// A plugin may provide LoRA layers for one or more output heads.
+/// Serializable bundle of `LoRA` weights for a plugin (Section 7.3).
+/// A plugin may provide `LoRA` layers for one or more output heads.
 /// This is the wire format returned by `SomaPlugin::lora_weights()`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LoRABundle {
@@ -261,6 +264,7 @@ pub struct LoRABundle {
 }
 
 impl LoRAWeights {
+    #[allow(dead_code)] // Spec Section 4.7 — used for LoRA magnitude tracking
     /// How much has this layer adapted from its base?
     pub fn magnitude(&self) -> f32 {
         // ||B @ A|| * scale — simplified as sum of absolute values

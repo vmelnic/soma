@@ -7,10 +7,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 fn default_id() -> String {
-    let hostname = hostname::get()
-        .map(|h| h.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "unknown".to_string());
-    format!("soma-{}", hostname)
+    let hostname = hostname::get().map_or_else(|_| "unknown".to_string(), |h| h.to_string_lossy().to_string());
+    format!("soma-{hostname}")
 }
 
 fn default_log_level() -> String {
@@ -25,35 +23,35 @@ fn default_model_dir() -> String {
     "models".to_string()
 }
 
-fn default_max_steps() -> usize {
+const fn default_max_steps() -> usize {
     16
 }
 
-fn default_max_inference_time_secs() -> u64 {
+const fn default_max_inference_time_secs() -> u64 {
     5
 }
 
-fn default_rank() -> usize {
+const fn default_rank() -> usize {
     8
 }
 
-fn default_alpha() -> f32 {
+const fn default_alpha() -> f32 {
     16.0
 }
 
-fn default_true() -> bool {
+const fn default_true() -> bool {
     true
 }
 
-fn default_adapt_every() -> usize {
+const fn default_adapt_every() -> usize {
     10
 }
 
-fn default_batch() -> usize {
+const fn default_batch() -> usize {
     8
 }
 
-fn default_lr() -> f32 {
+const fn default_lr() -> f32 {
     0.001
 }
 
@@ -61,15 +59,15 @@ fn default_ckpt_dir() -> String {
     "checkpoints".to_string()
 }
 
-fn default_max_ckpt() -> usize {
+const fn default_max_ckpt() -> usize {
     5
 }
 
-fn default_max_exp() -> usize {
+const fn default_max_exp() -> usize {
     1000
 }
 
-fn default_checkpoint_interval_secs() -> u64 {
+const fn default_checkpoint_interval_secs() -> u64 {
     3600
 }
 
@@ -77,15 +75,15 @@ fn default_consolidation_trigger() -> String {
     "experience_count".to_string()
 }
 
-fn default_consolidation_threshold() -> u64 {
+const fn default_consolidation_threshold() -> u64 {
     500
 }
 
-fn default_min_lora_magnitude() -> f32 {
+const fn default_min_lora_magnitude() -> f32 {
     0.01
 }
 
-fn default_connection_timeout_secs() -> u64 {
+const fn default_connection_timeout_secs() -> u64 {
     60
 }
 
@@ -97,39 +95,39 @@ fn default_bind() -> String {
     "127.0.0.1:9999".to_string()
 }
 
-fn default_max_conn() -> usize {
+const fn default_max_conn() -> usize {
     100
 }
 
-fn default_max_infer() -> usize {
+const fn default_max_infer() -> usize {
     10
 }
 
-fn default_max_plugin() -> usize {
+const fn default_max_plugin() -> usize {
     50
 }
 
-fn default_max_plugins_loaded() -> usize {
+const fn default_max_plugins_loaded() -> usize {
     50
 }
 
-fn default_max_signal_size() -> usize {
+const fn default_max_signal_size() -> usize {
     10_485_760 // 10 MB
 }
 
-fn default_keepalive_interval_secs() -> u64 {
+const fn default_keepalive_interval_secs() -> u64 {
     30
 }
 
-fn default_max_memory_bytes() -> usize {
+const fn default_max_memory_bytes() -> usize {
     536_870_912 // 512 MB
 }
 
-fn default_mcp_max_connections() -> usize {
+const fn default_mcp_max_connections() -> usize {
     10
 }
 
-fn default_confirmation_timeout_secs() -> u64 {
+const fn default_confirmation_timeout_secs() -> u64 {
     60
 }
 
@@ -141,7 +139,7 @@ fn default_confirmation_patterns() -> Vec<String> {
     ]
 }
 
-fn default_max_lora_layers() -> usize {
+const fn default_max_lora_layers() -> usize {
     64
 }
 
@@ -153,11 +151,12 @@ fn default_mcp_http_bind() -> String {
     "127.0.0.1:3000".to_string()
 }
 
-fn default_max_executions() -> usize {
+const fn default_max_executions() -> usize {
     500
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[derive(Default)]
 pub struct SomaConfig {
     #[serde(default)]
     pub soma: SomaSection,
@@ -196,7 +195,7 @@ pub struct SomaSection {
     pub plugins_directory: String,
 }
 
-fn default_temperature() -> f32 {
+const fn default_temperature() -> f32 {
     1.0
 }
 
@@ -212,9 +211,9 @@ pub struct MindSection {
     #[serde(default = "default_temperature")]
     pub temperature: f32,
     /// Maximum wall-clock time allowed for a single inference call, in seconds.
-    /// Currently advisory: the sync decoder loop in onnx_engine.rs is bounded by
-    /// max_steps which provides an implicit time cap. True tokio::time::timeout
-    /// enforcement requires async infer(), tracked as a future change.
+    /// Currently advisory: the sync decoder loop in `onnx_engine.rs` is bounded by
+    /// `max_steps` which provides an implicit time cap. True `tokio::time::timeout`
+    /// enforcement requires async `infer()`, tracked as a future change.
     #[serde(default = "default_max_inference_time_secs")]
     pub max_inference_time_secs: u64,
     #[serde(default)]
@@ -222,6 +221,7 @@ pub struct MindSection {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // Spec config fields: Section 15.1
 pub struct LoraConfig {
     #[serde(default = "default_rank")]
     pub default_rank: usize,
@@ -235,7 +235,7 @@ pub struct LoraConfig {
     pub adapt_batch_size: usize,
     #[serde(default = "default_lr")]
     pub adapt_learning_rate: f32,
-    /// Maximum number of LoRA adapter layers (Section 20.1).
+    /// Maximum number of `LoRA` adapter layers (Section 20.1).
     /// Checked at configuration/init time.
     #[serde(default = "default_max_lora_layers")]
     pub max_lora_layers: usize,
@@ -257,6 +257,7 @@ impl Default for LoraConfig {
 
 /// Consolidation configuration (Spec Section 15.1).
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // Spec config fields: Section 15.1
 pub struct ConsolidationConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -281,6 +282,8 @@ impl Default for ConsolidationConfig {
 
 /// Encryption configuration (Spec Section 15.1).
 #[derive(Debug, Clone, Deserialize)]
+#[derive(Default)]
+#[allow(dead_code)] // Spec config fields: Section 15.1
 pub struct EncryptionConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -288,16 +291,9 @@ pub struct EncryptionConfig {
     pub key_file: String,
 }
 
-impl Default for EncryptionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            key_file: String::new(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // Spec config fields: Section 15.1
 pub struct MemorySection {
     #[serde(default = "default_ckpt_dir")]
     pub checkpoint_dir: String,
@@ -314,6 +310,7 @@ pub struct MemorySection {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // Spec config fields: Section 15.1
 pub struct ProtocolSection {
     #[serde(default = "default_bind")]
     pub bind: String,
@@ -334,6 +331,7 @@ pub struct ProtocolSection {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code, clippy::struct_field_names)] // Spec config fields: Section 15.1; all fields share "max" prefix by design
 pub struct ResourceSection {
     #[serde(default = "default_max_infer")]
     pub max_concurrent_inferences: usize,
@@ -350,6 +348,7 @@ pub struct ResourceSection {
 
 /// MCP Server configuration (Whitepaper Section 8).
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // Spec config fields: Section 8
 pub struct McpSection {
     /// Transport: "stdio" or "http"
     #[serde(default = "default_mcp_transport")]
@@ -394,6 +393,7 @@ fn default_viewer_token_env() -> String {
 
 /// Security configuration (Whitepaper Sections 8.3, 12.2).
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // Spec config fields: Sections 8.3, 12.2
 pub struct SecuritySection {
     /// Require auth tokens for MCP connections
     #[serde(default)]
@@ -413,12 +413,12 @@ pub struct SecuritySection {
     /// Timeout in seconds for confirmation prompts. Default 60.
     #[serde(default = "default_confirmation_timeout_secs")]
     pub confirmation_timeout_secs: u64,
-    /// Patterns that trigger confirmation when require_confirmation is true.
-    /// Default: ["DROP", "DELETE", "TRUNCATE"].
+    /// Patterns that trigger confirmation when `require_confirmation` is true.
+    /// Default: `["DROP", "DELETE", "TRUNCATE"]`.
     #[serde(default = "default_confirmation_patterns")]
     pub confirmation_patterns: Vec<String>,
     /// Plugins whose execution is denied (Section 12.2 permission enforcement).
-    /// Plugin names in this list will be refused at execute_step time.
+    /// Plugin names in this list will be refused at `execute_step` time.
     #[serde(default)]
     pub denied_plugins: Vec<String>,
 }
@@ -438,20 +438,6 @@ impl Default for SecuritySection {
     }
 }
 
-impl Default for SomaConfig {
-    fn default() -> Self {
-        Self {
-            soma: SomaSection::default(),
-            mind: MindSection::default(),
-            memory: MemorySection::default(),
-            protocol: ProtocolSection::default(),
-            resources: ResourceSection::default(),
-            mcp: McpSection::default(),
-            security: SecuritySection::default(),
-            plugins: HashMap::new(),
-        }
-    }
-}
 
 impl Default for SomaSection {
     fn default() -> Self {
@@ -525,7 +511,7 @@ impl SomaConfig {
             return Ok(Self::default());
         }
         let content = std::fs::read_to_string(path)?;
-        let mut config: SomaConfig = toml::from_str(&content)?;
+        let mut config: Self = toml::from_str(&content)?;
         config.validate_and_clamp();
         tracing::info!("Loaded config from {}", path.display());
         Ok(config)
@@ -564,19 +550,17 @@ impl SomaConfig {
     }
 
     /// Apply environment variable overrides (Section 15.3).
-    /// Format: SOMA_SECTION_KEY maps to [section].key.
-    /// Examples: SOMA_MIND_TEMPERATURE=0.5, SOMA_PROTOCOL_BIND=0.0.0.0:9001
+    /// Format: `SOMA_SECTION_KEY` maps to [section].key.
+    /// Examples: `SOMA_MIND_TEMPERATURE=0.5`, `SOMA_PROTOCOL_BIND=0.0.0.0:9001`
     pub fn apply_env_overrides(&mut self) {
-        if let Ok(v) = std::env::var("SOMA_MIND_TEMPERATURE") {
-            if let Ok(t) = v.parse::<f32>() {
+        if let Ok(v) = std::env::var("SOMA_MIND_TEMPERATURE")
+            && let Ok(t) = v.parse::<f32>() {
                 self.mind.temperature = t;
             }
-        }
-        if let Ok(v) = std::env::var("SOMA_MIND_MAX_PROGRAM_STEPS") {
-            if let Ok(s) = v.parse::<usize>() {
+        if let Ok(v) = std::env::var("SOMA_MIND_MAX_PROGRAM_STEPS")
+            && let Ok(s) = v.parse::<usize>() {
                 self.mind.max_program_steps = s;
             }
-        }
         if let Ok(v) = std::env::var("SOMA_PROTOCOL_BIND") {
             self.protocol.bind = v;
         }
@@ -598,7 +582,7 @@ mod hostname {
 
     pub fn get() -> Result<OsString, std::io::Error> {
         let mut buf = vec![0u8; 256];
-        let rc = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut i8, buf.len()) };
+        let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast::<i8>(), buf.len()) };
         if rc != 0 {
             return Err(std::io::Error::last_os_error());
         }

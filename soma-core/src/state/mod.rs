@@ -25,7 +25,7 @@ impl SomaState {
         }
     }
 
-    /// Serialize the complete state for MCP get_state() response.
+    /// Serialize the complete state for MCP `get_state()` response.
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "decisions": self.decisions.to_json(),

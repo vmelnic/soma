@@ -22,7 +22,7 @@ pub struct DecisionLog {
 }
 
 impl DecisionLog {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             decisions: Vec::new(),
             next_id: 1,
@@ -67,11 +67,12 @@ impl DecisionLog {
             .collect()
     }
 
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.decisions.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[allow(dead_code)] // Spec feature: decision log API
+    pub const fn is_empty(&self) -> bool {
         self.decisions.is_empty()
     }
 

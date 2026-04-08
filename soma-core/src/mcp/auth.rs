@@ -19,15 +19,16 @@ pub enum AuthLevel {
 
 impl AuthLevel {
     /// Check if this level can perform the given action category.
-    pub fn can_execute(&self) -> bool {
-        matches!(self, AuthLevel::Admin | AuthLevel::Builder)
+    pub const fn can_execute(self) -> bool {
+        matches!(self, Self::Admin | Self::Builder)
     }
 
-    pub fn can_admin(&self) -> bool {
-        matches!(self, AuthLevel::Admin)
+    pub const fn can_admin(self) -> bool {
+        matches!(self, Self::Admin)
     }
 
-    pub fn can_read(&self) -> bool {
+    #[allow(dead_code, clippy::unused_self)] // Spec feature: Section 8.3 role checks
+    pub const fn can_read(self) -> bool {
         true // all levels can read
     }
 }
@@ -35,15 +36,16 @@ impl AuthLevel {
 impl std::fmt::Display for AuthLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AuthLevel::Admin => write!(f, "admin"),
-            AuthLevel::Builder => write!(f, "builder"),
-            AuthLevel::Viewer => write!(f, "viewer"),
+            Self::Admin => write!(f, "admin"),
+            Self::Builder => write!(f, "builder"),
+            Self::Viewer => write!(f, "viewer"),
         }
     }
 }
 
 /// A registered auth token.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Spec feature: Section 8.3 auth token fields
 pub struct AuthToken {
     pub token: String,
     pub level: AuthLevel,
@@ -53,6 +55,7 @@ pub struct AuthToken {
 
 /// Pending action awaiting two-step confirmation (Section 8.3).
 #[derive(Debug)]
+#[allow(dead_code)] // Spec feature: Section 8.3 confirmation fields
 pub struct PendingConfirmation {
     pub action_id: String,
     pub description: String,
@@ -83,6 +86,7 @@ impl AuthManager {
     }
 
     /// Create a new auth token for the given level.
+    #[allow(dead_code)] // Spec feature: Section 8.3 dynamic token creation
     pub fn create_token(&mut self, level: AuthLevel) -> String {
         let token = uuid::Uuid::new_v4().to_string();
         let session_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
@@ -133,6 +137,7 @@ impl AuthManager {
     }
 
     /// Validate a token and return the auth info.
+    #[allow(dead_code)] // Spec feature: Section 8.3 token validation
     pub fn validate(&self, token: &str) -> Option<&AuthToken> {
         if !self.require_auth {
             return None; // auth disabled, all requests pass
@@ -140,7 +145,7 @@ impl AuthManager {
         self.tokens.get(token)
     }
 
-    /// Check if a request is authorized. Returns the session_id if authorized.
+    /// Check if a request is authorized. Returns the `session_id` if authorized.
     pub fn check_request(&self, token: Option<&str>, needs_execute: bool, needs_admin: bool) -> Result<String, String> {
         if !self.require_auth {
             return Ok("anonymous".to_string());
@@ -161,7 +166,7 @@ impl AuthManager {
     }
 
     /// Create a pending confirmation for a destructive action.
-    /// Stores the original tool_name and arguments so that `soma.confirm` can re-dispatch.
+    /// Stores the original `tool_name` and arguments so that `soma.confirm` can re-dispatch.
     pub fn create_confirmation(
         &mut self,
         description: String,
@@ -195,6 +200,7 @@ impl AuthManager {
     }
 
     /// Clean up expired confirmations.
+    #[allow(dead_code)] // Spec feature: Section 8.3 confirmation cleanup
     pub fn cleanup_expired(&mut self) {
         self.pending_confirmations.retain(|_, p| {
             p.created_at.elapsed().as_secs() < 60

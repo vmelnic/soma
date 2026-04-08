@@ -1,4 +1,4 @@
-//! OnnxMindEngine — ONNX inference via tract for server/desktop targets.
+//! `OnnxMindEngine` — ONNX inference via tract for server/desktop targets.
 //!
 //! Spec Section 4.3 recommends the `ort` crate (ONNX Runtime with GPU/NPU
 //! acceleration). We use `tract-onnx` instead because:
@@ -9,9 +9,10 @@
 //! Migration to `ort` is tracked as a future optimization when GPU
 //! acceleration becomes necessary for larger models (50M+ params).
 //!
-//! Implements MindEngine trait. Loads encoder.onnx + decoder.onnx.
+//! Implements `MindEngine` trait. Loads encoder.onnx + decoder.onnx.
 
 use anyhow::{Context, Result};
+use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::time::Instant;
 use tract_onnx::prelude::*;
@@ -36,17 +37,17 @@ pub struct OnnxMindEngine {
     pub max_inference_time_secs: u64,
     /// SHA-256 hash of encoder.onnx + decoder.onnx, computed at load time.
     pub model_hash: String,
-    /// Active LoRA layers applied to decoder output heads (Section 4.7).
-    /// LoRA is applied as post-hoc logit adjustment: logits += scale * (hidden @ A.T) @ B.T
+    /// Active `LoRA` layers applied to decoder output heads (Section 4.7).
+    /// `LoRA` is applied as post-hoc logit adjustment: logits += scale * (hidden @ A.T) @ B.T
     active_lora: Vec<super::lora::LoRALayer>,
-    /// Permanently merged LoRA weight delta for opcode head (Section 6.3 consolidation).
+    /// Permanently merged `LoRA` weight delta for opcode head (Section 6.3 consolidation).
     ///
     /// Since tract-onnx models are frozen (compiled into the graph), we cannot modify
-    /// W_base in-place. Instead, during consolidation we compute `scale * B @ A` for each
-    /// LoRA layer and accumulate the result here. During inference this delta is applied as:
+    /// `W_base` in-place. Instead, during consolidation we compute `scale * B @ A` for each
+    /// `LoRA` layer and accumulate the result here. During inference this delta is applied as:
     /// `output = base(hidden) + hidden @ merged_opcode_delta.T + lora_delta`
     ///
-    /// Shape: (num_conventions * decoder_dim) in row-major order, or empty if no
+    /// Shape: (`num_conventions` * `decoder_dim`) in row-major order, or empty if no
     /// consolidation has occurred.
     pub merged_opcode_delta: Vec<f32>,
 }
@@ -67,11 +68,12 @@ impl OnnxMindEngine {
                 if let Some(entries) = catalog_data.get("entries").and_then(|e| e.as_array()) {
                     model_meta.catalog = entries.iter().filter_map(|e| {
                         let name = e.get("full_name")?.as_str()?.to_string();
+                        #[allow(clippy::cast_possible_truncation)] // catalog IDs are small
                         let id = e.get("catalog_id")?.as_u64()? as usize;
                         Some(CatalogEntry {
                             id,
                             name: name.clone(),
-                            function: name.clone(),
+                            function: name,
                             call_pattern: e.get("call_pattern").and_then(|v| v.as_str()).unwrap_or("direct").to_string(),
                             var_args: Vec::new(),
                             description: e.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string(),
@@ -95,7 +97,6 @@ impl OnnxMindEngine {
         let tokenizer = Tokenizer::load(&model_dir.join("tokenizer.json"))?;
 
         // Compute SHA-256 hash of base model files for checkpoint integrity
-        use sha2::{Sha256, Digest};
         let enc_bytes = std::fs::read(model_dir.join("encoder.onnx"))?;
         let dec_bytes = std::fs::read(model_dir.join("decoder.onnx"))?;
         let mut hasher = Sha256::new();
@@ -108,15 +109,15 @@ impl OnnxMindEngine {
     }
 }
 
-/// Adaptation-specific methods for runtime LoRA training.
+/// Adaptation-specific methods for runtime `LoRA` training.
 /// These expose internal encoder/decoder to the adaptation engine
-/// without breaking the MindEngine trait abstraction.
+/// without breaking the `MindEngine` trait abstraction.
 impl OnnxMindEngine {
-    /// Run the encoder on raw intent tokens and return (encoder_output, initial_hidden).
-    /// The encoder_output is (1, seq_len, decoder_dim) flattened, hidden is (decoder_dim,).
+    /// Run the encoder on raw intent tokens and return (`encoder_output`, `initial_hidden`).
+    /// The `encoder_output` is (1, `seq_len`, `decoder_dim`) flattened, hidden is (`decoder_dim`,).
     pub fn encode_for_adaptation(&self, intent_tokens: &[u32]) -> anyhow::Result<(Vec<f32>, Vec<f32>)> {
         let seq_len = self.model_meta.max_seq_len;
-        let mut ids: Vec<i64> = intent_tokens.iter().map(|&t| t as i64).collect();
+        let mut ids: Vec<i64> = intent_tokens.iter().map(|&t| i64::from(t)).collect();
         let real_len = ids.len();
         let mut mask_vec = vec![1.0f32; real_len];
 
@@ -129,13 +130,13 @@ impl OnnxMindEngine {
             tract_ndarray::Array2::from_shape_vec((1, seq_len), ids)?.into_tvalue(),
             tract_ndarray::Array2::from_shape_vec((1, seq_len), mask_vec)?.into_tvalue(),
         ])?;
-        let enc_out: Vec<f32> = enc_result[0].to_array_view::<f32>()?.iter().cloned().collect();
-        let hidden: Vec<f32> = enc_result[2].to_array_view::<f32>()?.iter().cloned().collect();
+        let enc_out: Vec<f32> = enc_result[0].to_array_view::<f32>()?.iter().copied().collect();
+        let hidden: Vec<f32> = enc_result[2].to_array_view::<f32>()?.iter().copied().collect();
         Ok((enc_out, hidden))
     }
 
-    /// Run one decoder step and return (new_hidden, opcode_logits).
-    /// This does NOT apply LoRA — the caller gets raw base logits for adaptation.
+    /// Run one decoder step and return (`new_hidden`, `opcode_logits`).
+    /// This does NOT apply `LoRA` — the caller gets raw base logits for adaptation.
     pub fn decode_step_for_adaptation(
         &self,
         prev_op: i64,
@@ -158,28 +159,29 @@ impl OnnxMindEngine {
             tract_ndarray::Array3::from_shape_vec((1, seq_len, dd), enc_out.to_vec())?.into_tvalue(),
             tract_ndarray::Array2::from_shape_vec((1, seq_len), mask_vec)?.into_tvalue(),
             tract_ndarray::Array3::from_shape_vec((1, ms, dd), prev_hiddens.to_vec())?.into_tvalue(),
+            #[allow(clippy::cast_possible_wrap)] // step count is small
             tract_ndarray::Array1::from_vec(vec![step as i64]).into_tvalue(),
         ])?;
 
-        let new_hidden: Vec<f32> = dr[0].to_array_view::<f32>()?.iter().cloned().collect();
-        let op_logits: Vec<f32> = dr[1].to_array_view::<f32>()?.iter().cloned().collect();
+        let new_hidden: Vec<f32> = dr[0].to_array_view::<f32>()?.iter().copied().collect();
+        let op_logits: Vec<f32> = dr[1].to_array_view::<f32>()?.iter().copied().collect();
 
         Ok((new_hidden, op_logits))
     }
 
-    /// Get a mutable reference to the active LoRA layers for adaptation.
-    pub fn active_lora_mut(&mut self) -> &mut Vec<super::lora::LoRALayer> {
+    /// Get a mutable reference to the active `LoRA` layers for adaptation.
+    pub const fn active_lora_mut(&mut self) -> &mut Vec<super::lora::LoRALayer> {
         &mut self.active_lora
     }
 
-    /// Get a reference to the active LoRA layers.
+    /// Get a reference to the active `LoRA` layers.
     pub fn active_lora(&self) -> &[super::lora::LoRALayer] {
         &self.active_lora
     }
 
-    /// Apply matching LoRA layers to a set of logits for a given output head.
+    /// Apply matching `LoRA` layers to a set of logits for a given output head.
     ///
-    /// For each active LoRA layer whose name matches `head_name`, compute:
+    /// For each active `LoRA` layer whose name matches `head_name`, compute:
     ///   delta = scale * (hidden @ A.T) @ B.T
     /// and add to the logits in-place.
     fn apply_lora_to_logits(&self, head_name: &str, hidden: &[f32], logits: &mut [f32]) {
@@ -196,30 +198,31 @@ impl OnnxMindEngine {
     }
 
     /// Get the decoder dimension from model metadata.
-    pub fn decoder_dim(&self) -> usize {
+    pub const fn decoder_dim(&self) -> usize {
         self.model_meta.decoder_dim
     }
 
     /// Get max program steps from model metadata.
-    pub fn max_steps(&self) -> usize {
+    pub const fn max_steps(&self) -> usize {
         self.model_meta.max_steps
     }
 
     /// Get the number of conventions (opcode output size).
-    pub fn num_conventions(&self) -> usize {
+    pub const fn num_conventions(&self) -> usize {
         self.model_meta.num_conventions
     }
 
     /// Get the start token ID.
-    pub fn start_token(&self) -> usize {
+    pub const fn start_token(&self) -> usize {
         self.model_meta.start_token
     }
 
     /// Get the stop ID.
-    pub fn stop_id(&self) -> usize {
+    pub const fn stop_id(&self) -> usize {
         self.model_meta.stop_id
     }
 
+    #[allow(dead_code)] // Spec Section 6.3 — checkpoint serialization of consolidated LoRA
     /// Get a reference to the consolidated weight delta.
     pub fn merged_opcode_delta(&self) -> &[f32] {
         &self.merged_opcode_delta
@@ -232,6 +235,8 @@ impl OnnxMindEngine {
 }
 
 impl MindEngine for OnnxMindEngine {
+    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // convention/step indices are small
     fn infer(&self, text: &str) -> Result<Program> {
         let tokens = self.tokenizer.tokenize(text);
         let mut ids = self.tokenizer.encode_with_null(text);
@@ -251,11 +256,12 @@ impl MindEngine for OnnxMindEngine {
             tract_ndarray::Array2::from_shape_vec((1, seq_len), ids)?.into_tvalue(),
             tract_ndarray::Array2::from_shape_vec((1, seq_len), mask_vec.clone())?.into_tvalue(),
         ])?;
-        let enc_out: Vec<f32> = enc_result[0].to_array_view::<f32>()?.iter().cloned().collect();
-        let mut hidden: Vec<f32> = enc_result[2].to_array_view::<f32>()?.iter().cloned().collect();
+        let enc_out: Vec<f32> = enc_result[0].to_array_view::<f32>()?.iter().copied().collect();
+        let mut hidden: Vec<f32> = enc_result[2].to_array_view::<f32>()?.iter().copied().collect();
 
         // Decode
         let mut prev_hiddens = vec![0.0f32; ms * dd];
+        #[allow(clippy::cast_possible_wrap)] // start_token is a small vocab index
         let mut prev_op = self.model_meta.start_token as i64;
         let mut steps = Vec::new();
         let mut step_confidences: Vec<f32> = Vec::new();
@@ -280,13 +286,14 @@ impl MindEngine for OnnxMindEngine {
                 tract_ndarray::Array3::from_shape_vec((1, seq_len, dd), enc_out.clone())?.into_tvalue(),
                 tract_ndarray::Array2::from_shape_vec((1, seq_len), mask_vec.clone())?.into_tvalue(),
                 tract_ndarray::Array3::from_shape_vec((1, ms, dd), prev_hiddens.clone())?.into_tvalue(),
+                #[allow(clippy::cast_possible_wrap)] // step index t < max_steps
                 tract_ndarray::Array1::from_vec(vec![t as i64]).into_tvalue(),
             ])?;
 
             let new_h = dr[0].to_array_view::<f32>()?;
 
             // Extract raw opcode logits from decoder output
-            let mut op_l: Vec<f32> = dr[1].to_array_view::<f32>()?.iter().cloned().collect();
+            let mut op_l: Vec<f32> = dr[1].to_array_view::<f32>()?.iter().copied().collect();
 
             // Cache hidden state + base logits for fast LoRA adaptation (before LoRA is applied).
             // This avoids re-running the ONNX model during adaptation.
@@ -297,12 +304,12 @@ impl MindEngine for OnnxMindEngine {
             // Applied as: logits += hidden @ merged_delta.T
             if !self.merged_opcode_delta.is_empty() {
                 let num_ops = op_l.len();
-                for o in 0..num_ops {
+                for (o, op_l_o) in op_l.iter_mut().enumerate().take(num_ops) {
                     let mut delta = 0.0f32;
-                    for d in 0..dd {
-                        delta += hidden[d] * self.merged_opcode_delta[o * dd + d];
+                    for (d, hidden_d) in hidden.iter().enumerate().take(dd) {
+                        delta += hidden_d * self.merged_opcode_delta[o * dd + d];
                     }
-                    op_l[o] += delta;
+                    *op_l_o += delta;
                 }
             }
 
@@ -324,7 +331,7 @@ impl MindEngine for OnnxMindEngine {
                 step_confidences.push(step_prob);
             }
 
-            hidden = new_h.iter().cloned().collect();
+            hidden = new_h.iter().copied().collect();
             for (i, &v) in hidden.iter().enumerate() { prev_hiddens[t * dd + i] = v; }
 
             if pred == self.model_meta.stop_id {
@@ -332,25 +339,25 @@ impl MindEngine for OnnxMindEngine {
                 break;
             }
             if pred == self.model_meta.emit_id {
-                let mut r0: Vec<f32> = dr[8].to_array_view::<f32>()?.iter().cloned().collect();
+                let mut r0: Vec<f32> = dr[8].to_array_view::<f32>()?.iter().copied().collect();
                 self.apply_lora_to_logits("r0", &hidden, &mut r0);
                 steps.push(ProgramStep { conv_id: EMIT_ID, arg0_type: ArgType::Ref, arg0_value: ArgValue::Ref(argmax(&r0)), arg1_type: ArgType::None, arg1_value: ArgValue::None });
             } else {
                 // Extract all output head logits and apply LoRA to each (Section 4.7)
-                let mut a0t: Vec<f32> = dr[2].to_array_view::<f32>()?.iter().cloned().collect();
-                let mut a1t: Vec<f32> = dr[3].to_array_view::<f32>()?.iter().cloned().collect();
-                let mut s0s: Vec<f32> = dr[4].to_array_view::<f32>()?.iter().cloned().collect();
-                let mut s0e: Vec<f32> = dr[5].to_array_view::<f32>()?.iter().cloned().collect();
-                let mut s1s: Vec<f32> = dr[6].to_array_view::<f32>()?.iter().cloned().collect();
-                let mut s1e: Vec<f32> = dr[7].to_array_view::<f32>()?.iter().cloned().collect();
-                let mut r0: Vec<f32> = dr[8].to_array_view::<f32>()?.iter().cloned().collect();
-                let mut r1: Vec<f32> = dr[9].to_array_view::<f32>()?.iter().cloned().collect();
+                let mut a0t: Vec<f32> = dr[2].to_array_view::<f32>()?.iter().copied().collect();
+                let mut a1t: Vec<f32> = dr[3].to_array_view::<f32>()?.iter().copied().collect();
+                let mut s0s: Vec<f32> = dr[4].to_array_view::<f32>()?.iter().copied().collect();
+                let mut s0e: Vec<f32> = dr[5].to_array_view::<f32>()?.iter().copied().collect();
+                let mut s1s: Vec<f32> = dr[6].to_array_view::<f32>()?.iter().copied().collect();
+                let mut s1e: Vec<f32> = dr[7].to_array_view::<f32>()?.iter().copied().collect();
+                let mut r0: Vec<f32> = dr[8].to_array_view::<f32>()?.iter().copied().collect();
+                let mut r1: Vec<f32> = dr[9].to_array_view::<f32>()?.iter().copied().collect();
                 // Literal heads may not be present in older ONNX exports
                 let mut lit0: Vec<f32> = if dr.len() > 10 {
-                    dr[10].to_array_view::<f32>()?.iter().cloned().collect()
+                    dr[10].to_array_view::<f32>()?.iter().copied().collect()
                 } else { vec![0.0; self.model_meta.vocab_size] };
                 let mut lit1: Vec<f32> = if dr.len() > 11 {
-                    dr[11].to_array_view::<f32>()?.iter().cloned().collect()
+                    dr[11].to_array_view::<f32>()?.iter().copied().collect()
                 } else { vec![0.0; self.model_meta.vocab_size] };
 
                 self.apply_lora_to_logits("a0t", &hidden, &mut a0t);
@@ -372,8 +379,8 @@ impl MindEngine for OnnxMindEngine {
         }
         // Compute final confidence as minimum probability across all steps (conservative).
         // If inference timed out, apply an additional penalty.
-        let mut confidence = step_confidences.iter().cloned().fold(f32::MAX, f32::min);
-        if confidence == f32::MAX {
+        let mut confidence = step_confidences.iter().copied().fold(f32::MAX, f32::min);
+        if (confidence - f32::MAX).abs() < f32::EPSILON {
             confidence = 0.0; // no steps decoded
         }
         if timeout_secs > 0 && infer_start.elapsed().as_secs() >= timeout_secs {
@@ -385,7 +392,7 @@ impl MindEngine for OnnxMindEngine {
     fn meta(&self) -> &ModelMeta { &self.model_meta }
 
     fn info(&self) -> MindInfo {
-        let mag: f32 = self.active_lora.iter().map(|l| l.magnitude()).sum();
+        let mag: f32 = self.active_lora.iter().map(super::lora::LoRALayer::magnitude).sum();
 
         // Estimate param_count from model dimensions:
         // Embedding: vocab_size * decoder_dim
@@ -462,9 +469,8 @@ impl MindEngine for OnnxMindEngine {
             }
 
             // Accumulate delta
-            let merge_len = delta.len().min(self.merged_opcode_delta.len());
-            for j in 0..merge_len {
-                self.merged_opcode_delta[j] += delta[j];
+            for (merged, d) in self.merged_opcode_delta.iter_mut().zip(delta.iter()) {
+                *merged += d;
             }
 
             // Reset the LoRA layer (A to small random, B to zero)
@@ -513,16 +519,18 @@ impl MindEngine for OnnxMindEngine {
     }
 }
 
+#[allow(dead_code)] // Spec Section 4.3 — arg resolution from raw decoder tensors (pre-LoRA path)
+#[allow(clippy::too_many_arguments)] // mirrors decoder output head structure
 fn resolve_arg(tid: usize, o: &TVec<TValue>, ss: usize, se: usize, ri: usize, li: usize, tokens: &[String], tok: &Tokenizer) -> (ArgType, ArgValue) {
     match tid {
         1 => {
-            let s: Vec<f32> = o[ss].to_array_view::<f32>().unwrap().iter().cloned().collect();
-            let e: Vec<f32> = o[se].to_array_view::<f32>().unwrap().iter().cloned().collect();
+            let s: Vec<f32> = o[ss].to_array_view::<f32>().unwrap().iter().copied().collect();
+            let e: Vec<f32> = o[se].to_array_view::<f32>().unwrap().iter().copied().collect();
             (ArgType::Span, ArgValue::Span(tok.extract_span(tokens, argmax(&s), argmax(&e).max(argmax(&s)))))
         }
-        2 => { let r: Vec<f32> = o[ri].to_array_view::<f32>().unwrap().iter().cloned().collect(); (ArgType::Ref, ArgValue::Ref(argmax(&r))) }
+        2 => { let r: Vec<f32> = o[ri].to_array_view::<f32>().unwrap().iter().copied().collect(); (ArgType::Ref, ArgValue::Ref(argmax(&r))) }
         3 => {
-            let lit: Vec<f32> = o[li].to_array_view::<f32>().unwrap().iter().cloned().collect();
+            let lit: Vec<f32> = o[li].to_array_view::<f32>().unwrap().iter().copied().collect();
             let vocab_idx = argmax(&lit);
             (ArgType::Literal, ArgValue::Literal(tok.decode_index(vocab_idx)))
         }
@@ -532,7 +540,7 @@ fn resolve_arg(tid: usize, o: &TVec<TValue>, ss: usize, se: usize, ri: usize, li
 
 /// Resolve an argument from pre-extracted (and LoRA-adjusted) logits.
 /// This variant works with logit slices directly instead of raw decoder tensors,
-/// enabling LoRA application to all output heads before argument resolution.
+/// enabling `LoRA` application to all output heads before argument resolution.
 fn resolve_arg_from_logits(tid: usize, span_start: &[f32], span_end: &[f32], ref_logits: &[f32], lit_logits: &[f32], tokens: &[String], tok: &Tokenizer) -> (ArgType, ArgValue) {
     match tid {
         1 => {
@@ -549,4 +557,4 @@ fn resolve_arg_from_logits(tid: usize, span_start: &[f32], span_end: &[f32], ref
     }
 }
 
-fn argmax(s: &[f32]) -> usize { s.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map(|(i, _)| i).unwrap_or(0) }
+fn argmax(s: &[f32]) -> usize { s.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map_or(0, |(i, _)| i) }

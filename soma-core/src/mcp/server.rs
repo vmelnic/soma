@@ -29,6 +29,7 @@ use crate::state::SomaState;
 /// JSON-RPC 2.0 request.
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
+    #[allow(dead_code)] // Required by JSON-RPC 2.0 spec, validated by serde
     jsonrpc: String,
     #[serde(default)]
     id: serde_json::Value,
@@ -70,7 +71,7 @@ impl JsonRpcResponse {
     }
 
     fn method_not_found(id: serde_json::Value, method: &str) -> Self {
-        Self::error(id, -32601, format!("Method not found: {}", method))
+        Self::error(id, -32601, format!("Method not found: {method}"))
     }
 }
 
@@ -91,6 +92,7 @@ pub struct McpServer {
 impl McpServer {
     /// Run the MCP server on stdio — reads JSON-RPC requests from stdin,
     /// writes responses to stdout. One message per line.
+    #[allow(clippy::future_not_send)] // RwLockReadGuard held across await is intentional for plugin manager
     pub async fn run_stdio(self) -> Result<()> {
         let stdin = tokio::io::stdin();
         let mut stdout = tokio::io::stdout();
@@ -111,7 +113,7 @@ impl McpServer {
                     let resp = JsonRpcResponse::error(
                         serde_json::Value::Null,
                         -32700,
-                        format!("Parse error: {}", e),
+                        format!("Parse error: {e}"),
                     );
                     let out = serde_json::to_string(&resp).unwrap_or_default();
                     let _ = stdout.write_all(out.as_bytes()).await;
@@ -139,12 +141,12 @@ impl McpServer {
     }
 
     /// Handle a single JSON-RPC request.
+    #[allow(clippy::future_not_send)]
     async fn handle_request(&self, req: &JsonRpcRequest) -> JsonRpcResponse {
         match req.method.as_str() {
             // MCP lifecycle
             "initialize" => self.handle_initialize(&req.id),
-            "initialized" => JsonRpcResponse::success(req.id.clone(), serde_json::json!({})),
-            "ping" => JsonRpcResponse::success(req.id.clone(), serde_json::json!({})),
+            "initialized" | "ping" => JsonRpcResponse::success(req.id.clone(), serde_json::json!({})),
 
             // MCP tool discovery
             "tools/list" => self.handle_tools_list(&req.id),
@@ -186,6 +188,7 @@ impl McpServer {
     }
 
     /// Handle resources/list — return available resources.
+    #[allow(clippy::unused_self)] // Method signature kept consistent with other handle_* methods
     fn handle_resources_list(&self, id: &serde_json::Value) -> JsonRpcResponse {
         JsonRpcResponse::success(id.clone(), serde_json::json!({
             "resources": [
@@ -217,6 +220,8 @@ impl McpServer {
                     "state": state.to_json(),
                     "proprioception": proprio.to_json(),
                 });
+                drop(state);
+                drop(proprio);
                 JsonRpcResponse::success(id.clone(), serde_json::json!({
                     "contents": [{
                         "uri": uri,
@@ -234,12 +239,13 @@ impl McpServer {
                     }],
                 }))
             }
-            _ => JsonRpcResponse::error(id.clone(), -32602, format!("Unknown resource URI: {}", uri)),
+            _ => JsonRpcResponse::error(id.clone(), -32602, format!("Unknown resource URI: {uri}")),
         }
     }
 
     /// Handle tools/call — dispatch to the appropriate tool handler.
     /// Every call is logged for audit trail (Section 12.1).
+    #[allow(clippy::future_not_send)]
     async fn handle_tools_call(
         &self,
         id: &serde_json::Value,
@@ -250,7 +256,7 @@ impl McpServer {
             Err(e) => {
                 return JsonRpcResponse::error(
                     id.clone(), -32602,
-                    format!("Invalid params: {}", e),
+                    format!("Invalid params: {e}"),
                 );
             }
         };
@@ -290,11 +296,11 @@ impl McpServer {
                     tracing::warn!(
                         component = "mcp",
                         tool = %call.name,
-                        "MCP auth denied: {}", e
+                        "MCP auth denied: {e}"
                     );
                     return JsonRpcResponse::success(
                         id.clone(),
-                        serde_json::to_value(&McpToolResult::error(format!("Auth: {}", e)))
+                        serde_json::to_value(McpToolResult::error(format!("Auth: {e}")))
                             .unwrap_or_default(),
                     );
                 }
@@ -328,11 +334,7 @@ impl McpServer {
             "soma.shutdown" => self.tool_shutdown(),
             "soma.uninstall_plugin" => self.tool_uninstall_plugin(&call.arguments),
             "soma.configure_plugin" => self.tool_configure_plugin(&call.arguments),
-            "soma.reload_design" => McpToolResult::json(serde_json::json!({
-                "success": false,
-                "message": "Not yet connected to Interface SOMA. This tool will work when an Interface SOMA connects via Synaptic Protocol.",
-            })),
-            "soma.render_view" | "soma.update_view" => McpToolResult::json(serde_json::json!({
+            "soma.reload_design" | "soma.render_view" | "soma.update_view" => McpToolResult::json(serde_json::json!({
                 "success": false,
                 "message": "Not yet connected to Interface SOMA. This tool will work when an Interface SOMA connects via Synaptic Protocol.",
             })),
@@ -364,16 +366,46 @@ impl McpServer {
 
     fn tool_get_state(&self) -> McpToolResult {
         let state = self.state.read().unwrap();
+        let state_json = state.to_json();
+        drop(state);
+
         let proprio = self.proprio.read().unwrap();
+        let uptime_secs = proprio.uptime().as_secs();
+        let proprio_json = proprio.to_json();
+        drop(proprio);
+
         let mind = self.mind.read().unwrap();
         let mind_info = mind.info();
+        drop(mind);
+
         let exp = self.experience.read().unwrap();
+        let exp_json = serde_json::json!({
+            "buffer_size": exp.len(),
+            "total_seen": exp.total_seen(),
+            "success_count": exp.success_count(),
+            "failure_count": exp.failure_count(),
+        });
+        drop(exp);
+
         let peers = self.peers.read().unwrap();
+        let peers_json: Vec<serde_json::Value> = peers.list().iter().map(|p| serde_json::json!({
+            "name": p.name,
+            "addr": p.addr,
+        })).collect();
+        drop(peers);
+
+        let plugins_guard = self.plugins.read().unwrap();
+        let plugin_names: Vec<String> = plugins_guard.conventions().iter().map(|c| c.name.clone()).collect();
+        let health_warnings = plugins_guard.check_plugin_health();
+        let plugin_warnings: Vec<serde_json::Value> = health_warnings.iter().map(|(name, msg)| {
+            serde_json::json!({"plugin": name, "warning": msg})
+        }).collect();
+        drop(plugins_guard);
 
         let result = serde_json::json!({
             "soma_id": self.config.soma.id,
             "version": "0.1.0",
-            "uptime_secs": proprio.uptime().as_secs(),
+            "uptime_secs": uptime_secs,
             "mind": {
                 "backend": mind_info.backend,
                 "conventions_known": mind_info.conventions_known,
@@ -381,22 +413,12 @@ impl McpServer {
                 "lora_layers": mind_info.lora_layers,
                 "lora_magnitude": mind_info.lora_magnitude,
             },
-            "state": state.to_json(),
-            "experience": {
-                "buffer_size": exp.len(),
-                "total_seen": exp.total_seen(),
-                "success_count": exp.success_count(),
-                "failure_count": exp.failure_count(),
-            },
-            "proprioception": proprio.to_json(),
-            "peers": peers.list().iter().map(|p| serde_json::json!({
-                "name": p.name,
-                "addr": p.addr,
-            })).collect::<Vec<_>>(),
-            "plugins": self.plugins.read().unwrap().conventions().iter().map(|c| &c.name).collect::<Vec<_>>(),
-            "plugin_warnings": self.plugins.read().unwrap().check_plugin_health().iter().map(|(name, msg)| {
-                serde_json::json!({"plugin": name, "warning": msg})
-            }).collect::<Vec<_>>(),
+            "state": state_json,
+            "experience": exp_json,
+            "proprioception": proprio_json,
+            "peers": peers_json,
+            "plugins": plugin_names,
+            "plugin_warnings": plugin_warnings,
         });
 
         McpToolResult::json(result)
@@ -429,16 +451,17 @@ impl McpServer {
 
         // Per-plugin health status (Section 11.3 — dead plugin detection)
         let health_warnings = plugins.check_plugin_health();
-        let warning_map: std::collections::HashMap<&str, &str> = health_warnings.iter()
-            .map(|(name, msg)| (name.as_str(), *msg))
+        // Convert borrowed &str warnings to owned Strings so we can drop the plugin guard
+        let warning_map: std::collections::HashMap<String, String> = health_warnings.iter()
+            .map(|(name, msg)| (name.clone(), (*msg).to_string()))
             .collect();
+        drop(plugins);
 
         let plugin_list: Vec<serde_json::Value> = plugins_map.iter().map(|(name, convs)| {
-            let health_status = if let Some(warning) = warning_map.get(name.as_str()) {
-                serde_json::json!({"status": "degraded", "warning": warning})
-            } else {
-                serde_json::json!({"status": "healthy"})
-            };
+            let health_status = warning_map.get(name).map_or_else(
+                || serde_json::json!({"status": "healthy"}),
+                |warning| serde_json::json!({"status": "degraded", "warning": warning}),
+            );
             serde_json::json!({
                 "name": name,
                 "version": "0.1.0",
@@ -462,32 +485,37 @@ impl McpServer {
 
     fn tool_get_health(&self) -> McpToolResult {
         let proprio = self.proprio.read().unwrap();
+        let proprio_json = proprio.to_json();
+        drop(proprio);
         let metrics = self.metrics.to_json();
 
         // Check plugin health (Section 11.3 — dead plugin detection)
         let pm_guard = self.plugins.read().unwrap();
         let plugin_warnings = pm_guard.check_plugin_health();
         let status = if plugin_warnings.is_empty() { "healthy" } else { "degraded" };
+        let warnings_json: Vec<serde_json::Value> = plugin_warnings.iter().map(|(name, msg)| {
+            serde_json::json!({"plugin": name, "warning": msg})
+        }).collect();
+        drop(pm_guard);
 
         McpToolResult::json(serde_json::json!({
             "status": status,
-            "proprioception": proprio.to_json(),
+            "proprioception": proprio_json,
             "metrics": metrics,
-            "plugin_warnings": plugin_warnings.iter().map(|(name, msg)| {
-                serde_json::json!({"plugin": name, "warning": msg})
-            }).collect::<Vec<_>>(),
+            "plugin_warnings": warnings_json,
         }))
     }
 
     fn tool_get_recent_activity(&self, args: &serde_json::Value) -> McpToolResult {
-        let n = args.get("n").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+        let n = args.get("n").and_then(serde_json::Value::as_u64).unwrap_or(10);
         let state = self.state.read().unwrap();
-        let records = state.executions.recent(n);
-
-        McpToolResult::json(serde_json::json!({
+        let records = state.executions.recent(usize::try_from(n).unwrap_or(usize::MAX));
+        let resp = McpToolResult::json(serde_json::json!({
             "count": records.len(),
             "records": records,
-        }))
+        }));
+        drop(state);
+        resp
     }
 
     fn tool_get_peers(&self) -> McpToolResult {
@@ -500,6 +528,7 @@ impl McpServer {
                 "conventions": p.conventions,
             })
         }).collect();
+        drop(peers);
 
         McpToolResult::json(serde_json::json!({
             "count": peer_list.len(),
@@ -509,25 +538,39 @@ impl McpServer {
 
     fn tool_get_experience(&self) -> McpToolResult {
         let exp = self.experience.read().unwrap();
-        let mind_info = self.mind.read().unwrap().info();
+        let exp_len = exp.len();
+        let total_seen = exp.total_seen();
+        let success_count = exp.success_count();
+        let failure_count = exp.failure_count();
+        drop(exp);
+
+        let mind_guard = self.mind.read().unwrap();
+        let mind_info = mind_guard.info();
+        drop(mind_guard);
+
         let proprio = self.proprio.read().unwrap();
+        let adaptation_count = proprio.total_adaptations;
+        let consolidation_count = proprio.consolidations;
+        drop(proprio);
+
         McpToolResult::json(serde_json::json!({
-            "buffer_size": exp.len(),
+            "buffer_size": exp_len,
             "max_size": self.config.memory.max_experience_buffer,
-            "total_seen": exp.total_seen(),
-            "success_count": exp.success_count(),
-            "failure_count": exp.failure_count(),
+            "total_seen": total_seen,
+            "success_count": success_count,
+            "failure_count": failure_count,
             "lora_magnitude": mind_info.lora_magnitude,
             "lora_layers": mind_info.lora_layers,
-            "adaptation_count": proprio.total_adaptations,
-            "consolidation_count": proprio.consolidations,
+            "adaptation_count": adaptation_count,
+            "consolidation_count": consolidation_count,
         }))
     }
 
     fn tool_get_checkpoints(&self) -> McpToolResult {
         let ckpt_dir = Path::new(&self.config.memory.checkpoint_dir);
-        let checkpoints = match Checkpoint::list_checkpoints(ckpt_dir) {
-            Ok(paths) => paths.iter().map(|p| {
+        let checkpoints = Checkpoint::list_checkpoints(ckpt_dir).map_or_else(
+            |_| Vec::new(),
+            |paths| paths.iter().map(|p| {
                 let filename = p.file_name()
                     .map(|f| f.to_string_lossy().to_string())
                     .unwrap_or_default();
@@ -536,8 +579,7 @@ impl McpServer {
                     "filename": filename,
                 })
             }).collect::<Vec<_>>(),
-            Err(_) => Vec::new(),
-        };
+        );
 
         McpToolResult::json(serde_json::json!({
             "checkpoint_dir": self.config.memory.checkpoint_dir,
@@ -596,36 +638,44 @@ impl McpServer {
         }))
     }
 
+    #[allow(clippy::cast_possible_truncation)] // u64 from JSON capped to reasonable values
     fn tool_get_decisions(&self, args: &serde_json::Value) -> McpToolResult {
         let state = self.state.read().unwrap();
 
         if let Some(query) = args.get("search").and_then(|v| v.as_str()) {
             let results = state.decisions.search(query);
-            return McpToolResult::json(serde_json::json!({
+            let resp = McpToolResult::json(serde_json::json!({
                 "search": query,
                 "count": results.len(),
                 "decisions": results,
             }));
+            drop(state);
+            return resp;
         }
 
-        let n = args.get("n").and_then(|v| v.as_u64());
-        let decisions = match n {
-            Some(n) => state.decisions.recent(n as usize),
-            None => state.decisions.list(),
-        };
+        let n = args.get("n").and_then(serde_json::Value::as_u64);
+        let decisions = n.map_or_else(
+            || state.decisions.list(),
+            |n| state.decisions.recent(n as usize),
+        );
 
-        McpToolResult::json(serde_json::json!({
+        let resp = McpToolResult::json(serde_json::json!({
             "count": decisions.len(),
             "decisions": decisions,
-        }))
+        }));
+        drop(state);
+        resp
     }
 
+    #[allow(clippy::future_not_send, clippy::await_holding_lock, clippy::significant_drop_tightening)]
+    // RwLockReadGuard held across await is intentional for plugin manager
     async fn tool_get_schema(&self, args: &serde_json::Value) -> McpToolResult {
         // Check if a database plugin (postgres or sqlite) is loaded
         let pm = self.plugins.read().unwrap();
         let has_postgres = pm.plugin_names().iter().any(|n| n == "postgres");
 
         if !has_postgres {
+            drop(pm);
             return McpToolResult::json(serde_json::json!({
                 "tables": [],
                 "note": "No database plugin loaded. Install postgres or sqlite plugin for schema tracking.",
@@ -636,18 +686,17 @@ impl McpServer {
         if let Some(table_name) = args.get("table").and_then(|v| v.as_str()) {
             let schema_args = vec![crate::plugin::interface::Value::String(table_name.to_string())];
             let columns = match pm.execute_by_plugin_async("postgres", 10, schema_args).await {
-                Ok(cols) => format!("{}", cols),
-                Err(e) => return McpToolResult::error(format!("Failed to query table schema: {}", e)),
+                Ok(cols) => format!("{cols}"),
+                Err(e) => return McpToolResult::error(format!("Failed to query table schema: {e}")),
             };
             // Try to get sample rows (convention id 11 = sample_rows, if available)
             let sample_args = vec![
                 crate::plugin::interface::Value::String(table_name.to_string()),
                 crate::plugin::interface::Value::Int(5),
             ];
-            let sample_rows = match pm.execute_by_plugin_async("postgres", 11, sample_args).await {
-                Ok(rows) => Some(format!("{}", rows)),
-                Err(_) => None,
-            };
+            let sample_rows = pm.execute_by_plugin_async("postgres", 11, sample_args).await
+                .ok()
+                .map(|rows| format!("{rows}"));
             let mut result = serde_json::json!({
                 "table": table_name,
                 "columns": columns,
@@ -666,10 +715,8 @@ impl McpServer {
                     if let crate::plugin::interface::Value::String(table_name) = table_val {
                         // Query table_schema convention (id 10) for each table
                         let schema_args = vec![crate::plugin::interface::Value::String(table_name.clone())];
-                        let columns = match pm.execute_by_plugin_async("postgres", 10, schema_args).await {
-                            Ok(cols) => format!("{}", cols),
-                            Err(_) => "[]".to_string(),
-                        };
+                        let columns = pm.execute_by_plugin_async("postgres", 10, schema_args).await
+                            .map_or_else(|_| "[]".to_string(), |cols| format!("{cols}"));
                         result.push(serde_json::json!({
                             "name": table_name,
                             "columns": columns,
@@ -681,12 +728,12 @@ impl McpServer {
             Ok(other) => {
                 return McpToolResult::json(serde_json::json!({
                     "tables": [],
-                    "raw": format!("{}", other),
+                    "raw": format!("{other}"),
                     "note": "Unexpected response from list_tables",
                 }));
             }
             Err(e) => {
-                return McpToolResult::error(format!("Failed to query schema: {}", e));
+                return McpToolResult::error(format!("Failed to query schema: {e}"));
             }
         };
 
@@ -711,6 +758,7 @@ impl McpServer {
                 "timestamp": d.timestamp,
             }))
             .collect();
+        drop(state);
 
         McpToolResult::json(serde_json::json!({
             "count": rules.len(),
@@ -719,6 +767,7 @@ impl McpServer {
         }))
     }
 
+    #[allow(clippy::unused_self)] // Will use self when Interface SOMA is connected
     fn tool_get_render_state(&self) -> McpToolResult {
         // Render state — populated when Interface SOMA is connected.
         McpToolResult::json(serde_json::json!({
@@ -739,10 +788,10 @@ impl McpServer {
 
     // ---- Action tool implementations ----
 
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // as_millis() fits u64; token ids are non-negative
     fn tool_intent(&self, args: &serde_json::Value) -> McpToolResult {
-        let text = match args.get("text").and_then(|v| v.as_str()) {
-            Some(t) => t,
-            None => return McpToolResult::error("Missing required argument: text".into()),
+        let Some(text) = args.get("text").and_then(|v| v.as_str()) else {
+            return McpToolResult::error("Missing required argument: text".into());
         };
 
         let trace_id = uuid::Uuid::new_v4().to_string()[..12].to_string();
@@ -751,10 +800,12 @@ impl McpServer {
         let mind_guard = self.mind.read().unwrap();
         match mind_guard.infer(text) {
             Ok(program) => {
-                let result = self.plugins.read().unwrap().execute_program(
+                let plugins_guard = self.plugins.read().unwrap();
+                let result = plugins_guard.execute_program(
                     &program.steps,
                     self.config.mind.max_program_steps,
                 );
+                drop(plugins_guard);
 
                 let execution_time_ms = exec_start.elapsed().as_millis() as u64;
 
@@ -784,6 +835,7 @@ impl McpServer {
                 // Record experience
                 let tokens: Vec<u32> = mind_guard.tokenizer.encode(text)
                     .iter().map(|&t| t as u32).collect();
+                drop(mind_guard);
                 let prog_data: Vec<(i32, u8, u8)> = program.steps.iter().map(|s| {
                     use crate::mind::ArgType;
                     let a0 = match s.arg0_type { ArgType::None => 0u8, ArgType::Span => 1, ArgType::Ref => 2, ArgType::Literal => 3 };
@@ -825,7 +877,7 @@ impl McpServer {
                     "confidence": program.confidence,
                     "program_steps": program.steps.len(),
                     "execution_time_ms": execution_time_ms,
-                    "output": result.output.map(|o| format!("{}", o)),
+                    "output": result.output.map(|o| format!("{o}")),
                     "error": result.error,
                     "trace": result.trace,
                 });
@@ -833,11 +885,12 @@ impl McpServer {
                 McpToolResult::json(response)
             }
             Err(e) => {
+                drop(mind_guard);
                 self.metrics.record_inference(false, exec_start.elapsed().as_millis() as u64);
                 if let Ok(mut p) = self.proprio.write() {
                     p.record_failure();
                 }
-                McpToolResult::error(format!("Inference error: {}", e))
+                McpToolResult::error(format!("Inference error: {e}"))
             }
         }
     }
@@ -845,16 +898,17 @@ impl McpServer {
     fn tool_checkpoint(&self, args: &serde_json::Value) -> McpToolResult {
         let label = args.get("label").and_then(|v| v.as_str());
         let ckpt_dir = Path::new(&self.config.memory.checkpoint_dir);
-        let filename = if let Some(lbl) = label {
-            // Include label in filename: soma-{id}-{label}-{timestamp}.ckpt
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            format!("soma-{}-{}-{}.ckpt", self.config.soma.id, lbl, ts)
-        } else {
-            Checkpoint::filename(&self.config.soma.id)
-        };
+        let filename = label.map_or_else(
+            || Checkpoint::filename(&self.config.soma.id),
+            |lbl| {
+                // Include label in filename: soma-{id}-{label}-{timestamp}.ckpt
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                format!("soma-{}-{lbl}-{ts}.ckpt", self.config.soma.id)
+            },
+        );
         let path = ckpt_dir.join(&filename);
 
         let (exp_count, adapt_count) = {
@@ -880,7 +934,7 @@ impl McpServer {
         );
         ckpt.plugin_states = plugin_state_entries;
         if let Ok(m) = self.mind.read() {
-            ckpt.base_model_hash = m.model_hash.clone();
+            ckpt.base_model_hash.clone_from(&m.model_hash);
         }
         ckpt.plugin_manifest = self.plugins.read().unwrap().plugin_manifest().into_iter()
             .map(|(name, version)| crate::memory::checkpoint::PluginManifestEntry { name, version })
@@ -892,7 +946,7 @@ impl McpServer {
                 .ok()
                 .and_then(|v| v.as_array().cloned())
                 .unwrap_or_default();
-            ckpt.recent_executions = serde_json::to_value(&st.executions.to_json())
+            ckpt.recent_executions = serde_json::to_value(st.executions.to_json())
                 .ok()
                 .and_then(|v| v.as_array().cloned())
                 .unwrap_or_default();
@@ -915,7 +969,7 @@ impl McpServer {
                 }
                 McpToolResult::json(resp)
             }
-            Err(e) => McpToolResult::error(format!("Checkpoint failed: {}", e)),
+            Err(e) => McpToolResult::error(format!("Checkpoint failed: {e}")),
         }
     }
 
@@ -930,61 +984,60 @@ impl McpServer {
         };
 
         // Optional enrichment fields
-        let context = args.get("context").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let context = args.get("context").and_then(|v| v.as_str()).map(std::string::ToString::to_string);
         let related_tables: Option<Vec<String>> = args.get("related_tables")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect());
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(std::string::ToString::to_string)).collect());
         let related_plugins: Option<Vec<String>> = args.get("related_plugins")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect());
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(std::string::ToString::to_string)).collect());
 
         // Build enriched 'what' with context if provided
-        let enriched_what = if let Some(ctx) = &context {
-            format!("{} [context: {}]", what, ctx)
-        } else {
-            what
-        };
+        let enriched_what = context.as_ref().map_or_else(
+            || what.clone(),
+            |ctx| format!("{what} [context: {ctx}]"),
+        );
 
         // Build enriched 'why' with related info if provided
         let mut enriched_why = why;
         if let Some(tables) = &related_tables {
-            enriched_why = format!("{} [tables: {}]", enriched_why, tables.join(", "));
+            enriched_why = format!("{enriched_why} [tables: {}]", tables.join(", "));
         }
         if let Some(plugins) = &related_plugins {
-            enriched_why = format!("{} [plugins: {}]", enriched_why, plugins.join(", "));
+            enriched_why = format!("{enriched_why} [plugins: {}]", plugins.join(", "));
         }
 
         // Session ID from auth token or anonymous
         let session_id = "mcp-session".to_string();
 
-        if let Ok(mut state) = self.state.write() {
-            let decision = state.decisions.record(enriched_what, enriched_why, session_id);
-            if let Ok(mut p) = self.proprio.write() {
-                p.record_decision();
-            }
-            let mut resp = serde_json::json!({
-                "success": true,
-                "decision": decision,
-            });
-            if let Some(ctx) = &context {
-                resp.as_object_mut().unwrap().insert("context".to_string(), serde_json::json!(ctx));
-            }
-            if let Some(tables) = &related_tables {
-                resp.as_object_mut().unwrap().insert("related_tables".to_string(), serde_json::json!(tables));
-            }
-            if let Some(plugins) = &related_plugins {
-                resp.as_object_mut().unwrap().insert("related_plugins".to_string(), serde_json::json!(plugins));
-            }
-            McpToolResult::json(resp)
-        } else {
-            McpToolResult::error("Failed to acquire state lock".into())
+        let Ok(mut state) = self.state.write() else {
+            return McpToolResult::error("Failed to acquire state lock".into());
+        };
+        let decision = state.decisions.record(enriched_what, enriched_why, session_id).clone();
+        drop(state);
+        if let Ok(mut p) = self.proprio.write() {
+            p.record_decision();
         }
+        let mut resp = serde_json::json!({
+            "success": true,
+            "decision": decision,
+        });
+        if let Some(ctx) = &context {
+            resp.as_object_mut().unwrap().insert("context".to_string(), serde_json::json!(ctx));
+        }
+        if let Some(tables) = &related_tables {
+            resp.as_object_mut().unwrap().insert("related_tables".to_string(), serde_json::json!(tables));
+        }
+        if let Some(plugins) = &related_plugins {
+            resp.as_object_mut().unwrap().insert("related_plugins".to_string(), serde_json::json!(plugins));
+        }
+        McpToolResult::json(resp)
     }
 
+    #[allow(clippy::future_not_send)]
     async fn tool_confirm(&self, args: &serde_json::Value) -> McpToolResult {
-        let action_id = match args.get("action_id").and_then(|v| v.as_str()) {
-            Some(id) => id,
-            None => return McpToolResult::error("Missing required argument: action_id".into()),
+        let Some(action_id) = args.get("action_id").and_then(|v| v.as_str()) else {
+            return McpToolResult::error("Missing required argument: action_id".into());
         };
 
         let pending = {
@@ -999,36 +1052,34 @@ impl McpServer {
                 if let Some(obj) = confirmed_args.as_object_mut() {
                     obj.insert("confirmed".to_string(), serde_json::json!(true));
                 }
-                let redispatch_result = match pending.tool_name.as_str() {
+                match pending.tool_name.as_str() {
                     "soma.restore_checkpoint" => self.tool_restore_checkpoint(&confirmed_args),
                     name if name.starts_with("soma.") && name.matches('.').count() >= 2 => {
                         self.tool_plugin_call(name, &confirmed_args).await
                     }
                     _ => McpToolResult::error(format!("Cannot re-dispatch tool: {}", pending.tool_name)),
-                };
-                redispatch_result
+                }
             }
-            None => McpToolResult::error(format!("No pending confirmation: {} (expired or invalid)", action_id)),
+            None => McpToolResult::error(format!("No pending confirmation: {action_id} (expired or invalid)")),
         }
     }
 
     fn tool_install_plugin(&self, args: &serde_json::Value) -> McpToolResult {
-        let name = match args.get("name").and_then(|v| v.as_str()) {
-            Some(n) => n,
-            None => return McpToolResult::error("Missing required argument: name".into()),
+        let Some(name) = args.get("name").and_then(|v| v.as_str()) else {
+            return McpToolResult::error("Missing required argument: name".into());
         };
 
         // Look for plugin .so/.dylib in plugins directory
         let plugins_dir = std::path::Path::new(&self.config.soma.plugins_directory);
         let ext = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-        let plugin_path = plugins_dir.join(format!("lib{}.{}", name, ext));
+        let plugin_path = plugins_dir.join(format!("lib{name}.{ext}"));
 
         if !plugin_path.exists() {
             return McpToolResult::json(serde_json::json!({
                 "success": false,
                 "error": format!("Plugin file not found: {}", plugin_path.display()),
                 "searched": plugins_dir.display().to_string(),
-                "expected_filename": format!("lib{}.{}", name, ext),
+                "expected_filename": format!("lib{name}.{ext}"),
             }));
         }
 
@@ -1036,17 +1087,17 @@ impl McpServer {
             Ok(mut plugin) => {
                 // Build plugin config from [plugins.<name>] section
                 let mut pc = crate::plugin::interface::PluginConfig::default();
-                if let Some(toml_val) = self.config.plugins.get(name) {
-                    if let Some(table) = toml_val.as_table() {
-                        for (k, v) in table {
-                            if let Ok(json_val) = serde_json::to_value(v) {
-                                pc.settings.insert(k.clone(), json_val);
-                            }
+                if let Some(toml_val) = self.config.plugins.get(name)
+                    && let Some(table) = toml_val.as_table()
+                {
+                    for (k, v) in table {
+                        if let Ok(json_val) = serde_json::to_value(v) {
+                            pc.settings.insert(k.clone(), json_val);
                         }
                     }
                 }
                 if let Err(e) = plugin.on_load(&pc) {
-                    return McpToolResult::error(format!("Plugin on_load failed: {}", e));
+                    return McpToolResult::error(format!("Plugin on_load failed: {e}"));
                 }
                 let pname = plugin.name().to_string();
                 let pversion = plugin.version().to_string();
@@ -1054,6 +1105,7 @@ impl McpServer {
                 // Register dynamically via write lock
                 let mut pm = self.plugins.write().unwrap();
                 pm.register(plugin);
+                drop(pm);
                 McpToolResult::json(serde_json::json!({
                     "success": true,
                     "plugin": pname,
@@ -1062,33 +1114,33 @@ impl McpServer {
                     "note": "Plugin loaded and registered at runtime",
                 }))
             }
-            Err(e) => McpToolResult::error(format!("Failed to load plugin: {}", e)),
+            Err(e) => McpToolResult::error(format!("Failed to load plugin: {e}")),
         }
     }
 
     fn tool_restore_checkpoint(&self, args: &serde_json::Value) -> McpToolResult {
-        let path_str = match args.get("path").and_then(|v| v.as_str()) {
-            Some(p) => p,
-            None => return McpToolResult::error("Missing required argument: path".into()),
+        let Some(path_str) = args.get("path").and_then(|v| v.as_str()) else {
+            return McpToolResult::error("Missing required argument: path".into());
         };
 
         // Destructive action: require two-step confirmation (Section 12.1)
-        if self.config.security.require_confirmation {
-            if args.get("confirmed").and_then(|v| v.as_bool()) != Some(true) {
-                let mut auth = self.auth.write().unwrap();
-                let action_id = auth.create_confirmation(
-                    format!("Restore checkpoint from {}", path_str),
-                    "mcp",
-                    "soma.restore_checkpoint".to_string(),
-                    args.clone(),
-                );
-                return McpToolResult::json(serde_json::json!({
-                    "requires_confirmation": true,
-                    "action_id": action_id,
-                    "description": format!("Restore checkpoint from {}. This will overwrite current LoRA state.", path_str),
-                    "instructions": "Call soma.confirm with the action_id to proceed, or pass confirmed:true.",
-                }));
-            }
+        if self.config.security.require_confirmation
+            && args.get("confirmed").and_then(serde_json::Value::as_bool) != Some(true)
+        {
+            let mut auth = self.auth.write().unwrap();
+            let action_id = auth.create_confirmation(
+                format!("Restore checkpoint from {path_str}"),
+                "mcp",
+                "soma.restore_checkpoint".to_string(),
+                args.clone(),
+            );
+            drop(auth);
+            return McpToolResult::json(serde_json::json!({
+                "requires_confirmation": true,
+                "action_id": action_id,
+                "description": format!("Restore checkpoint from {path_str}. This will overwrite current LoRA state."),
+                "instructions": "Call soma.confirm with the action_id to proceed, or pass confirmed:true.",
+            }));
         }
 
         let path = std::path::Path::new(path_str);
@@ -1131,7 +1183,7 @@ impl McpServer {
                     "decisions_restored": decisions_restored,
                 }))
             }
-            Err(e) => McpToolResult::error(format!("Restore failed: {}", e)),
+            Err(e) => McpToolResult::error(format!("Restore failed: {e}")),
         }
     }
 
@@ -1145,9 +1197,8 @@ impl McpServer {
     }
 
     fn tool_uninstall_plugin(&self, args: &serde_json::Value) -> McpToolResult {
-        let name = match args.get("name").and_then(|v| v.as_str()) {
-            Some(n) => n,
-            None => return McpToolResult::error("Missing required argument: name".into()),
+        let Some(name) = args.get("name").and_then(|v| v.as_str()) else {
+            return McpToolResult::error("Missing required argument: name".into());
         };
 
         let mut pm = self.plugins.write().unwrap();
@@ -1157,18 +1208,16 @@ impl McpServer {
                 "plugin": name,
                 "note": "Plugin unloaded and unregistered",
             })),
-            Err(e) => McpToolResult::error(format!("Uninstall failed: {}", e)),
+            Err(e) => McpToolResult::error(format!("Uninstall failed: {e}")),
         }
     }
 
     fn tool_configure_plugin(&self, args: &serde_json::Value) -> McpToolResult {
-        let name = match args.get("name").and_then(|v| v.as_str()) {
-            Some(n) => n,
-            None => return McpToolResult::error("Missing required argument: name".into()),
+        let Some(name) = args.get("name").and_then(|v| v.as_str()) else {
+            return McpToolResult::error("Missing required argument: name".into());
         };
-        let config_val = match args.get("config") {
-            Some(c) => c,
-            None => return McpToolResult::error("Missing required argument: config".into()),
+        let Some(config_val) = args.get("config") else {
+            return McpToolResult::error("Missing required argument: config".into());
         };
 
         // Build a PluginConfig from the provided JSON object
@@ -1180,10 +1229,11 @@ impl McpServer {
         }
 
         // Find the plugin and call on_load with new config (acts as config update)
-        let mut pm = self.plugins.write().unwrap();
+        let pm = self.plugins.write().unwrap();
         let plugin_names: Vec<String> = pm.plugin_names();
+        drop(pm);
         if !plugin_names.contains(&name.to_string()) {
-            return McpToolResult::error(format!("Plugin not found: {}", name));
+            return McpToolResult::error(format!("Plugin not found: {name}"));
         }
 
         // on_load is the lifecycle hook for configuration; there is no separate on_config_changed
@@ -1201,19 +1251,19 @@ impl McpServer {
         }))
     }
 
+    #[allow(clippy::future_not_send, clippy::await_holding_lock)] // RwLockReadGuard held across await is intentional
     async fn tool_plugin_call(&self, tool_name: &str, args: &serde_json::Value) -> McpToolResult {
         // Dynamic plugin namespacing: soma.{plugin}.{convention} (Section 12.2)
         let parts: Vec<&str> = tool_name.splitn(3, '.').collect();
         if parts.len() < 3 {
-            return McpToolResult::error(format!("Invalid tool name: {}", tool_name));
+            return McpToolResult::error(format!("Invalid tool name: {tool_name}"));
         }
         let plugin_name = parts[1]; // e.g. "posix"
         let conv_name = parts[2]; // e.g. "open_read"
 
         let conventions = self.plugins.read().unwrap().conventions();
-        let conv = match conventions.iter().find(|c| c.name == conv_name) {
-            Some(c) => c,
-            None => return McpToolResult::error(format!("Unknown convention: {}", conv_name)),
+        let Some(conv) = conventions.iter().find(|c| c.name == conv_name) else {
+            return McpToolResult::error(format!("Unknown convention: {conv_name}"));
         };
 
         // Build args from JSON, supporting List and Map types for complex arguments
@@ -1237,7 +1287,7 @@ impl McpServer {
                         crate::plugin::interface::Value::Bytes(s.into_bytes())
                     }
                     ArgType::Any => json_to_value(val),
-                    _ => {
+                    ArgType::String => {
                         crate::plugin::interface::Value::String(
                             val.as_str().unwrap_or("").to_string()
                         )
@@ -1262,7 +1312,7 @@ impl McpServer {
                 "success": true,
                 "result": serde_json::to_value(&val).unwrap_or(serde_json::Value::Null),
             })),
-            Err(e) => McpToolResult::error(format!("Plugin error: {}", e)),
+            Err(e) => McpToolResult::error(format!("Plugin error: {e}")),
         }
     }
 }
@@ -1273,11 +1323,10 @@ fn json_to_value(val: &serde_json::Value) -> crate::plugin::interface::Value {
         serde_json::Value::Null => crate::plugin::interface::Value::Null,
         serde_json::Value::Bool(b) => crate::plugin::interface::Value::Bool(*b),
         serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                crate::plugin::interface::Value::Int(i)
-            } else {
-                crate::plugin::interface::Value::Float(n.as_f64().unwrap_or(0.0))
-            }
+            n.as_i64().map_or_else(
+                || crate::plugin::interface::Value::Float(n.as_f64().unwrap_or(0.0)),
+                crate::plugin::interface::Value::Int,
+            )
         }
         serde_json::Value::String(s) => crate::plugin::interface::Value::String(s.clone()),
         serde_json::Value::Array(arr) => {

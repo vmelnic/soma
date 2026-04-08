@@ -4,6 +4,7 @@
 //! All counters use atomic operations for lock-free concurrent updates.
 //! Per-plugin metrics are tracked via `PluginMetrics` in a concurrent `DashMap`.
 
+use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use dashmap::DashMap;
@@ -22,7 +23,7 @@ pub struct SomaMetrics {
     pub inferences_success: AtomicU64,
     pub inferences_failed: AtomicU64,
     pub inference_duration_sum_ms: AtomicU64,
-    /// Sum of confidence scores (Section 18.4); divide by inferences_total for average.
+    /// Sum of confidence scores (Section 18.4); divide by `inferences_total` for average.
     pub inference_confidence_sum: AtomicU64,
 
     // Program execution metrics
@@ -44,7 +45,7 @@ pub struct SomaMetrics {
     pub memory_rss_bytes: AtomicU64,
 
     // Adaptation metrics (Section 18.4)
-    /// Current LoRA adapter magnitude, stored as f32 bits via `f32::to_bits`.
+    /// Current `LoRA` adapter magnitude, stored as f32 bits via `f32::to_bits`.
     pub lora_magnitude: AtomicU64,
 
     // Protocol metrics
@@ -106,6 +107,7 @@ impl SomaMetrics {
     }
 
     /// Record a plugin call (global counters only, no per-plugin tracking).
+    #[allow(dead_code)] // Spec feature: used by plugin execution path
     pub fn record_plugin_call(&self, success: bool) {
         self.plugin_calls_total.fetch_add(1, Ordering::Relaxed);
         if !success {
@@ -142,30 +144,37 @@ impl SomaMetrics {
 
     /// Record an inference confidence score (Section 18.4).
     /// The f32 value is decomposed into integer mantissa-scaled addition
-    /// so the running sum can be kept in an AtomicU64.
+    /// so the running sum can be kept in an `AtomicU64`.
+    #[allow(dead_code)] // Spec feature: Section 18.4
     pub fn record_confidence(&self, confidence: f32) {
         // Store confidence * 1_000_000 as integer to preserve ~6 decimal digits.
-        let scaled = (confidence as f64 * 1_000_000.0) as u64;
+        // Confidence is 0.0..1.0, so scaled fits in u64 without sign/truncation issues.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let scaled = (f64::from(confidence) * 1_000_000.0) as u64;
         self.inference_confidence_sum.fetch_add(scaled, Ordering::Relaxed);
     }
 
     /// Record the duration of a single plugin call in ms (Section 18.4).
+    #[allow(dead_code)] // Spec feature: Section 18.4
     pub fn record_plugin_duration(&self, duration_ms: u64) {
         self.plugin_duration_sum_ms.fetch_add(duration_ms, Ordering::Relaxed);
     }
 
-    /// Set the current LoRA adapter magnitude (Section 18.4).
-    /// Stored as raw f32 bits inside an AtomicU64.
+    /// Set the current `LoRA` adapter magnitude (Section 18.4).
+    /// Stored as raw f32 bits inside an `AtomicU64`.
+    #[allow(dead_code)] // Spec feature: Section 18.4
     pub fn set_lora_magnitude(&self, magnitude: f32) {
-        self.lora_magnitude.store(magnitude.to_bits() as u64, Ordering::Relaxed);
+        self.lora_magnitude.store(u64::from(magnitude.to_bits()), Ordering::Relaxed);
     }
 
     /// Set the current process RSS in bytes (Section 18.4).
+    #[allow(dead_code)] // Spec feature: Section 18.4
     pub fn set_memory_rss(&self, bytes: u64) {
         self.memory_rss_bytes.store(bytes, Ordering::Relaxed);
     }
 
     /// Average inference confidence (0.0..1.0).
+    #[allow(clippy::cast_precision_loss)] // Acceptable: metrics counters don't need exact precision
     pub fn avg_confidence(&self) -> f64 {
         let total = self.inferences_total.load(Ordering::Relaxed);
         if total == 0 { return 0.0; }
@@ -173,12 +182,15 @@ impl SomaMetrics {
         sum / 1_000_000.0 / total as f64
     }
 
-    /// Read back the LoRA magnitude as f32.
+    /// Read back the `LoRA` magnitude as f32.
     pub fn get_lora_magnitude(&self) -> f32 {
+        // Only the lower 32 bits are used (stored via f32::to_bits)
+        #[allow(clippy::cast_possible_truncation)]
         f32::from_bits(self.lora_magnitude.load(Ordering::Relaxed) as u32)
     }
 
     /// Average inference duration in ms.
+    #[allow(clippy::cast_precision_loss)] // Acceptable: metrics counters don't need exact precision
     pub fn avg_inference_ms(&self) -> f64 {
         let total = self.inferences_total.load(Ordering::Relaxed);
         if total == 0 { return 0.0; }
@@ -188,7 +200,7 @@ impl SomaMetrics {
     /// Serialize per-plugin metrics to JSON.
     fn per_plugin_json(&self) -> serde_json::Value {
         let mut map = serde_json::Map::new();
-        for entry in self.per_plugin.iter() {
+        for entry in &self.per_plugin {
             let name = entry.key().clone();
             let pm = entry.value();
             map.insert(name, serde_json::json!({
@@ -231,33 +243,33 @@ impl SomaMetrics {
         if !self.per_plugin.is_empty() {
             out.push_str("# HELP soma_plugin_calls_total_per Per-plugin total calls\n");
             out.push_str("# TYPE soma_plugin_calls_total_per counter\n");
-            for entry in self.per_plugin.iter() {
+            for entry in &self.per_plugin {
                 let name = entry.key();
                 let pm = entry.value();
-                out.push_str(&format!(
-                    "soma_plugin_calls_total{{plugin=\"{}\"}} {}\n",
-                    name, pm.calls.load(Ordering::Relaxed),
-                ));
+                let _ = writeln!(out,
+                    "soma_plugin_calls_total{{plugin=\"{name}\"}} {}",
+                    pm.calls.load(Ordering::Relaxed),
+                );
             }
             out.push_str("# HELP soma_plugin_errors_total_per Per-plugin error count\n");
             out.push_str("# TYPE soma_plugin_errors_total_per counter\n");
-            for entry in self.per_plugin.iter() {
+            for entry in &self.per_plugin {
                 let name = entry.key();
                 let pm = entry.value();
-                out.push_str(&format!(
-                    "soma_plugin_errors_total{{plugin=\"{}\"}} {}\n",
-                    name, pm.errors.load(Ordering::Relaxed),
-                ));
+                let _ = writeln!(out,
+                    "soma_plugin_errors_total{{plugin=\"{name}\"}} {}",
+                    pm.errors.load(Ordering::Relaxed),
+                );
             }
             out.push_str("# HELP soma_plugin_duration_sum_ms_per Per-plugin duration sum in ms\n");
             out.push_str("# TYPE soma_plugin_duration_sum_ms_per counter\n");
-            for entry in self.per_plugin.iter() {
+            for entry in &self.per_plugin {
                 let name = entry.key();
                 let pm = entry.value();
-                out.push_str(&format!(
-                    "soma_plugin_duration_sum_ms{{plugin=\"{}\"}} {}\n",
-                    name, pm.duration_sum_ms.load(Ordering::Relaxed),
-                ));
+                let _ = writeln!(out,
+                    "soma_plugin_duration_sum_ms{{plugin=\"{name}\"}} {}",
+                    pm.duration_sum_ms.load(Ordering::Relaxed),
+                );
             }
         }
         prom(&mut out, "soma_experience_buffer_size", "gauge",
@@ -269,7 +281,7 @@ impl SomaMetrics {
         prom(&mut out, "soma_memory_rss_bytes", "gauge",
             "Current resident set size in bytes", self.memory_rss_bytes.load(Ordering::Relaxed));
         prom_f64(&mut out, "soma_lora_magnitude", "gauge",
-            "Current LoRA adapter magnitude", self.get_lora_magnitude() as f64);
+            "Current LoRA adapter magnitude", f64::from(self.get_lora_magnitude()));
         prom(&mut out, "soma_protocol_connections_active", "gauge",
             "Active protocol connections", self.protocol_connections_active.load(Ordering::Relaxed));
         prom(&mut out, "soma_protocol_signals_sent", "counter",
@@ -287,6 +299,7 @@ impl SomaMetrics {
     }
 
     /// Set the active connection count gauge.
+    #[allow(dead_code)] // Spec feature: protocol metrics
     pub fn set_active_connections(&self, count: u64) {
         self.protocol_connections_active.store(count, Ordering::Relaxed);
     }
@@ -345,13 +358,9 @@ impl SomaMetrics {
 }
 
 fn prom(out: &mut String, name: &str, ptype: &str, help: &str, value: u64) {
-    out.push_str(&format!("# HELP {} {}\n", name, help));
-    out.push_str(&format!("# TYPE {} {}\n", name, ptype));
-    out.push_str(&format!("{} {}\n", name, value));
+    let _ = write!(out, "# HELP {name} {help}\n# TYPE {name} {ptype}\n{name} {value}\n");
 }
 
 fn prom_f64(out: &mut String, name: &str, ptype: &str, help: &str, value: f64) {
-    out.push_str(&format!("# HELP {} {}\n", name, help));
-    out.push_str(&format!("# TYPE {} {}\n", name, ptype));
-    out.push_str(&format!("{} {}\n", name, value));
+    let _ = write!(out, "# HELP {name} {help}\n# TYPE {name} {ptype}\n{name} {value}\n");
 }

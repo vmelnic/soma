@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::process::Stdio;
 
 /// A managed child process spawned by a plugin.
+#[allow(dead_code)] // Spec feature: MCP Bridge plugin child processes
 pub struct ManagedProcess {
     pub name: String,
     pub child: std::process::Child,
@@ -14,10 +15,12 @@ pub struct ManagedProcess {
 }
 
 /// Manager for plugin child processes.
+#[allow(dead_code)] // Spec feature: MCP Bridge plugin process management
 pub struct ProcessManager {
     processes: HashMap<String, ManagedProcess>,
 }
 
+#[allow(dead_code)] // Spec feature: MCP Bridge plugin process management
 impl ProcessManager {
     pub fn new() -> Self {
         Self { processes: HashMap::new() }
@@ -26,7 +29,7 @@ impl ProcessManager {
     /// Spawn a child process.
     pub fn spawn(
         &mut self,
-        name: String,
+        name: &str,
         command: &str,
         args: &[&str],
         env: &HashMap<String, String>,
@@ -48,14 +51,15 @@ impl ProcessManager {
         tracing::info!(name = %name, command = %command, "Child process spawned");
 
         let managed = ManagedProcess {
-            name: name.clone(),
+            name: name.to_string(),
             child,
             stdin,
             stdout,
         };
 
-        self.processes.insert(name.clone(), managed);
-        Ok(self.processes.get(&name).unwrap())
+        let key = name.to_string();
+        self.processes.insert(key.clone(), managed);
+        Ok(self.processes.get(&key).unwrap())
     }
 
     /// Kill a child process.
@@ -86,7 +90,7 @@ impl ProcessManager {
 
     /// List running processes.
     pub fn list(&self) -> Vec<&str> {
-        self.processes.keys().map(|s| s.as_str()).collect()
+        self.processes.keys().map(std::string::String::as_str).collect()
     }
 }
 

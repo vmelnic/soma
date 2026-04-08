@@ -1,16 +1,16 @@
-//! Memory consolidation — criteria for when LoRA changes should be
+//! Memory consolidation — criteria for when `LoRA` changes should be
 //! permanently integrated into the base model weights (Spec Section 6.3).
 //!
 //! The 5-step consolidation process:
-//!   1. Evaluate LoRA magnitude per layer
+//!   1. Evaluate `LoRA` magnitude per layer
 //!   2. Merge high-magnitude layers: `merged_delta += scale * B @ A`
-//!   3. Reset merged LoRA layers to initial values
+//!   3. Reset merged `LoRA` layers to initial values
 //!   4. Save updated base weights checkpoint (handled by caller)
 //!   5. Log consolidation event for auditability
 //!
 //! Because tract-onnx models are frozen (compiled into the graph), we cannot
-//! modify W_base in-place. Instead, consolidation computes the weight delta
-//! `scale * B @ A` for each eligible LoRA layer and accumulates it into
+//! modify `W_base` in-place. Instead, consolidation computes the weight delta
+//! `scale * B @ A` for each eligible `LoRA` layer and accumulates it into
 //! `OnnxMindEngine::merged_opcode_delta`. During inference, this delta is
 //! applied as: `logits += hidden @ merged_opcode_delta.T`, equivalent to
 //! having modified the base weights.
@@ -19,7 +19,7 @@ use crate::mind::onnx_engine::OnnxMindEngine;
 
 /// Configuration for memory consolidation thresholds.
 pub struct ConsolidationConfig {
-    /// Minimum LoRA magnitude to consider a layer "significantly adapted".
+    /// Minimum `LoRA` magnitude to consider a layer "significantly adapted".
     pub min_lora_magnitude: f32,
     /// Number of successful adaptations before consolidation is considered.
     pub threshold: u64,
@@ -27,11 +27,11 @@ pub struct ConsolidationConfig {
 
 /// Result of a consolidation attempt.
 pub struct ConsolidationResult {
-    /// Number of LoRA layers evaluated for merge eligibility.
+    /// Number of `LoRA` layers evaluated for merge eligibility.
     pub layers_evaluated: usize,
     /// Number of layers whose magnitude exceeded the threshold and were merged.
     pub layers_merged: usize,
-    /// Maximum LoRA magnitude observed across all layers after consolidation.
+    /// Maximum `LoRA` magnitude observed across all layers after consolidation.
     pub new_magnitude: f32,
 }
 
@@ -45,7 +45,7 @@ impl Default for ConsolidationConfig {
 }
 
 impl ConsolidationConfig {
-    pub fn new(min_lora_magnitude: f32, threshold: u64) -> Self {
+    pub const fn new(min_lora_magnitude: f32, threshold: u64) -> Self {
         Self {
             min_lora_magnitude,
             threshold,
@@ -53,17 +53,17 @@ impl ConsolidationConfig {
     }
 
     /// Check whether consolidation should be attempted given the current
-    /// adaptation count and maximum LoRA magnitude across layers.
+    /// adaptation count and maximum `LoRA` magnitude across layers.
     pub fn should_consolidate(&self, adaptation_count: u64, max_magnitude: f32) -> bool {
         adaptation_count >= self.threshold && max_magnitude >= self.min_lora_magnitude
     }
 
-    /// Perform consolidation on an OnnxMindEngine (Section 6.3).
+    /// Perform consolidation on an `OnnxMindEngine` (Section 6.3).
     ///
     /// The 5-step process:
-    ///   1. Evaluate LoRA magnitude per layer
+    ///   1. Evaluate `LoRA` magnitude per layer
     ///   2. Merge high-magnitude layers: `merged_delta += scale * B @ A`
-    ///   3. Reset merged LoRA layers to initial values (A=small random, B=zero)
+    ///   3. Reset merged `LoRA` layers to initial values (A=small random, B=zero)
     ///   4. Save updated checkpoint (handled externally by the caller)
     ///   5. Log consolidation event
     ///
@@ -115,8 +115,8 @@ impl ConsolidationConfig {
         for (idx, delta) in &merge_actions {
             // Accumulate into merged_opcode_delta
             let merge_len = delta.len().min(engine.merged_opcode_delta.len());
-            for j in 0..merge_len {
-                engine.merged_opcode_delta[j] += delta[j];
+            for (target, source) in engine.merged_opcode_delta[..merge_len].iter_mut().zip(&delta[..merge_len]) {
+                *target += source;
             }
 
             // Step 3: Reset this LoRA layer (A to small random, B to zero)
@@ -126,7 +126,7 @@ impl ConsolidationConfig {
 
         // Compute remaining magnitude after consolidation
         let new_magnitude: f32 = engine.active_lora().iter()
-            .map(|l| l.magnitude())
+            .map(super::super::mind::lora::LoRALayer::magnitude)
             .fold(0.0f32, f32::max);
 
         // Step 5: Log consolidation event

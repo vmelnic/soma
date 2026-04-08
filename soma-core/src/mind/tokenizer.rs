@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 
+#[allow(dead_code)] // Spec Section 10.2 — padding token index
 pub const PAD_IDX: i64 = 0;
 pub const UNK_IDX: i64 = 1;
 pub const NULL_IDX: i64 = 2;
@@ -77,7 +78,7 @@ impl Tokenizer {
     }
 
     /// Returns `true` if BPE merge rules are loaded.
-    pub fn is_bpe(&self) -> bool {
+    pub const fn is_bpe(&self) -> bool {
         !self.merges.is_empty()
     }
 
@@ -101,19 +102,18 @@ impl Tokenizer {
 
             for i in 0..symbols.len() - 1 {
                 // Look up this pair in the merges list
-                if let Some(merge_idx) = self.find_merge(&symbols[i], &symbols[i + 1]) {
-                    if best_merge_idx.is_none() || merge_idx < best_merge_idx.unwrap() {
+                if let Some(merge_idx) = self.find_merge(&symbols[i], &symbols[i + 1])
+                    && (best_merge_idx.is_none() || merge_idx < best_merge_idx.unwrap()) {
                         best_merge_idx = Some(merge_idx);
                         best_pair_pos = Some(i);
                     }
-                }
             }
 
             match (best_merge_idx, best_pair_pos) {
                 (Some(_), Some(_)) => {
                     // Apply the merge: scan left to right merging all occurrences
                     let (ref left, ref right) = self.merges[best_merge_idx.unwrap()];
-                    let merged = format!("{}{}", left, right);
+                    let merged = format!("{left}{right}");
                     let mut new_symbols = Vec::with_capacity(symbols.len());
                     let mut i = 0;
                     while i < symbols.len() {
@@ -152,7 +152,7 @@ impl Tokenizer {
                 .collect()
         } else {
             lower.split_whitespace()
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
                 .collect()
         }
     }
@@ -166,7 +166,8 @@ impl Tokenizer {
     }
 
     /// Encode with BPE explicitly, mapping subword tokens to indices.
-    /// Unknown subwords map to UNK_IDX.
+    /// Unknown subwords map to `UNK_IDX`.
+    #[allow(dead_code)] // Spec Section 10.2 — explicit BPE encode path
     pub fn encode_bpe(&self, text: &str) -> Vec<i64> {
         let lower = text.to_lowercase();
         lower.split_whitespace()
@@ -189,9 +190,11 @@ impl Tokenizer {
     /// Decode a single vocabulary index back to its word string.
     /// Returns "<UNK>" if the index is not found in the vocabulary.
     pub fn decode_index(&self, idx: usize) -> String {
+        #[allow(clippy::cast_possible_wrap)] // vocab indices are small positive values
         self.idx2word.get(&(idx as i64)).cloned().unwrap_or_else(|| "<UNK>".to_string())
     }
 
+    #[allow(clippy::unused_self)] // method semantically belongs to Tokenizer
     /// Extract text from token span (offset by 1 for NULL prefix)
     pub fn extract_span(&self, tokens: &[String], start: usize, end: usize) -> String {
         if start == 0 && end == 0 {

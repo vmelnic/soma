@@ -23,7 +23,7 @@ use memory::checkpoint::Checkpoint;
 use memory::consolidation::ConsolidationConfig as ConsolidationEngine;
 use memory::experience::{Experience, ExperienceBuffer};
 use metrics::SomaMetrics;
-use mind::{ArgType, MindEngine, ProgramStep, STOP_ID};
+use mind::{ArgType, MindEngine, STOP_ID};
 use mind::onnx_engine::OnnxMindEngine;
 use plugin::builtin::PosixPlugin;
 use plugin::interface::SomaPlugin;
@@ -65,7 +65,7 @@ struct Cli {
     #[arg(long)]
     checkpoint: Option<PathBuf>,
 
-    /// Override soma.log_level (trace, debug, info, warn, error)
+    /// Override `soma.log_level` (trace, debug, info, warn, error)
     #[arg(long)]
     log_level: Option<String>,
 
@@ -87,7 +87,7 @@ fn display_result(result: &plugin::manager::ProgramResult, _catalog: &[mind::Cat
                 plugin::interface::Value::List(items) => {
                     println!("  [Body] ({} items):", items.len());
                     for item in items.iter().take(15) {
-                        println!("    {}", item);
+                        println!("    {item}");
                     }
                     if items.len() > 15 {
                         println!("    ... and {} more", items.len() - 15);
@@ -96,10 +96,10 @@ fn display_result(result: &plugin::manager::ProgramResult, _catalog: &[mind::Cat
                 plugin::interface::Value::Map(entries) => {
                     println!("  [Body]");
                     for (k, v) in entries {
-                        println!("    {}: {}", k, v);
+                        println!("    {k}: {v}");
                     }
                 }
-                _ => println!("  [Body] {}", output),
+                _ => println!("  [Body] {output}"),
             }
         } else {
             println!("  [Body] Done.");
@@ -109,6 +109,7 @@ fn display_result(result: &plugin::manager::ProgramResult, _catalog: &[mind::Cat
     }
 }
 
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn run_intent(
     mind: &Arc<RwLock<OnnxMindEngine>>,
     plugins: &Arc<RwLock<PluginManager>>,
@@ -158,14 +159,13 @@ fn run_intent(
     let mind_guard = mind.read().unwrap();
     match mind_guard.infer(text) {
         Ok(program) => {
-            let real: Vec<&ProgramStep> = program
+            let real_count = program
                 .steps
                 .iter()
                 .filter(|s| s.conv_id != STOP_ID)
-                .collect();
+                .count();
             println!(
-                "\n  [Mind] Program ({} steps, {:.0}%):",
-                real.len(),
+                "\n  [Mind] Program ({real_count} steps, {:.0}%):",
                 program.confidence * 100.0
             );
             for (i, step) in program.steps.iter().enumerate() {
@@ -197,6 +197,7 @@ fn run_intent(
             }
             display_result(&result, &mind_guard.meta().catalog);
 
+            #[allow(clippy::cast_possible_truncation)] // millis will not exceed u64
             let execution_time_ms = exec_start.elapsed().as_millis() as u64;
 
             // Metrics
@@ -221,37 +222,43 @@ fn run_intent(
                 if !result.success && program.confidence > 0.3 {
                     drop(mind_guard);
                     let mind_guard2 = mind.read().unwrap();
-                    if let Ok(program2) = mind_guard2.infer(text) {
-                        if program2.steps != program.steps {
+                    let retry_result = if let Ok(program2) = mind_guard2.infer(text) {
+                        if program2.steps == program.steps {
+                            None
+                        } else {
                             println!("  [Mind] Re-inferred alternative program ({} steps, {:.0}%)",
                                 program2.steps.len(), program2.confidence * 100.0);
                             let result2 = plugins.read().unwrap().execute_program(&program2.steps, max_program_steps);
                             if result2.success {
                                 println!("  [Mind] Re-inference succeeded:");
                                 display_result(&result2, &mind_guard2.meta().catalog);
-                                (true, program2.steps.len(), program2.confidence, None)
+                                Some((true, program2.steps.len(), program2.confidence, None))
                             } else {
-                                (false, program.steps.len(), program.confidence, result.error.clone())
+                                None
                             }
-                        } else {
-                            (false, program.steps.len(), program.confidence, result.error.clone())
                         }
                     } else {
-                        (false, program.steps.len(), program.confidence, result.error.clone())
-                    }
+                        None
+                    };
+                    drop(mind_guard2);
+                    retry_result.unwrap_or(
+                        (false, program.steps.len(), program.confidence, result.error)
+                    )
                 } else {
-                    (result.success, program.steps.len(), program.confidence, result.error.clone())
+                    (result.success, program.steps.len(), program.confidence, result.error)
                 };
 
             // Record experience with FINAL outcome (not first attempt)
             {
                 let mind_r = mind.read().unwrap();
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)] // token IDs are small positive
                 let tokens: Vec<u32> = mind_r
                     .tokenizer
                     .encode(text)
                     .iter()
                     .map(|&t| t as u32)
                     .collect();
+                drop(mind_r);
                 let program_data: Vec<(i32, u8, u8)> = program
                     .steps
                     .iter()
@@ -277,7 +284,7 @@ fn run_intent(
                     success: final_success,
                     execution_time_ms,
                     timestamp: std::time::Instant::now(),
-                    cached_states: program.cached_states.clone(),
+                    cached_states: program.cached_states,
                 };
                 if let Ok(mut buf) = experience_buf.write() {
                     // Section 17.1: Only successful executions are recorded
@@ -300,7 +307,7 @@ fn run_intent(
                     final_confidence,
                     final_success,
                     execution_time_ms,
-                    trace_id.clone(),
+                    trace_id,
                     final_error,
                 );
             }
@@ -317,7 +324,7 @@ fn run_intent(
             // Runtime LoRA adaptation trigger (Section 4.7)
             if config.mind.lora.adaptation_enabled && final_success {
                 let success_count = experience_buf.read().map(|buf| buf.success_count()).unwrap_or(0);
-                if success_count > 0 && success_count % config.mind.lora.adapt_every_n_successes == 0 {
+                if success_count > 0 && success_count.is_multiple_of(config.mind.lora.adapt_every_n_successes) {
                     let experiences: Vec<Experience> = {
                         let buf = experience_buf.read().unwrap();
                         buf.successes().into_iter().cloned().collect()
@@ -338,7 +345,7 @@ fn run_intent(
                     let metrics_clone = soma_metrics.clone();
                     std::thread::spawn(move || {
                         let mut mind_guard = mind_clone.write().unwrap();
-                        match mind::adaptation::adapt_from_experience(&mut *mind_guard, &experiences, &adapt_config) {
+                        match mind::adaptation::adapt_from_experience(&mut mind_guard, &experiences, &adapt_config) {
                             Ok(result) => {
                                 eprintln!("  [Mind] Adapted. Loss: {:.4}, Cycle: {}, LoRA magnitude: {:.6}",
                                     result.loss, result.cycle, result.lora_magnitude);
@@ -347,7 +354,7 @@ fn run_intent(
                                 }
                                 metrics_clone.adaptations_total.fetch_add(1, Ordering::Relaxed);
                                 metrics_clone.lora_magnitude.store(
-                                    result.lora_magnitude.to_bits() as u64,
+                                    u64::from(result.lora_magnitude.to_bits()),
                                     Ordering::Relaxed,
                                 );
                             }
@@ -360,6 +367,7 @@ fn run_intent(
             }
         }
         Err(e) => {
+            #[allow(clippy::cast_possible_truncation)] // millis will not exceed u64
             let execution_time_ms = exec_start.elapsed().as_millis() as u64;
             soma_metrics.record_inference(false, execution_time_ms);
             tracing::info!(
@@ -370,7 +378,7 @@ fn run_intent(
                 success = false,
                 "Intent failed: {}", e
             );
-            println!("  [Mind] Error: {}", e);
+            println!("  [Mind] Error: {e}");
 
             // Record failed execution in history
             if let Ok(mut st) = soma_state.write() {
@@ -423,6 +431,7 @@ fn do_checkpoint(
         .collect();
 
     // Checkpoint LoRA state from mind engine (Section 4.7)
+    #[allow(clippy::option_if_let_else)]
     let lora_state = if let Some(mind_ref) = mind {
         if let Ok(m) = mind_ref.read() {
             match m.checkpoint_lora() {
@@ -449,30 +458,31 @@ fn do_checkpoint(
     ckpt.plugin_manifest = plugins_guard.plugin_manifest().into_iter()
         .map(|(name, version)| memory::checkpoint::PluginManifestEntry { name, version })
         .collect();
+    drop(plugins_guard);
 
     // Record base model hash and consolidated weight delta for checkpoint integrity
-    if let Some(mind_ref) = mind {
-        if let Ok(m) = mind_ref.read() {
-            ckpt.base_model_hash = m.model_hash.clone();
-            // Persist consolidated LoRA weight delta (Section 6.3)
-            if !m.merged_opcode_delta.is_empty() {
-                ckpt.merged_opcode_delta = m.merged_opcode_delta.clone();
-            }
+    if let Some(mind_ref) = mind
+        && let Ok(m) = mind_ref.read()
+    {
+        ckpt.base_model_hash.clone_from(&m.model_hash);
+        // Persist consolidated LoRA weight delta (Section 6.3)
+        if !m.merged_opcode_delta.is_empty() {
+            ckpt.merged_opcode_delta.clone_from(&m.merged_opcode_delta);
         }
     }
 
     // Persist decisions and execution history (Section 7.5: institutional memory)
-    if let Some(state_ref) = soma_state {
-        if let Ok(st) = state_ref.read() {
-            ckpt.decisions = serde_json::to_value(st.decisions.list())
-                .ok()
-                .and_then(|v| v.as_array().cloned())
-                .unwrap_or_default();
-            ckpt.recent_executions = serde_json::to_value(&st.executions.to_json())
-                .ok()
-                .and_then(|v| v.as_array().cloned())
-                .unwrap_or_default();
-        }
+    if let Some(state_ref) = soma_state
+        && let Ok(st) = state_ref.read()
+    {
+        ckpt.decisions = serde_json::to_value(st.decisions.list())
+            .ok()
+            .and_then(|v| v.as_array().cloned())
+            .unwrap_or_default();
+        ckpt.recent_executions = serde_json::to_value(st.executions.to_json())
+            .ok()
+            .and_then(|v| v.as_array().cloned())
+            .unwrap_or_default();
     }
 
     match ckpt.save(&path) {
@@ -482,12 +492,12 @@ fn do_checkpoint(
                 p.record_checkpoint();
             }
             match Checkpoint::prune_checkpoints(ckpt_dir, config.memory.max_checkpoints) {
-                Ok(n) if n > 0 => println!("  [Memory] Pruned {} old checkpoint(s)", n),
+                Ok(n) if n > 0 => println!("  [Memory] Pruned {n} old checkpoint(s)"),
                 _ => {}
             }
         }
         Err(e) => {
-            println!("  [Memory] Checkpoint failed: {}", e);
+            println!("  [Memory] Checkpoint failed: {e}");
         }
     }
 }
@@ -510,17 +520,16 @@ fn do_consolidate(
     let max_magnitude = {
         let m = mind.read().unwrap();
         m.active_lora().iter()
-            .map(|l| l.magnitude())
+            .map(mind::lora::LoRALayer::magnitude)
             .fold(0.0f32, f32::max)
     };
     if consolidation.should_consolidate(adaptation_count, max_magnitude) {
         println!(
-            "  [Memory] Consolidation criteria met ({} adaptations, magnitude {:.4})",
-            adaptation_count, max_magnitude
+            "  [Memory] Consolidation criteria met ({adaptation_count} adaptations, magnitude {max_magnitude:.4})"
         );
         drop(p); // release read lock before acquiring write lock on mind
         let mut mind_guard = mind.write().unwrap();
-        let result = consolidation.consolidate(&mut *mind_guard);
+        let result = consolidation.consolidate(&mut mind_guard);
         println!(
             "  [Memory] Consolidation complete: evaluated={}, merged={}, magnitude={:.4}",
             result.layers_evaluated, result.layers_merged, result.new_magnitude
@@ -539,7 +548,7 @@ fn do_consolidate(
         if let Ok(mut buf) = experience_buf.write() {
             let cleared = buf.len();
             buf.clear();
-            println!("  [Memory] Experience buffer cleared ({} entries)", cleared);
+            println!("  [Memory] Experience buffer cleared ({cleared} entries)");
         }
     } else {
         println!(
@@ -552,27 +561,28 @@ fn do_consolidate(
 fn format_uptime(d: std::time::Duration) -> String {
     let secs = d.as_secs();
     if secs < 60 {
-        format!("{}s", secs)
+        format!("{secs}s")
     } else if secs < 3600 {
-        format!("{}m {}s", secs / 60, secs % 60)
+        let m = secs / 60;
+        let s = secs % 60;
+        format!("{m}m {s}s")
     } else {
-        format!(
-            "{}h {}m {}s",
-            secs / 3600,
-            (secs % 3600) / 60,
-            secs % 60
-        )
+        let h = secs / 3600;
+        let m = (secs % 3600) / 60;
+        let s = secs % 60;
+        format!("{h}h {m}m {s}s")
     }
 }
 
 /// Graceful shutdown sequence (Whitepaper Section 11.4):
 /// 1. Stop accepting new requests
 /// 2. Notify peers with CLOSE signals
-/// 3. Drain in-flight requests (wait for ACTIVE_INFERENCES to reach 0)
+/// 3. Drain in-flight requests (wait for `ACTIVE_INFERENCES` to reach 0)
 /// 4. Auto-checkpoint
-/// 5. Unload plugins (on_unload lifecycle)
+/// 5. Unload plugins (`on_unload` lifecycle)
 /// 6. Close listeners
 /// 7. Exit
+#[allow(clippy::too_many_arguments, clippy::significant_drop_tightening)]
 fn do_shutdown(
     config: &SomaConfig,
     experience_buf: &Arc<RwLock<ExperienceBuffer>>,
@@ -609,11 +619,12 @@ fn do_shutdown(
                         .enable_all()
                         .build();
                     if let Ok(rt) = rt {
-                        let _ = rt.block_on(async {
-                            let _ = protocol::client::SynapseClient::send(
-                                &addr, &sender, &signal,
-                            )
-                            .await;
+                        rt.block_on(async {
+                            drop(
+                                protocol::client::SynapseClient::send(
+                                    &addr, &sender, &signal,
+                                ).await
+                            );
                         });
                     }
                 });
@@ -668,13 +679,17 @@ fn do_shutdown(
     // Step 8: Log final stats and exit
     let p = proprio.read().unwrap();
     let uptime = format_uptime(p.uptime());
+    let total_inferences = p.total_inferences;
+    let experience_count = p.experience_count;
+    let total_decisions = p.total_decisions_recorded;
+    drop(p);
     println!(
-        "  SOMA shutdown. Uptime: {}, Inferences: {}, Experiences: {}, Decisions: {}",
-        uptime, p.total_inferences, p.experience_count, p.total_decisions_recorded
+        "  SOMA shutdown. Uptime: {uptime}, Inferences: {total_inferences}, Experiences: {experience_count}, Decisions: {total_decisions}"
     );
 }
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -697,8 +712,7 @@ async fn main() -> Result<()> {
             config.protocol.peers.insert(parts[0].to_string(), parts[1].to_string());
         } else {
             eprintln!(
-                "  Warning: ignoring invalid peer format '{}' (expected name:host:port)",
-                peer_str
+                "  Warning: ignoring invalid peer format '{peer_str}' (expected name:host:port)"
             );
         }
     }
@@ -731,10 +745,9 @@ async fn main() -> Result<()> {
         .model
         .unwrap_or_else(|| PathBuf::from(&config.mind.model_dir));
     let mut engine = OnnxMindEngine::load(&model_dir)
-        .map_err(|e| {
+        .inspect_err(|_| {
             eprintln!("  Error: Failed to load Mind model from {}", model_dir.display());
             eprintln!("  Ensure encoder.onnx, decoder.onnx, tokenizer.json, and meta.json exist.");
-            e
         })?;
     engine.temperature = config.mind.temperature;
     engine.max_inference_time_secs = config.mind.max_inference_time_secs;
@@ -755,7 +768,7 @@ async fn main() -> Result<()> {
                 );
             }
             Err(e) => {
-                anyhow::bail!("Model verification failed: {}", e);
+                anyhow::bail!("Model verification failed: {e}");
             }
         }
     }
@@ -827,8 +840,9 @@ async fn main() -> Result<()> {
             let mut attached_count = 0usize;
             for name in &lora_plugins {
                 if let Some(lora_data) = plugins.get_plugin_lora_weights(name) {
-                    match mind.write().unwrap().attach_lora_bytes(name, &lora_data) {
-                        Ok(_) => {
+                    let attach_result = mind.write().unwrap().attach_lora_bytes(name, &lora_data);
+                    match attach_result {
+                        Ok(()) => {
                             tracing::info!(plugin = %name, "Plugin LoRA attached to Mind");
                             attached_count += 1;
                         }
@@ -851,15 +865,17 @@ async fn main() -> Result<()> {
     {
         let m = mind.read().unwrap();
         // Build catalog-to-plugin routing: maps model catalog IDs → plugin manager global IDs
-        let catalog = &m.meta().catalog;
-        plugins.build_catalog_routing(catalog);
+        let catalog = m.meta().catalog.clone();
+        drop(m);
+        plugins.build_catalog_routing(&catalog);
 
         // Check which catalog conventions have no matching plugin
         let mut missing = Vec::new();
-        for entry in catalog {
+        for entry in &catalog {
             if entry.name == "EMIT" || entry.name == "STOP" {
                 continue; // built-in control opcodes, handled separately
             }
+            #[allow(clippy::cast_possible_truncation)] // catalog IDs are small
             if plugins.resolve_catalog_id(entry.id as u32) == entry.id as u32 {
                 // Not remapped — means no matching plugin convention found by name
                 // Check if it exists via name_routing
@@ -935,6 +951,7 @@ async fn main() -> Result<()> {
             auth.register_viewer_token(token);
             tracing::info!("Registered viewer token from env {}", config.security.viewer_token_env);
         }
+        drop(auth);
     }
 
     // Step 6: Load checkpoint — restores proprioception, decisions, execution history,
@@ -947,21 +964,7 @@ async fn main() -> Result<()> {
         // Verify base model hash matches — detect model changes since checkpoint
         if !ckpt.base_model_hash.is_empty() {
             let current_hash = mind.read().unwrap().model_hash.clone();
-            if ckpt.base_model_hash != current_hash {
-                eprintln!(
-                    "  Warning: Base model hash mismatch! Checkpoint was created with a different model."
-                );
-                eprintln!(
-                    "    Checkpoint model hash: {}",
-                    &ckpt.base_model_hash[..16.min(ckpt.base_model_hash.len())]
-                );
-                eprintln!(
-                    "    Current model hash:    {}",
-                    &current_hash[..16.min(current_hash.len())]
-                );
-                eprintln!("    LoRA state from this checkpoint may be incompatible — skipping LoRA restore.");
-                // Skip LoRA state restore (lora_state is not applied when hashes mismatch)
-            } else {
+            if ckpt.base_model_hash == current_hash {
                 // Model hash matches — restore LoRA state if present (Section 4.7)
                 if !ckpt.lora_state.is_empty() {
                     let lora_checkpoint = crate::mind::lora::LoRACheckpoint {
@@ -975,20 +978,34 @@ async fn main() -> Result<()> {
                                 "  Restored LoRA state ({} layers)",
                                 ckpt.lora_state.len()
                             ),
-                            Err(e) => eprintln!("  Warning: Failed to restore LoRA state: {}", e),
+                            Err(e) => eprintln!("  Warning: Failed to restore LoRA state: {e}"),
                         }
                     }
                 }
                 // Restore consolidated weight delta if present
-                if !ckpt.merged_opcode_delta.is_empty() {
-                    if let Ok(mut m) = mind.write() {
-                        m.set_merged_opcode_delta(ckpt.merged_opcode_delta.clone());
-                        eprintln!(
-                            "  Restored consolidated weight delta ({} values)",
-                            ckpt.merged_opcode_delta.len()
-                        );
-                    }
+                if !ckpt.merged_opcode_delta.is_empty()
+                    && let Ok(mut m) = mind.write()
+                {
+                    m.set_merged_opcode_delta(ckpt.merged_opcode_delta.clone());
+                    eprintln!(
+                        "  Restored consolidated weight delta ({} values)",
+                        ckpt.merged_opcode_delta.len()
+                    );
                 }
+            } else {
+                eprintln!(
+                    "  Warning: Base model hash mismatch! Checkpoint was created with a different model."
+                );
+                eprintln!(
+                    "    Checkpoint model hash: {}",
+                    &ckpt.base_model_hash[..16.min(ckpt.base_model_hash.len())]
+                );
+                eprintln!(
+                    "    Current model hash:    {}",
+                    &current_hash[..16.min(current_hash.len())]
+                );
+                eprintln!("    LoRA state from this checkpoint may be incompatible — skipping LoRA restore.");
+                // Skip LoRA state restore (lora_state is not applied when hashes mismatch)
             }
         }
         if let Ok(mut p) = proprio.write() {
@@ -1123,7 +1140,7 @@ async fn main() -> Result<()> {
         eprintln!("============================================================");
         eprintln!("  ID:       {}", config.soma.id);
         eprintln!("  Mind:     {} ({}conv)", mind_info.backend, mind_info.conventions_known);
-        eprintln!("  Plugins:  posix ({} conventions)", total_conv);
+        eprintln!("  Plugins:  posix ({total_conv} conventions)");
         eprintln!("  Protocol: {} (Synaptic)", config.protocol.bind);
         eprintln!("  MCP:      stdio (JSON-RPC 2.0)");
         eprintln!("============================================================");
@@ -1145,7 +1162,7 @@ async fn main() -> Result<()> {
     eprintln!("============================================================");
     eprintln!("  ID:       {}", config.soma.id);
     eprintln!("  Mind:     {} ({}conv)", mind_info.backend, mind_info.conventions_known);
-    eprintln!("  Plugins:  posix ({} conventions)", total_conv);
+    eprintln!("  Plugins:  posix ({total_conv} conventions)");
     eprintln!("  Model:    {}", model_dir.display());
     eprintln!("  Protocol: {} (Synaptic server started)", config.protocol.bind);
     eprintln!("  MCP:      available (--mcp flag to enable)");
@@ -1210,18 +1227,14 @@ async fn main() -> Result<()> {
         let input = tokio::task::spawn_blocking(|| {
             let mut buf = String::new();
             match io::stdin().read_line(&mut buf) {
-                Ok(0) => None,
+                Ok(0) | Err(_) => None,
                 Ok(_) => Some(buf),
-                Err(_) => None,
             }
         }).await?;
-        let input = match input {
-            Some(s) => s,
-            None => {
-                println!();
-                do_shutdown(&config, &experience_buf, &proprio, Some(&server_handle), Some(&peer_registry), &plugins_arc, Some(&soma_state), Some(&mind));
-                break;
-            }
+        let Some(input) = input else {
+            println!();
+            do_shutdown(&config, &experience_buf, &proprio, Some(&server_handle), Some(&peer_registry), &plugins_arc, Some(&soma_state), Some(&mind));
+            break;
         };
         let text = input.trim();
         if text.is_empty() {
@@ -1240,10 +1253,19 @@ async fn main() -> Result<()> {
                 m.info()
             };
             let p = proprio.read().unwrap();
+            let report = p.report();
+            drop(p);
             let exp = experience_buf.read().unwrap();
+            let exp_len = exp.len();
+            let exp_total = exp.total_seen();
+            drop(exp);
             let st = soma_state.read().unwrap();
+            let decisions_len = st.decisions.len();
+            let executions_len = st.executions.len();
+            drop(st);
+            let conv_count = plugins_arc.read().unwrap().conventions().len();
             println!("\n  [Proprioception]");
-            println!("    {}", p.report().replace('\n', "\n    "));
+            println!("    {}", report.replace('\n', "\n    "));
             println!("    Mind:        {}", info.backend);
             println!("    Conventions: {}", info.conventions_known);
             println!("    Max steps:   {}", info.max_steps);
@@ -1251,15 +1273,13 @@ async fn main() -> Result<()> {
                 "    LoRA:        {} layers, magnitude {:.6}",
                 info.lora_layers, info.lora_magnitude
             );
-            println!("    Plugins:     {} loaded", plugins_arc.read().unwrap().conventions().len());
+            println!("    Plugins:     {conv_count} loaded");
             println!(
-                "    Experience:  {}/{} buffer ({} total seen)",
-                exp.len(),
+                "    Experience:  {exp_len}/{} buffer ({exp_total} total seen)",
                 config.memory.max_experience_buffer,
-                exp.total_seen()
             );
-            println!("    State:       {} decisions, {} executions",
-                st.decisions.len(), st.executions.len());
+            println!("    State:       {decisions_len} decisions, {executions_len} executions");
+            #[allow(clippy::significant_drop_tightening)]
             {
                 let pr = peer_registry.read().unwrap();
                 println!("    Peers:       {} configured", pr.count());
@@ -1274,7 +1294,8 @@ async fn main() -> Result<()> {
         }
         if text == ":inspect" || text == "help" || text == "?" {
             println!("\n  [Conventions]");
-            for conv in plugins_arc.read().unwrap().conventions() {
+            let conventions = plugins_arc.read().unwrap().conventions();
+            for conv in conventions {
                 println!("    [{:2}] {} -- {}", conv.id, conv.name, conv.description);
             }
             println!();
@@ -1292,12 +1313,13 @@ async fn main() -> Result<()> {
         }
         if text == ":decisions" {
             let st = soma_state.read().unwrap();
-            let decisions = st.decisions.list();
+            let decisions = st.decisions.list().to_vec();
+            drop(st);
             if decisions.is_empty() {
                 println!("\n  [State] No decisions recorded.");
             } else {
                 println!("\n  [State] Decision log ({} entries):", decisions.len());
-                for d in decisions {
+                for d in &decisions {
                     println!("    [{}] {} -- {}", d.id, d.what, d.why);
                 }
             }
@@ -1315,13 +1337,17 @@ async fn main() -> Result<()> {
         }
         if text == ":health" {
             let pm = plugins_arc.read().unwrap();
-            let warnings = pm.check_plugin_health();
+            let warnings: Vec<(String, String)> = pm.check_plugin_health()
+                .into_iter()
+                .map(|(n, m)| (n, m.to_string()))
+                .collect();
+            drop(pm);
             if warnings.is_empty() {
                 println!("\n  [Health] All plugins healthy.");
             } else {
                 println!("\n  [Health] Plugin warnings:");
                 for (name, msg) in &warnings {
-                    println!("    {} — {}", name, msg);
+                    println!("    {name} — {msg}");
                 }
             }
             println!();

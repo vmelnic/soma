@@ -1,8 +1,8 @@
 //! Peer discovery and registry for the Synaptic Protocol v2 (Spec Section 7).
 //!
 //! DISCOVER signals include address, plugins, conventions, and load.
-//! PEER_QUERY finds SOMAs with specific plugins.
-//! PEER_LIST returns matching peers.
+//! `PEER_QUERY` finds SOMAs with specific plugins.
+//! `PEER_LIST` returns matching peers.
 
 use std::collections::HashMap;
 
@@ -16,13 +16,15 @@ pub struct PeerInfo {
     pub plugins: Vec<String>,
     pub conventions: Vec<String>,
     pub load: f64,
+    #[allow(dead_code)] // Spec feature for peer load balancing
     pub capacity: u64,
+    #[allow(dead_code)] // Spec feature for peer health tracking
     pub last_seen: u64,
 }
 
 impl PeerInfo {
-    /// Create a basic PeerInfo with just name and address.
-    pub fn basic(name: String, addr: String) -> Self {
+    /// Create a basic `PeerInfo` with just name and address.
+    pub const fn basic(name: String, addr: String) -> Self {
         Self {
             name,
             addr,
@@ -53,7 +55,8 @@ impl PeerRegistry {
             .insert(name.clone(), PeerInfo::basic(name, addr));
     }
 
-    /// Update the last_seen timestamp for a peer.
+    /// Update the `last_seen` timestamp for a peer.
+    #[allow(dead_code)] // Spec feature for peer health tracking
     pub fn touch(&mut self, name: &str) {
         if let Some(peer) = self.peers.get_mut(name) {
             peer.last_seen = std::time::SystemTime::now()
@@ -72,10 +75,10 @@ impl PeerRegistry {
             .as_secs();
 
         // Extract payload data (address, plugins, conventions, load)
-        let payload: serde_json::Value = if !signal.payload.is_empty() {
-            serde_json::from_slice(&signal.payload).unwrap_or_default()
-        } else {
+        let payload: serde_json::Value = if signal.payload.is_empty() {
             serde_json::Value::Null
+        } else {
+            serde_json::from_slice(&signal.payload).unwrap_or_default()
         };
 
         let addr = payload
@@ -106,12 +109,12 @@ impl PeerRegistry {
 
         let load = payload
             .get("load")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .unwrap_or(0.0);
 
         let capacity = payload
             .get("capacity")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(1000);
 
         self.peers.insert(
@@ -129,6 +132,7 @@ impl PeerRegistry {
     }
 
     /// Register or update a discovered peer with explicit info.
+    #[allow(dead_code)] // Spec feature for peer discovery
     pub fn register(&mut self, name: String, addr: String) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -167,6 +171,7 @@ impl PeerRegistry {
     }
 
     /// Create a DISCOVER signal announcing this SOMA's presence.
+    #[allow(dead_code)] // Spec feature for peer discovery
     pub fn create_discover_signal(
         soma_id: &str,
         address: &str,
@@ -194,7 +199,8 @@ impl PeerRegistry {
         signal
     }
 
-    /// Create a DISCOVER_ACK response signal.
+    /// Create a `DISCOVER_ACK` response signal.
+    #[allow(dead_code)] // Spec feature for peer discovery
     pub fn create_discover_ack(
         soma_id: &str,
         address: &str,
@@ -216,13 +222,13 @@ impl PeerRegistry {
         signal
     }
 
-    /// Handle a PEER_QUERY signal: find peers matching the requested plugin.
-    /// Returns a PEER_LIST signal.
+    /// Handle a `PEER_QUERY` signal: find peers matching the requested plugin.
+    /// Returns a `PEER_LIST` signal.
     pub fn handle_peer_query(&self, query: &Signal, soma_id: &str) -> Signal {
-        let query_payload: serde_json::Value = if !query.payload.is_empty() {
-            serde_json::from_slice(&query.payload).unwrap_or_default()
-        } else {
+        let query_payload: serde_json::Value = if query.payload.is_empty() {
             serde_json::Value::Null
+        } else {
+            serde_json::from_slice(&query.payload).unwrap_or_default()
         };
 
         let need_plugin = query_payload
@@ -261,11 +267,12 @@ impl PeerRegistry {
 /// Check if a DISCOVER signal should be forwarded (TTL > 0).
 /// Returns a new signal with decremented TTL for forwarding, or None.
 /// Implements the chemical-gradient decay from Spec Section 7.1.
+#[allow(dead_code)] // Spec feature for discovery forwarding
 pub fn prepare_forward_discover(signal: &Signal, our_id: &str) -> Option<Signal> {
     let ttl = signal
         .metadata
         .get("ttl")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_json::Value::as_u64)
         .unwrap_or(0);
 
     if ttl == 0 {

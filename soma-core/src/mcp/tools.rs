@@ -1,12 +1,12 @@
 //! MCP tool definitions — state tools and action tools (Whitepaper Section 8.1).
 //!
 //! State tools (query what exists):
-//!   soma.get_state, soma.get_plugins, soma.get_conventions, soma.get_health,
-//!   soma.get_recent_activity, soma.get_peers, soma.get_experience,
-//!   soma.get_checkpoints, soma.get_config, soma.get_decisions
+//!   `soma.get_state`, `soma.get_plugins`, `soma.get_conventions`, `soma.get_health`,
+//!   `soma.get_recent_activity`, `soma.get_peers`, `soma.get_experience`,
+//!   `soma.get_checkpoints`, `soma.get_config`, `soma.get_decisions`
 //!
 //! Action tools (do things):
-//!   soma.intent, soma.checkpoint, soma.record_decision, soma.confirm
+//!   soma.intent, soma.checkpoint, `soma.record_decision`, soma.confirm
 //!   + every loaded plugin convention as an MCP tool
 
 use serde::{Deserialize, Serialize};
@@ -46,6 +46,7 @@ impl McpToolResult {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)] // Ergonomic: callers pass json!() directly
     pub fn json(val: serde_json::Value) -> Self {
         Self::text(serde_json::to_string_pretty(&val).unwrap_or_default())
     }
@@ -62,7 +63,8 @@ impl McpToolResult {
 }
 
 /// Build the list of all available MCP tools (state + action + plugin conventions).
-/// Takes namespaced conventions: Vec<(plugin_name, Convention)>.
+/// Takes namespaced conventions: Vec<(`plugin_name`, Convention)>.
+#[allow(clippy::too_many_lines)] // Tool list is declarative; splitting would harm readability
 pub fn build_tool_list(conventions: &[(String, crate::plugin::interface::Convention)]) -> Vec<McpTool> {
     let mut tools = Vec::new();
 

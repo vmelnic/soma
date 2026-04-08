@@ -16,12 +16,14 @@ pub struct Proprioception {
     pub experience_count: u64,
     pub checkpoints_saved: u64,
     pub consolidations: u64,
+    #[allow(dead_code)] // Spec feature: Section 11 protocol tracking
     pub active_connections: u64,
+    #[allow(dead_code)] // Spec feature: Section 11 protocol tracking
     pub total_signals_processed: u64,
     pub total_decisions_recorded: u64,
     /// Names of currently loaded plugins.
     pub loaded_plugins: Vec<String>,
-    /// Current LoRA adapter magnitude.
+    /// Current `LoRA` adapter magnitude.
     pub lora_magnitude: f32,
     /// Current CPU usage percentage.
     /// CPU tracking requires platform-specific implementation.
@@ -54,33 +56,34 @@ impl Proprioception {
     }
 
     /// Record a successful inference+execution cycle.
-    pub fn record_success(&mut self) {
+    pub const fn record_success(&mut self) {
         self.total_inferences += 1;
         self.successful_inferences += 1;
         self.experience_count += 1;
     }
 
     /// Record a failed inference or execution cycle.
-    pub fn record_failure(&mut self) {
+    pub const fn record_failure(&mut self) {
         self.total_inferences += 1;
         self.failed_inferences += 1;
         self.experience_count += 1;
     }
 
-    /// Record that a LoRA adaptation was performed.
-    pub fn record_adaptation(&mut self) {
+    /// Record that a `LoRA` adaptation was performed.
+    pub const fn record_adaptation(&mut self) {
         self.total_adaptations += 1;
     }
 
-    pub fn record_checkpoint(&mut self) {
+    pub const fn record_checkpoint(&mut self) {
         self.checkpoints_saved += 1;
     }
 
-    pub fn record_consolidation(&mut self) {
+    #[allow(dead_code)] // Spec feature: Section 11 consolidation tracking
+    pub const fn record_consolidation(&mut self) {
         self.consolidations += 1;
     }
 
-    pub fn record_decision(&mut self) {
+    pub const fn record_decision(&mut self) {
         self.total_decisions_recorded += 1;
     }
 
@@ -94,7 +97,7 @@ impl Proprioception {
         let d = self.uptime();
         let secs = d.as_secs();
         if secs < 60 {
-            format!("{}s", secs)
+            format!("{secs}s")
         } else if secs < 3600 {
             format!("{}m {}s", secs / 60, secs % 60)
         } else {
@@ -103,6 +106,7 @@ impl Proprioception {
     }
 
     /// Success rate as a percentage (0.0 - 100.0).
+    #[allow(clippy::cast_precision_loss)] // Acceptable: precision loss negligible for percentages
     pub fn success_rate(&self) -> f64 {
         if self.total_inferences == 0 {
             return 0.0;
@@ -152,13 +156,14 @@ impl Proprioception {
     /// to accurately reflect what it measures.
     pub fn peak_rss_bytes() -> u64 {
         let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
-        let rc = unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
+        let rc = unsafe { libc::getrusage(libc::RUSAGE_SELF, &raw mut usage) };
         if rc == 0 {
             // macOS: ru_maxrss is in bytes. Linux: in KB.
+            // ru_maxrss is always non-negative, sign loss is safe
             #[cfg(target_os = "macos")]
-            { usage.ru_maxrss as u64 }
+            { usage.ru_maxrss.cast_unsigned() }
             #[cfg(not(target_os = "macos"))]
-            { (usage.ru_maxrss as u64) * 1024 }
+            { usage.ru_maxrss.cast_unsigned() * 1024 }
         } else {
             0
         }
@@ -169,14 +174,16 @@ impl Proprioception {
         self.loaded_plugins = names;
     }
 
-    /// Set the current LoRA adapter magnitude.
-    pub fn set_lora_magnitude(&mut self, mag: f32) {
+    /// Set the current `LoRA` adapter magnitude.
+    #[allow(dead_code)] // Spec feature: Section 11 adaptation tracking
+    pub const fn set_lora_magnitude(&mut self, mag: f32) {
         self.lora_magnitude = mag;
     }
 
     /// Update CPU usage estimate.
     /// CPU tracking requires platform-specific implementation.
-    pub fn update_cpu(&mut self) {
+    #[allow(dead_code)] // Spec feature: Section 11 resource tracking
+    pub const fn update_cpu(&mut self) {
         // CPU tracking requires platform-specific implementation.
         self.cpu_usage_percent = 0.0;
     }

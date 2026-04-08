@@ -49,8 +49,8 @@ pub enum SignalType {
 }
 
 impl SignalType {
-    /// Convert a raw byte to a SignalType, returning None for unknown types.
-    pub fn from_u8(v: u8) -> Option<Self> {
+    /// Convert a raw byte to a `SignalType`, returning None for unknown types.
+    pub const fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x01 => Some(Self::Handshake),
             0x02 => Some(Self::HandshakeAck),
@@ -81,12 +81,13 @@ impl SignalType {
     }
 
     /// Convert to the wire byte representation.
-    pub fn to_u8(self) -> u8 {
+    pub const fn to_u8(self) -> u8 {
         self as u8
     }
 
+    #[allow(dead_code)] // Spec feature used by protocol routing
     /// Whether this signal type is a control signal (must use channel 0).
-    pub fn is_control(&self) -> bool {
+    pub const fn is_control(self) -> bool {
         matches!(self, Self::Handshake | Self::HandshakeAck | Self::Close |
                  Self::Ping | Self::Pong | Self::Error | Self::Control |
                  Self::Discover | Self::DiscoverAck | Self::PeerQuery | Self::PeerList)
@@ -117,12 +118,13 @@ impl Serialize for SignalFlags {
 impl<'de> Deserialize<'de> for SignalFlags {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
         let bits = u8::deserialize(deserializer)?;
-        Ok(SignalFlags::from_bits_truncate(bits))
+        Ok(Self::from_bits_truncate(bits))
     }
 }
 
 /// A Synaptic Protocol v2 signal. The fundamental unit of communication
 /// between SOMAs.
+#[allow(clippy::struct_field_names)] // signal_type and trace_id are descriptive names
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Signal {
     pub signal_type: SignalType,
@@ -174,7 +176,7 @@ impl Signal {
     }
 
     /// Create a Handshake signal with negotiation metadata.
-    /// Includes a session_token for reconnect identification (Spec Section 14.5).
+    /// Includes a `session_token` for reconnect identification (Spec Section 14.5).
     pub fn handshake(soma_id: &str, capabilities: &[&str], plugins: &[&str]) -> Self {
         let mut s = Self::new(SignalType::Handshake, soma_id.to_string());
         s.channel_id = 0; // control channel
@@ -194,7 +196,7 @@ impl Signal {
         s
     }
 
-    /// Create a HandshakeAck signal.
+    /// Create a `HandshakeAck` signal.
     pub fn handshake_ack(
         soma_id: &str,
         negotiated_caps: &[String],
@@ -218,7 +220,8 @@ impl Signal {
         Self::new(SignalType::Close, sender.to_string())
     }
 
-    /// Convenience: read trace_id from metadata if the field is empty.
+    #[allow(dead_code)] // Used by WebSocket handler
+    /// Convenience: read `trace_id` from metadata if the field is empty.
     pub fn effective_trace_id(&self) -> String {
         if !self.trace_id.is_empty() {
             return self.trace_id.clone();

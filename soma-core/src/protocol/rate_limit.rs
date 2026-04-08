@@ -29,11 +29,15 @@ pub enum ViolationLevel {
 pub struct RateLimiter {
     signals_per_second: u32,
     bytes_per_second: u64,
-    /// Original signals_per_second for restoration after `reduce_window`.
+    /// Original `signals_per_second` for restoration after `reduce_window`.
+    #[allow(dead_code)] // Used by reduce/restore_window
     original_signals_per_second: u32,
-    /// Original bytes_per_second for restoration after `reduce_window`.
+    /// Original `bytes_per_second` for restoration after `reduce_window`.
+    #[allow(dead_code)] // Used by reduce/restore_window
     original_bytes_per_second: u64,
+    #[allow(dead_code)] // Spec feature for channel limits
     max_channels: u32,
+    #[allow(dead_code)] // Spec feature for subscription limits
     max_subscriptions: u32,
 
     // Current-second tracking
@@ -65,6 +69,7 @@ impl RateLimiter {
     }
 
     /// Create a rate limiter with custom channel/subscription caps.
+    #[allow(dead_code)] // Spec feature for custom rate limits
     pub fn with_caps(
         signals_per_second: u32,
         bytes_per_second: u64,
@@ -96,6 +101,7 @@ impl RateLimiter {
         if self.signal_count_this_second >= self.signals_per_second {
             self.start_violation(now);
             // Suggest retrying after the current second window resets
+            #[allow(clippy::cast_possible_truncation)] // elapsed within 1s, fits in u32
             let elapsed_in_second = now.duration_since(self.second_start).as_millis() as u32;
             let retry_after = 1000u32.saturating_sub(elapsed_in_second).max(10);
             return Some(retry_after);
@@ -104,6 +110,7 @@ impl RateLimiter {
         // Check bytes/sec
         if self.bytes_this_second + signal_bytes as u64 > self.bytes_per_second {
             self.start_violation(now);
+            #[allow(clippy::cast_possible_truncation)] // elapsed within 1s, fits in u32
             let elapsed_in_second = now.duration_since(self.second_start).as_millis() as u32;
             let retry_after = 1000u32.saturating_sub(elapsed_in_second).max(10);
             return Some(retry_after);
@@ -118,26 +125,24 @@ impl RateLimiter {
 
     /// Return the current graduated violation level.
     pub fn violation_level(&self) -> ViolationLevel {
-        match self.violation_start {
-            None => ViolationLevel::None,
-            Some(start) => {
-                let duration = start.elapsed();
-                if duration.as_secs() >= 60 {
-                    ViolationLevel::Severe
-                } else if duration.as_secs() >= 10 {
-                    ViolationLevel::Sustained
-                } else {
-                    ViolationLevel::Warning
-                }
+        self.violation_start.map_or(ViolationLevel::None, |start| {
+            let duration = start.elapsed();
+            if duration.as_secs() >= 60 {
+                ViolationLevel::Severe
+            } else if duration.as_secs() >= 10 {
+                ViolationLevel::Sustained
+            } else {
+                ViolationLevel::Warning
             }
-        }
+        })
     }
 
     /// Check whether opening another channel would exceed the limit.
     ///
     /// Returns `true` if `current_channels < max_channels` (i.e. allowed),
     /// `false` if the limit would be exceeded.
-    pub fn check_channel_limit(&self, current_channels: usize) -> bool {
+    #[allow(dead_code)] // Spec feature for channel limits
+    pub const fn check_channel_limit(&self, current_channels: usize) -> bool {
         current_channels < self.max_channels as usize
     }
 
@@ -145,13 +150,15 @@ impl RateLimiter {
     ///
     /// Returns `true` if `current_subs < max_subscriptions` (i.e. allowed),
     /// `false` if the limit would be exceeded.
-    pub fn check_subscription_limit(&self, current_subs: usize) -> bool {
+    #[allow(dead_code)] // Spec feature for subscription limits
+    pub const fn check_subscription_limit(&self, current_subs: usize) -> bool {
         current_subs < self.max_subscriptions as usize
     }
 
     /// Halve the throughput windows as a graduated response to sustained
     /// violations (Spec Section 20). The original values are preserved so
     /// they can be restored later via `restore_window()`.
+    #[allow(dead_code)] // Spec feature for graduated response
     pub fn reduce_window(&mut self) {
         self.signals_per_second = (self.signals_per_second / 2).max(1);
         self.bytes_per_second = (self.bytes_per_second / 2).max(1);
@@ -159,12 +166,14 @@ impl RateLimiter {
 
     /// Restore throughput windows to their original values after a
     /// previous `reduce_window()`.
-    pub fn restore_window(&mut self) {
+    #[allow(dead_code)] // Spec feature for graduated response
+    pub const fn restore_window(&mut self) {
         self.signals_per_second = self.original_signals_per_second;
         self.bytes_per_second = self.original_bytes_per_second;
     }
 
     /// Reset all counters and violation state.
+    #[allow(dead_code)] // Spec feature for rate limit reset
     pub fn reset(&mut self) {
         self.signal_count_this_second = 0;
         self.bytes_this_second = 0;
@@ -172,7 +181,7 @@ impl RateLimiter {
         self.violation_start = None;
     }
 
-    fn start_violation(&mut self, now: Instant) {
+    const fn start_violation(&mut self, now: Instant) {
         if self.violation_start.is_none() {
             self.violation_start = Some(now);
         }
@@ -190,13 +199,15 @@ pub fn create_rate_limit_signal(sender: &str, retry_after_ms: u32) -> Signal {
 }
 
 /// Tracks blacklisted peers after sustained rate limit violations (Section 20.4).
+#[allow(dead_code)] // Spec feature for peer blacklisting
 pub struct PeerBlacklist {
-    /// peer_addr → blacklist_until
+    /// `peer_addr` → `blacklist_until`
     entries: HashMap<String, Instant>,
     /// Default blacklist duration
     blacklist_duration: std::time::Duration,
 }
 
+#[allow(dead_code)] // Spec feature for peer blacklisting
 impl PeerBlacklist {
     pub fn new() -> Self {
         Self {
@@ -215,8 +226,7 @@ impl PeerBlacklist {
     /// Check if a peer is currently blacklisted.
     pub fn is_blacklisted(&self, peer_addr: &str) -> bool {
         self.entries.get(peer_addr)
-            .map(|until| Instant::now() < *until)
-            .unwrap_or(false)
+            .is_some_and(|until| Instant::now() < *until)
     }
 
     /// Remove expired blacklist entries.

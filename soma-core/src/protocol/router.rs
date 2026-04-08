@@ -1,4 +1,4 @@
-//! SignalRouter — centralized signal routing with request-response correlation
+//! `SignalRouter` — centralized signal routing with request-response correlation
 //! (Whitepaper Section 14.2).
 
 use dashmap::DashMap;
@@ -8,21 +8,25 @@ use tokio::time::{timeout, Duration};
 use super::signal::Signal;
 
 /// Default timeout for request-response correlation.
+#[allow(dead_code)] // Used by SignalRouter constructor
 const DEFAULT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Maximum number of inflight pending requests.
+#[allow(dead_code)] // Used by SignalRouter::register_pending
 const MAX_INFLIGHT: usize = 1000;
 
 /// Centralized router for correlating outgoing requests with incoming responses.
 /// When a SOMA sends an Intent to a peer and expects a Result, it stores
 /// a one-shot channel keyed by sequence number (Section 14.3).
+#[allow(dead_code)] // Spec feature for request-response correlation
 pub struct SignalRouter {
-    /// Pending request-response correlations: sequence_id -> response sender
+    /// Pending request-response correlations: `sequence_id` -> response sender
     pending_requests: DashMap<u32, oneshot::Sender<Signal>>,
     /// Response timeout
     response_timeout: Duration,
 }
 
+#[allow(dead_code)] // Spec feature for request-response correlation
 impl SignalRouter {
     pub fn new() -> Self {
         Self {
@@ -87,7 +91,8 @@ impl SignalRouter {
     }
 
     /// Clean up expired entries (called periodically).
-    pub fn cleanup(&self) {
+    #[allow(clippy::unused_self)] // hook for future TTL-based cleanup
+    pub const fn cleanup(&self) {
         // DashMap entries are cleaned up on deliver/cancel/timeout.
         // This is a no-op but provides a hook for future TTL-based cleanup.
     }
@@ -110,6 +115,7 @@ impl SignalRouter {
 }
 
 /// Errors from the signal router.
+#[allow(dead_code)] // Spec feature for request-response correlation
 #[derive(Debug)]
 pub enum RouterError {
     /// Response channel was closed (peer disconnected).
@@ -123,9 +129,9 @@ pub enum RouterError {
 impl std::fmt::Display for RouterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RouterError::ChannelClosed => write!(f, "response channel closed"),
-            RouterError::Timeout(d) => write!(f, "response timed out after {:?}", d),
-            RouterError::MaxInflight(max) => write!(f, "max inflight requests reached ({})", max),
+            Self::ChannelClosed => write!(f, "response channel closed"),
+            Self::Timeout(d) => write!(f, "response timed out after {d:?}"),
+            Self::MaxInflight(max) => write!(f, "max inflight requests reached ({max})"),
         }
     }
 }

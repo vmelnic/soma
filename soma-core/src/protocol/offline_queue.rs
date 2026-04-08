@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use super::signal::Signal;
 
 /// A signal waiting for delivery, annotated with priority and retry count.
+#[allow(dead_code)] // Spec feature for offline signal queuing
 pub struct QueuedSignal {
     pub signal: Signal,
     pub queued_at: Instant,
@@ -22,6 +23,7 @@ pub struct QueuedSignal {
 ///
 /// `max_age` is a queue-level setting (per spec): signals older than
 /// `max_age` are considered expired and silently dropped on drain.
+#[allow(dead_code)] // Spec feature for offline signal queuing
 pub struct OfflineQueue {
     signals: VecDeque<QueuedSignal>,
     max_size: usize,
@@ -29,6 +31,7 @@ pub struct OfflineQueue {
     max_age: Duration,
 }
 
+#[allow(dead_code)] // Spec feature for offline signal queuing
 impl OfflineQueue {
     pub fn new(max_size: usize) -> Self {
         Self {

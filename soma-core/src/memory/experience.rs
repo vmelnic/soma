@@ -1,21 +1,22 @@
-//! Experience buffer — stores recent inference outcomes for LoRA adaptation.
+//! Experience buffer — stores recent inference outcomes for `LoRA` adaptation.
 
 /// A single experience record from an inference+execution cycle.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Spec feature: experience tracking fields
 pub struct Experience {
     pub intent_tokens: Vec<u32>,
-    /// Full program: (conv_id, arg0_type, arg1_type) per step
+    /// Full program: (`conv_id`, `arg0_type`, `arg1_type`) per step
     pub program: Vec<(i32, u8, u8)>,
     pub success: bool,
     pub execution_time_ms: u64,
     pub timestamp: std::time::Instant,
-    /// Cached hidden states from inference — (hidden_state, base_opcode_logits) per decoder step.
+    /// Cached hidden states from inference — (`hidden_state`, `base_opcode_logits`) per decoder step.
     /// Pre-computed during normal inference so adaptation doesn't need to re-run ONNX.
     /// Empty if not captured (backward compat).
     pub cached_states: Vec<(Vec<f32>, Vec<f32>)>,
 }
 
-/// Ring buffer of recent experiences, used to drive LoRA adaptation.
+/// Ring buffer of recent experiences, used to drive `LoRA` adaptation.
 pub struct ExperienceBuffer {
     buffer: Vec<Experience>,
     max_size: usize,
@@ -47,22 +48,24 @@ impl ExperienceBuffer {
     }
 
     /// Get all failed experiences (for negative examples).
+    #[allow(dead_code)] // Spec feature: experience analysis
     pub fn failures(&self) -> Vec<&Experience> {
         self.buffer.iter().filter(|e| !e.success).collect()
     }
 
     /// Number of experiences currently in the buffer.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.buffer.len()
     }
 
     /// Whether the buffer is empty.
-    pub fn is_empty(&self) -> bool {
+    #[allow(dead_code)] // Spec feature: experience buffer API
+    pub const fn is_empty(&self) -> bool {
         self.buffer.is_empty()
     }
 
     /// Total number of experiences ever recorded (including evicted ones).
-    pub fn total_seen(&self) -> u64 {
+    pub const fn total_seen(&self) -> u64 {
         self.total_seen
     }
 
@@ -82,6 +85,7 @@ impl ExperienceBuffer {
     }
 
     /// Get the most recent N experiences.
+    #[allow(dead_code)] // Spec feature: experience buffer API
     pub fn recent(&self, n: usize) -> &[Experience] {
         let start = if self.buffer.len() > n {
             self.buffer.len() - n

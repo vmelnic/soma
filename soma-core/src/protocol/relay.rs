@@ -15,10 +15,10 @@ pub fn should_relay(signal: &Signal, our_id: &str) -> bool {
     !recipient.is_empty() && recipient != our_id
 }
 
-/// Prepare a signal for relay: increment hop_count, append to relay_path.
+/// Prepare a signal for relay: increment `hop_count`, append to `relay_path`.
 ///
 /// Returns an error if max hops would be exceeded or if a relay loop
-/// is detected (our_id already appears in the relay_path).
+/// is detected (`our_id` already appears in the `relay_path`).
 pub fn prepare_relay(signal: &mut Signal, our_id: &str) -> Result<(), &'static str> {
     let metadata = signal
         .metadata
@@ -26,13 +26,15 @@ pub fn prepare_relay(signal: &mut Signal, our_id: &str) -> Result<(), &'static s
         .ok_or("invalid metadata")?;
 
     // Check max_hops
+    #[allow(clippy::cast_possible_truncation)] // hop counts are small values
     let max_hops = metadata
         .get("max_hops")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_json::Value::as_u64)
         .unwrap_or(3) as u32;
+    #[allow(clippy::cast_possible_truncation)] // hop counts are small values
     let hop_count = metadata
         .get("hop_count")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_json::Value::as_u64)
         .unwrap_or(0) as u32;
 
     if hop_count >= max_hops {
@@ -50,7 +52,7 @@ pub fn prepare_relay(signal: &mut Signal, our_id: &str) -> Result<(), &'static s
         })
         .unwrap_or_default();
 
-    if relay_path.iter().any(|id| *id == our_id) {
+    if relay_path.contains(&our_id) {
         return Err("relay loop detected");
     }
 

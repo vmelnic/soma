@@ -1,6 +1,6 @@
 //! Chunked transfer support for large file uploads (Spec Section 6.3).
 //!
-//! Manages CHUNK_START / CHUNK_DATA / CHUNK_END / CHUNK_ACK lifecycle,
+//! Manages `CHUNK_START` / `CHUNK_DATA` / `CHUNK_END` / `CHUNK_ACK` lifecycle,
 //! including resumption from the last acknowledged chunk and SHA-256
 //! verification on reassembly.
 
@@ -13,9 +13,11 @@ use super::signal::{Signal, SignalType};
 
 /// State for a single in-progress chunked transfer.
 pub struct ChunkTransfer {
+    #[allow(dead_code)] // Stored for transfer tracking
     pub channel_id: u32,
     pub filename: String,
     pub total_size: u64,
+    #[allow(dead_code)] // Stored for transfer metadata
     pub chunk_size: u32,
     pub total_chunks: u32,
     pub checksum_sha256: String,
@@ -23,7 +25,7 @@ pub struct ChunkTransfer {
     pub last_ack_seq: u32,
 }
 
-/// Manages all active chunked transfers, keyed by channel_id.
+/// Manages all active chunked transfers, keyed by `channel_id`.
 pub struct ChunkManager {
     active_transfers: HashMap<u32, ChunkTransfer>,
 }
@@ -35,11 +37,12 @@ impl ChunkManager {
         }
     }
 
-    /// Handle CHUNK_START: create a new transfer from the signal metadata.
+    /// Handle `CHUNK_START`: create a new transfer from the signal metadata.
     ///
     /// If metadata contains `resume_from`, the transfer starts expecting
     /// chunks from that sequence number onward (chunks below it are
     /// assumed already received in a prior session and are not required).
+    #[allow(clippy::unnecessary_wraps)] // Result kept for future validation logic
     pub fn start_transfer(
         &mut self,
         channel_id: u32,
@@ -53,17 +56,19 @@ impl ChunkManager {
 
         let total_size = metadata
             .get("total_size")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
 
+        #[allow(clippy::cast_possible_truncation)] // chunk sizes fit in u32
         let chunk_size = metadata
             .get("chunk_size")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(65536) as u32;
 
+        #[allow(clippy::cast_possible_truncation)] // chunk counts fit in u32
         let total_chunks = metadata
             .get("total_chunks")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0) as u32;
 
         let checksum_sha256 = metadata
@@ -72,9 +77,10 @@ impl ChunkManager {
             .unwrap_or("")
             .to_string();
 
+        #[allow(clippy::cast_possible_truncation)] // resume sequence fits in u32
         let resume_from = metadata
             .get("resume_from")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0) as u32;
 
         let mut transfer = ChunkTransfer {
@@ -99,9 +105,9 @@ impl ChunkManager {
         Ok(())
     }
 
-    /// Handle CHUNK_DATA: store chunk data and return a CHUNK_ACK signal.
+    /// Handle `CHUNK_DATA`: store chunk data and return a `CHUNK_ACK` signal.
     ///
-    /// Returns `None` if the channel_id has no active transfer.
+    /// Returns `None` if the `channel_id` has no active transfer.
     pub fn receive_chunk(
         &mut self,
         channel_id: u32,
@@ -121,13 +127,12 @@ impl ChunkManager {
         Some(ack)
     }
 
-    /// Handle CHUNK_END: verify all chunks received, reassemble in sequence
+    /// Handle `CHUNK_END`: verify all chunks received, reassemble in sequence
     /// order, verify SHA-256 checksum (if provided), and return the complete
     /// payload.
     pub fn finalize_transfer(&mut self, channel_id: u32) -> Result<Vec<u8>> {
-        let transfer = match self.active_transfers.remove(&channel_id) {
-            Some(t) => t,
-            None => bail!("No active transfer on channel {}", channel_id),
+        let Some(transfer) = self.active_transfers.remove(&channel_id) else {
+            bail!("No active transfer on channel {channel_id}");
         };
 
         // Determine expected chunk count from the map itself if total_chunks
@@ -154,6 +159,7 @@ impl ChunkManager {
         }
 
         // Reassemble in order
+        #[allow(clippy::cast_possible_truncation)] // file sizes within memory limits
         let mut assembled = Vec::with_capacity(transfer.total_size as usize);
         for seq in 0..expected {
             if let Some(chunk) = transfer.received_chunks.get(&seq) {
@@ -181,12 +187,14 @@ impl ChunkManager {
 
     /// Return the next expected sequence number for a transfer (useful for
     /// communicating resume position to the sender).
+    #[allow(dead_code)] // Spec feature for resumable transfers
     pub fn resume_from(&self, channel_id: u32) -> Option<u32> {
         let transfer = self.active_transfers.get(&channel_id)?;
         Some(transfer.last_ack_seq + 1)
     }
 
     /// Check whether a transfer is active on the given channel.
+    #[allow(dead_code)] // Spec feature for transfer state queries
     pub fn has_transfer(&self, channel_id: u32) -> bool {
         self.active_transfers.contains_key(&channel_id)
     }

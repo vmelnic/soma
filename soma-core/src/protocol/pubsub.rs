@@ -9,6 +9,7 @@ use super::signal::{Signal, SignalType};
 
 /// A single subscription entry.
 pub struct Subscription {
+    #[allow(dead_code)] // Stored for subscription management
     pub topic: String,
     pub channel_id: u32,
     pub connection_id: u64,
@@ -78,7 +79,7 @@ impl PubSubManager {
 
         self.subscriptions
             .entry(topic.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(sub);
 
         // Ensure a buffer exists for the topic
@@ -105,7 +106,7 @@ impl PubSubManager {
     pub fn publish(
         &mut self,
         topic: &str,
-        payload: Vec<u8>,
+        payload: &[u8],
         channel_id: u32,
     ) -> Vec<(u64, Signal)> {
         // Assign the next sequence number for this topic
@@ -120,7 +121,7 @@ impl PubSubManager {
         self.topic_buffers
             .entry(topic.to_string())
             .or_insert_with(|| TopicBuffer::new(self.default_buffer_size))
-            .push(seq, payload.clone());
+            .push(seq, payload.to_vec());
 
         // Fan-out to matching subscribers
         let mut results: Vec<(u64, Signal)> = Vec::new();
@@ -143,7 +144,7 @@ impl PubSubManager {
                         channel_id
                     };
                     signal.sequence = seq;
-                    signal.payload = payload.clone();
+                    signal.payload = payload.to_vec();
                     signal.metadata = serde_json::json!({ "topic": topic });
 
                     sub.last_seen_sequence = seq;
@@ -165,7 +166,7 @@ impl PubSubManager {
                 if *seq > last_seen_sequence {
                     let mut signal = Signal::new(SignalType::StreamData, String::new());
                     signal.sequence = *seq;
-                    signal.payload = payload.clone();
+                    signal.payload.clone_from(payload);
                     signal.metadata = serde_json::json!({ "topic": topic });
                     signals.push(signal);
                 }
@@ -191,12 +192,10 @@ impl PubSubManager {
     /// Match a topic against a subscription pattern. Supports `:*` suffix
     /// as a wildcard (e.g. `chat:*` matches `chat:room-1`).
     fn topic_matches(pattern: &str, topic: &str) -> bool {
-        if pattern.ends_with(":*") {
-            let prefix = &pattern[..pattern.len() - 2];
-            topic == prefix || topic.starts_with(&format!("{}:", prefix))
-        } else {
-            pattern == topic
-        }
+        pattern.strip_suffix(":*").map_or_else(
+            || pattern == topic,
+            |prefix| topic == prefix || topic.starts_with(&format!("{prefix}:")),
+        )
     }
 }
 
@@ -210,7 +209,7 @@ mod tests {
         mgr.subscribe("chat:room-1", 100, 1, None, false);
         mgr.subscribe("chat:room-1", 101, 2, None, false);
 
-        let results = mgr.publish("chat:room-1", b"hello".to_vec(), 100);
+        let results = mgr.publish("chat:room-1", b"hello", 100);
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].0, 1); // connection_id
         assert_eq!(results[1].0, 2);
@@ -222,7 +221,7 @@ mod tests {
         let mut mgr = PubSubManager::new();
         mgr.subscribe("chat:*", 100, 1, None, false);
 
-        let results = mgr.publish("chat:room-5", b"msg".to_vec(), 100);
+        let results = mgr.publish("chat:room-5", b"msg", 100);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, 1);
     }
@@ -232,7 +231,7 @@ mod tests {
         let mut mgr = PubSubManager::new();
         mgr.subscribe("chat:*", 100, 1, None, false);
 
-        let results = mgr.publish("events:new", b"msg".to_vec(), 100);
+        let results = mgr.publish("events:new", b"msg", 100);
         assert_eq!(results.len(), 0);
     }
 
@@ -243,7 +242,7 @@ mod tests {
         mgr.subscribe("topic-a", 101, 2, None, false);
 
         mgr.unsubscribe("topic-a", 1);
-        let results = mgr.publish("topic-a", b"data".to_vec(), 100);
+        let results = mgr.publish("topic-a", b"data", 100);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, 2);
     }
@@ -253,9 +252,9 @@ mod tests {
         let mut mgr = PubSubManager::new();
         mgr.subscribe("news", 100, 1, None, true);
 
-        mgr.publish("news", b"a".to_vec(), 100);
-        mgr.publish("news", b"b".to_vec(), 100);
-        mgr.publish("news", b"c".to_vec(), 100);
+        mgr.publish("news", b"a", 100);
+        mgr.publish("news", b"b", 100);
+        mgr.publish("news", b"c", 100);
 
         // Subscriber missed signals after seq 0
         let catchup = mgr.catch_up("news", 0);
@@ -271,7 +270,7 @@ mod tests {
         mgr.subscribe("topic", 101, 2, None, false);
 
         mgr.remove_connection(1);
-        let results = mgr.publish("topic", b"x".to_vec(), 100);
+        let results = mgr.publish("topic", b"x", 100);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, 2);
     }
@@ -283,7 +282,7 @@ mod tests {
 
         mgr.remove_connection(1);
         // Durable sub is still there
-        let results = mgr.publish("topic", b"x".to_vec(), 100);
+        let results = mgr.publish("topic", b"x", 100);
         assert_eq!(results.len(), 1);
     }
 

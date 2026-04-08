@@ -163,6 +163,7 @@ fn to_cstring(val: &Value) -> Result<CString, PluginError> {
     }
 }
 
+#[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // fd values fit in i32
 fn get_fd(val: &Value) -> Result<i32, PluginError> {
     match val {
         Value::Handle(h) => Ok(*h as i32),
@@ -172,7 +173,7 @@ fn get_fd(val: &Value) -> Result<i32, PluginError> {
 }
 
 impl SomaPlugin for PosixPlugin {
-    fn name(&self) -> &str { "posix" }
+    fn name(&self) -> &'static str { "posix" }
 
     fn permissions(&self) -> super::interface::PluginPermissions {
         super::interface::PluginPermissions {
@@ -187,6 +188,7 @@ impl SomaPlugin for PosixPlugin {
         self.conventions.clone()
     }
 
+    #[allow(clippy::too_many_lines)]
     fn execute(&self, conv_id: u32, args: Vec<Value>) -> Result<Value, PluginError> {
         match conv_id {
             // open_read
@@ -194,6 +196,7 @@ impl SomaPlugin for PosixPlugin {
                 let path = to_cstring(&args[0])?;
                 let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDONLY) };
                 if fd < 0 { return Err(PluginError::NotFound(format!("file not found: {}", args[0]))); }
+                #[allow(clippy::cast_sign_loss)] // fd is checked >= 0 above
                 Ok(Value::Handle(fd as u64))
             }
             // create_file (creat)
@@ -201,14 +204,16 @@ impl SomaPlugin for PosixPlugin {
                 let path = to_cstring(&args[0])?;
                 let fd = unsafe { libc::creat(path.as_ptr(), 0o644) };
                 if fd < 0 { return Err(PluginError::Failed("create failed".into())); }
+                #[allow(clippy::cast_sign_loss)] // fd is checked >= 0 above
                 Ok(Value::Handle(fd as u64))
             }
             // read_content
             2 => {
                 let fd = get_fd(&args[0])?;
                 let mut buf = vec![0u8; 65536];
-                let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+                let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len()) };
                 if n < 0 { return Err(PluginError::Failed("read failed".into())); }
+                #[allow(clippy::cast_sign_loss)] // n is checked >= 0 above
                 buf.truncate(n as usize);
                 Ok(Value::String(String::from_utf8_lossy(&buf).to_string()))
             }
@@ -220,7 +225,7 @@ impl SomaPlugin for PosixPlugin {
                     Value::Bytes(b) => b.clone(),
                     _ => return Err(PluginError::InvalidArg("expected string/bytes".into())),
                 };
-                let n = unsafe { libc::write(fd, data.as_ptr() as *const libc::c_void, data.len()) };
+                let n = unsafe { libc::write(fd, data.as_ptr().cast::<libc::c_void>(), data.len()) };
                 Ok(Value::Int(n as i64))
             }
             // close_fd
@@ -302,18 +307,18 @@ impl SomaPlugin for PosixPlugin {
             12 => {
                 let path = to_cstring(&args[0])?;
                 let mut stat: libc::stat = unsafe { std::mem::zeroed() };
-                let rc = unsafe { libc::stat(path.as_ptr(), &mut stat) };
+                let rc = unsafe { libc::stat(path.as_ptr(), &raw mut stat) };
                 if rc != 0 { return Err(PluginError::NotFound(format!("stat failed: {}", args[0]))); }
                 Ok(Value::Map(std::collections::HashMap::from([
-                    ("size".to_string(), Value::Int(stat.st_size as i64)),
+                    ("size".to_string(), Value::Int(stat.st_size)),
                     ("mode".to_string(), Value::String(format!("{:o}", stat.st_mode))),
-                    ("modified".to_string(), Value::Int(stat.st_mtime as i64)),
+                    ("modified".to_string(), Value::Int(stat.st_mtime)),
                 ])))
             }
             // get_cwd
             13 => {
                 let mut buf = vec![0u8; 1024];
-                let ptr = unsafe { libc::getcwd(buf.as_mut_ptr() as *mut i8, buf.len()) };
+                let ptr = unsafe { libc::getcwd(buf.as_mut_ptr().cast::<i8>(), buf.len()) };
                 if ptr.is_null() { return Err(PluginError::Failed("getcwd failed".into())); }
                 let cwd = unsafe { std::ffi::CStr::from_ptr(ptr).to_string_lossy().to_string() };
                 Ok(Value::String(cwd))
@@ -321,15 +326,15 @@ impl SomaPlugin for PosixPlugin {
             // get_time
             14 => {
                 let mut tv: libc::timeval = unsafe { std::mem::zeroed() };
-                unsafe { libc::gettimeofday(&mut tv, std::ptr::null_mut()); }
+                unsafe { libc::gettimeofday(&raw mut tv, std::ptr::null_mut()); }
                 // Format as ISO timestamp
                 let secs = tv.tv_sec;
-                Ok(Value::String(format!("timestamp:{}", secs)))
+                Ok(Value::String(format!("timestamp:{secs}")))
             }
             // get_uname
             15 => {
                 let mut uts: libc::utsname = unsafe { std::mem::zeroed() };
-                unsafe { libc::uname(&mut uts); }
+                unsafe { libc::uname(&raw mut uts); }
                 let sysname = unsafe { std::ffi::CStr::from_ptr(uts.sysname.as_ptr()).to_string_lossy().to_string() };
                 let machine = unsafe { std::ffi::CStr::from_ptr(uts.machine.as_ptr()).to_string_lossy().to_string() };
                 let release = unsafe { std::ffi::CStr::from_ptr(uts.release.as_ptr()).to_string_lossy().to_string() };
@@ -344,7 +349,7 @@ impl SomaPlugin for PosixPlugin {
             16 => {
                 let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
                 let content = std::fs::read_to_string(&path)
-                    .map_err(|e| PluginError::NotFound(format!("read_file failed: {}", e)))?;
+                    .map_err(|e| PluginError::NotFound(format!("read_file failed: {e}")))?;
                 Ok(Value::String(content))
             }
             // write_file — single-call: create/overwrite file
@@ -352,55 +357,55 @@ impl SomaPlugin for PosixPlugin {
                 let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
                 let content = match &args[1] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
                 std::fs::write(&path, &content)
-                    .map_err(|e| PluginError::Failed(format!("write_file failed: {}", e)))?;
+                    .map_err(|e| PluginError::Failed(format!("write_file failed: {e}")))?;
                 Ok(Value::Null)
             }
             // list_dir_simple — single-call: list directory entries sorted
             18 => {
                 let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
                 let mut entries = Vec::new();
-                for entry in std::fs::read_dir(&path).map_err(|e| PluginError::NotFound(format!("{}", e)))? {
-                    if let Ok(e) = entry {
-                        let name = e.file_name().to_string_lossy().to_string();
-                        entries.push(Value::String(name));
-                    }
+                for e in std::fs::read_dir(&path).map_err(|e| PluginError::NotFound(format!("{e}")))?.flatten() {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    entries.push(Value::String(name));
                 }
-                entries.sort_by(|a, b| format!("{}", a).cmp(&format!("{}", b)));
+                entries.sort_by(|a, b| format!("{a}").cmp(&format!("{b}")));
                 Ok(Value::List(entries))
             }
             // copy_file — single-call: copy file
             19 => {
                 let from = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
                 let to = match &args[1] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
-                std::fs::copy(&from, &to).map_err(|e| PluginError::Failed(format!("copy failed: {}", e)))?;
+                std::fs::copy(&from, &to).map_err(|e| PluginError::Failed(format!("copy failed: {e}")))?;
                 Ok(Value::Null)
             }
             // read_chunk — read N bytes from fd (low-level handle, high-level size)
             20 => {
                 let fd = get_fd(&args[0])?;
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // size comes from user intent, validated
                 let size = match &args[1] { Value::Int(n) => *n as usize, _ => return Err(PluginError::InvalidArg("expected int".into())) };
                 let mut buf = vec![0u8; size];
-                let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, size) };
+                let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast::<libc::c_void>(), size) };
                 if n < 0 { return Err(PluginError::Failed("read_chunk failed".into())); }
+                #[allow(clippy::cast_sign_loss)] // n is checked >= 0 above
                 buf.truncate(n as usize);
                 Ok(Value::Bytes(buf))
             }
             // append_file — single-call: append to file (create if missing)
             21 => {
+                use std::io::Write;
                 let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
                 let content = match &args[1] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
-                use std::io::Write;
                 let mut file = std::fs::OpenOptions::new().append(true).create(true).open(&path)
-                    .map_err(|e| PluginError::Failed(format!("append failed: {}", e)))?;
+                    .map_err(|e| PluginError::Failed(format!("append failed: {e}")))?;
                 file.write_all(content.as_bytes())
-                    .map_err(|e| PluginError::Failed(format!("append write failed: {}", e)))?;
+                    .map_err(|e| PluginError::Failed(format!("append write failed: {e}")))?;
                 Ok(Value::Null)
             }
             // read_bytes — single-call: read entire file as raw bytes
             22 => {
                 let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
                 let bytes = std::fs::read(&path)
-                    .map_err(|e| PluginError::NotFound(format!("read_bytes failed: {}", e)))?;
+                    .map_err(|e| PluginError::NotFound(format!("read_bytes failed: {e}")))?;
                 Ok(Value::Bytes(bytes))
             }
             // write_bytes — single-call: write raw bytes to file
@@ -408,18 +413,18 @@ impl SomaPlugin for PosixPlugin {
                 let path = match &args[0] { Value::String(s) => s.clone(), _ => return Err(PluginError::InvalidArg("expected string".into())) };
                 let data = match &args[1] { Value::Bytes(b) => b.clone(), _ => return Err(PluginError::InvalidArg("expected bytes".into())) };
                 std::fs::write(&path, &data)
-                    .map_err(|e| PluginError::Failed(format!("write_bytes failed: {}", e)))?;
+                    .map_err(|e| PluginError::Failed(format!("write_bytes failed: {e}")))?;
                 Ok(Value::Null)
             }
             // write_chunk — write bytes to open fd
             24 => {
                 let fd = get_fd(&args[0])?;
                 let data = match &args[1] { Value::Bytes(b) => b.clone(), _ => return Err(PluginError::InvalidArg("expected bytes".into())) };
-                let n = unsafe { libc::write(fd, data.as_ptr() as *const libc::c_void, data.len()) };
+                let n = unsafe { libc::write(fd, data.as_ptr().cast::<libc::c_void>(), data.len()) };
                 if n < 0 { return Err(PluginError::Failed("write_chunk failed".into())); }
                 Ok(Value::Int(n as i64))
             }
-            _ => Err(PluginError::NotFound(format!("unknown convention: {}", conv_id))),
+            _ => Err(PluginError::NotFound(format!("unknown convention: {conv_id}"))),
         }
     }
 }

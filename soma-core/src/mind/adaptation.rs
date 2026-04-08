@@ -1,16 +1,16 @@
-//! Runtime LoRA adaptation — learn from experience without Python.
+//! Runtime `LoRA` adaptation — learn from experience without Python.
 //!
 //! This module implements the adaptation cycle: using recorded successful
-//! experiences to update the Mind's LoRA layers via gradient descent.
+//! experiences to update the Mind's `LoRA` layers via gradient descent.
 //! The key insight is that we don't backprop through the ONNX graph —
 //! instead we treat the decoder's hidden states as frozen features and
-//! only update the LoRA parameters (A and B matrices).
+//! only update the `LoRA` parameters (A and B matrices).
 //!
 //! The adaptation loop uses teacher forcing: for each experience, we
 //! run the encoder to get hidden states, then step through the decoder
 //! feeding the KNOWN correct opcode at each step (not the predicted one).
-//! At each step we collect (hidden_state, target_opcode) pairs and pass
-//! them to LoRALayer::adapt() for a gradient descent update.
+//! At each step we collect (`hidden_state`, `target_opcode`) pairs and pass
+//! them to `LoRALayer::adapt()` for a gradient descent update.
 
 use super::lora::LoRALayer;
 use super::onnx_engine::OnnxMindEngine;
@@ -19,7 +19,9 @@ use crate::memory::experience::Experience;
 /// Configuration for the adaptation engine.
 #[derive(Debug, Clone)]
 pub struct AdaptationConfig {
+    #[allow(dead_code)] // Spec Section 4.7 — toggle for adaptation engine
     pub enabled: bool,
+    #[allow(dead_code)] // Spec Section 4.7 — adaptation frequency control
     pub adapt_every_n: usize,
     pub batch_size: usize,
     pub learning_rate: f32,
@@ -32,19 +34,21 @@ pub struct AdaptationResult {
     pub loss: f32,
     /// How many adaptation cycles have been performed (cumulative).
     pub cycle: u64,
-    /// Current LoRA magnitude after adaptation.
+    /// Current `LoRA` magnitude after adaptation.
     pub lora_magnitude: f32,
 }
 
-/// Run one adaptation cycle on the Mind's LoRA layers using recorded experiences.
+/// Run one adaptation cycle on the Mind's `LoRA` layers using recorded experiences.
 ///
-/// This requires a WRITE lock on the MindEngine (caller must hold it).
+/// This requires a WRITE lock on the `MindEngine` (caller must hold it).
 /// Steps:
 ///   1. Sample `batch_size` experiences from the buffer
 ///   2. For each experience, run encoder to get hidden states
-///   3. For each decoder step, collect (hidden, target_opcode) pairs
-///   4. Call LoRALayer::adapt() with the batch
+///   3. For each decoder step, collect (hidden, `target_opcode`) pairs
+///   4. Call `LoRALayer::adapt()` with the batch
 ///   5. Return adaptation metrics
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::unnecessary_wraps)] // Result return is intentional for API consistency
 pub fn adapt_from_experience(
     engine: &mut OnnxMindEngine,
     experiences: &[Experience],
@@ -81,6 +85,7 @@ pub fn adapt_from_experience(
                 let step_idx = batch.len() % exp.program.len().max(1);
                 if step_idx < exp.program.len() {
                     let (conv_id, _, _) = exp.program[step_idx];
+                    #[allow(clippy::cast_sign_loss)] // conv_id checked >= 0 on line above
                     if conv_id >= 0 && (conv_id as usize) < num_conventions {
                         batch.push((hidden.clone(), conv_id as usize));
                         base_logits_batch.push(op_logits.clone());
@@ -92,11 +97,10 @@ pub fn adapt_from_experience(
 
         // Slow path: re-run ONNX encoder+decoder to get hidden states.
         // This is only used when cached_states are not available.
-        let valid_steps: Vec<&(i32, u8, u8)> = exp.program.iter()
-            .filter(|(conv_id, _, _)| *conv_id >= 0)
-            .collect();
+        let has_valid_steps = exp.program.iter()
+            .any(|(conv_id, _, _)| *conv_id >= 0);
 
-        if valid_steps.is_empty() {
+        if !has_valid_steps {
             continue;
         }
 
@@ -109,6 +113,7 @@ pub fn adapt_from_experience(
         };
 
         let mut prev_hiddens = vec![0.0f32; ms * dd];
+        #[allow(clippy::cast_possible_wrap)] // start_token is a small vocab index
         let mut prev_op = start_token as i64;
 
         for (t, (conv_id, _, _)) in exp.program.iter().enumerate() {
@@ -125,6 +130,7 @@ pub fn adapt_from_experience(
             };
 
             let target_opcode = *conv_id;
+            #[allow(clippy::cast_sign_loss)] // target_opcode checked >= 0 on same line
             if target_opcode >= 0 && (target_opcode as usize) < num_conventions {
                 batch.push((hidden.clone(), target_opcode as usize));
                 base_logits_batch.push(op_logits);
@@ -135,8 +141,9 @@ pub fn adapt_from_experience(
             }
             hidden = new_hidden;
 
+            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // stop_id is small
             if target_opcode == stop_id as i32 { break; }
-            prev_op = target_opcode as i64;
+            prev_op = i64::from(target_opcode);
         }
     }
 
@@ -200,14 +207,12 @@ pub fn adapt_from_experience(
     // Run adaptation on the opcode LoRA layer
     let loss = {
         let lora_layers = engine.active_lora_mut();
-        let opcode_lora = lora_layers.iter_mut().find(|l| l.name == "opcode");
-        match opcode_lora {
-            Some(lora) => lora.adapt(&batch, &base_logits_batch, config.learning_rate),
-            None => 0.0,
-        }
+        lora_layers.iter_mut()
+            .find(|l| l.name == "opcode")
+            .map_or(0.0, |lora| lora.adapt(&batch, &base_logits_batch, config.learning_rate))
     };
 
-    let magnitude: f32 = engine.active_lora().iter().map(|l| l.magnitude()).sum();
+    let magnitude: f32 = engine.active_lora().iter().map(super::lora::LoRALayer::magnitude).sum();
 
     tracing::info!(
         loss = %format!("{:.4}", loss),

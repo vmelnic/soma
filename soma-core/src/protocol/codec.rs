@@ -4,15 +4,15 @@
 //!   magic:          0x53 0x4D (2 bytes, "SM")
 //!   version:        0x20 (1 byte, v2.0)
 //!   flags:          u8 (1 byte)
-//!   signal_type:    u8 (1 byte)
-//!   channel_id:     u32 BE (4 bytes)
+//!   `signal_type`:    u8 (1 byte)
+//!   `channel_id`:     u32 BE (4 bytes)
 //!   sequence:       u32 BE (4 bytes)
-//!   sender_id_len:  u8 (1 byte)
-//!   sender_id:      [u8; sender_id_len]
-//!   metadata_len:   u32 BE (4 bytes)
-//!   metadata:       [u8; metadata_len] (MessagePack-encoded per spec)
-//!   payload_len:    u32 BE (4 bytes)
-//!   payload:        [u8; payload_len]
+//!   `sender_id_len`:  u8 (1 byte)
+//!   `sender_id`:      [u8; `sender_id_len`]
+//!   `metadata_len`:   u32 BE (4 bytes)
+//!   metadata:       [u8; `metadata_len`] (MessagePack-encoded per spec)
+//!   `payload_len`:    u32 BE (4 bytes)
+//!   payload:        [u8; `payload_len`]
 //!   checksum:       u32 BE CRC32 (4 bytes)
 
 use anyhow::{bail, Result};
@@ -46,7 +46,7 @@ fn maybe_decompress(payload: &[u8], compressed: bool) -> Result<Vec<u8>> {
         return Ok(payload.to_vec());
     }
     zstd::decode_all(std::io::Cursor::new(payload))
-        .map_err(|e| anyhow::anyhow!("zstd decompress failed: {}", e))
+        .map_err(|e| anyhow::anyhow!("zstd decompress failed: {e}"))
 }
 
 /// Magic bytes identifying a Synaptic Protocol frame.
@@ -55,10 +55,11 @@ pub const MAGIC: [u8; 2] = [0x53, 0x4D];
 /// Protocol version byte: v2.0 = 0x20.
 pub const VERSION: u8 = 0x20;
 
-/// Minimum frame size: header(13) + sender_id_len(1) + meta_len(4) + payload_len(4) + checksum(4) = 26 bytes
-/// with 0-length sender_id, metadata, and payload.
+/// Minimum frame size: header(13) + `sender_id_len(1)` + `meta_len(4)` + `payload_len(4)` + checksum(4) = 26 bytes
+/// with 0-length `sender_id`, metadata, and payload.
 pub const MIN_FRAME_SIZE: usize = 26;
 
+#[allow(dead_code)] // Used by UDS transport
 /// Default maximum frame size (10 MB + overhead). Negotiated via handshake.
 pub const DEFAULT_MAX_FRAME_SIZE: usize = 10 * 1024 * 1024 + 1024;
 
@@ -69,19 +70,19 @@ pub const DEFAULT_MAX_FRAME_SIZE: usize = 10 * 1024 * 1024 + 1024;
 /// falls back to the hardcoded test key for backwards compatibility.
 pub fn encode_frame(signal: &Signal, session_keys: Option<&SessionKeys>) -> Vec<u8> {
     let sender_bytes = signal.sender_id.as_bytes();
+    #[allow(clippy::cast_possible_truncation)] // clamped to 255 by min()
     let sender_len = sender_bytes.len().min(255) as u8;
 
     // Serialize metadata: merge trace_id into metadata for wire
     let metadata_value = {
         let mut meta = signal.metadata.clone();
-        if !signal.trace_id.is_empty() {
-            if let serde_json::Value::Object(ref mut map) = meta {
+        if !signal.trace_id.is_empty()
+            && let serde_json::Value::Object(ref mut map) = meta {
                 map.insert(
                     "trace_id".to_string(),
                     serde_json::Value::String(signal.trace_id.clone()),
                 );
             }
-        }
         meta
     };
     let metadata_bytes = rmp_serde::to_vec(&metadata_value).unwrap_or_default();
@@ -105,12 +106,11 @@ pub fn encode_frame(signal: &Signal, session_keys: Option<&SessionKeys>) -> Vec<
 
     // Encryption: if ENCRYPTED flag is set, encrypt payload (Section 9.4)
     let payload_bytes = if flags.contains(SignalFlags::ENCRYPTED) {
-        let (key, nonce) = if let Some(sk) = session_keys {
-            (sk.encrypt_key, sk.next_send_nonce())
-        } else {
+        let (key, nonce) = session_keys.map_or(
             // Fallback: hardcoded key/nonce for backwards compatibility / tests
-            ([0x42u8; 32], [0u8; 12])
-        };
+            ([0x42u8; 32], [0u8; 12]),
+            |sk| (sk.encrypt_key, sk.next_send_nonce()),
+        );
         let aad = signal.sender_id.as_bytes();
         match super::encryption::encrypt_payload(&key, &nonce, &payload_bytes, aad) {
             Ok(encrypted) => encrypted,
@@ -150,9 +150,11 @@ pub fn encode_frame(signal: &Signal, session_keys: Option<&SessionKeys>) -> Vec<
     buf.push(sender_len);
     buf.extend_from_slice(&sender_bytes[..sender_len as usize]);
     // Metadata length (BE) + metadata
+    #[allow(clippy::cast_possible_truncation)] // metadata length fits in u32 (wire format)
     buf.extend_from_slice(&(metadata_bytes.len() as u32).to_be_bytes());
     buf.extend_from_slice(&metadata_bytes);
     // Payload length (BE) + payload
+    #[allow(clippy::cast_possible_truncation)] // payload length fits in u32 (wire format)
     buf.extend_from_slice(&(payload_bytes.len() as u32).to_be_bytes());
     buf.extend_from_slice(&payload_bytes);
 
@@ -173,7 +175,8 @@ pub fn encode_frame(signal: &Signal, session_keys: Option<&SessionKeys>) -> Vec<
 /// falls back to the hardcoded test key for backwards compatibility.
 ///
 /// Returns `Ok(None)` for frames with unknown signal types per Spec Section 12.3:
-/// "Unknown signal type received → Ignore signal. Log warning. Do NOT close connection."
+/// "Unknown signal type received -> Ignore signal. Log warning. Do NOT close connection."
+#[allow(clippy::too_many_lines)]
 pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<Option<Signal>> {
     if data.len() < MIN_FRAME_SIZE {
         bail!(
@@ -196,25 +199,20 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
     let version = data[2];
     if version != VERSION {
         bail!(
-            "Unsupported protocol version: 0x{:02X} (expected 0x{:02X})",
-            version,
-            VERSION
+            "Unsupported protocol version: 0x{version:02X} (expected 0x{VERSION:02X})"
         );
     }
 
     // Parse flags
     let flags = SignalFlags::from_bits_truncate(data[3]);
 
-    // Parse signal type — unknown types are silently ignored per Spec Section 12.3
-    let signal_type = match SignalType::from_u8(data[4]) {
-        Some(st) => st,
-        None => {
-            tracing::warn!(
-                signal_type_byte = format_args!("0x{:02X}", data[4]),
-                "Unknown signal type received, ignoring frame (Spec Sec 12.3)"
-            );
-            return Ok(None);
-        }
+    // Parse signal type -- unknown types are silently ignored per Spec Section 12.3
+    let Some(signal_type) = SignalType::from_u8(data[4]) else {
+        tracing::warn!(
+            signal_type_byte = format_args!("0x{:02X}", data[4]),
+            "Unknown signal type received, ignoring frame (Spec Sec 12.3)"
+        );
+        return Ok(None);
     };
 
     // Channel ID
@@ -252,7 +250,7 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
             // Fallback in debug mode: try JSON for backward compat during development
             if cfg!(debug_assertions) {
                 serde_json::from_slice(meta_bytes)
-                    .unwrap_or(serde_json::Value::Object(serde_json::Map::new()))
+                    .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
             } else {
                 serde_json::Value::Object(serde_json::Map::new())
             }
@@ -281,12 +279,11 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
 
     // Decrypt payload if ENCRYPTED flag is set (Section 9.4)
     let raw_payload = if flags.contains(SignalFlags::ENCRYPTED) {
-        let (key, nonce) = if let Some(sk) = session_keys {
-            (sk.encrypt_key, sk.next_recv_nonce())
-        } else {
+        let (key, nonce) = session_keys.map_or(
             // Fallback: hardcoded key/nonce for backwards compatibility / tests
-            ([0x42u8; 32], [0u8; 12])
-        };
+            ([0x42u8; 32], [0u8; 12]),
+            |sk| (sk.encrypt_key, sk.next_recv_nonce()),
+        );
         let aad = sender_id.as_bytes();
         match super::encryption::decrypt_payload(&key, &nonce, &raw_payload, aad) {
             Ok(decrypted) => decrypted,
@@ -319,9 +316,7 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
     let computed_crc = hasher.finalize();
     if received_crc != computed_crc {
         bail!(
-            "Checksum mismatch: received 0x{:08X}, computed 0x{:08X}",
-            received_crc,
-            computed_crc
+            "Checksum mismatch: received 0x{received_crc:08X}, computed 0x{computed_crc:08X}"
         );
     }
 
@@ -346,10 +341,10 @@ pub fn decode_frame(data: &[u8], session_keys: Option<&SessionKeys>) -> Result<O
 
 /// Read a complete frame from an async reader.
 /// Reads length-prefixed: first reads the 13-byte fixed header to determine
-/// sender_id_len, then reads enough to get metadata_len, then payload_len,
+/// `sender_id_len`, then reads enough to get `metadata_len`, then `payload_len`,
 /// then the checksum.
 ///
-/// Returns the full frame bytes (ready for decode_frame).
+/// Returns the full frame bytes (ready for `decode_frame`).
 pub async fn read_frame(
     reader: &mut (impl tokio::io::AsyncReadExt + Unpin),
     max_frame_size: usize,
@@ -398,9 +393,7 @@ pub async fn read_frame(
     let total = 14 + sender_len + 4 + meta_len + 4 + payload_len + 4;
     if total > max_frame_size {
         bail!(
-            "Frame exceeds max size: {} bytes (max {})",
-            total,
-            max_frame_size
+            "Frame exceeds max size: {total} bytes (max {max_frame_size})"
         );
     }
 
@@ -418,6 +411,7 @@ pub async fn read_frame(
     Ok(frame)
 }
 
+#[allow(dead_code)] // Used by UDS transport
 /// Write a signal as a binary frame to an async writer.
 pub async fn write_frame(
     writer: &mut (impl tokio::io::AsyncWriteExt + Unpin),

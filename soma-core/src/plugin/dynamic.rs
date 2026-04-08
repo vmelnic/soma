@@ -2,12 +2,12 @@
 //!
 //! Plugins are compiled as cdylib crates that export a C ABI init function.
 //! The function signature is:
-//!   extern "C" fn soma_plugin_init() -> *mut dyn SomaPlugin
+//!   extern "C" fn `soma_plugin_init()` -> *mut dyn `SomaPlugin`
 //!
 //! Example plugin crate:
-//!   #[no_mangle]
-//!   pub extern "C" fn soma_plugin_init() -> *mut dyn SomaPlugin {
-//!       Box::into_raw(Box::new(MyPlugin::new()))
+//!   #[`no_mangle`]
+//!   pub extern "C" fn `soma_plugin_init()` -> *mut dyn `SomaPlugin` {
+//!       `Box::into_raw(Box::new(MyPlugin::new()))`
 //!   }
 
 use anyhow::{Context, Result};
@@ -28,7 +28,7 @@ pub fn verify_plugin_signature(
 }
 
 /// Load a plugin from a shared library file.
-/// The library must export `soma_plugin_init` returning a raw pointer to SomaPlugin.
+/// The library must export `soma_plugin_init` returning a raw pointer to `SomaPlugin`.
 ///
 /// If a signature file (`<path>.sig`) and public key file (`<path>.pub`) exist alongside
 /// the plugin library, Ed25519 signature verification is performed before loading.
@@ -37,8 +37,8 @@ pub fn verify_plugin_signature(
 pub fn load_plugin_from_path(path: &Path) -> Result<Box<dyn SomaPlugin>> {
     // Check for signature file (Section 20.4)
     let ext_str = path.extension().unwrap_or_default().to_str().unwrap_or("");
-    let sig_path = path.with_extension(format!("{}.sig", ext_str));
-    let pub_path = path.with_extension(format!("{}.pub", ext_str));
+    let sig_path = path.with_extension(format!("{ext_str}.sig"));
+    let pub_path = path.with_extension(format!("{ext_str}.pub"));
 
     if sig_path.exists() && pub_path.exists() {
         let sig_bytes = std::fs::read(&sig_path)
@@ -110,12 +110,12 @@ pub fn scan_plugin_directory(dir: &Path) -> Vec<std::path::PathBuf> {
 
     match std::fs::read_dir(dir) {
         Ok(entries) => {
-            let entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+            let entries: Vec<_> = entries.filter_map(std::result::Result::ok).collect();
 
             // Top-level library files
             for entry in &entries {
                 let path = entry.path();
-                if path.extension().map(|x| x == ext).unwrap_or(false) {
+                if path.extension().is_some_and(|x| x == ext) {
                     results.push(path);
                 }
             }
@@ -129,7 +129,7 @@ pub fn scan_plugin_directory(dir: &Path) -> Vec<std::path::PathBuf> {
                     if manifest_json.exists() || manifest_toml.exists() {
                         // Look for the library file inside the subdirectory
                         if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
-                            let lib_name = format!("lib{}.{}", dir_name, ext);
+                            let lib_name = format!("lib{dir_name}.{ext}");
                             let lib_path = path.join(&lib_name);
                             if lib_path.exists() {
                                 results.push(lib_path);
@@ -147,8 +147,9 @@ pub fn scan_plugin_directory(dir: &Path) -> Vec<std::path::PathBuf> {
     results
 }
 
-/// Plugin manifest parsed from manifest.toml (05_PLUGIN_CATALOG.md Section 4).
+/// Plugin manifest parsed from manifest.toml (`05_PLUGIN_CATALOG.md` Section 4).
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Spec feature: manifest fields for plugin catalog
 pub struct PluginManifest {
     pub name: String,
     pub version: String,
@@ -177,18 +178,18 @@ pub fn parse_manifest(plugin_dir: &Path) -> Option<PluginManifest> {
     let compat = table.get("compatibility");
     let platforms = compat
         .and_then(|c| c.get("platforms"))
-        .and_then(|p| p.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-        .unwrap_or_else(|| vec!["*".to_string()]);
+        .and_then(|p| p.as_array()).map_or_else(|| vec!["*".to_string()], |arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect());
 
+    // Convention count from TOML is a small non-negative integer
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let conv_count = table.get("conventions")
         .and_then(|c| c.get("count"))
-        .and_then(|c| c.as_integer())
+        .and_then(toml::Value::as_integer)
         .unwrap_or(0) as usize;
 
     let lora = table.get("lora")
         .and_then(|l| l.get("included"))
-        .and_then(|i| i.as_bool())
+        .and_then(toml::Value::as_bool)
         .unwrap_or(false);
 
     let deps = table.get("dependencies")
@@ -246,8 +247,8 @@ pub fn discover_plugins(dir: &Path) -> Vec<(std::path::PathBuf, Option<PluginMan
         let manifest = parse_manifest(parent);
 
         // Filter by platform compatibility when a manifest is available
-        if let Some(ref m) = manifest {
-            if !is_platform_compatible(m) {
+        if let Some(ref m) = manifest
+            && !is_platform_compatible(m) {
                 tracing::debug!(
                     plugin = %m.name,
                     platforms = ?m.platforms,
@@ -256,7 +257,6 @@ pub fn discover_plugins(dir: &Path) -> Vec<(std::path::PathBuf, Option<PluginMan
                 );
                 continue;
             }
-        }
 
         result.push((path, manifest));
     }

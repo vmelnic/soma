@@ -1,4 +1,4 @@
-//! Checkpoint system — save/restore LoRA state + experience metadata.
+//! Checkpoint system — save/restore `LoRA` state + experience metadata.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ pub const CHECKPOINT_MAGIC: &[u8; 4] = b"SOMA";
 pub const CHECKPOINT_VERSION: u32 = 2;
 
 /// A serializable checkpoint of the SOMA's learned state.
-/// Includes LoRA state, experience metadata, plugin state, and decision log (Section 7.5).
+/// Includes `LoRA` state, experience metadata, plugin state, and decision log (Section 7.5).
 #[derive(Serialize, Deserialize)]
 pub struct Checkpoint {
     pub version: u32,
@@ -29,16 +29,16 @@ pub struct Checkpoint {
     #[serde(default)]
     pub recent_executions: Vec<serde_json::Value>,
     /// SHA-256 hash of the base model (encoder+decoder) used when this checkpoint was created.
-    /// Used to detect model changes on restore and warn about LoRA state incompatibility.
+    /// Used to detect model changes on restore and warn about `LoRA` state incompatibility.
     #[serde(default)]
     pub base_model_hash: String,
     /// Plugin manifest — which plugins (and versions) were loaded at checkpoint time.
     #[serde(default)]
     pub plugin_manifest: Vec<PluginManifestEntry>,
-    /// Consolidated LoRA weight delta for the opcode head (Section 6.3).
-    /// Shape: (num_conventions * decoder_dim) in row-major order.
+    /// Consolidated `LoRA` weight delta for the opcode head (Section 6.3).
+    /// Shape: (`num_conventions` * `decoder_dim`) in row-major order.
     /// This accumulates `scale * B @ A` from past consolidations so that
-    /// permanently merged LoRA knowledge survives across restarts.
+    /// permanently merged `LoRA` knowledge survives across restarts.
     #[serde(default)]
     pub merged_opcode_delta: Vec<f32>,
 }
@@ -129,13 +129,11 @@ impl Checkpoint {
         let version = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
         if version == 0 || version > CHECKPOINT_VERSION {
             return Err(anyhow::anyhow!(
-                "Unsupported checkpoint version: {} (supported: 1-{})",
-                version,
-                CHECKPOINT_VERSION
+                "Unsupported checkpoint version: {version} (supported: 1-{CHECKPOINT_VERSION})"
             ));
         }
 
-        let checkpoint: Checkpoint = serde_json::from_slice(&data[8..])
+        let checkpoint: Self = serde_json::from_slice(&data[8..])
             .context("Failed to deserialize checkpoint")?;
 
         tracing::info!(
@@ -153,7 +151,7 @@ impl Checkpoint {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        format!("{}-{}.ckpt", soma_id, ts)
+        format!("{soma_id}-{ts}.ckpt")
     }
 
     /// List checkpoint files in a directory, sorted by modification time (newest first).
@@ -163,12 +161,11 @@ impl Checkpoint {
         }
 
         let mut entries: Vec<(std::path::PathBuf, std::time::SystemTime)> = std::fs::read_dir(dir)?
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter(|e| {
                 e.path()
                     .extension()
-                    .map(|ext| ext == "ckpt")
-                    .unwrap_or(false)
+                    .is_some_and(|ext| ext == "ckpt")
             })
             .filter_map(|e| {
                 let modified = e.metadata().ok()?.modified().ok()?;

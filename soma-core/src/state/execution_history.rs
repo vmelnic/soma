@@ -36,6 +36,7 @@ impl ExecutionHistory {
     }
 
     /// Record a new execution.
+    #[allow(clippy::too_many_arguments)] // All fields are needed per spec Section 7.5
     pub fn record(
         &mut self,
         intent: String,
@@ -79,15 +80,18 @@ impl ExecutionHistory {
         self.records.len()
     }
 
+    #[allow(dead_code)] // Spec feature: Section 7.5
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
     }
 
-    pub fn total_count(&self) -> u64 {
+    #[allow(dead_code)] // Spec feature: Section 7.5
+    pub const fn total_count(&self) -> u64 {
         self.total_count
     }
 
     /// Success rate over the buffer.
+    #[allow(dead_code, clippy::cast_precision_loss)] // Spec feature; precision loss acceptable for percentages
     pub fn success_rate(&self) -> f64 {
         if self.records.is_empty() {
             return 0.0;
@@ -97,6 +101,7 @@ impl ExecutionHistory {
     }
 
     /// Average execution time over the buffer.
+    #[allow(dead_code, clippy::cast_precision_loss)] // Spec feature; precision loss acceptable for averages
     pub fn avg_execution_time_ms(&self) -> f64 {
         if self.records.is_empty() {
             return 0.0;
