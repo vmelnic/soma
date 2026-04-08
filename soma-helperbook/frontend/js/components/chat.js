@@ -52,20 +52,21 @@ function getMessages(contactId) {
 }
 
 // Current user ID (fixed for now — would come from auth in production)
-const CURRENT_USER_ID = 1;
+function getCurrentUserId() {
+  return window.SOMA_USER_ID || 'unknown';
+}
 
 async function loadChatContacts() {
   try {
     // Load contacts that have chats with the current user
+    const myId = getCurrentUserId();
     const result = await api.query(
-      "SELECT DISTINCT u.id, u.name, u.phone, u.role, u.bio, u.is_verified, " +
-      "m.content as last_message, m.created_at as last_time " +
-      "FROM users u " +
-      "JOIN messages m ON (m.sender_id = u.id OR m.sender_id = " + CURRENT_USER_ID + ") " +
-      "JOIN chats c ON c.id = m.chat_id " +
-      "WHERE u.id != " + CURRENT_USER_ID + " " +
-      "AND m.created_at = (SELECT MAX(m2.created_at) FROM messages m2 WHERE m2.chat_id = m.chat_id) " +
-      "ORDER BY m.created_at DESC"
+      `SELECT DISTINCT u.id, u.name, u.phone, u.role, u.bio, u.is_verified
+       FROM users u
+       JOIN chat_members cm1 ON cm1.user_id = u.id
+       JOIN chat_members cm2 ON cm2.chat_id = cm1.chat_id
+       WHERE cm2.user_id = '${myId}' AND u.id != '${myId}'
+       ORDER BY u.name`
     );
     const rows = SomaAPI.extractRows(result);
     if (rows && Array.isArray(rows) && rows.length > 0) {
@@ -89,22 +90,21 @@ async function loadChatContacts() {
 
 async function loadChatMessages(contactId) {
   try {
+    const myId = getCurrentUserId();
     const result = await api.query(
-      "SELECT m.id, m.sender_id, m.type, m.content, m.status, m.created_at " +
-      "FROM messages m " +
-      "JOIN chats c ON c.id = m.chat_id " +
-      "WHERE m.chat_id IN (" +
-      "  SELECT DISTINCT ch.id FROM chats ch " +
-      "  JOIN messages msg ON msg.chat_id = ch.id " +
-      "  WHERE ch.type = 'direct' " +
-      "  AND (msg.sender_id = " + CURRENT_USER_ID + " OR msg.sender_id = " + contactId + ")" +
-      ") " +
-      "ORDER BY m.created_at ASC LIMIT 100"
+      `SELECT m.id, m.sender_id, m.type, m.content, m.status, m.created_at
+       FROM messages m
+       WHERE m.chat_id IN (
+         SELECT cm1.chat_id FROM chat_members cm1
+         JOIN chat_members cm2 ON cm2.chat_id = cm1.chat_id
+         WHERE cm1.user_id = '${myId}' AND cm2.user_id = '${contactId}'
+       )
+       ORDER BY m.created_at ASC LIMIT 100`
     );
     const rows = SomaAPI.extractRows(result);
     if (rows && Array.isArray(rows) && rows.length > 0) {
       return rows.map(row => {
-        const isMe = String(row.sender_id) === String(CURRENT_USER_ID);
+        const isMe = String(row.sender_id) === String(getCurrentUserId());
         if (row.type === 'appointment') {
           return {
             id: String(row.id),

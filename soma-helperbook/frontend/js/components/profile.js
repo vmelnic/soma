@@ -14,7 +14,7 @@ const MOCK_PROFILE = {
 };
 
 // Current user ID — matches the seeded "me" user
-const PROFILE_USER_ID = 1;
+function getProfileUserId() { return window.SOMA_USER_ID || 'unknown'; }
 
 async function loadProfile() {
   try {
@@ -26,7 +26,7 @@ async function loadProfile() {
       "FROM users u " +
       "LEFT JOIN reviews r ON r.reviewed_id = u.id " +
       "LEFT JOIN appointments a ON (a.client_id = u.id OR a.provider_id = u.id) " +
-      "WHERE u.id = " + PROFILE_USER_ID + " " +
+      "WHERE u.id = '" + getProfileUserId() + "' " +
       "GROUP BY u.id, u.name, u.phone, u.role, u.bio, u.is_verified, u.created_at"
     );
     const rows = SomaAPI.extractRows(result);

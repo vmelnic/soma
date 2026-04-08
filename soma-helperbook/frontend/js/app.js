@@ -68,16 +68,33 @@ async function seedTestData() {
     const count = (typeof rows === 'number') ? rows : 0;
     if (count > 0) {
       console.log('[seed] Database has ' + count + ' users, skipping seed');
+      // Load current user ID
+      try {
+        const meResult = await api.query("SELECT id FROM users WHERE phone = '+40740555123' LIMIT 1");
+        const meRows = SomaAPI.extractRows(meResult);
+        if (meRows && meRows.length > 0) {
+          window.SOMA_USER_ID = meRows[0].id;
+          console.log('[seed] My user ID:', window.SOMA_USER_ID);
+        }
+      } catch(e) { console.log('[seed] Could not load user ID'); }
       return;
     }
 
     console.log('[seed] Database empty, seeding test data...');
 
-    // Insert "me" user (id=1)
+    // Insert "me" user
     await api.execute(
       "INSERT INTO users (name, phone, role, bio, is_verified) VALUES " +
       "('Alexandru P.', '+40740555123', 'both', 'Home Repairs, Furniture Assembly', true)"
     );
+
+    // Get my user ID for later use
+    const meResult = await api.query("SELECT id FROM users WHERE phone = '+40740555123' LIMIT 1");
+    const meRows = SomaAPI.extractRows(meResult);
+    if (meRows && meRows.length > 0) {
+      window.SOMA_USER_ID = meRows[0].id;
+      console.log('[seed] My user ID:', window.SOMA_USER_ID);
+    }
 
     // Insert provider users
     const providers = [

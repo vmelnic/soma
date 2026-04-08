@@ -44,6 +44,15 @@ impl PostgresPlugin {
         Ok(client)
     }
 
+    /// Format a postgres error with full detail from the database.
+    fn format_pg_error(e: &postgres::Error) -> String {
+        if let Some(db_err) = e.as_db_error() {
+            format!("{}: {} ({})", db_err.severity(), db_err.message(), db_err.code().code())
+        } else {
+            e.to_string()
+        }
+    }
+
     /// Convert a `postgres::Row` into `Value::Map`.
     fn row_to_value(row: &postgres::Row) -> Value {
         let mut map = HashMap::new();
@@ -102,6 +111,27 @@ impl PostgresPlugin {
                     Err(_) => Value::Null,
                 }
             }
+            // UUID
+            Type::UUID => match row.try_get::<_, Option<uuid::Uuid>>(idx) {
+                Ok(Some(v)) => Value::String(v.to_string()),
+                Ok(None) => Value::Null,
+                Err(_) => Value::Null,
+            },
+            // Timestamps
+            Type::TIMESTAMP | Type::TIMESTAMPTZ => match row.try_get::<_, Option<chrono::NaiveDateTime>>(idx) {
+                Ok(Some(v)) => Value::String(v.format("%Y-%m-%dT%H:%M:%S").to_string()),
+                Ok(None) => Value::Null,
+                Err(_) => match row.try_get::<_, Option<String>>(idx) {
+                    Ok(Some(v)) => Value::String(v),
+                    _ => Value::Null,
+                },
+            },
+            // Numeric/Decimal
+            Type::NUMERIC => match row.try_get::<_, Option<String>>(idx) {
+                Ok(Some(v)) => Value::String(v),
+                Ok(None) => Value::Null,
+                Err(_) => Value::Null,
+            },
             // Fallback: try to get as string
             _ => match row.try_get::<_, Option<String>>(idx) {
                 Ok(Some(v)) => Value::String(v),
@@ -570,7 +600,7 @@ impl PostgresPlugin {
 
         let rows = client
             .query(&*sql, &param_refs)
-            .map_err(|e| PluginError::Failed(e.to_string()))?;
+            .map_err(|e| PluginError::Failed(Self::format_pg_error(&e)))?;
 
         let values: Vec<Value> = rows.iter().map(Self::row_to_value).collect();
         Ok(Value::List(values))
@@ -588,7 +618,7 @@ impl PostgresPlugin {
 
         let count = client
             .execute(sql, &param_refs)
-            .map_err(|e| PluginError::Failed(e.to_string()))?;
+            .map_err(|e| PluginError::Failed(Self::format_pg_error(&e)))?;
 
         Ok(Value::Int(count as i64))
     }
@@ -605,7 +635,7 @@ impl PostgresPlugin {
 
         let row_opt = client
             .query_opt(sql, &param_refs)
-            .map_err(|e| PluginError::Failed(e.to_string()))?;
+            .map_err(|e| PluginError::Failed(Self::format_pg_error(&e)))?;
 
         match row_opt {
             Some(row) => Ok(Self::row_to_value(&row)),
@@ -631,7 +661,7 @@ impl PostgresPlugin {
 
         client
             .execute(&*sql, &[])
-            .map_err(|e| PluginError::Failed(e.to_string()))?;
+            .map_err(|e| PluginError::Failed(Self::format_pg_error(&e)))?;
 
         Ok(Value::Null)
     }
@@ -653,7 +683,7 @@ impl PostgresPlugin {
 
         client
             .execute(&*sql, &[])
-            .map_err(|e| PluginError::Failed(e.to_string()))?;
+            .map_err(|e| PluginError::Failed(Self::format_pg_error(&e)))?;
 
         Ok(Value::Null)
     }
@@ -668,7 +698,7 @@ impl PostgresPlugin {
 
         let row = client
             .query_one(sql, &[&name])
-            .map_err(|e| PluginError::Failed(e.to_string()))?;
+            .map_err(|e| PluginError::Failed(Self::format_pg_error(&e)))?;
 
         let exists: bool = row.get(0);
         Ok(Value::Bool(exists))
@@ -680,7 +710,7 @@ impl PostgresPlugin {
 
         let rows = client
             .query(sql, &[])
-            .map_err(|e| PluginError::Failed(e.to_string()))?;
+            .map_err(|e| PluginError::Failed(Self::format_pg_error(&e)))?;
 
         let tables: Vec<Value> = rows
             .iter()
@@ -710,7 +740,7 @@ impl PostgresPlugin {
 
         let rows = client
             .query(sql, &[&name])
-            .map_err(|e| PluginError::Failed(e.to_string()))?;
+            .map_err(|e| PluginError::Failed(Self::format_pg_error(&e)))?;
 
         let columns: Vec<Value> = rows
             .iter()
