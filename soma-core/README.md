@@ -122,6 +122,7 @@ Six core components:
 - BiLSTM encoder + GRU autoregressive decoder
 - 11 output heads: opcode, arg types x2, span positions x4, ref pointers x2, literal values x2
 - LoRA adaptation: active layers applied as post-hoc logit adjustment during inference
+- Runtime LoRA adaptation: gradient descent on frozen decoder hidden states using successful experiences (no Python needed)
 - Temperature-controlled softmax for deterministic execution
 - Model integrity: SHA-256 hash verified against checkpoint on restore
 
@@ -132,8 +133,9 @@ Six core components:
 - **Value enum** — Null, Bool, Int, Float, String, Bytes, List(recursive), Map(recursive), Handle, Signal
 - **PosixPlugin** — 22 built-in libc conventions (open/read/write/close + high-level read_file/write_file/list_dir/copy)
 - **Dynamic loading** — `libloading` for .so/.dylib at runtime, `soma_plugin_init` C ABI
-- **Manifest parsing** — reads `manifest.toml` for metadata, platform compat, dependencies
+- **Manifest parsing** — reads `manifest.json` for metadata, platform compat, dependencies
 - **Plugin signing** — Ed25519 verification via `ed25519-dalek`
+- **External plugins** — 6 catalog plugins in `soma-plugins/` workspace (crypto, postgres, redis, auth, geo, http-bridge), built as cdylib crates using the shared SDK at `soma-plugins/sdk/`
 - **Crash isolation** — `catch_unwind` + `RwLock<HashSet>` marks crashed plugins, refuses re-execution
 - **Cleanup conventions** — backwards walk on program failure, invoke cleanup (e.g., close_fd, rollback)
 - **Per-convention stats** — call count, duration, error count tracked via `ConventionStats`
@@ -294,11 +296,11 @@ Failure handling: missing model = fatal. Plugin load fail = skip + continue. Cor
 ## Testing
 
 ```bash
-cargo test                    # 57 tests
+cargo test                    # 101 tests
 cargo build --release         # 14MB binary
 ```
 
-Tests cover: codec roundtrip (9 tests), encryption (5), pub/sub (7), rate limiting (5), relay (6), streaming (6), chunked transfer (6), offline queue (4), signal router (4), unknown signal handling (1).
+Tests cover: codec roundtrip (9 tests), encryption (5), pub/sub (7), rate limiting (5), relay (6), streaming (6), chunked transfer (6), offline queue (4), signal router (4), unknown signal handling (1), BPE tokenizer (13), adaptation engine, LoRA layers, and more.
 
 ## Source Files
 
@@ -310,8 +312,9 @@ src/
   mind/
     mod.rs                    # MindEngine trait, Program, ProgramStep, MindConfig
     onnx_engine.rs            # tract-onnx inference with LoRA + temperature
-    tokenizer.rs              # Word-level vocab, encode, extract_span
+    tokenizer.rs              # Word-level + BPE tokenizers, auto-detected from JSON
     lora.rs                   # LoRALayer (forward/merge/reset), LoRAWeights, LoRACheckpoint
+    adaptation.rs             # Runtime LoRA adaptation via gradient descent on experiences
   plugin/
     interface.rs              # SomaPlugin trait (18 methods), Value (10 variants),
                               # Convention, ArgType, ReturnSpec, CleanupSpec, TrustLevel,
@@ -355,7 +358,7 @@ src/
     soma_dump.rs              # Signal capture CLI tool
 ```
 
-**44 source files. 10,729 lines of Rust. 57 tests. 14MB release binary.**
+**45 source files. ~14,700 lines of Rust. 101 tests. 14MB release binary.**
 
 ## Spec Compliance
 
@@ -389,3 +392,4 @@ Validated against three specification documents with 10-agent parallel audits:
 | `toml` | Configuration parsing |
 | `uuid` | Trace ID generation |
 | `bitflags` | Signal flag bits |
+| `soma-plugin-sdk` | Shared plugin interface types (from `soma-plugins/sdk/`) |

@@ -4,9 +4,11 @@
 
 SOMA (from Greek "body") is a computational paradigm where a neural architecture IS the program. No application source code. A trained neural Mind receives structured intents, generates execution programs, and orchestrates plugins that interface with hardware, databases, networks, and other systems.
 
-Two deliverables:
+Four deliverables:
 - **soma-core/** — Rust runtime (single binary, 14MB). THE production deliverable.
+- **soma-plugins/** — Rust plugin workspace (SDK + 6 plugins). External catalog plugins.
 - **soma-synthesizer/** — Python build tool (PyTorch). Trains the Mind, exports ONNX models.
+- **soma-helperbook/** — First real-world application. Service marketplace frontend + database.
 
 ## Architecture (6 core components)
 
@@ -32,7 +34,7 @@ soma/
   00_ROADMAP.md               # Milestone ordering
 
   soma-core/                  # Rust runtime
-    Cargo.toml                # 17 crate dependencies
+    Cargo.toml                # 26 crate dependencies
     soma.toml.example         # All config fields documented
     README.md                 # Comprehensive usage + architecture docs
     src/
@@ -42,8 +44,9 @@ soma/
       mind/
         mod.rs                # MindEngine trait, Program, ProgramStep, MindConfig
         onnx_engine.rs        # tract-onnx inference with LoRA + temperature
-        tokenizer.rs          # Word-level vocab
+        tokenizer.rs          # Word-level + BPE tokenizers (auto-detected from JSON)
         lora.rs               # LoRALayer (forward/merge/reset), LoRAWeights, LoRACheckpoint
+        adaptation.rs         # Runtime LoRA adaptation — gradient descent on experiences
       plugin/
         interface.rs          # SomaPlugin trait (18 methods), Value (10 variants),
                               # Convention, ArgType, ReturnSpec, CleanupSpec, TrustLevel,
@@ -86,6 +89,16 @@ soma/
       bin/
         soma_dump.rs          # Signal capture CLI tool
 
+  soma-plugins/               # Plugin workspace (SDK + 6 catalog plugins)
+    Cargo.toml                # Workspace: sdk, auth, crypto, geo, http-bridge, postgres, redis
+    sdk/                      # Plugin interface types (SomaPlugin trait, Value, Convention)
+    crypto/                   # 13 conventions: hash, sign, encrypt, JWT, random generation
+    postgres/                 # 15 conventions: query, execute, ORM-style find/count/aggregate
+    redis/                    # 14 conventions: strings, hashes, lists, pub/sub, keys
+    auth/                     # 10 conventions: OTP verification, session management, TOTP
+    geo/                      # 5 conventions: distance, radius filter, geocoding
+    http-bridge/              # 5 conventions: HTTP client (GET/POST/PUT/DELETE)
+
   soma-synthesizer/           # Python build tool
     pyproject.toml            # PyTorch, ONNX deps
     README.md                 # Comprehensive docs
@@ -102,6 +115,17 @@ soma/
       exporter.py             # ONNX export, .soma-model int8, catalog.json, meta.json with SHA-256
       lora.py                 # LoRALinear, apply/remove/save/load/merge, plugin-specific training
 
+  soma-helperbook/            # First real-world SOMA application
+    docker-compose.yml        # PostgreSQL + Redis services
+    schema.sql                # 19 tables (users, connections, messages, chats, appointments, etc.)
+    seed.sql                  # Test data (users, chats, messages, appointments, reviews)
+    soma.toml                 # HelperBook-specific SOMA config
+    domain/                   # Domain-specific training data for Mind synthesis
+    scripts/                  # setup-db, seed-db, clean-db, start, start-mcp, synthesize
+    frontend/                 # Plain JS + Tailwind CSS, Express bridge to SOMA MCP
+      server.js               # Express server bridging HTTP to SOMA MCP
+      index.html              # Single-page app
+
   poc/                        # Python proof of concept (v0.1-v0.3)
   pow/                        # Proofs of work (POW1, POW2, POW3)
   models/                     # Exported ONNX models
@@ -114,18 +138,29 @@ soma/
 # Rust runtime
 cd soma-core
 cargo build --release          # 14MB binary
-cargo test                     # 57 tests
+cargo test                     # 101 tests
 
 # Run
 cargo run --bin soma -- --model ../models --intent "list files in /tmp"
 cargo run --bin soma -- --model ../models --mcp   # MCP server mode
 cargo run --bin soma-dump -- 127.0.0.1:9999       # Signal capture
 
+# Plugins
+cd soma-plugins
+cargo build --release          # Produces .dylib/.so per plugin
+
 # Python synthesizer
 cd soma-synthesizer
 pip install -e .
 soma-synthesize train --plugins ./plugins --output ./models
 soma-synthesize validate --plugins ./plugins
+
+# HelperBook (first application)
+cd soma-helperbook
+docker compose up -d --wait    # PostgreSQL + Redis
+scripts/setup-db.sh            # Apply schema (19 tables)
+scripts/seed-db.sh             # Seed test data
+cd frontend && npm install && node server.js  # http://localhost:8080
 ```
 
 ## Key Design Decisions
@@ -138,6 +173,10 @@ soma-synthesize validate --plugins ./plugins
 - **Experience records successes only**: Spec Section 17.1 — don't reinforce bad programs.
 - **Checkpoint version 2**: Backwards-compat with v1 via `#[serde(default)]`. Includes SHA-256 model hash.
 - **Real crypto**: ChaCha20-Poly1305, X25519, Ed25519 via dalek crates. Not placeholders.
+- **Synchronous postgres plugin**: Uses `block_on()` for tokio-postgres inside the sync SomaPlugin trait. Connection pooled and cached across calls.
+- **Cached LoRA adaptation**: Runtime adaptation via gradient descent on frozen decoder hidden states. Teacher forcing with experience replay. No Python needed.
+- **Catalog routing via plugin_idx*1000**: Each external plugin gets a unique index range. Postgres conventions at 2000+, redis at 3000+, etc. See `plugin/manager.rs`.
+- **BPE tokenizer in Rust**: Auto-detected from tokenizer.json format. Handles OOV, SQL, URLs. Character-level fallback for unknown subwords.
 
 ## Config
 
@@ -156,7 +195,8 @@ Implementation validated against specs with 10-agent parallel audits:
 | `03_PLUGINS.md` | 63 | 63 |
 | `05_PLUGIN_CATALOG.md` | 61 | 61 |
 | `07_SYNTHESIZER.md` | 89 | 87 (+2 documented-future) |
-| **Total** | **328** | **326** |
+| `04_HELPERBOOK.md` | - | In progress (first application) |
+| **Total** | **328+** | **326+** |
 
 ## Rules
 
@@ -165,7 +205,7 @@ Implementation validated against specs with 10-agent parallel audits:
 ## When Editing
 
 ### Rust (soma-core)
-- Run `cargo test` after changes — must stay at 57+ tests passing.
+- Run `cargo test` after changes — must stay at 101+ tests passing.
 - Run `cargo build` — 0 errors required, warnings OK.
 - The spec documents (01-09) are the source of truth. Code should match specs.
 - Don't remove "unused" code that implements spec features not yet wired.
@@ -179,6 +219,17 @@ Implementation validated against specs with 10-agent parallel audits:
 - `soma-synthesize validate` should always pass before training.
 - model.py and trainer.py are the core — they define the neural architecture and loss function.
 
+### Rust (soma-plugins)
+- Each plugin is a cdylib crate in the `soma-plugins/` workspace.
+- All plugins depend on `soma-plugin-sdk` from `soma-plugins/sdk/`.
+- Each plugin has `manifest.json` + `training/examples.json`.
+- `cargo build --release` from `soma-plugins/` builds all plugins.
+
+### HelperBook (soma-helperbook)
+- Requires Docker for PostgreSQL + Redis (`docker compose up -d`).
+- Schema changes go in `schema.sql`, test data in `seed.sql`.
+- Frontend is plain JS (no build step). Express server bridges HTTP to SOMA MCP.
+
 ## What's Deferred (roadmap, not current scope)
 
 - EmbeddedMindEngine for ESP32 (no_std)
@@ -188,4 +239,3 @@ Implementation validated against specs with 10-agent parallel audits:
 - soma-replay and soma-mock tools
 - Plugin registry (download/cache)
 - Diffuse memory tier (peer queries)
-- Actual catalog plugins (postgres, redis, mcp-bridge — infrastructure ready, plugins not yet built)
