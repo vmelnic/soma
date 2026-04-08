@@ -121,7 +121,7 @@ function renderProfile(params = {}) {
   const container = document.createElement('div');
   container.className = 'view-enter px-4 py-6';
 
-  // Show loading state initially, then replace with real/mock data
+  // Show loading state initially, then replace with real data
   const loadingDiv = document.createElement('div');
   loadingDiv.className = 'text-center py-8 text-gray-400 text-sm';
   loadingDiv.textContent = 'Loading profile...';
