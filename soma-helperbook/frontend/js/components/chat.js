@@ -498,7 +498,7 @@ function appendMessageBubble(container, msg) {
   }
 }
 
-function sendMessage(contact) {
+async function sendMessage(contact) {
   const input = document.getElementById('chat-input');
   const text = input.value.trim();
   if (!text) return;
@@ -506,25 +506,66 @@ function sendMessage(contact) {
   input.value = '';
 
   const messagesEl = document.querySelector('.chat-messages');
-  const bubble = document.createElement('div');
-  bubble.className = 'flex justify-end';
-
   const now = new Date();
   const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  const inner = document.createElement('div');
-  inner.className = 'max-w-[75%] px-4 py-2.5 rounded-2xl text-sm bg-indigo-600 text-white bubble-sent';
-  const textP = document.createElement('p');
-  textP.textContent = text;
-  inner.appendChild(textP);
-  const timeSpan = document.createElement('p');
-  timeSpan.className = 'text-[10px] mt-1 text-indigo-200';
-  timeSpan.textContent = timeStr;
-  inner.appendChild(timeSpan);
-
-  bubble.appendChild(inner);
-  messagesEl.appendChild(bubble);
+  // Show bubble immediately (optimistic UI)
+  appendMessageBubble(messagesEl, {
+    from: 'me',
+    text: text,
+    time: timeStr,
+    type: 'text'
+  });
 
   const messagesArea = document.getElementById('chat-messages');
   messagesArea.scrollTop = messagesArea.scrollHeight;
+
+  // Persist to database via SOMA
+  try {
+    const myId = getCurrentUserId();
+    const contactId = contact.id;
+
+    // Find or create a direct chat between these users
+    let chatId = null;
+    const chatResult = await api.query(
+      `SELECT cm1.chat_id FROM chat_members cm1
+       JOIN chat_members cm2 ON cm2.chat_id = cm1.chat_id
+       JOIN chats c ON c.id = cm1.chat_id
+       WHERE cm1.user_id = '${myId}' AND cm2.user_id = '${contactId}'
+       AND c.type = 'direct' LIMIT 1`
+    );
+    const chatRows = SomaAPI.extractRows(chatResult);
+    if (chatRows && chatRows.length > 0) {
+      chatId = chatRows[0].chat_id;
+    } else {
+      // Create new chat
+      await api.execute(
+        `INSERT INTO chats (type, created_by) VALUES ('direct', '${myId}')`
+      );
+      const newChat = await api.query(
+        `SELECT id FROM chats WHERE created_by = '${myId}' ORDER BY created_at DESC LIMIT 1`
+      );
+      const newRows = SomaAPI.extractRows(newChat);
+      if (newRows && newRows.length > 0) {
+        chatId = newRows[0].id;
+        // Add both users as members
+        await api.execute(
+          `INSERT INTO chat_members (chat_id, user_id) VALUES ('${chatId}', '${myId}'), ('${chatId}', '${contactId}')`
+        );
+      }
+    }
+
+    if (chatId) {
+      // Escape single quotes in message text
+      const escaped = text.replace(/'/g, "''");
+      await api.execute(
+        `INSERT INTO messages (chat_id, sender_id, type, content, status)
+         VALUES ('${chatId}', '${myId}', 'text', '${escaped}', 'sent')`
+      );
+      console.log('[chat] Message persisted to database');
+    }
+  } catch (e) {
+    console.warn('[chat] Failed to persist message:', e.message);
+    // Message is still shown in UI — will sync on next load
+  }
 }
