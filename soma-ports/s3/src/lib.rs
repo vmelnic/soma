@@ -94,13 +94,18 @@ impl Port for S3Port {
             other => {
                 return Err(PortError::Validation(format!(
                     "unknown capability: {other}"
-                )))
+                )));
             }
         };
         let latency_ms = start.elapsed().as_millis() as u64;
 
         match result {
-            Ok(value) => Ok(PortCallRecord::success(PORT_ID, capability_id, value, latency_ms)),
+            Ok(value) => Ok(PortCallRecord::success(
+                PORT_ID,
+                capability_id,
+                value,
+                latency_ms,
+            )),
             Err(e) => Ok(PortCallRecord::failure(
                 PORT_ID,
                 capability_id,
@@ -128,7 +133,7 @@ impl Port for S3Port {
             other => {
                 return Err(PortError::Validation(format!(
                     "unknown capability: {other}"
-                )))
+                )));
             }
         }
         Ok(())
@@ -356,8 +361,16 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Stochastic,
                 idempotence_class: IdempotenceClass::Idempotent,
                 risk_class: RiskClass::Low,
-                latency_profile: LatencyProfile { expected_latency_ms: 200, p95_latency_ms: 2000, max_latency_ms: 30000 },
-                cost_profile: CostProfile { network_cost_class: CostClass::Medium, io_cost_class: CostClass::Medium, ..CostProfile::default() },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 200,
+                    p95_latency_ms: 2000,
+                    max_latency_ms: 30000,
+                },
+                cost_profile: CostProfile {
+                    network_cost_class: CostClass::Medium,
+                    io_cost_class: CostClass::Medium,
+                    ..CostProfile::default()
+                },
                 remote_exposable: true,
                 auth_override: None,
             },
@@ -376,8 +389,15 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Stochastic,
                 idempotence_class: IdempotenceClass::Idempotent,
                 risk_class: RiskClass::Negligible,
-                latency_profile: LatencyProfile { expected_latency_ms: 150, p95_latency_ms: 1500, max_latency_ms: 30000 },
-                cost_profile: CostProfile { network_cost_class: CostClass::Medium, ..CostProfile::default() },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 150,
+                    p95_latency_ms: 1500,
+                    max_latency_ms: 30000,
+                },
+                cost_profile: CostProfile {
+                    network_cost_class: CostClass::Medium,
+                    ..CostProfile::default()
+                },
                 remote_exposable: true,
                 auth_override: None,
             },
@@ -396,8 +416,15 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Stochastic,
                 idempotence_class: IdempotenceClass::Idempotent,
                 risk_class: RiskClass::Medium,
-                latency_profile: LatencyProfile { expected_latency_ms: 100, p95_latency_ms: 1000, max_latency_ms: 10000 },
-                cost_profile: CostProfile { network_cost_class: CostClass::Low, ..CostProfile::default() },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 100,
+                    p95_latency_ms: 1000,
+                    max_latency_ms: 10000,
+                },
+                cost_profile: CostProfile {
+                    network_cost_class: CostClass::Low,
+                    ..CostProfile::default()
+                },
                 remote_exposable: false,
                 auth_override: None,
             },
@@ -417,7 +444,11 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Stochastic,
                 idempotence_class: IdempotenceClass::NonIdempotent,
                 risk_class: RiskClass::Low,
-                latency_profile: LatencyProfile { expected_latency_ms: 10, p95_latency_ms: 100, max_latency_ms: 5000 },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 10,
+                    p95_latency_ms: 100,
+                    max_latency_ms: 5000,
+                },
                 cost_profile: CostProfile::default(),
                 remote_exposable: true,
                 auth_override: None,
@@ -437,8 +468,15 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Stochastic,
                 idempotence_class: IdempotenceClass::Idempotent,
                 risk_class: RiskClass::Negligible,
-                latency_profile: LatencyProfile { expected_latency_ms: 100, p95_latency_ms: 1000, max_latency_ms: 15000 },
-                cost_profile: CostProfile { network_cost_class: CostClass::Low, ..CostProfile::default() },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 100,
+                    p95_latency_ms: 1000,
+                    max_latency_ms: 15000,
+                },
+                cost_profile: CostProfile {
+                    network_cost_class: CostClass::Low,
+                    ..CostProfile::default()
+                },
                 remote_exposable: true,
                 auth_override: None,
             },
@@ -446,14 +484,29 @@ fn build_spec() -> PortSpec {
         input_schema: SchemaRef::any(),
         output_schema: SchemaRef::any(),
         failure_modes: vec![
-            PortFailureClass::ValidationError, PortFailureClass::ExternalError,
-            PortFailureClass::Timeout, PortFailureClass::AuthorizationDenied,
+            PortFailureClass::ValidationError,
+            PortFailureClass::ExternalError,
+            PortFailureClass::Timeout,
+            PortFailureClass::AuthorizationDenied,
         ],
         side_effect_class: SideEffectClass::ExternalStateMutation,
-        latency_profile: LatencyProfile { expected_latency_ms: 150, p95_latency_ms: 2000, max_latency_ms: 30000 },
-        cost_profile: CostProfile { network_cost_class: CostClass::Medium, ..CostProfile::default() },
-        auth_requirements: AuthRequirements { methods: vec![AuthMethod::ApiKey], required: true },
-        sandbox_requirements: SandboxRequirements { network_access: true, ..SandboxRequirements::default() },
+        latency_profile: LatencyProfile {
+            expected_latency_ms: 150,
+            p95_latency_ms: 2000,
+            max_latency_ms: 30000,
+        },
+        cost_profile: CostProfile {
+            network_cost_class: CostClass::Medium,
+            ..CostProfile::default()
+        },
+        auth_requirements: AuthRequirements {
+            methods: vec![AuthMethod::ApiKey],
+            required: true,
+        },
+        sandbox_requirements: SandboxRequirements {
+            network_access: true,
+            ..SandboxRequirements::default()
+        },
         observable_fields: vec!["bucket".into(), "key".into(), "size".into()],
         validation_rules: vec![],
         remote_exposure: true,
@@ -490,7 +543,10 @@ mod tests {
     #[test]
     fn test_invoke_without_client() {
         let port = S3Port::new();
-        let result = port.invoke("put_object", serde_json::json!({"key": "test", "data": "abc"}));
+        let result = port.invoke(
+            "put_object",
+            serde_json::json!({"key": "test", "data": "abc"}),
+        );
         // Should return a PortCallRecord with success=false, not an Err
         let record = result.unwrap();
         assert!(!record.success);

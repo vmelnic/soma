@@ -56,10 +56,9 @@ impl SmtpPort {
             .port
             .get()
             .ok_or_else(|| PortError::DependencyUnavailable("SMTP port not configured".into()))?;
-        let creds = self
-            .credentials
-            .get()
-            .ok_or_else(|| PortError::DependencyUnavailable("SMTP credentials not configured".into()))?;
+        let creds = self.credentials.get().ok_or_else(|| {
+            PortError::DependencyUnavailable("SMTP credentials not configured".into())
+        })?;
 
         let transport = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host)
             .map_err(|e| PortError::TransportError(format!("SMTP relay error: {e}")))?
@@ -77,10 +76,9 @@ impl SmtpPort {
     }
 
     fn sender_address(&self) -> soma_port_sdk::Result<&str> {
-        self.from
-            .get()
-            .map(|s| s.as_str())
-            .ok_or_else(|| PortError::DependencyUnavailable("SMTP from address not configured".into()))
+        self.from.get().map(|s| s.as_str()).ok_or_else(|| {
+            PortError::DependencyUnavailable("SMTP from address not configured".into())
+        })
     }
 }
 
@@ -112,13 +110,18 @@ impl Port for SmtpPort {
             other => {
                 return Err(PortError::Validation(format!(
                     "unknown capability: {other}"
-                )))
+                )));
             }
         };
         let latency_ms = start.elapsed().as_millis() as u64;
 
         match result {
-            Ok(value) => Ok(PortCallRecord::success(PORT_ID, capability_id, value, latency_ms)),
+            Ok(value) => Ok(PortCallRecord::success(
+                PORT_ID,
+                capability_id,
+                value,
+                latency_ms,
+            )),
             Err(e) => Ok(PortCallRecord::failure(
                 PORT_ID,
                 capability_id,
@@ -150,7 +153,7 @@ impl Port for SmtpPort {
             other => {
                 return Err(PortError::Validation(format!(
                     "unknown capability: {other}"
-                )))
+                )));
             }
         }
         Ok(())
@@ -177,8 +180,13 @@ impl SmtpPort {
         let from = self.sender_address()?;
 
         let message = Message::builder()
-            .from(from.parse().map_err(|e| PortError::Validation(format!("invalid from: {e}")))?)
-            .to(to.parse().map_err(|e| PortError::Validation(format!("invalid to: {e}")))?)
+            .from(
+                from.parse()
+                    .map_err(|e| PortError::Validation(format!("invalid from: {e}")))?,
+            )
+            .to(to
+                .parse()
+                .map_err(|e| PortError::Validation(format!("invalid to: {e}")))?)
             .subject(subject)
             .body(body.to_string())
             .map_err(|e| PortError::Internal(format!("failed to build email: {e}")))?;
@@ -203,8 +211,13 @@ impl SmtpPort {
         let from = self.sender_address()?;
 
         let message = Message::builder()
-            .from(from.parse().map_err(|e| PortError::Validation(format!("invalid from: {e}")))?)
-            .to(to.parse().map_err(|e| PortError::Validation(format!("invalid to: {e}")))?)
+            .from(
+                from.parse()
+                    .map_err(|e| PortError::Validation(format!("invalid from: {e}")))?,
+            )
+            .to(to
+                .parse()
+                .map_err(|e| PortError::Validation(format!("invalid to: {e}")))?)
             .subject(subject)
             .singlepart(
                 SinglePart::builder()
@@ -240,17 +253,23 @@ impl SmtpPort {
         use base64::Engine;
         let attachment_data = base64::engine::general_purpose::STANDARD
             .decode(attachment_b64)
-            .map_err(|e| PortError::Validation(format!("invalid base64 in attachment_data: {e}")))?;
+            .map_err(|e| {
+                PortError::Validation(format!("invalid base64 in attachment_data: {e}"))
+            })?;
 
-        let attachment = Attachment::new(attachment_name.to_string())
-            .body(
-                attachment_data,
-                ContentType::parse("application/octet-stream").unwrap(),
-            );
+        let attachment = Attachment::new(attachment_name.to_string()).body(
+            attachment_data,
+            ContentType::parse("application/octet-stream").unwrap(),
+        );
 
         let message = Message::builder()
-            .from(from.parse().map_err(|e| PortError::Validation(format!("invalid from: {e}")))?)
-            .to(to.parse().map_err(|e| PortError::Validation(format!("invalid to: {e}")))?)
+            .from(
+                from.parse()
+                    .map_err(|e| PortError::Validation(format!("invalid from: {e}")))?,
+            )
+            .to(to
+                .parse()
+                .map_err(|e| PortError::Validation(format!("invalid to: {e}")))?)
             .subject(subject)
             .multipart(
                 MultiPart::mixed()
@@ -324,8 +343,15 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Stochastic,
                 idempotence_class: IdempotenceClass::NonIdempotent,
                 risk_class: RiskClass::Low,
-                latency_profile: LatencyProfile { expected_latency_ms: 500, p95_latency_ms: 5000, max_latency_ms: 10000 },
-                cost_profile: CostProfile { network_cost_class: CostClass::Low, ..CostProfile::default() },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 500,
+                    p95_latency_ms: 5000,
+                    max_latency_ms: 10000,
+                },
+                cost_profile: CostProfile {
+                    network_cost_class: CostClass::Low,
+                    ..CostProfile::default()
+                },
                 remote_exposable: false,
                 auth_override: None,
             },
@@ -345,8 +371,15 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Stochastic,
                 idempotence_class: IdempotenceClass::NonIdempotent,
                 risk_class: RiskClass::Low,
-                latency_profile: LatencyProfile { expected_latency_ms: 500, p95_latency_ms: 5000, max_latency_ms: 10000 },
-                cost_profile: CostProfile { network_cost_class: CostClass::Low, ..CostProfile::default() },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 500,
+                    p95_latency_ms: 5000,
+                    max_latency_ms: 10000,
+                },
+                cost_profile: CostProfile {
+                    network_cost_class: CostClass::Low,
+                    ..CostProfile::default()
+                },
                 remote_exposable: false,
                 auth_override: None,
             },
@@ -368,8 +401,15 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Stochastic,
                 idempotence_class: IdempotenceClass::NonIdempotent,
                 risk_class: RiskClass::Low,
-                latency_profile: LatencyProfile { expected_latency_ms: 1000, p95_latency_ms: 10000, max_latency_ms: 30000 },
-                cost_profile: CostProfile { network_cost_class: CostClass::Medium, ..CostProfile::default() },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 1000,
+                    p95_latency_ms: 10000,
+                    max_latency_ms: 30000,
+                },
+                cost_profile: CostProfile {
+                    network_cost_class: CostClass::Medium,
+                    ..CostProfile::default()
+                },
                 remote_exposable: false,
                 auth_override: None,
             },
@@ -377,15 +417,30 @@ fn build_spec() -> PortSpec {
         input_schema: SchemaRef::any(),
         output_schema: SchemaRef::any(),
         failure_modes: vec![
-            PortFailureClass::ValidationError, PortFailureClass::ExternalError,
-            PortFailureClass::TransportError, PortFailureClass::Timeout,
+            PortFailureClass::ValidationError,
+            PortFailureClass::ExternalError,
+            PortFailureClass::TransportError,
+            PortFailureClass::Timeout,
             PortFailureClass::DependencyUnavailable,
         ],
         side_effect_class: SideEffectClass::ExternalStateMutation,
-        latency_profile: LatencyProfile { expected_latency_ms: 500, p95_latency_ms: 5000, max_latency_ms: 30000 },
-        cost_profile: CostProfile { network_cost_class: CostClass::Medium, ..CostProfile::default() },
-        auth_requirements: AuthRequirements { methods: vec![AuthMethod::ApiKey], required: true },
-        sandbox_requirements: SandboxRequirements { network_access: true, ..SandboxRequirements::default() },
+        latency_profile: LatencyProfile {
+            expected_latency_ms: 500,
+            p95_latency_ms: 5000,
+            max_latency_ms: 30000,
+        },
+        cost_profile: CostProfile {
+            network_cost_class: CostClass::Medium,
+            ..CostProfile::default()
+        },
+        auth_requirements: AuthRequirements {
+            methods: vec![AuthMethod::ApiKey],
+            required: true,
+        },
+        sandbox_requirements: SandboxRequirements {
+            network_access: true,
+            ..SandboxRequirements::default()
+        },
         observable_fields: vec!["to".into(), "subject".into(), "sent".into()],
         validation_rules: vec![],
         remote_exposure: false,
@@ -422,7 +477,10 @@ mod tests {
     #[test]
     fn test_validate_send_plain_missing_fields() {
         let port = SmtpPort::new();
-        assert!(port.validate_input("send_plain", &serde_json::json!({})).is_err());
+        assert!(
+            port.validate_input("send_plain", &serde_json::json!({}))
+                .is_err()
+        );
     }
 
     #[test]
@@ -435,9 +493,14 @@ mod tests {
     #[test]
     fn test_invoke_without_config() {
         let port = SmtpPort::new();
-        let record = port.invoke("send_plain", serde_json::json!({
-            "to": "a@b.com", "subject": "test", "body": "hello"
-        })).unwrap();
+        let record = port
+            .invoke(
+                "send_plain",
+                serde_json::json!({
+                    "to": "a@b.com", "subject": "test", "body": "hello"
+                }),
+            )
+            .unwrap();
         assert!(!record.success);
     }
 

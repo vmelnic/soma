@@ -18,14 +18,13 @@
 pub use semver;
 
 pub mod prelude {
-    pub use crate::{
-        AuthMethod, AuthRequirements, CostClass, CostProfile, DeterminismClass,
-        IdempotenceClass, LatencyProfile, Port, PortCallRecord, PortCapabilitySpec,
-        PortError, PortFailureClass, PortKind, PortLifecycleState, PortSpec, RiskClass,
-        RollbackSupport, SandboxRequirements, SchemaRef, SideEffectClass, TrustLevel,
-        ValidationRule,
-    };
     pub use crate::semver;
+    pub use crate::{
+        AuthMethod, AuthRequirements, CostClass, CostProfile, DeterminismClass, IdempotenceClass,
+        LatencyProfile, Port, PortCallRecord, PortCapabilitySpec, PortError, PortFailureClass,
+        PortKind, PortLifecycleState, PortSpec, RiskClass, RollbackSupport, SandboxRequirements,
+        SchemaRef, SideEffectClass, TrustLevel, ValidationRule,
+    };
 }
 
 use chrono::{DateTime, Utc};
@@ -244,22 +243,13 @@ pub struct ValidationRule {
     pub constraint: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuthRequirements {
     pub methods: Vec<AuthMethod>,
     pub required: bool,
 }
 
-impl Default for AuthRequirements {
-    fn default() -> Self {
-        Self {
-            methods: vec![],
-            required: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SandboxRequirements {
     pub filesystem_access: bool,
     pub network_access: bool,
@@ -269,21 +259,6 @@ pub struct SandboxRequirements {
     pub cpu_limit_percent: Option<u32>,
     pub time_limit_ms: Option<u64>,
     pub syscall_limit: Option<u64>,
-}
-
-impl Default for SandboxRequirements {
-    fn default() -> Self {
-        Self {
-            filesystem_access: false,
-            network_access: false,
-            device_access: false,
-            process_access: false,
-            memory_limit_mb: None,
-            cpu_limit_percent: None,
-            time_limit_ms: None,
-            syscall_limit: None,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -478,21 +453,13 @@ pub trait Port: Send + Sync {
     ///
     /// The runtime calls `validate_input` before dispatching here, so
     /// implementations may assume the input passed schema validation.
-    fn invoke(
-        &self,
-        capability_id: &str,
-        input: serde_json::Value,
-    ) -> Result<PortCallRecord>;
+    fn invoke(&self, capability_id: &str, input: serde_json::Value) -> Result<PortCallRecord>;
 
     /// Validate input against the capability's declared schema.
     ///
     /// Called by the runtime before `invoke`. A port MAY add domain-specific
     /// checks beyond pure schema conformance.
-    fn validate_input(
-        &self,
-        capability_id: &str,
-        input: &serde_json::Value,
-    ) -> Result<()>;
+    fn validate_input(&self, capability_id: &str, input: &serde_json::Value) -> Result<()>;
 
     /// Current lifecycle state as seen by the adapter itself.
     fn lifecycle_state(&self) -> PortLifecycleState;

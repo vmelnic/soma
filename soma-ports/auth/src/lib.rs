@@ -60,6 +60,12 @@ struct TokenEntry {
     revoked: bool,
 }
 
+impl Default for AuthPort {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AuthPort {
     pub fn new() -> Self {
         Self {
@@ -132,7 +138,12 @@ impl Port for AuthPort {
         capability_id: &str,
         _input: &serde_json::Value,
     ) -> soma_port_sdk::Result<()> {
-        if self.spec.capabilities.iter().any(|c| c.capability_id == capability_id) {
+        if self
+            .spec
+            .capabilities
+            .iter()
+            .any(|c| c.capability_id == capability_id)
+        {
             Ok(())
         } else {
             Err(PortError::NotFound(format!(
@@ -162,7 +173,10 @@ fn get_str<'a>(input: &'a serde_json::Value, field: &str) -> soma_port_sdk::Resu
 // ---------------------------------------------------------------------------
 
 impl AuthPort {
-    fn exec_otp_generate(&self, input: &serde_json::Value) -> soma_port_sdk::Result<serde_json::Value> {
+    fn exec_otp_generate(
+        &self,
+        input: &serde_json::Value,
+    ) -> soma_port_sdk::Result<serde_json::Value> {
         let phone = get_str(input, "phone")?;
         let code = Self::gen_otp();
         let code_hash = Self::sha256_hex(&code);
@@ -183,7 +197,10 @@ impl AuthPort {
         }))
     }
 
-    fn exec_otp_verify(&self, input: &serde_json::Value) -> soma_port_sdk::Result<serde_json::Value> {
+    fn exec_otp_verify(
+        &self,
+        input: &serde_json::Value,
+    ) -> soma_port_sdk::Result<serde_json::Value> {
         let phone = get_str(input, "phone")?;
         let code = get_str(input, "code")?;
         let code_hash = Self::sha256_hex(code);
@@ -195,14 +212,18 @@ impl AuthPort {
                 return Ok(serde_json::json!({ "valid": false, "reason": "already verified" }));
             }
             if entry.attempts > 5 {
-                return Ok(serde_json::json!({ "valid": false, "reason": "max attempts exceeded" }));
+                return Ok(
+                    serde_json::json!({ "valid": false, "reason": "max attempts exceeded" }),
+                );
             }
             if Utc::now() > entry.expires_at {
                 return Ok(serde_json::json!({ "valid": false, "reason": "expired" }));
             }
             if entry.code_hash == code_hash {
                 entry.verified = true;
-                return Ok(serde_json::json!({ "valid": true, "user_id": format!("phone:{phone}") }));
+                return Ok(
+                    serde_json::json!({ "valid": true, "user_id": format!("phone:{phone}") }),
+                );
             }
             Ok(serde_json::json!({ "valid": false, "reason": "incorrect code" }))
         } else {
@@ -210,7 +231,10 @@ impl AuthPort {
         }
     }
 
-    fn exec_session_create(&self, input: &serde_json::Value) -> soma_port_sdk::Result<serde_json::Value> {
+    fn exec_session_create(
+        &self,
+        input: &serde_json::Value,
+    ) -> soma_port_sdk::Result<serde_json::Value> {
         let user_id = get_str(input, "user_id")?;
         let device_info = input
             .get("device_info")
@@ -242,7 +266,10 @@ impl AuthPort {
         }))
     }
 
-    fn exec_session_validate(&self, input: &serde_json::Value) -> soma_port_sdk::Result<serde_json::Value> {
+    fn exec_session_validate(
+        &self,
+        input: &serde_json::Value,
+    ) -> soma_port_sdk::Result<serde_json::Value> {
         let token = get_str(input, "token")?;
         let token_hash = Self::sha256_hex(token);
 
@@ -260,7 +287,10 @@ impl AuthPort {
         }
     }
 
-    fn exec_session_revoke(&self, input: &serde_json::Value) -> soma_port_sdk::Result<serde_json::Value> {
+    fn exec_session_revoke(
+        &self,
+        input: &serde_json::Value,
+    ) -> soma_port_sdk::Result<serde_json::Value> {
         let token = get_str(input, "token")?;
         let token_hash = Self::sha256_hex(token);
 
@@ -273,7 +303,10 @@ impl AuthPort {
         }
     }
 
-    fn exec_totp_generate(&self, input: &serde_json::Value) -> soma_port_sdk::Result<serde_json::Value> {
+    fn exec_totp_generate(
+        &self,
+        input: &serde_json::Value,
+    ) -> soma_port_sdk::Result<serde_json::Value> {
         let user_id = get_str(input, "user_id")?;
         let secret = Secret::generate_secret();
         let secret_base32 = secret.to_encoded().to_string();
@@ -295,7 +328,10 @@ impl AuthPort {
         }))
     }
 
-    fn exec_totp_verify(&self, input: &serde_json::Value) -> soma_port_sdk::Result<serde_json::Value> {
+    fn exec_totp_verify(
+        &self,
+        input: &serde_json::Value,
+    ) -> soma_port_sdk::Result<serde_json::Value> {
         let secret_base32 = get_str(input, "secret")?;
         let code = get_str(input, "code")?;
         let secret = Secret::Encoded(secret_base32.to_string());
@@ -312,12 +348,16 @@ impl AuthPort {
             "user".to_string(),
         )
         .map_err(|e| PortError::Internal(format!("TOTP init failed: {e}")))?;
-        let valid = totp.check_current(code)
+        let valid = totp
+            .check_current(code)
             .map_err(|e| PortError::Internal(format!("TOTP check failed: {e}")))?;
         Ok(serde_json::json!({ "valid": valid }))
     }
 
-    fn exec_token_generate(&self, input: &serde_json::Value) -> soma_port_sdk::Result<serde_json::Value> {
+    fn exec_token_generate(
+        &self,
+        input: &serde_json::Value,
+    ) -> soma_port_sdk::Result<serde_json::Value> {
         let user_id = get_str(input, "user_id")?;
         let ttl_hours = input
             .get("ttl_hours")
@@ -344,7 +384,10 @@ impl AuthPort {
         }))
     }
 
-    fn exec_token_validate(&self, input: &serde_json::Value) -> soma_port_sdk::Result<serde_json::Value> {
+    fn exec_token_validate(
+        &self,
+        input: &serde_json::Value,
+    ) -> soma_port_sdk::Result<serde_json::Value> {
         let token = get_str(input, "token")?;
         let token_hash = Self::sha256_hex(token);
 
@@ -362,7 +405,10 @@ impl AuthPort {
         }
     }
 
-    fn exec_token_refresh(&self, input: &serde_json::Value) -> soma_port_sdk::Result<serde_json::Value> {
+    fn exec_token_refresh(
+        &self,
+        input: &serde_json::Value,
+    ) -> soma_port_sdk::Result<serde_json::Value> {
         let token = get_str(input, "token")?;
         let ttl_hours = input
             .get("ttl_hours")
@@ -435,20 +481,93 @@ fn build_spec() -> PortSpec {
         namespace: "soma.ports.auth".to_string(),
         trust_level: TrustLevel::Trusted,
         capabilities: vec![
-            cap("otp_generate", "Generate OTP", "Generate a 6-digit OTP for phone verification", SideEffectClass::LocalStateMutation, DeterminismClass::Stochastic, 5),
-            cap("otp_verify", "Verify OTP", "Verify an OTP code against stored hash", SideEffectClass::LocalStateMutation, DeterminismClass::Deterministic, 5),
-            cap("session_create", "Create session", "Create an authenticated session with expiry", SideEffectClass::LocalStateMutation, DeterminismClass::Stochastic, 5),
-            cap("session_validate", "Validate session", "Check if a session token is valid and not expired", SideEffectClass::ReadOnly, DeterminismClass::Deterministic, 1),
-            cap("session_revoke", "Revoke session", "Mark a session as revoked", SideEffectClass::LocalStateMutation, DeterminismClass::Deterministic, 1),
-            cap("totp_generate", "Generate TOTP secret", "Generate a TOTP secret and provisioning URI for 2FA setup", SideEffectClass::None, DeterminismClass::Stochastic, 5),
-            cap("totp_verify", "Verify TOTP", "Verify a TOTP code against a secret", SideEffectClass::None, DeterminismClass::Deterministic, 1),
-            cap("token_generate", "Generate token", "Generate a random bearer token with expiry", SideEffectClass::LocalStateMutation, DeterminismClass::Stochastic, 5),
-            cap("token_validate", "Validate token", "Check if a bearer token is valid and not expired", SideEffectClass::ReadOnly, DeterminismClass::Deterministic, 1),
-            cap("token_refresh", "Refresh token", "Extend the expiry of a valid bearer token", SideEffectClass::LocalStateMutation, DeterminismClass::Deterministic, 1),
+            cap(
+                "otp_generate",
+                "Generate OTP",
+                "Generate a 6-digit OTP for phone verification",
+                SideEffectClass::LocalStateMutation,
+                DeterminismClass::Stochastic,
+                5,
+            ),
+            cap(
+                "otp_verify",
+                "Verify OTP",
+                "Verify an OTP code against stored hash",
+                SideEffectClass::LocalStateMutation,
+                DeterminismClass::Deterministic,
+                5,
+            ),
+            cap(
+                "session_create",
+                "Create session",
+                "Create an authenticated session with expiry",
+                SideEffectClass::LocalStateMutation,
+                DeterminismClass::Stochastic,
+                5,
+            ),
+            cap(
+                "session_validate",
+                "Validate session",
+                "Check if a session token is valid and not expired",
+                SideEffectClass::ReadOnly,
+                DeterminismClass::Deterministic,
+                1,
+            ),
+            cap(
+                "session_revoke",
+                "Revoke session",
+                "Mark a session as revoked",
+                SideEffectClass::LocalStateMutation,
+                DeterminismClass::Deterministic,
+                1,
+            ),
+            cap(
+                "totp_generate",
+                "Generate TOTP secret",
+                "Generate a TOTP secret and provisioning URI for 2FA setup",
+                SideEffectClass::None,
+                DeterminismClass::Stochastic,
+                5,
+            ),
+            cap(
+                "totp_verify",
+                "Verify TOTP",
+                "Verify a TOTP code against a secret",
+                SideEffectClass::None,
+                DeterminismClass::Deterministic,
+                1,
+            ),
+            cap(
+                "token_generate",
+                "Generate token",
+                "Generate a random bearer token with expiry",
+                SideEffectClass::LocalStateMutation,
+                DeterminismClass::Stochastic,
+                5,
+            ),
+            cap(
+                "token_validate",
+                "Validate token",
+                "Check if a bearer token is valid and not expired",
+                SideEffectClass::ReadOnly,
+                DeterminismClass::Deterministic,
+                1,
+            ),
+            cap(
+                "token_refresh",
+                "Refresh token",
+                "Extend the expiry of a valid bearer token",
+                SideEffectClass::LocalStateMutation,
+                DeterminismClass::Deterministic,
+                1,
+            ),
         ],
         input_schema: SchemaRef::any(),
         output_schema: SchemaRef::any(),
-        failure_modes: vec![PortFailureClass::ValidationError, PortFailureClass::ExternalError],
+        failure_modes: vec![
+            PortFailureClass::ValidationError,
+            PortFailureClass::ExternalError,
+        ],
         side_effect_class: SideEffectClass::LocalStateMutation,
         latency_profile: LatencyProfile {
             expected_latency_ms: 5,
@@ -458,7 +577,11 @@ fn build_spec() -> PortSpec {
         cost_profile: CostProfile::default(),
         auth_requirements: AuthRequirements::default(),
         sandbox_requirements: SandboxRequirements::default(),
-        observable_fields: vec!["capability_id".into(), "latency_ms".into(), "user_id".into()],
+        observable_fields: vec![
+            "capability_id".into(),
+            "latency_ms".into(),
+            "user_id".into(),
+        ],
         validation_rules: vec![],
         remote_exposure: false,
     }

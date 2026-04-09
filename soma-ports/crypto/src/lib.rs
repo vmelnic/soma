@@ -25,7 +25,7 @@ use std::time::Instant;
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce as AesNonce};
 use hmac::Mac;
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rand::RngCore;
 use rsa::pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey};
 use rsa::pkcs1v15::{SigningKey, VerifyingKey};
@@ -35,6 +35,12 @@ use soma_port_sdk::prelude::*;
 
 pub struct CryptoPort {
     spec: PortSpec,
+}
+
+impl Default for CryptoPort {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CryptoPort {
@@ -76,7 +82,12 @@ impl Port for CryptoPort {
         };
         let elapsed = start.elapsed().as_millis() as u64;
         match result {
-            Ok(val) => Ok(PortCallRecord::success("crypto", capability_id, val, elapsed)),
+            Ok(val) => Ok(PortCallRecord::success(
+                "crypto",
+                capability_id,
+                val,
+                elapsed,
+            )),
             Err(e) => Ok(PortCallRecord::failure(
                 "crypto",
                 capability_id,
@@ -92,7 +103,12 @@ impl Port for CryptoPort {
         capability_id: &str,
         _input: &serde_json::Value,
     ) -> soma_port_sdk::Result<()> {
-        if self.spec.capabilities.iter().any(|c| c.capability_id == capability_id) {
+        if self
+            .spec
+            .capabilities
+            .iter()
+            .any(|c| c.capability_id == capability_id)
+        {
             Ok(())
         } else {
             Err(PortError::NotFound(format!(
@@ -149,8 +165,10 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn hex_decode(hex: &str) -> soma_port_sdk::Result<Vec<u8>> {
-    if hex.len() % 2 != 0 {
-        return Err(PortError::Validation("hex string must have even length".into()));
+    if !hex.len().is_multiple_of(2) {
+        return Err(PortError::Validation(
+            "hex string must have even length".into(),
+        ));
     }
     (0..hex.len())
         .step_by(2)
@@ -191,10 +209,7 @@ fn exec_hmac(input: &serde_json::Value) -> soma_port_sdk::Result<serde_json::Val
 
 fn exec_bcrypt_hash(input: &serde_json::Value) -> soma_port_sdk::Result<serde_json::Value> {
     let password = get_str(input, "password")?;
-    let cost = input
-        .get("cost")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(12) as u32;
+    let cost = input.get("cost").and_then(|v| v.as_u64()).unwrap_or(12) as u32;
     let hash = bcrypt::hash(password, cost)
         .map_err(|e| PortError::ExternalError(format!("bcrypt hash failed: {e}")))?;
     Ok(serde_json::json!({ "hash": hash }))
@@ -377,27 +392,123 @@ fn build_spec() -> PortSpec {
         name: "Crypto".to_string(),
         version: semver::Version::new(0, 1, 0),
         kind: PortKind::Custom,
-        description: "Cryptographic operations: hashing, signing, encryption, JWT, random generation".to_string(),
+        description:
+            "Cryptographic operations: hashing, signing, encryption, JWT, random generation"
+                .to_string(),
         namespace: "soma.ports.crypto".to_string(),
         trust_level: TrustLevel::Trusted,
         capabilities: vec![
-            cap("sha256", "SHA-256", "Compute SHA-256 hex digest", SideEffectClass::None, DeterminismClass::Deterministic, 1),
-            cap("sha512", "SHA-512", "Compute SHA-512 hex digest", SideEffectClass::None, DeterminismClass::Deterministic, 1),
-            cap("hmac", "HMAC-SHA256", "Compute HMAC-SHA256 authentication code", SideEffectClass::None, DeterminismClass::Deterministic, 1),
-            cap("bcrypt_hash", "bcrypt hash", "Hash a password with bcrypt", SideEffectClass::None, DeterminismClass::Stochastic, 100),
-            cap("bcrypt_verify", "bcrypt verify", "Verify password against bcrypt hash", SideEffectClass::None, DeterminismClass::Deterministic, 100),
-            cap("aes_encrypt", "AES-256-GCM encrypt", "Encrypt data with AES-256-GCM", SideEffectClass::None, DeterminismClass::Stochastic, 1),
-            cap("aes_decrypt", "AES-256-GCM decrypt", "Decrypt AES-256-GCM ciphertext", SideEffectClass::None, DeterminismClass::Deterministic, 1),
-            cap("rsa_sign", "RSA sign", "Sign data with RSA-PKCS1v15-SHA256", SideEffectClass::None, DeterminismClass::Deterministic, 10),
-            cap("rsa_verify", "RSA verify", "Verify RSA-PKCS1v15-SHA256 signature", SideEffectClass::None, DeterminismClass::Deterministic, 5),
-            cap("jwt_sign", "JWT sign", "Sign JWT with HS256", SideEffectClass::None, DeterminismClass::Deterministic, 1),
-            cap("jwt_verify", "JWT verify", "Verify JWT and decode claims", SideEffectClass::None, DeterminismClass::Deterministic, 1),
-            cap("random_bytes", "Random bytes", "Generate cryptographically secure random bytes", SideEffectClass::None, DeterminismClass::Stochastic, 1),
-            cap("random_string", "Random string", "Generate random alphanumeric string", SideEffectClass::None, DeterminismClass::Stochastic, 1),
+            cap(
+                "sha256",
+                "SHA-256",
+                "Compute SHA-256 hex digest",
+                SideEffectClass::None,
+                DeterminismClass::Deterministic,
+                1,
+            ),
+            cap(
+                "sha512",
+                "SHA-512",
+                "Compute SHA-512 hex digest",
+                SideEffectClass::None,
+                DeterminismClass::Deterministic,
+                1,
+            ),
+            cap(
+                "hmac",
+                "HMAC-SHA256",
+                "Compute HMAC-SHA256 authentication code",
+                SideEffectClass::None,
+                DeterminismClass::Deterministic,
+                1,
+            ),
+            cap(
+                "bcrypt_hash",
+                "bcrypt hash",
+                "Hash a password with bcrypt",
+                SideEffectClass::None,
+                DeterminismClass::Stochastic,
+                100,
+            ),
+            cap(
+                "bcrypt_verify",
+                "bcrypt verify",
+                "Verify password against bcrypt hash",
+                SideEffectClass::None,
+                DeterminismClass::Deterministic,
+                100,
+            ),
+            cap(
+                "aes_encrypt",
+                "AES-256-GCM encrypt",
+                "Encrypt data with AES-256-GCM",
+                SideEffectClass::None,
+                DeterminismClass::Stochastic,
+                1,
+            ),
+            cap(
+                "aes_decrypt",
+                "AES-256-GCM decrypt",
+                "Decrypt AES-256-GCM ciphertext",
+                SideEffectClass::None,
+                DeterminismClass::Deterministic,
+                1,
+            ),
+            cap(
+                "rsa_sign",
+                "RSA sign",
+                "Sign data with RSA-PKCS1v15-SHA256",
+                SideEffectClass::None,
+                DeterminismClass::Deterministic,
+                10,
+            ),
+            cap(
+                "rsa_verify",
+                "RSA verify",
+                "Verify RSA-PKCS1v15-SHA256 signature",
+                SideEffectClass::None,
+                DeterminismClass::Deterministic,
+                5,
+            ),
+            cap(
+                "jwt_sign",
+                "JWT sign",
+                "Sign JWT with HS256",
+                SideEffectClass::None,
+                DeterminismClass::Deterministic,
+                1,
+            ),
+            cap(
+                "jwt_verify",
+                "JWT verify",
+                "Verify JWT and decode claims",
+                SideEffectClass::None,
+                DeterminismClass::Deterministic,
+                1,
+            ),
+            cap(
+                "random_bytes",
+                "Random bytes",
+                "Generate cryptographically secure random bytes",
+                SideEffectClass::None,
+                DeterminismClass::Stochastic,
+                1,
+            ),
+            cap(
+                "random_string",
+                "Random string",
+                "Generate random alphanumeric string",
+                SideEffectClass::None,
+                DeterminismClass::Stochastic,
+                1,
+            ),
         ],
         input_schema: SchemaRef::any(),
         output_schema: SchemaRef::any(),
-        failure_modes: vec![PortFailureClass::ValidationError, PortFailureClass::ExternalError],
+        failure_modes: vec![
+            PortFailureClass::ValidationError,
+            PortFailureClass::ExternalError,
+        ],
         side_effect_class: SideEffectClass::None,
         latency_profile: LatencyProfile {
             expected_latency_ms: 1,

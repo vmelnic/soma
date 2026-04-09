@@ -36,6 +36,39 @@ pub struct PostgresPort {
     runtime: OnceLock<tokio::runtime::Runtime>,
 }
 
+#[derive(Clone, Copy)]
+struct CapabilityBehavior {
+    effect_class: SideEffectClass,
+    rollback_support: RollbackSupport,
+    determinism_class: DeterminismClass,
+    idempotence_class: IdempotenceClass,
+    risk_class: RiskClass,
+}
+
+impl CapabilityBehavior {
+    fn new(
+        effect_class: SideEffectClass,
+        rollback_support: RollbackSupport,
+        determinism_class: DeterminismClass,
+        idempotence_class: IdempotenceClass,
+        risk_class: RiskClass,
+    ) -> Self {
+        Self {
+            effect_class,
+            rollback_support,
+            determinism_class,
+            idempotence_class,
+            risk_class,
+        }
+    }
+}
+
+impl Default for PostgresPort {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PostgresPort {
     pub fn new() -> Self {
         let spec = Self::build_spec();
@@ -68,10 +101,11 @@ impl PostgresPort {
     fn connect(&self) -> std::result::Result<tokio_postgres::Client, PortError> {
         let conn_str = self.conn_str();
         self.rt().block_on(async {
-            let (client, connection) =
-                tokio_postgres::connect(conn_str, tokio_postgres::NoTls)
-                    .await
-                    .map_err(|e| PortError::DependencyUnavailable(format!("PostgreSQL connection failed: {e}")))?;
+            let (client, connection) = tokio_postgres::connect(conn_str, tokio_postgres::NoTls)
+                .await
+                .map_err(|e| {
+                    PortError::DependencyUnavailable(format!("PostgreSQL connection failed: {e}"))
+                })?;
 
             // Spawn the connection handler so it processes messages in the background.
             tokio::spawn(async move {
@@ -149,12 +183,10 @@ impl PostgresPort {
                     _ => serde_json::Value::Null,
                 }
             }
-            Type::JSON | Type::JSONB => {
-                match row.try_get::<_, Option<serde_json::Value>>(idx) {
-                    Ok(Some(v)) => v,
-                    _ => serde_json::Value::Null,
-                }
-            }
+            Type::JSON | Type::JSONB => match row.try_get::<_, Option<serde_json::Value>>(idx) {
+                Ok(Some(v)) => v,
+                _ => serde_json::Value::Null,
+            },
             Type::UUID => match row.try_get::<_, Option<uuid::Uuid>>(idx) {
                 Ok(Some(v)) => serde_json::Value::String(v.to_string()),
                 _ => serde_json::Value::Null,
@@ -285,7 +317,10 @@ impl PostgresPort {
     /// `query` -- execute a SELECT and return all rows as a JSON array.
     ///
     /// Input: `{ "sql": "SELECT ...", "params": ["val1", "val2"] }`
-    fn do_query(&self, input: &serde_json::Value) -> std::result::Result<serde_json::Value, String> {
+    fn do_query(
+        &self,
+        input: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
         let raw_sql = input
             .get("sql")
             .and_then(|v| v.as_str())
@@ -325,7 +360,10 @@ impl PostgresPort {
     /// `execute` -- run INSERT/UPDATE/DELETE, return rows affected.
     ///
     /// Input: `{ "sql": "INSERT INTO ...", "params": [...] }`
-    fn do_execute(&self, input: &serde_json::Value) -> std::result::Result<serde_json::Value, String> {
+    fn do_execute(
+        &self,
+        input: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
         let sql = input
             .get("sql")
             .and_then(|v| v.as_str())
@@ -358,9 +396,7 @@ impl PostgresPort {
             .ok_or("missing 'table' field")?;
         Self::validate_identifier(table)?;
 
-        let id = input
-            .get("id")
-            .ok_or("missing 'id' field")?;
+        let id = input.get("id").ok_or("missing 'id' field")?;
         let id_str = match id {
             serde_json::Value::String(s) => s.clone(),
             serde_json::Value::Number(n) => n.to_string(),
@@ -378,7 +414,10 @@ impl PostgresPort {
 
         self.rt().block_on(async {
             let row_opt = client
-                .query_opt(&*sql, &[&id_str as &(dyn tokio_postgres::types::ToSql + Sync)])
+                .query_opt(
+                    &*sql,
+                    &[&id_str as &(dyn tokio_postgres::types::ToSql + Sync)],
+                )
                 .await
                 .map_err(|e| Self::format_pg_error(&e))?;
 
@@ -389,7 +428,10 @@ impl PostgresPort {
     /// `find_many` -- ORM-style multi-row query with structured filter.
     ///
     /// Input: `{ "table": "users", "where": {"active": true}, "order_by": [...], "limit": 10, "offset": 0 }`
-    fn do_find_many(&self, input: &serde_json::Value) -> std::result::Result<serde_json::Value, String> {
+    fn do_find_many(
+        &self,
+        input: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
         let table = input
             .get("table")
             .and_then(|v| v.as_str())
@@ -436,7 +478,10 @@ impl PostgresPort {
     /// `count` -- COUNT query with optional filter.
     ///
     /// Input: `{ "table": "users", "where": {"active": true} }`
-    fn do_count(&self, input: &serde_json::Value) -> std::result::Result<serde_json::Value, String> {
+    fn do_count(
+        &self,
+        input: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
         let table = input
             .get("table")
             .and_then(|v| v.as_str())
@@ -468,7 +513,10 @@ impl PostgresPort {
     /// `aggregate` -- SUM/AVG/MIN/MAX aggregation query.
     ///
     /// Input: `{ "table": "orders", "function": "SUM", "column": "amount", "where": {...}, "group_by": ["status"] }`
-    fn do_aggregate(&self, input: &serde_json::Value) -> std::result::Result<serde_json::Value, String> {
+    fn do_aggregate(
+        &self,
+        input: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
         let table = input
             .get("table")
             .and_then(|v| v.as_str())
@@ -531,7 +579,10 @@ impl PostgresPort {
     /// `create_table` -- DDL CREATE TABLE IF NOT EXISTS.
     ///
     /// Input: `{ "table": "my_table", "columns": "id SERIAL PRIMARY KEY, name TEXT NOT NULL" }`
-    fn do_create_table(&self, input: &serde_json::Value) -> std::result::Result<serde_json::Value, String> {
+    fn do_create_table(
+        &self,
+        input: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
         let table = input
             .get("table")
             .and_then(|v| v.as_str())
@@ -558,7 +609,10 @@ impl PostgresPort {
     /// `drop_table` -- DDL DROP TABLE IF EXISTS.
     ///
     /// Input: `{ "table": "my_table", "cascade": false }`
-    fn do_drop_table(&self, input: &serde_json::Value) -> std::result::Result<serde_json::Value, String> {
+    fn do_drop_table(
+        &self,
+        input: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
         let table = input
             .get("table")
             .and_then(|v| v.as_str())
@@ -586,7 +640,10 @@ impl PostgresPort {
     /// `alter_table` -- DDL ALTER TABLE.
     ///
     /// Input: `{ "table": "my_table", "changes": "ADD COLUMN email TEXT" }`
-    fn do_alter_table(&self, input: &serde_json::Value) -> std::result::Result<serde_json::Value, String> {
+    fn do_alter_table(
+        &self,
+        input: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
         let table = input
             .get("table")
             .and_then(|v| v.as_str())
@@ -613,7 +670,10 @@ impl PostgresPort {
     /// `insert` -- row-level INSERT with column/value pairs.
     ///
     /// Input: `{ "table": "users", "values": {"name": "Alice", "email": "alice@example.com"}, "returning": "*" }`
-    fn do_insert(&self, input: &serde_json::Value) -> std::result::Result<serde_json::Value, String> {
+    fn do_insert(
+        &self,
+        input: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
         let table = input
             .get("table")
             .and_then(|v| v.as_str())
@@ -664,17 +724,21 @@ impl PostgresPort {
                 .await
                 .map_err(|e| Self::format_pg_error(&e))?;
 
-            Ok(row_opt.map_or(
-                serde_json::json!({ "inserted": true }),
-                |row| Self::row_to_json(&row),
-            ))
+            Ok(
+                row_opt.map_or(serde_json::json!({ "inserted": true }), |row| {
+                    Self::row_to_json(&row)
+                }),
+            )
         })
     }
 
     /// `update` -- row-level UPDATE with SET values and WHERE filter.
     ///
     /// Input: `{ "table": "users", "set": {"name": "Bob"}, "where": {"id": 1} }`
-    fn do_update(&self, input: &serde_json::Value) -> std::result::Result<serde_json::Value, String> {
+    fn do_update(
+        &self,
+        input: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
         let table = input
             .get("table")
             .and_then(|v| v.as_str())
@@ -730,7 +794,10 @@ impl PostgresPort {
     /// `delete` -- row-level DELETE with WHERE filter.
     ///
     /// Input: `{ "table": "users", "where": {"id": 1} }`
-    fn do_delete(&self, input: &serde_json::Value) -> std::result::Result<serde_json::Value, String> {
+    fn do_delete(
+        &self,
+        input: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
         let table = input
             .get("table")
             .and_then(|v| v.as_str())
@@ -745,7 +812,10 @@ impl PostgresPort {
                 let _ = write!(sql, " WHERE {}", clauses.join(" AND "));
             }
         } else {
-            return Err("'where' clause is required for delete to prevent accidental full-table deletion".into());
+            return Err(
+                "'where' clause is required for delete to prevent accidental full-table deletion"
+                    .into(),
+            );
         }
 
         let client = self.connect().map_err(|e| e.to_string())?;
@@ -767,7 +837,10 @@ impl PostgresPort {
     /// Wraps all statements in BEGIN/COMMIT with automatic ROLLBACK on failure.
     /// True transaction handles across invocations are not possible with
     /// per-invocation connections, so this runs all statements atomically.
-    fn do_begin_transaction(&self, input: &serde_json::Value) -> std::result::Result<serde_json::Value, String> {
+    fn do_begin_transaction(
+        &self,
+        input: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
         let statements = input
             .get("statements")
             .and_then(|v| v.as_array())
@@ -789,18 +862,19 @@ impl PostgresPort {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| "each statement must have a 'sql' field".to_string())?;
 
-                let params: Vec<String> = if let Some(arr) = stmt.get("params").and_then(|v| v.as_array()) {
-                    arr.iter()
-                        .map(|v| match v {
-                            serde_json::Value::String(s) => s.clone(),
-                            serde_json::Value::Number(n) => n.to_string(),
-                            serde_json::Value::Bool(b) => b.to_string(),
-                            _ => v.to_string(),
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+                let params: Vec<String> =
+                    if let Some(arr) = stmt.get("params").and_then(|v| v.as_array()) {
+                        arr.iter()
+                            .map(|v| match v {
+                                serde_json::Value::String(s) => s.clone(),
+                                serde_json::Value::Number(n) => n.to_string(),
+                                serde_json::Value::Bool(b) => b.to_string(),
+                                _ => v.to_string(),
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
 
                 let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = params
                     .iter()
@@ -833,14 +907,24 @@ impl PostgresPort {
 
     /// `commit` -- explicit commit (no-op in the atomic transaction model,
     /// provided for API completeness).
-    fn do_commit(&self, _input: &serde_json::Value) -> std::result::Result<serde_json::Value, String> {
-        Ok(serde_json::json!({ "committed": true, "note": "use begin_transaction for atomic multi-statement execution" }))
+    fn do_commit(
+        &self,
+        _input: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
+        Ok(
+            serde_json::json!({ "committed": true, "note": "use begin_transaction for atomic multi-statement execution" }),
+        )
     }
 
     /// `rollback` -- explicit rollback (no-op in the atomic transaction model,
     /// provided for API completeness).
-    fn do_rollback(&self, _input: &serde_json::Value) -> std::result::Result<serde_json::Value, String> {
-        Ok(serde_json::json!({ "rolled_back": true, "note": "use begin_transaction for atomic multi-statement execution" }))
+    fn do_rollback(
+        &self,
+        _input: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
+        Ok(
+            serde_json::json!({ "rolled_back": true, "note": "use begin_transaction for atomic multi-statement execution" }),
+        )
     }
 
     // -----------------------------------------------------------------------
@@ -865,7 +949,9 @@ impl PostgresPort {
             {
                 continue;
             }
-            return Err(format!("invalid character '{ch}' in identifier '{trimmed}'"));
+            return Err(format!(
+                "invalid character '{ch}' in identifier '{trimmed}'"
+            ));
         }
         Ok(())
     }
@@ -966,9 +1052,7 @@ impl PostgresPort {
     }
 
     /// Build ORDER BY clause from a JSON array.
-    fn build_order_by(
-        arr: &[serde_json::Value],
-    ) -> std::result::Result<Vec<String>, String> {
+    fn build_order_by(arr: &[serde_json::Value]) -> std::result::Result<Vec<String>, String> {
         let mut orders = Vec::new();
         for item in arr {
             if let Some(s) = item.as_str() {
@@ -1021,165 +1105,195 @@ impl PostgresPort {
             Self::cap(
                 "query",
                 "Execute a SELECT query and return rows",
-                SideEffectClass::ReadOnly,
-                RollbackSupport::Irreversible,
-                DeterminismClass::PartiallyDeterministic,
-                IdempotenceClass::Idempotent,
-                RiskClass::Low,
+                CapabilityBehavior::new(
+                    SideEffectClass::ReadOnly,
+                    RollbackSupport::Irreversible,
+                    DeterminismClass::PartiallyDeterministic,
+                    IdempotenceClass::Idempotent,
+                    RiskClass::Low,
+                ),
                 &db_latency,
                 &low_cost,
             ),
             Self::cap(
                 "execute",
                 "Execute an INSERT/UPDATE/DELETE and return rows affected",
-                SideEffectClass::ExternalStateMutation,
-                RollbackSupport::CompensatingAction,
-                DeterminismClass::PartiallyDeterministic,
-                IdempotenceClass::NonIdempotent,
-                RiskClass::Medium,
+                CapabilityBehavior::new(
+                    SideEffectClass::ExternalStateMutation,
+                    RollbackSupport::CompensatingAction,
+                    DeterminismClass::PartiallyDeterministic,
+                    IdempotenceClass::NonIdempotent,
+                    RiskClass::Medium,
+                ),
                 &db_latency,
                 &low_cost,
             ),
             Self::cap(
                 "find",
                 "Find a single row by ID (ORM-style)",
-                SideEffectClass::ReadOnly,
-                RollbackSupport::Irreversible,
-                DeterminismClass::PartiallyDeterministic,
-                IdempotenceClass::Idempotent,
-                RiskClass::Low,
+                CapabilityBehavior::new(
+                    SideEffectClass::ReadOnly,
+                    RollbackSupport::Irreversible,
+                    DeterminismClass::PartiallyDeterministic,
+                    IdempotenceClass::Idempotent,
+                    RiskClass::Low,
+                ),
                 &db_latency,
                 &low_cost,
             ),
             Self::cap(
                 "find_many",
                 "Find multiple rows with structured filter",
-                SideEffectClass::ReadOnly,
-                RollbackSupport::Irreversible,
-                DeterminismClass::PartiallyDeterministic,
-                IdempotenceClass::Idempotent,
-                RiskClass::Low,
+                CapabilityBehavior::new(
+                    SideEffectClass::ReadOnly,
+                    RollbackSupport::Irreversible,
+                    DeterminismClass::PartiallyDeterministic,
+                    IdempotenceClass::Idempotent,
+                    RiskClass::Low,
+                ),
                 &db_latency,
                 &low_cost,
             ),
             Self::cap(
                 "count",
                 "Count rows matching a filter",
-                SideEffectClass::ReadOnly,
-                RollbackSupport::Irreversible,
-                DeterminismClass::PartiallyDeterministic,
-                IdempotenceClass::Idempotent,
-                RiskClass::Negligible,
+                CapabilityBehavior::new(
+                    SideEffectClass::ReadOnly,
+                    RollbackSupport::Irreversible,
+                    DeterminismClass::PartiallyDeterministic,
+                    IdempotenceClass::Idempotent,
+                    RiskClass::Negligible,
+                ),
                 &db_latency,
                 &low_cost,
             ),
             Self::cap(
                 "aggregate",
                 "Run an aggregate function (SUM/AVG/MIN/MAX) with optional grouping",
-                SideEffectClass::ReadOnly,
-                RollbackSupport::Irreversible,
-                DeterminismClass::PartiallyDeterministic,
-                IdempotenceClass::Idempotent,
-                RiskClass::Low,
+                CapabilityBehavior::new(
+                    SideEffectClass::ReadOnly,
+                    RollbackSupport::Irreversible,
+                    DeterminismClass::PartiallyDeterministic,
+                    IdempotenceClass::Idempotent,
+                    RiskClass::Low,
+                ),
                 &db_latency,
                 &low_cost,
             ),
             Self::cap(
                 "create_table",
                 "Create a table (DDL CREATE TABLE IF NOT EXISTS)",
-                SideEffectClass::ExternalStateMutation,
-                RollbackSupport::CompensatingAction,
-                DeterminismClass::Deterministic,
-                IdempotenceClass::Idempotent,
-                RiskClass::High,
+                CapabilityBehavior::new(
+                    SideEffectClass::ExternalStateMutation,
+                    RollbackSupport::CompensatingAction,
+                    DeterminismClass::Deterministic,
+                    IdempotenceClass::Idempotent,
+                    RiskClass::High,
+                ),
                 &db_latency,
                 &low_cost,
             ),
             Self::cap(
                 "drop_table",
                 "Drop a table (DDL DROP TABLE IF EXISTS)",
-                SideEffectClass::Destructive,
-                RollbackSupport::Irreversible,
-                DeterminismClass::Deterministic,
-                IdempotenceClass::Idempotent,
-                RiskClass::Critical,
+                CapabilityBehavior::new(
+                    SideEffectClass::Destructive,
+                    RollbackSupport::Irreversible,
+                    DeterminismClass::Deterministic,
+                    IdempotenceClass::Idempotent,
+                    RiskClass::Critical,
+                ),
                 &db_latency,
                 &low_cost,
             ),
             Self::cap(
                 "alter_table",
                 "Alter a table (DDL ALTER TABLE)",
-                SideEffectClass::ExternalStateMutation,
-                RollbackSupport::CompensatingAction,
-                DeterminismClass::Deterministic,
-                IdempotenceClass::NonIdempotent,
-                RiskClass::High,
+                CapabilityBehavior::new(
+                    SideEffectClass::ExternalStateMutation,
+                    RollbackSupport::CompensatingAction,
+                    DeterminismClass::Deterministic,
+                    IdempotenceClass::NonIdempotent,
+                    RiskClass::High,
+                ),
                 &db_latency,
                 &low_cost,
             ),
             Self::cap(
                 "insert",
                 "Insert a row with column/value pairs",
-                SideEffectClass::ExternalStateMutation,
-                RollbackSupport::CompensatingAction,
-                DeterminismClass::PartiallyDeterministic,
-                IdempotenceClass::NonIdempotent,
-                RiskClass::Low,
+                CapabilityBehavior::new(
+                    SideEffectClass::ExternalStateMutation,
+                    RollbackSupport::CompensatingAction,
+                    DeterminismClass::PartiallyDeterministic,
+                    IdempotenceClass::NonIdempotent,
+                    RiskClass::Low,
+                ),
                 &db_latency,
                 &low_cost,
             ),
             Self::cap(
                 "update",
                 "Update rows matching a WHERE filter",
-                SideEffectClass::ExternalStateMutation,
-                RollbackSupport::CompensatingAction,
-                DeterminismClass::PartiallyDeterministic,
-                IdempotenceClass::ConditionallyIdempotent,
-                RiskClass::Medium,
+                CapabilityBehavior::new(
+                    SideEffectClass::ExternalStateMutation,
+                    RollbackSupport::CompensatingAction,
+                    DeterminismClass::PartiallyDeterministic,
+                    IdempotenceClass::ConditionallyIdempotent,
+                    RiskClass::Medium,
+                ),
                 &db_latency,
                 &low_cost,
             ),
             Self::cap(
                 "delete",
                 "Delete rows matching a WHERE filter",
-                SideEffectClass::Destructive,
-                RollbackSupport::Irreversible,
-                DeterminismClass::PartiallyDeterministic,
-                IdempotenceClass::Idempotent,
-                RiskClass::High,
+                CapabilityBehavior::new(
+                    SideEffectClass::Destructive,
+                    RollbackSupport::Irreversible,
+                    DeterminismClass::PartiallyDeterministic,
+                    IdempotenceClass::Idempotent,
+                    RiskClass::High,
+                ),
                 &db_latency,
                 &low_cost,
             ),
             Self::cap(
                 "begin_transaction",
                 "Execute multiple statements atomically within a transaction",
-                SideEffectClass::ExternalStateMutation,
-                RollbackSupport::FullReversal,
-                DeterminismClass::PartiallyDeterministic,
-                IdempotenceClass::NonIdempotent,
-                RiskClass::Medium,
+                CapabilityBehavior::new(
+                    SideEffectClass::ExternalStateMutation,
+                    RollbackSupport::FullReversal,
+                    DeterminismClass::PartiallyDeterministic,
+                    IdempotenceClass::NonIdempotent,
+                    RiskClass::Medium,
+                ),
                 &db_latency,
                 &low_cost,
             ),
             Self::cap(
                 "commit",
                 "Commit a transaction (provided for API completeness)",
-                SideEffectClass::ExternalStateMutation,
-                RollbackSupport::Irreversible,
-                DeterminismClass::Deterministic,
-                IdempotenceClass::Idempotent,
-                RiskClass::Low,
+                CapabilityBehavior::new(
+                    SideEffectClass::ExternalStateMutation,
+                    RollbackSupport::Irreversible,
+                    DeterminismClass::Deterministic,
+                    IdempotenceClass::Idempotent,
+                    RiskClass::Low,
+                ),
                 &db_latency,
                 &CostProfile::default(),
             ),
             Self::cap(
                 "rollback",
                 "Rollback a transaction (provided for API completeness)",
-                SideEffectClass::None,
-                RollbackSupport::FullReversal,
-                DeterminismClass::Deterministic,
-                IdempotenceClass::Idempotent,
-                RiskClass::Negligible,
+                CapabilityBehavior::new(
+                    SideEffectClass::None,
+                    RollbackSupport::FullReversal,
+                    DeterminismClass::Deterministic,
+                    IdempotenceClass::Idempotent,
+                    RiskClass::Negligible,
+                ),
                 &db_latency,
                 &CostProfile::default(),
             ),
@@ -1190,7 +1304,9 @@ impl PostgresPort {
             name: "postgres".to_string(),
             version: Version::new(0, 1, 0),
             kind: PortKind::Database,
-            description: "PostgreSQL database operations: queries, DDL, ORM-style CRUD, transactions".to_string(),
+            description:
+                "PostgreSQL database operations: queries, DDL, ORM-style CRUD, transactions"
+                    .to_string(),
             namespace: "soma.ports".to_string(),
             trust_level: TrustLevel::Verified,
             capabilities,
@@ -1230,11 +1346,7 @@ impl PostgresPort {
     fn cap(
         name: &str,
         purpose: &str,
-        effect_class: SideEffectClass,
-        rollback_support: RollbackSupport,
-        determinism_class: DeterminismClass,
-        idempotence_class: IdempotenceClass,
-        risk_class: RiskClass,
+        behavior: CapabilityBehavior,
         latency_profile: &LatencyProfile,
         cost_profile: &CostProfile,
     ) -> PortCapabilitySpec {
@@ -1247,11 +1359,11 @@ impl PostgresPort {
             purpose: purpose.to_string(),
             input_schema: any_schema.clone(),
             output_schema: any_schema,
-            effect_class,
-            rollback_support,
-            determinism_class,
-            idempotence_class,
-            risk_class,
+            effect_class: behavior.effect_class,
+            rollback_support: behavior.rollback_support,
+            determinism_class: behavior.determinism_class,
+            idempotence_class: behavior.idempotence_class,
+            risk_class: behavior.risk_class,
             latency_profile: latency_profile.clone(),
             cost_profile: cost_profile.clone(),
             remote_exposable: false,
@@ -1427,6 +1539,7 @@ impl Port for PostgresPort {
 // C ABI entry point
 // ---------------------------------------------------------------------------
 
+#[allow(improper_ctypes_definitions)]
 #[unsafe(no_mangle)]
 pub extern "C" fn soma_port_init() -> *mut dyn Port {
     let port = PostgresPort::new();

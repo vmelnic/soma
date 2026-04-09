@@ -96,13 +96,18 @@ impl Port for TimerPort {
             other => {
                 return Err(PortError::Validation(format!(
                     "unknown capability: {other}"
-                )))
+                )));
             }
         };
         let latency_ms = start.elapsed().as_millis() as u64;
 
         match result {
-            Ok(value) => Ok(PortCallRecord::success(PORT_ID, capability_id, value, latency_ms)),
+            Ok(value) => Ok(PortCallRecord::success(
+                PORT_ID,
+                capability_id,
+                value,
+                latency_ms,
+            )),
             Err(e) => Ok(PortCallRecord::failure(
                 PORT_ID,
                 capability_id,
@@ -130,7 +135,7 @@ impl Port for TimerPort {
             other => {
                 return Err(PortError::Validation(format!(
                     "unknown capability: {other}"
-                )))
+                )));
             }
         }
         Ok(())
@@ -146,10 +151,7 @@ impl Port for TimerPort {
 // ---------------------------------------------------------------------------
 
 impl TimerPort {
-    fn set_timeout(
-        &self,
-        input: &serde_json::Value,
-    ) -> soma_port_sdk::Result<serde_json::Value> {
+    fn set_timeout(&self, input: &serde_json::Value) -> soma_port_sdk::Result<serde_json::Value> {
         let label = get_str(input, "label")?;
         let delay_ms = get_u64(input, "delay_ms")?;
 
@@ -181,10 +183,7 @@ impl TimerPort {
         }))
     }
 
-    fn set_interval(
-        &self,
-        input: &serde_json::Value,
-    ) -> soma_port_sdk::Result<serde_json::Value> {
+    fn set_interval(&self, input: &serde_json::Value) -> soma_port_sdk::Result<serde_json::Value> {
         let label = get_str(input, "label")?;
         let delay_ms = get_u64(input, "delay_ms")?;
 
@@ -216,10 +215,7 @@ impl TimerPort {
         }))
     }
 
-    fn cancel_timer(
-        &self,
-        input: &serde_json::Value,
-    ) -> soma_port_sdk::Result<serde_json::Value> {
+    fn cancel_timer(&self, input: &serde_json::Value) -> soma_port_sdk::Result<serde_json::Value> {
         let timer_id = get_str(input, "timer_id")?;
 
         let mut state = self.state.lock().unwrap();
@@ -320,7 +316,11 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Stochastic,
                 idempotence_class: IdempotenceClass::NonIdempotent,
                 risk_class: RiskClass::Negligible,
-                latency_profile: LatencyProfile { expected_latency_ms: 1, p95_latency_ms: 5, max_latency_ms: 10 },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 1,
+                    p95_latency_ms: 5,
+                    max_latency_ms: 10,
+                },
                 cost_profile: CostProfile::default(),
                 remote_exposable: false,
                 auth_override: None,
@@ -341,7 +341,11 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Stochastic,
                 idempotence_class: IdempotenceClass::NonIdempotent,
                 risk_class: RiskClass::Negligible,
-                latency_profile: LatencyProfile { expected_latency_ms: 1, p95_latency_ms: 5, max_latency_ms: 10 },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 1,
+                    p95_latency_ms: 5,
+                    max_latency_ms: 10,
+                },
                 cost_profile: CostProfile::default(),
                 remote_exposable: false,
                 auth_override: None,
@@ -361,7 +365,11 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Deterministic,
                 idempotence_class: IdempotenceClass::Idempotent,
                 risk_class: RiskClass::Negligible,
-                latency_profile: LatencyProfile { expected_latency_ms: 1, p95_latency_ms: 5, max_latency_ms: 10 },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 1,
+                    p95_latency_ms: 5,
+                    max_latency_ms: 10,
+                },
                 cost_profile: CostProfile::default(),
                 remote_exposable: false,
                 auth_override: None,
@@ -379,7 +387,11 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Stochastic,
                 idempotence_class: IdempotenceClass::Idempotent,
                 risk_class: RiskClass::Negligible,
-                latency_profile: LatencyProfile { expected_latency_ms: 1, p95_latency_ms: 5, max_latency_ms: 10 },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 1,
+                    p95_latency_ms: 5,
+                    max_latency_ms: 10,
+                },
                 cost_profile: CostProfile::default(),
                 remote_exposable: false,
                 auth_override: None,
@@ -389,7 +401,11 @@ fn build_spec() -> PortSpec {
         output_schema: SchemaRef::any(),
         failure_modes: vec![PortFailureClass::ValidationError],
         side_effect_class: SideEffectClass::LocalStateMutation,
-        latency_profile: LatencyProfile { expected_latency_ms: 1, p95_latency_ms: 5, max_latency_ms: 10 },
+        latency_profile: LatencyProfile {
+            expected_latency_ms: 1,
+            p95_latency_ms: 5,
+            max_latency_ms: 10,
+        },
         cost_profile: CostProfile::default(),
         auth_requirements: AuthRequirements::default(),
         sandbox_requirements: SandboxRequirements::default(),
@@ -423,9 +439,14 @@ mod tests {
     #[test]
     fn test_set_timeout() {
         let port = TimerPort::new();
-        let record = port.invoke("set_timeout", serde_json::json!({
-            "label": "test-timeout", "delay_ms": 1000
-        })).unwrap();
+        let record = port
+            .invoke(
+                "set_timeout",
+                serde_json::json!({
+                    "label": "test-timeout", "delay_ms": 1000
+                }),
+            )
+            .unwrap();
         assert!(record.success);
         assert_eq!(record.raw_result["type"], "timeout");
         assert!(record.raw_result["timer_id"].is_string());
@@ -434,9 +455,14 @@ mod tests {
     #[test]
     fn test_set_interval() {
         let port = TimerPort::new();
-        let record = port.invoke("set_interval", serde_json::json!({
-            "label": "heartbeat", "delay_ms": 500
-        })).unwrap();
+        let record = port
+            .invoke(
+                "set_interval",
+                serde_json::json!({
+                    "label": "heartbeat", "delay_ms": 500
+                }),
+            )
+            .unwrap();
         assert!(record.success);
         assert_eq!(record.raw_result["type"], "interval");
     }
@@ -445,14 +471,24 @@ mod tests {
     fn test_cancel_timer() {
         let port = TimerPort::new();
 
-        let record = port.invoke("set_timeout", serde_json::json!({
-            "label": "cancel-me", "delay_ms": 5000
-        })).unwrap();
+        let record = port
+            .invoke(
+                "set_timeout",
+                serde_json::json!({
+                    "label": "cancel-me", "delay_ms": 5000
+                }),
+            )
+            .unwrap();
         let timer_id = record.raw_result["timer_id"].as_str().unwrap().to_string();
 
-        let cancel = port.invoke("cancel_timer", serde_json::json!({
-            "timer_id": timer_id
-        })).unwrap();
+        let cancel = port
+            .invoke(
+                "cancel_timer",
+                serde_json::json!({
+                    "timer_id": timer_id
+                }),
+            )
+            .unwrap();
         assert!(cancel.success);
         assert_eq!(cancel.raw_result["cancelled"], true);
     }
@@ -460,9 +496,14 @@ mod tests {
     #[test]
     fn test_cancel_nonexistent() {
         let port = TimerPort::new();
-        let cancel = port.invoke("cancel_timer", serde_json::json!({
-            "timer_id": "does-not-exist"
-        })).unwrap();
+        let cancel = port
+            .invoke(
+                "cancel_timer",
+                serde_json::json!({
+                    "timer_id": "does-not-exist"
+                }),
+            )
+            .unwrap();
         assert!(cancel.success);
         assert_eq!(cancel.raw_result["cancelled"], false);
     }
@@ -470,12 +511,20 @@ mod tests {
     #[test]
     fn test_list_active() {
         let port = TimerPort::new();
-        port.invoke("set_timeout", serde_json::json!({
-            "label": "t1", "delay_ms": 10000
-        })).unwrap();
-        port.invoke("set_interval", serde_json::json!({
-            "label": "t2", "delay_ms": 5000
-        })).unwrap();
+        port.invoke(
+            "set_timeout",
+            serde_json::json!({
+                "label": "t1", "delay_ms": 10000
+            }),
+        )
+        .unwrap();
+        port.invoke(
+            "set_interval",
+            serde_json::json!({
+                "label": "t2", "delay_ms": 5000
+            }),
+        )
+        .unwrap();
 
         let list = port.invoke("list_active", serde_json::json!({})).unwrap();
         assert!(list.success);
@@ -485,9 +534,14 @@ mod tests {
     #[test]
     fn test_zero_delay_rejected() {
         let port = TimerPort::new();
-        let record = port.invoke("set_timeout", serde_json::json!({
-            "label": "zero", "delay_ms": 0
-        })).unwrap();
+        let record = port
+            .invoke(
+                "set_timeout",
+                serde_json::json!({
+                    "label": "zero", "delay_ms": 0
+                }),
+            )
+            .unwrap();
         assert!(!record.success);
     }
 }

@@ -24,6 +24,12 @@ pub struct GeoPort {
     spec: PortSpec,
 }
 
+impl Default for GeoPort {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GeoPort {
     pub fn new() -> Self {
         Self { spec: build_spec() }
@@ -71,7 +77,12 @@ impl Port for GeoPort {
         capability_id: &str,
         _input: &serde_json::Value,
     ) -> soma_port_sdk::Result<()> {
-        if self.spec.capabilities.iter().any(|c| c.capability_id == capability_id) {
+        if self
+            .spec
+            .capabilities
+            .iter()
+            .any(|c| c.capability_id == capability_id)
+        {
             Ok(())
         } else {
             Err(PortError::NotFound(format!(
@@ -94,10 +105,8 @@ fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let dlon = (lon2 - lon1).to_radians();
     let lat1_rad = lat1.to_radians();
     let lat2_rad = lat2.to_radians();
-    let a = (lat1_rad.cos() * lat2_rad.cos()).mul_add(
-        (dlon / 2.0).sin().powi(2),
-        (dlat / 2.0).sin().powi(2),
-    );
+    let a = (lat1_rad.cos() * lat2_rad.cos())
+        .mul_add((dlon / 2.0).sin().powi(2), (dlat / 2.0).sin().powi(2));
     let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
     EARTH_RADIUS_KM * c
 }
@@ -147,11 +156,15 @@ fn exec_radius_filter(input: &serde_json::Value) -> soma_port_sdk::Result<serde_
         let lat = point
             .get("lat")
             .and_then(serde_json::Value::as_f64)
-            .ok_or_else(|| PortError::Validation("each point must have a numeric 'lat' field".into()))?;
+            .ok_or_else(|| {
+                PortError::Validation("each point must have a numeric 'lat' field".into())
+            })?;
         let lon = point
             .get("lon")
             .and_then(serde_json::Value::as_f64)
-            .ok_or_else(|| PortError::Validation("each point must have a numeric 'lon' field".into()))?;
+            .ok_or_else(|| {
+                PortError::Validation("each point must have a numeric 'lon' field".into())
+            })?;
         let dist = haversine(center_lat, center_lon, lat, lon);
         if dist <= radius_km {
             let mut entry = point.clone();
@@ -257,19 +270,60 @@ fn build_spec() -> PortSpec {
         name: "Geo".to_string(),
         version: semver::Version::new(0, 1, 0),
         kind: PortKind::Custom,
-        description: "Geolocation: distance calculation, radius filtering, geocoding, bounds checking".to_string(),
+        description:
+            "Geolocation: distance calculation, radius filtering, geocoding, bounds checking"
+                .to_string(),
         namespace: "soma.ports.geo".to_string(),
         trust_level: TrustLevel::Trusted,
         capabilities: vec![
-            cap("distance", "Haversine distance", "Compute great-circle distance between two lat/lon points", SideEffectClass::None, DeterminismClass::Deterministic, 1),
-            cap("radius_filter", "Radius filter", "Filter a JSON array of points to those within a radius", SideEffectClass::None, DeterminismClass::Deterministic, 1),
-            cap("geocode", "Geocode", "Convert address to lat/lon coordinates (requires API key)", SideEffectClass::None, DeterminismClass::DelegatedVariant, 500),
-            cap("reverse_geocode", "Reverse geocode", "Convert lat/lon to address (requires API key)", SideEffectClass::None, DeterminismClass::DelegatedVariant, 500),
-            cap("bounds_check", "Bounds check", "Check if a point falls within a bounding box", SideEffectClass::None, DeterminismClass::Deterministic, 1),
+            cap(
+                "distance",
+                "Haversine distance",
+                "Compute great-circle distance between two lat/lon points",
+                SideEffectClass::None,
+                DeterminismClass::Deterministic,
+                1,
+            ),
+            cap(
+                "radius_filter",
+                "Radius filter",
+                "Filter a JSON array of points to those within a radius",
+                SideEffectClass::None,
+                DeterminismClass::Deterministic,
+                1,
+            ),
+            cap(
+                "geocode",
+                "Geocode",
+                "Convert address to lat/lon coordinates (requires API key)",
+                SideEffectClass::None,
+                DeterminismClass::DelegatedVariant,
+                500,
+            ),
+            cap(
+                "reverse_geocode",
+                "Reverse geocode",
+                "Convert lat/lon to address (requires API key)",
+                SideEffectClass::None,
+                DeterminismClass::DelegatedVariant,
+                500,
+            ),
+            cap(
+                "bounds_check",
+                "Bounds check",
+                "Check if a point falls within a bounding box",
+                SideEffectClass::None,
+                DeterminismClass::Deterministic,
+                1,
+            ),
         ],
         input_schema: SchemaRef::any(),
         output_schema: SchemaRef::any(),
-        failure_modes: vec![PortFailureClass::ValidationError, PortFailureClass::ExternalError, PortFailureClass::DependencyUnavailable],
+        failure_modes: vec![
+            PortFailureClass::ValidationError,
+            PortFailureClass::ExternalError,
+            PortFailureClass::DependencyUnavailable,
+        ],
         side_effect_class: SideEffectClass::None,
         latency_profile: LatencyProfile {
             expected_latency_ms: 1,

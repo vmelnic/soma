@@ -93,13 +93,18 @@ impl Port for PushPort {
             other => {
                 return Err(PortError::Validation(format!(
                     "unknown capability: {other}"
-                )))
+                )));
             }
         };
         let latency_ms = start.elapsed().as_millis() as u64;
 
         match result {
-            Ok(value) => Ok(PortCallRecord::success(PORT_ID, capability_id, value, latency_ms)),
+            Ok(value) => Ok(PortCallRecord::success(
+                PORT_ID,
+                capability_id,
+                value,
+                latency_ms,
+            )),
             Err(e) => Ok(PortCallRecord::failure(
                 PORT_ID,
                 capability_id,
@@ -138,7 +143,7 @@ impl Port for PushPort {
             other => {
                 return Err(PortError::Validation(format!(
                     "unknown capability: {other}"
-                )))
+                )));
             }
         }
         Ok(())
@@ -166,12 +171,9 @@ impl PushPort {
 
         let data = input.get("data").cloned().unwrap_or(serde_json::json!({}));
 
-        let access_token = get_str(input, "access_token")
-            .unwrap_or("missing-token");
+        let access_token = get_str(input, "access_token").unwrap_or("missing-token");
 
-        let url = format!(
-            "https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
-        );
+        let url = format!("https://fcm.googleapis.com/v1/projects/{project_id}/messages:send");
 
         let payload = serde_json::json!({
             "message": {
@@ -260,9 +262,10 @@ impl PushPort {
             }
         }
 
-        let mut devices = self.devices.write().map_err(|e| {
-            PortError::Internal(format!("device registry lock poisoned: {e}"))
-        })?;
+        let mut devices = self
+            .devices
+            .write()
+            .map_err(|e| PortError::Internal(format!("device registry lock poisoned: {e}")))?;
 
         let registrations = devices.entry(user_id.to_string()).or_default();
 
@@ -289,9 +292,10 @@ impl PushPort {
         let user_id = get_str(input, "user_id")?;
         let platform = get_str(input, "platform")?;
 
-        let mut devices = self.devices.write().map_err(|e| {
-            PortError::Internal(format!("device registry lock poisoned: {e}"))
-        })?;
+        let mut devices = self
+            .devices
+            .write()
+            .map_err(|e| PortError::Internal(format!("device registry lock poisoned: {e}")))?;
 
         let removed = if let Some(registrations) = devices.get_mut(user_id) {
             let before = registrations.len();
@@ -361,8 +365,15 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Stochastic,
                 idempotence_class: IdempotenceClass::NonIdempotent,
                 risk_class: RiskClass::Low,
-                latency_profile: LatencyProfile { expected_latency_ms: 500, p95_latency_ms: 3000, max_latency_ms: 30000 },
-                cost_profile: CostProfile { network_cost_class: CostClass::Low, ..CostProfile::default() },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 500,
+                    p95_latency_ms: 3000,
+                    max_latency_ms: 30000,
+                },
+                cost_profile: CostProfile {
+                    network_cost_class: CostClass::Low,
+                    ..CostProfile::default()
+                },
                 remote_exposable: false,
                 auth_override: None,
             },
@@ -382,8 +393,15 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Stochastic,
                 idempotence_class: IdempotenceClass::NonIdempotent,
                 risk_class: RiskClass::Low,
-                latency_profile: LatencyProfile { expected_latency_ms: 500, p95_latency_ms: 3000, max_latency_ms: 30000 },
-                cost_profile: CostProfile { network_cost_class: CostClass::Low, ..CostProfile::default() },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 500,
+                    p95_latency_ms: 3000,
+                    max_latency_ms: 30000,
+                },
+                cost_profile: CostProfile {
+                    network_cost_class: CostClass::Low,
+                    ..CostProfile::default()
+                },
                 remote_exposable: false,
                 auth_override: None,
             },
@@ -403,7 +421,11 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Deterministic,
                 idempotence_class: IdempotenceClass::Idempotent,
                 risk_class: RiskClass::Negligible,
-                latency_profile: LatencyProfile { expected_latency_ms: 1, p95_latency_ms: 5, max_latency_ms: 10 },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 1,
+                    p95_latency_ms: 5,
+                    max_latency_ms: 10,
+                },
                 cost_profile: CostProfile::default(),
                 remote_exposable: false,
                 auth_override: None,
@@ -423,7 +445,11 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Deterministic,
                 idempotence_class: IdempotenceClass::Idempotent,
                 risk_class: RiskClass::Negligible,
-                latency_profile: LatencyProfile { expected_latency_ms: 1, p95_latency_ms: 5, max_latency_ms: 10 },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 1,
+                    p95_latency_ms: 5,
+                    max_latency_ms: 10,
+                },
                 cost_profile: CostProfile::default(),
                 remote_exposable: false,
                 auth_override: None,
@@ -432,14 +458,29 @@ fn build_spec() -> PortSpec {
         input_schema: SchemaRef::any(),
         output_schema: SchemaRef::any(),
         failure_modes: vec![
-            PortFailureClass::ValidationError, PortFailureClass::ExternalError,
-            PortFailureClass::TransportError, PortFailureClass::Timeout,
+            PortFailureClass::ValidationError,
+            PortFailureClass::ExternalError,
+            PortFailureClass::TransportError,
+            PortFailureClass::Timeout,
         ],
         side_effect_class: SideEffectClass::ExternalStateMutation,
-        latency_profile: LatencyProfile { expected_latency_ms: 200, p95_latency_ms: 3000, max_latency_ms: 30000 },
-        cost_profile: CostProfile { network_cost_class: CostClass::Low, ..CostProfile::default() },
-        auth_requirements: AuthRequirements { methods: vec![AuthMethod::ApiKey], required: true },
-        sandbox_requirements: SandboxRequirements { network_access: true, ..SandboxRequirements::default() },
+        latency_profile: LatencyProfile {
+            expected_latency_ms: 200,
+            p95_latency_ms: 3000,
+            max_latency_ms: 30000,
+        },
+        cost_profile: CostProfile {
+            network_cost_class: CostClass::Low,
+            ..CostProfile::default()
+        },
+        auth_requirements: AuthRequirements {
+            methods: vec![AuthMethod::ApiKey],
+            required: true,
+        },
+        sandbox_requirements: SandboxRequirements {
+            network_access: true,
+            ..SandboxRequirements::default()
+        },
         observable_fields: vec!["user_id".into(), "platform".into(), "sent".into()],
         validation_rules: vec![],
         remote_exposure: false,
@@ -501,13 +542,22 @@ mod tests {
     #[test]
     fn test_register_then_unregister() {
         let port = PushPort::new();
-        port.invoke("register_device", serde_json::json!({
-            "user_id": "user-2", "platform": "ios", "token": "tok-456"
-        })).unwrap();
+        port.invoke(
+            "register_device",
+            serde_json::json!({
+                "user_id": "user-2", "platform": "ios", "token": "tok-456"
+            }),
+        )
+        .unwrap();
 
-        let record = port.invoke("unregister_device", serde_json::json!({
-            "user_id": "user-2", "platform": "ios"
-        })).unwrap();
+        let record = port
+            .invoke(
+                "unregister_device",
+                serde_json::json!({
+                    "user_id": "user-2", "platform": "ios"
+                }),
+            )
+            .unwrap();
         assert!(record.success);
         assert_eq!(record.raw_result["removed"], true);
     }

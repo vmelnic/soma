@@ -32,6 +32,12 @@ pub struct RedisPort {
     rt: tokio::runtime::Runtime,
 }
 
+impl Default for RedisPort {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RedisPort {
     /// Create a new Redis port, connecting to `SOMA_REDIS_URL` or localhost.
     pub fn new() -> Self {
@@ -57,12 +63,13 @@ impl RedisPort {
 
     /// Clone the connection manager, returning an error if not connected.
     fn get_conn(&self) -> soma_port_sdk::Result<redis::aio::ConnectionManager> {
-        let guard = self.conn.lock().map_err(|e| {
-            PortError::Internal(format!("lock poisoned: {e}"))
-        })?;
-        guard.clone().ok_or_else(|| {
-            PortError::DependencyUnavailable("Redis not connected".into())
-        })
+        let guard = self
+            .conn
+            .lock()
+            .map_err(|e| PortError::Internal(format!("lock poisoned: {e}")))?;
+        guard
+            .clone()
+            .ok_or_else(|| PortError::DependencyUnavailable("Redis not connected".into()))
     }
 
     /// Async implementation for all 14 capabilities.
@@ -179,11 +186,9 @@ impl RedisPort {
                 Ok(serde_json::json!(receivers))
             }
 
-            "subscribe" => {
-                Err(PortError::ExternalError(
-                    "subscribe requires streaming, not supported in sync port invocation".into(),
-                ))
-            }
+            "subscribe" => Err(PortError::ExternalError(
+                "subscribe requires streaming, not supported in sync port invocation".into(),
+            )),
 
             // --- Key listing ---
             "keys" => {
@@ -218,7 +223,12 @@ impl Port for RedisPort {
         match self.rt.block_on(self.invoke_async(capability_id, input)) {
             Ok(result) => {
                 let latency_ms = start.elapsed().as_millis() as u64;
-                Ok(PortCallRecord::success("redis", capability_id, result, latency_ms))
+                Ok(PortCallRecord::success(
+                    "redis",
+                    capability_id,
+                    result,
+                    latency_ms,
+                ))
             }
             Err(e) => {
                 let latency_ms = start.elapsed().as_millis() as u64;
@@ -337,8 +347,12 @@ fn read_cap(
         capability_id: id.to_string(),
         name: name.to_string(),
         purpose: purpose.to_string(),
-        input_schema: SchemaRef { schema: input_schema },
-        output_schema: SchemaRef { schema: output_schema },
+        input_schema: SchemaRef {
+            schema: input_schema,
+        },
+        output_schema: SchemaRef {
+            schema: output_schema,
+        },
         effect_class: SideEffectClass::ReadOnly,
         rollback_support: RollbackSupport::Irreversible,
         determinism_class: DeterminismClass::Stochastic,
@@ -367,8 +381,12 @@ fn write_cap(
         capability_id: id.to_string(),
         name: name.to_string(),
         purpose: purpose.to_string(),
-        input_schema: SchemaRef { schema: input_schema },
-        output_schema: SchemaRef { schema: output_schema },
+        input_schema: SchemaRef {
+            schema: input_schema,
+        },
+        output_schema: SchemaRef {
+            schema: output_schema,
+        },
         effect_class: SideEffectClass::ExternalStateMutation,
         rollback_support: RollbackSupport::Irreversible,
         determinism_class: DeterminismClass::Stochastic,
@@ -477,45 +495,105 @@ fn build_spec() -> PortSpec {
         trust_level: TrustLevel::Verified,
         capabilities: vec![
             // String operations
-            read_cap("get", "get", "Get string value by key",
-                key_schema.clone(), nullable_string.clone()),
-            write_cap("set", "set", "Set string value with optional TTL",
-                key_value_schema.clone(), string_schema.clone()),
-            write_cap("del", "del", "Delete a key",
-                key_schema.clone(), bool_schema.clone()),
-
+            read_cap(
+                "get",
+                "get",
+                "Get string value by key",
+                key_schema.clone(),
+                nullable_string.clone(),
+            ),
+            write_cap(
+                "set",
+                "set",
+                "Set string value with optional TTL",
+                key_value_schema.clone(),
+                string_schema.clone(),
+            ),
+            write_cap(
+                "del",
+                "del",
+                "Delete a key",
+                key_schema.clone(),
+                bool_schema.clone(),
+            ),
             // Hash operations
-            read_cap("hget", "hget", "Get a hash field value",
-                key_field_schema.clone(), nullable_string.clone()),
-            write_cap("hset", "hset", "Set a hash field value",
-                key_field_value_schema.clone(), bool_schema.clone()),
-            write_cap("hdel", "hdel", "Delete a hash field",
-                key_field_schema.clone(), bool_schema.clone()),
-            read_cap("hgetall", "hgetall", "Get all hash fields and values",
-                key_schema.clone(), object_schema.clone()),
-
+            read_cap(
+                "hget",
+                "hget",
+                "Get a hash field value",
+                key_field_schema.clone(),
+                nullable_string.clone(),
+            ),
+            write_cap(
+                "hset",
+                "hset",
+                "Set a hash field value",
+                key_field_value_schema.clone(),
+                bool_schema.clone(),
+            ),
+            write_cap(
+                "hdel",
+                "hdel",
+                "Delete a hash field",
+                key_field_schema.clone(),
+                bool_schema.clone(),
+            ),
+            read_cap(
+                "hgetall",
+                "hgetall",
+                "Get all hash fields and values",
+                key_schema.clone(),
+                object_schema.clone(),
+            ),
             // List operations
-            write_cap("lpush", "lpush", "Push value to head of list",
-                key_value_schema.clone(), int_schema.clone()),
-            read_cap("lpop", "lpop", "Pop value from head of list",
-                key_schema.clone(), nullable_string.clone()),
-            read_cap("lrange", "lrange", "Get a range of elements from a list",
-                lrange_schema.clone(), string_array.clone()),
-
+            write_cap(
+                "lpush",
+                "lpush",
+                "Push value to head of list",
+                key_value_schema.clone(),
+                int_schema.clone(),
+            ),
+            read_cap(
+                "lpop",
+                "lpop",
+                "Pop value from head of list",
+                key_schema.clone(),
+                nullable_string.clone(),
+            ),
+            read_cap(
+                "lrange",
+                "lrange",
+                "Get a range of elements from a list",
+                lrange_schema.clone(),
+                string_array.clone(),
+            ),
             // Pub/Sub
-            write_cap("publish", "publish", "Publish a message to a channel",
-                channel_message_schema.clone(), int_schema.clone()),
+            write_cap(
+                "publish",
+                "publish",
+                "Publish a message to a channel",
+                channel_message_schema.clone(),
+                int_schema.clone(),
+            ),
             {
-                let mut cap = read_cap("subscribe", "subscribe",
+                let mut cap = read_cap(
+                    "subscribe",
+                    "subscribe",
                     "Subscribe to a channel (streaming, not yet supported)",
-                    channel_schema.clone(), string_schema.clone());
+                    channel_schema.clone(),
+                    string_schema.clone(),
+                );
                 cap.effect_class = SideEffectClass::None;
                 cap
             },
-
             // Key listing
-            read_cap("keys", "keys", "Find keys matching a glob pattern",
-                pattern_schema.clone(), string_array.clone()),
+            read_cap(
+                "keys",
+                "keys",
+                "Find keys matching a glob pattern",
+                pattern_schema.clone(),
+                string_array.clone(),
+            ),
         ],
         input_schema: SchemaRef::any(),
         output_schema: SchemaRef::any(),

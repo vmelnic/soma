@@ -34,9 +34,7 @@ pub struct ImagePort {
 
 impl ImagePort {
     pub fn new() -> Self {
-        Self {
-            spec: build_spec(),
-        }
+        Self { spec: build_spec() }
     }
 }
 
@@ -70,13 +68,18 @@ impl Port for ImagePort {
             other => {
                 return Err(PortError::Validation(format!(
                     "unknown capability: {other}"
-                )))
+                )));
             }
         };
         let latency_ms = start.elapsed().as_millis() as u64;
 
         match result {
-            Ok(value) => Ok(PortCallRecord::success(PORT_ID, capability_id, value, latency_ms)),
+            Ok(value) => Ok(PortCallRecord::success(
+                PORT_ID,
+                capability_id,
+                value,
+                latency_ms,
+            )),
             Err(e) => Ok(PortCallRecord::failure(
                 PORT_ID,
                 capability_id,
@@ -113,7 +116,7 @@ impl Port for ImagePort {
             other => {
                 return Err(PortError::Validation(format!(
                     "unknown capability: {other}"
-                )))
+                )));
             }
         }
         Ok(())
@@ -258,8 +261,7 @@ fn get_u32(input: &serde_json::Value, field: &str) -> soma_port_sdk::Result<u32>
     let n = input[field]
         .as_u64()
         .ok_or_else(|| PortError::Validation(format!("{field} must be a positive integer")))?;
-    u32::try_from(n)
-        .map_err(|_| PortError::Validation(format!("{field} too large for u32")))
+    u32::try_from(n).map_err(|_| PortError::Validation(format!("{field} too large for u32")))
 }
 
 fn validate_dimensions(width: u32, height: u32) -> soma_port_sdk::Result<()> {
@@ -321,7 +323,8 @@ fn build_spec() -> PortSpec {
             PortCapabilitySpec {
                 capability_id: "thumbnail".into(),
                 name: "thumbnail".into(),
-                purpose: "Generate a thumbnail of an image (fast, lower quality than resize)".into(),
+                purpose: "Generate a thumbnail of an image (fast, lower quality than resize)"
+                    .into(),
                 input_schema: SchemaRef::object(serde_json::json!({
                     "data": {"type": "string", "description": "Base64-encoded image data"},
                     "width": {"type": "integer", "description": "Maximum thumbnail width"},
@@ -336,8 +339,15 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Deterministic,
                 idempotence_class: IdempotenceClass::Idempotent,
                 risk_class: RiskClass::Negligible,
-                latency_profile: LatencyProfile { expected_latency_ms: 10, p95_latency_ms: 100, max_latency_ms: 5000 },
-                cost_profile: CostProfile { cpu_cost_class: CostClass::Low, ..CostProfile::default() },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 10,
+                    p95_latency_ms: 100,
+                    max_latency_ms: 5000,
+                },
+                cost_profile: CostProfile {
+                    cpu_cost_class: CostClass::Low,
+                    ..CostProfile::default()
+                },
                 remote_exposable: true,
                 auth_override: None,
             },
@@ -358,8 +368,15 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Deterministic,
                 idempotence_class: IdempotenceClass::Idempotent,
                 risk_class: RiskClass::Negligible,
-                latency_profile: LatencyProfile { expected_latency_ms: 50, p95_latency_ms: 500, max_latency_ms: 10000 },
-                cost_profile: CostProfile { cpu_cost_class: CostClass::Medium, ..CostProfile::default() },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 50,
+                    p95_latency_ms: 500,
+                    max_latency_ms: 10000,
+                },
+                cost_profile: CostProfile {
+                    cpu_cost_class: CostClass::Medium,
+                    ..CostProfile::default()
+                },
                 remote_exposable: true,
                 auth_override: None,
             },
@@ -381,7 +398,11 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Deterministic,
                 idempotence_class: IdempotenceClass::Idempotent,
                 risk_class: RiskClass::Negligible,
-                latency_profile: LatencyProfile { expected_latency_ms: 5, p95_latency_ms: 50, max_latency_ms: 5000 },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 5,
+                    p95_latency_ms: 50,
+                    max_latency_ms: 5000,
+                },
                 cost_profile: CostProfile::default(),
                 remote_exposable: true,
                 auth_override: None,
@@ -402,7 +423,11 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Deterministic,
                 idempotence_class: IdempotenceClass::Idempotent,
                 risk_class: RiskClass::Negligible,
-                latency_profile: LatencyProfile { expected_latency_ms: 10, p95_latency_ms: 100, max_latency_ms: 5000 },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 10,
+                    p95_latency_ms: 100,
+                    max_latency_ms: 5000,
+                },
                 cost_profile: CostProfile::default(),
                 remote_exposable: true,
                 auth_override: None,
@@ -423,7 +448,11 @@ fn build_spec() -> PortSpec {
                 determinism_class: DeterminismClass::Deterministic,
                 idempotence_class: IdempotenceClass::Idempotent,
                 risk_class: RiskClass::Negligible,
-                latency_profile: LatencyProfile { expected_latency_ms: 10, p95_latency_ms: 100, max_latency_ms: 5000 },
+                latency_profile: LatencyProfile {
+                    expected_latency_ms: 10,
+                    p95_latency_ms: 100,
+                    max_latency_ms: 5000,
+                },
                 cost_profile: CostProfile::default(),
                 remote_exposable: true,
                 auth_override: None,
@@ -431,10 +460,20 @@ fn build_spec() -> PortSpec {
         ],
         input_schema: SchemaRef::any(),
         output_schema: SchemaRef::any(),
-        failure_modes: vec![PortFailureClass::ValidationError, PortFailureClass::ExternalError],
+        failure_modes: vec![
+            PortFailureClass::ValidationError,
+            PortFailureClass::ExternalError,
+        ],
         side_effect_class: SideEffectClass::None,
-        latency_profile: LatencyProfile { expected_latency_ms: 10, p95_latency_ms: 500, max_latency_ms: 10000 },
-        cost_profile: CostProfile { cpu_cost_class: CostClass::Medium, ..CostProfile::default() },
+        latency_profile: LatencyProfile {
+            expected_latency_ms: 10,
+            p95_latency_ms: 500,
+            max_latency_ms: 10000,
+        },
+        cost_profile: CostProfile {
+            cpu_cost_class: CostClass::Medium,
+            ..CostProfile::default()
+        },
         auth_requirements: AuthRequirements::default(),
         sandbox_requirements: SandboxRequirements::default(),
         observable_fields: vec!["width".into(), "height".into(), "format".into()],
