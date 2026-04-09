@@ -30,8 +30,14 @@ fn main() {
 
     // Check for --mcp flag → MCP JSON-RPC mode over stdin/stdout
     if args.iter().any(|a| a == "--mcp") {
-        // Extract --pack arguments for MCP mode the same way as CLI mode.
+        // Extract --pack, --listen, --peer, --unix-listen, --unix-peer for MCP mode.
         let mut mcp_pack_paths: Vec<String> = Vec::new();
+        let mut mcp_listen: Option<SocketAddr> = None;
+        let mut mcp_peer_addrs: Vec<SocketAddr> = Vec::new();
+        #[cfg(unix)]
+        let mut mcp_unix_listen: Option<std::path::PathBuf> = None;
+        #[cfg(unix)]
+        let mut mcp_unix_peers: Vec<std::path::PathBuf> = Vec::new();
         let mut mcp_skip = false;
         for (i, arg) in args.iter().enumerate() {
             if mcp_skip {
@@ -43,8 +49,43 @@ fn main() {
                     mcp_pack_paths.push(path.clone());
                     mcp_skip = true;
                 }
+            if arg == "--listen"
+                && let Some(addr_str) = args.get(i + 1) {
+                    if let Ok(addr) = addr_str.parse::<SocketAddr>() {
+                        mcp_listen = Some(addr);
+                    }
+                    mcp_skip = true;
+                }
+            if arg == "--peer"
+                && let Some(addr_str) = args.get(i + 1) {
+                    if let Ok(addr) = addr_str.parse::<SocketAddr>() {
+                        mcp_peer_addrs.push(addr);
+                    }
+                    mcp_skip = true;
+                }
+            #[cfg(unix)]
+            if arg == "--unix-listen"
+                && let Some(path_str) = args.get(i + 1) {
+                    mcp_unix_listen = Some(std::path::PathBuf::from(path_str));
+                    mcp_skip = true;
+                }
+            #[cfg(unix)]
+            if arg == "--unix-peer"
+                && let Some(path_str) = args.get(i + 1) {
+                    mcp_unix_peers.push(std::path::PathBuf::from(path_str));
+                    mcp_skip = true;
+                }
         }
-        run_mcp_server(&mcp_pack_paths);
+
+        let mcp_distributed = McpDistributedConfig {
+            listen: mcp_listen,
+            peer_addrs: mcp_peer_addrs,
+            #[cfg(unix)]
+            unix_listen: mcp_unix_listen,
+            #[cfg(unix)]
+            unix_peers: mcp_unix_peers,
+        };
+        run_mcp_server(&mcp_pack_paths, mcp_distributed);
         return;
     }
 
@@ -229,9 +270,12 @@ fn main() {
     let has_any_listener =
         listen_addr.is_some() || ws_listen_addr.is_some() || has_unix_listener;
     if has_any_listener {
+        let schema_store = Arc::clone(&runtime.schema_store);
+        let routine_store = Arc::clone(&runtime.routine_store);
         let runtime_arc = Arc::new(Mutex::new(runtime));
         let handler: Arc<dyn soma_next::distributed::transport::IncomingHandler> =
-            Arc::new(LocalDispatchHandler::new(Arc::clone(&runtime_arc)));
+            Arc::new(LocalDispatchHandler::with_stores(
+                Arc::clone(&runtime_arc), schema_store, routine_store));
 
         if let Some(addr) = listen_addr {
             if let Some(ref tls) = tls_config {
@@ -358,42 +402,187 @@ FLAGS:
     );
 }
 
+/// Configuration for distributed features in MCP mode.
+struct McpDistributedConfig {
+    listen: Option<SocketAddr>,
+    peer_addrs: Vec<SocketAddr>,
+    #[cfg(unix)]
+    unix_listen: Option<std::path::PathBuf>,
+    #[cfg(unix)]
+    unix_peers: Vec<std::path::PathBuf>,
+}
+
 /// MCP server: read JSON-RPC requests from stdin, write responses to stdout.
-fn run_mcp_server(pack_paths: &[String]) {
+fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
     use soma_next::interfaces::mcp::RuntimeHandle;
 
     let config = SomaConfig::load(Path::new("soma.toml")).unwrap_or_default();
 
-    let server = if pack_paths.is_empty() {
-        // Try default pack location, fall back to stub.
-        let default_manifest = "packs/reference/manifest.json";
-        if Path::new(default_manifest).exists() {
-            match bootstrap::bootstrap(&config, &[default_manifest.to_string()]) {
-                Ok(runtime) => McpServer::new(RuntimeHandle::from_runtime(runtime)),
-                Err(e) => {
-                    eprintln!("warning: failed to load default pack: {e}");
-                    McpServer::new_stub()
-                }
+    // Build peer maps and determine if we need a remote executor.
+    let has_tcp_peers = !distributed.peer_addrs.is_empty();
+    #[cfg(unix)]
+    let has_unix_peers = !distributed.unix_peers.is_empty();
+    #[cfg(not(unix))]
+    let has_unix_peers = false;
+    let has_peers = has_tcp_peers || has_unix_peers;
+
+    let tcp_peer_map: PeerAddressMap = Arc::new(Mutex::new(HashMap::new()));
+    let mut all_peer_ids: Vec<String> = Vec::new();
+    for (i, addr) in distributed.peer_addrs.iter().enumerate() {
+        let pid = format!("peer-{}", i);
+        tcp_peer_map.lock().unwrap().insert(pid.clone(), *addr);
+        all_peer_ids.push(pid);
+    }
+    #[cfg(unix)]
+    let unix_peer_map: soma_next::distributed::unix_transport::UnixPeerPathMap =
+        Arc::new(Mutex::new(HashMap::new()));
+    #[cfg(unix)]
+    for (i, path) in distributed.unix_peers.iter().enumerate() {
+        let pid = format!("unix-peer-{}", i);
+        unix_peer_map.lock().unwrap().insert(pid.clone(), path.clone());
+        all_peer_ids.push(pid);
+    }
+
+    // Build remote executor if peers are configured.
+    let make_executor = || -> Option<Box<dyn soma_next::distributed::remote::RemoteExecutor>> {
+        if !has_peers {
+            return None;
+        }
+        if has_tcp_peers {
+            let tls_config = config.distributed.tls_config();
+            if let Some(ref tls) = tls_config
+                && let Ok(executor) = TlsTcpRemoteExecutor::new(Arc::clone(&tcp_peer_map), tls)
+            {
+                eprintln!("MCP: Using TLS for outbound peer connections");
+                return Some(Box::new(executor));
             }
+            Some(Box::new(TcpRemoteExecutor::new(Arc::clone(&tcp_peer_map))))
         } else {
-            // Bootstrap with no packs to get a functional runtime (no skills).
-            match bootstrap::bootstrap(&config, &[]) {
-                Ok(runtime) => McpServer::new(RuntimeHandle::from_runtime(runtime)),
-                Err(e) => {
-                    eprintln!("warning: failed to bootstrap runtime: {e}");
-                    McpServer::new_stub()
-                }
+            #[cfg(unix)]
+            {
+                use soma_next::distributed::unix_transport::UnixRemoteExecutor;
+                Some(Box::new(UnixRemoteExecutor::new(Arc::clone(&unix_peer_map))))
+            }
+            #[cfg(not(unix))]
+            {
+                None
+            }
+        }
+    };
+
+    let bootstrap_runtime = |packs: &[String]| -> std::result::Result<crate::bootstrap::Runtime, String> {
+        if has_peers {
+            let exec = make_executor().unwrap();
+            bootstrap::bootstrap_with_remote(&config, packs, exec)
+                .map_err(|e| e.to_string())
+        } else {
+            bootstrap::bootstrap(&config, packs)
+                .map_err(|e| e.to_string())
+        }
+    };
+
+    let server = if pack_paths.is_empty() {
+        let default_manifest = "packs/reference/manifest.json";
+        let packs = if Path::new(default_manifest).exists() {
+            vec![default_manifest.to_string()]
+        } else {
+            vec![]
+        };
+        match bootstrap_runtime(&packs) {
+            Ok(runtime) => {
+                let handle = RuntimeHandle::from_runtime(runtime);
+                let handle = if has_peers {
+                    if let Some(exec) = make_executor() {
+                        handle.with_remote(exec, all_peer_ids.clone())
+                    } else {
+                        handle
+                    }
+                } else {
+                    handle
+                };
+                McpServer::new(handle)
+            }
+            Err(e) => {
+                eprintln!("warning: failed to bootstrap runtime: {e}");
+                McpServer::new_stub()
             }
         }
     } else {
-        match bootstrap::bootstrap(&config, pack_paths) {
-            Ok(runtime) => McpServer::new(RuntimeHandle::from_runtime(runtime)),
+        match bootstrap_runtime(pack_paths) {
+            Ok(runtime) => {
+                let handle = RuntimeHandle::from_runtime(runtime);
+                let handle = if has_peers {
+                    if let Some(exec) = make_executor() {
+                        handle.with_remote(exec, all_peer_ids.clone())
+                    } else {
+                        handle
+                    }
+                } else {
+                    handle
+                };
+                McpServer::new(handle)
+            }
             Err(e) => {
                 eprintln!("error: failed to bootstrap runtime: {e}");
                 std::process::exit(1);
             }
         }
     };
+
+    // Start TCP listener if requested (background thread).
+    if let Some(addr) = distributed.listen {
+        // Bootstrap a listener runtime with schema/routine stores wired in
+        // so that transferred schemas and routines are actually stored.
+        let listener_packs: Vec<String> = if pack_paths.is_empty() {
+            let dm = "packs/reference/manifest.json";
+            if Path::new(dm).exists() { vec![dm.to_string()] } else { vec![] }
+        } else {
+            pack_paths.to_vec()
+        };
+        match bootstrap::bootstrap(&config, &listener_packs) {
+            Ok(listener_rt) => {
+                let schema_store = Arc::clone(&listener_rt.schema_store);
+                let routine_store = Arc::clone(&listener_rt.routine_store);
+                let runtime_arc = Arc::new(Mutex::new(listener_rt));
+                let handler: Arc<dyn soma_next::distributed::transport::IncomingHandler> =
+                    Arc::new(LocalDispatchHandler::with_stores(
+                        Arc::clone(&runtime_arc), schema_store, routine_store));
+                let _tcp_handle = start_listener_background(addr, handler);
+                eprintln!("MCP: TCP transport listening on {}", addr);
+            }
+            Err(e) => {
+                eprintln!("warning: failed to bootstrap listener runtime: {e}");
+            }
+        }
+    }
+
+    // Start Unix listener if requested.
+    #[cfg(unix)]
+    if let Some(ref path) = distributed.unix_listen {
+        let listener_packs: Vec<String> = if pack_paths.is_empty() {
+            let dm = "packs/reference/manifest.json";
+            if Path::new(dm).exists() { vec![dm.to_string()] } else { vec![] }
+        } else {
+            pack_paths.to_vec()
+        };
+        match bootstrap::bootstrap(&config, &listener_packs) {
+            Ok(listener_rt) => {
+                let schema_store = Arc::clone(&listener_rt.schema_store);
+                let routine_store = Arc::clone(&listener_rt.routine_store);
+                let runtime_arc = Arc::new(Mutex::new(listener_rt));
+                let handler: Arc<dyn soma_next::distributed::transport::IncomingHandler> =
+                    Arc::new(LocalDispatchHandler::with_stores(
+                        Arc::clone(&runtime_arc), schema_store, routine_store));
+                let _unix_handle =
+                    soma_next::distributed::unix_transport::start_unix_listener_background(
+                        path.clone(), handler);
+                eprintln!("MCP: Unix transport listening on {}", path.display());
+            }
+            Err(e) => {
+                eprintln!("warning: failed to bootstrap Unix listener runtime: {e}");
+            }
+        }
+    }
     let stdin = io::stdin();
     let mut stdout = io::stdout();
 

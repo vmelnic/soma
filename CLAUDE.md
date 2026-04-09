@@ -16,6 +16,7 @@ Active deliverables:
 - **soma-project-postgres/** — PostgreSQL proof.
 - **soma-project-llm/** — Ollama + SOMA proof. LLM generates SQL from natural language, SOMA executes via postgres port.
 - **soma-project-mcp/** — Claude Code MCP integration. SOMA as MCP server for Claude (.mcp.json at repo root).
+- **soma-project-s2s/** — SOMA-to-SOMA communication proof. Two instances cooperate over TCP: transport, delegation, schema/routine transfer. 42 tests across 3 levels.
 
 Legacy (in repo but not active): soma-core/, soma-plugins/, soma-synthesizer/, poc/, pow/
 
@@ -74,7 +75,7 @@ soma/
       adapters.rs             # SkillRegistryAdapter (routine/schema-aware), EpisodeMemoryAdapter (embedding-aware), PolicyEngineAdapter, PortBackedSkillExecutor
       interfaces/
         cli.rs                # 11 commands, build_episode_from_session, attempt_learning
-        mcp.rs                # 16 MCP tools, episode storage after create_goal
+        mcp.rs                # 19 MCP tools (16 core + list_peers, invoke_remote_skill, transfer_routine), episode storage after create_goal
       memory/
         episodes.rs           # Ring buffer (VecDeque, 1024 cap), retrieve_by_embedding
         schemas.rs            # PrefixSpan-based induction with embedding clustering
@@ -104,6 +105,7 @@ soma/
   soma-project-postgres/      # PostgreSQL proof
   soma-project-llm/           # Ollama LLM + SOMA proof (ollama.js CLI, docker-compose)
   soma-project-mcp/           # Claude Code MCP integration (SOMA as MCP server)
+  soma-project-s2s/           # SOMA-to-SOMA proof (transport, delegation, transfer)
   .mcp.json                   # Root MCP config — registers SOMA for Claude Code
   docs/                       # 7 docs: vision, architecture, mcp, ports, distributed, building-projects, helperbook
 ```
@@ -151,6 +153,11 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
 - **macOS binary copy**: copied binaries may need `xattr -d com.apple.quarantine` + `codesign -fs -` to run.
 - **Failure recovery spec**: BindingFailure → SwitchCandidate, not Continue. The architecture.md failure recovery table is the source of truth for critic behavior.
 - **Predictor calibration**: SimpleCandidatePredictor must penalize skills that fail repeatedly within a session. Score decay prevents infinite retry loops.
+- **MCP distributed tools**: `list_peers`, `invoke_remote_skill`, `transfer_routine` (3 tools added for s2s). MCP mode now supports `--listen`, `--peer`, `--unix-listen`, `--unix-peer` flags.
+- **MCP mode + listeners**: MCP mode bootstraps a separate listener runtime for incoming connections. The MCP server and listener are independent runtimes sharing no state.
+- **LocalDispatchHandler stores**: `with_stores()` constructor wires `SchemaStore` and `RoutineStore` so transferred schemas/routines are actually persisted. Without stores, transfers are silently accepted (backward-compatible).
+- **Precondition format**: `{ condition_type: String, expression: Value, description: String }`. Missing `expression` or `description` fields cause serde deserialization failures.
+- **Wire protocol framing**: 4-byte big-endian length prefix + JSON. Max frame 16 MB. `TransportMessage` uses `#[serde(tag = "type", rename_all = "snake_case")]`.
 
 ## Core Analogy
 
@@ -183,7 +190,7 @@ The body does not think. It acts. An organism's hand doesn't decide where to rea
 ### soma-next
 - `cargo test` after changes — 1177+ tests passing.
 - `cargo clippy` — zero warnings.
-- MCP tool changes: update build_tools(), add handler, add routing (tools/call AND direct dispatch), update tool count in tests (currently 16). The `McpTool` struct uses `#[serde(rename = "inputSchema")]` — MCP spec requires camelCase. tools/call responses are wrapped via `tool_success_response()` into MCP content array format.
+- MCP tool changes: update build_tools(), add handler, add routing (tools/call AND direct dispatch), update tool count in tests (currently 19). The `McpTool` struct uses `#[serde(rename = "inputSchema")]` — MCP spec requires camelCase. tools/call responses are wrapped via `tool_success_response()` into MCP content array format.
 - Episode/learning changes: update both cli.rs AND mcp.rs (both paths store episodes).
 - Memory system: embedder.rs (GoalEmbedder trait), sequence_mining.rs (PrefixSpan), schemas.rs (induction), routines.rs (compilation).
 - Plan-following: session.rs (active_plan logic after step 6), adapters.rs (SkillRegistryAdapter, SimpleSessionCritic).

@@ -403,13 +403,17 @@ pub trait IncomingHandler: Send + Sync + 'static {
 }
 
 /// A handler that uses the local runtime's skill executor to service
-/// incoming invoke_skill requests. For other request types, returns
-/// a stub response.
+/// incoming invoke_skill requests. Also stores transferred schemas and
+/// routines when received from remote peers.
 pub struct LocalDispatchHandler {
     /// The local runtime, used to execute skills on behalf of remote peers.
     runtime: Arc<Mutex<crate::bootstrap::Runtime>>,
     /// Active chunked transfer receivers, keyed by transfer_id.
     chunked_receivers: Mutex<HashMap<Uuid, super::chunked::ChunkedReceiver>>,
+    /// Schema store for receiving transferred schemas.
+    schema_store: Option<Arc<Mutex<dyn crate::memory::schemas::SchemaStore + Send>>>,
+    /// Routine store for receiving transferred routines.
+    routine_store: Option<Arc<Mutex<dyn crate::memory::routines::RoutineStore + Send>>>,
 }
 
 impl LocalDispatchHandler {
@@ -417,6 +421,22 @@ impl LocalDispatchHandler {
         Self {
             runtime,
             chunked_receivers: Mutex::new(HashMap::new()),
+            schema_store: None,
+            routine_store: None,
+        }
+    }
+
+    /// Create a handler with schema and routine stores for receiving transfers.
+    pub fn with_stores(
+        runtime: Arc<Mutex<crate::bootstrap::Runtime>>,
+        schema_store: Arc<Mutex<dyn crate::memory::schemas::SchemaStore + Send>>,
+        routine_store: Arc<Mutex<dyn crate::memory::routines::RoutineStore + Send>>,
+    ) -> Self {
+        Self {
+            runtime,
+            chunked_receivers: Mutex::new(HashMap::new()),
+            schema_store: Some(schema_store),
+            routine_store: Some(routine_store),
         }
     }
 }
@@ -587,8 +607,78 @@ impl IncomingHandler for LocalDispatchHandler {
                     },
                 }
             }
-            TransportMessage::TransferSchema { .. } => TransportResponse::SchemaOk,
-            TransportMessage::TransferRoutine { .. } => TransportResponse::RoutineOk,
+            TransportMessage::TransferSchema { peer_id, schema } => {
+                if let Some(ref store) = self.schema_store {
+                    let schema_to_store = crate::types::schema::Schema {
+                        schema_id: schema.schema_id.clone(),
+                        namespace: format!("peer:{}", peer_id),
+                        pack: String::new(),
+                        name: schema.schema_id.clone(),
+                        version: semver::Version::parse(&schema.version)
+                            .unwrap_or_else(|_| semver::Version::new(0, 1, 0)),
+                        trigger_conditions: schema.trigger_conditions,
+                        resource_requirements: vec![],
+                        subgoal_structure: schema.subgoal_structure.iter().map(|v| {
+                            crate::types::schema::SubgoalNode {
+                                subgoal_id: v["subgoal_id"].as_str().unwrap_or("unknown").to_string(),
+                                description: v["description"].as_str().unwrap_or("").to_string(),
+                                skill_candidates: v["skill_candidates"]
+                                    .as_array()
+                                    .map(|arr| arr.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+                                    .unwrap_or_default(),
+                                dependencies: v["dependencies"]
+                                    .as_array()
+                                    .map(|arr| arr.iter().filter_map(|d| d.as_str().map(String::from)).collect())
+                                    .unwrap_or_default(),
+                                optional: v["optional"].as_bool().unwrap_or(false),
+                            }
+                        }).collect(),
+                        candidate_skill_ordering: schema.candidate_skill_ordering,
+                        stop_conditions: schema.stop_conditions,
+                        rollback_bias: crate::types::schema::RollbackBias::Cautious,
+                        confidence: schema.confidence,
+                    };
+                    match store.lock().unwrap().register(schema_to_store) {
+                        Ok(()) => {
+                            info!(schema_id = %schema.schema_id, peer = %peer_id, "stored transferred schema");
+                            TransportResponse::SchemaOk
+                        }
+                        Err(e) => TransportResponse::Error {
+                            details: format!("failed to store transferred schema: {}", e),
+                        },
+                    }
+                } else {
+                    // No store attached — accept silently (backward-compatible stub).
+                    TransportResponse::SchemaOk
+                }
+            }
+            TransportMessage::TransferRoutine { peer_id, routine } => {
+                if let Some(ref store) = self.routine_store {
+                    let routine_to_store = crate::types::routine::Routine {
+                        routine_id: routine.routine_id.clone(),
+                        namespace: format!("peer:{}", peer_id),
+                        origin: crate::types::routine::RoutineOrigin::PeerTransferred,
+                        match_conditions: routine.match_conditions,
+                        compiled_skill_path: routine.compiled_skill_path,
+                        guard_conditions: routine.guard_conditions,
+                        expected_cost: routine.expected_cost,
+                        expected_effect: routine.expected_effect,
+                        confidence: routine.confidence,
+                    };
+                    match store.lock().unwrap().register(routine_to_store) {
+                        Ok(()) => {
+                            info!(routine_id = %routine.routine_id, peer = %peer_id, "stored transferred routine");
+                            TransportResponse::RoutineOk
+                        }
+                        Err(e) => TransportResponse::Error {
+                            details: format!("failed to store transferred routine: {}", e),
+                        },
+                    }
+                } else {
+                    // No store attached — accept silently (backward-compatible stub).
+                    TransportResponse::RoutineOk
+                }
+            }
             TransportMessage::ChunkedTransferStart { peer_id: _, manifest } => {
                 let transfer_id = manifest.transfer_id;
                 match super::chunked::ChunkedReceiver::new(manifest) {

@@ -20,6 +20,9 @@ Both modes are production-ready. The LLM-driven path is proven with HelperBook (
 | [soma-project-smtp](soma-project-smtp/) | SMTP email delivery via SOMA MCP | Production |
 | [soma-project-s3](soma-project-s3/) | AWS S3 object storage via SOMA MCP | Production |
 | [soma-project-postgres](soma-project-postgres/) | PostgreSQL queries via SOMA MCP | Production |
+| [soma-project-llm](soma-project-llm/) | Ollama LLM + SOMA: natural language → SQL via postgres port | Production |
+| [soma-project-mcp](soma-project-mcp/) | Claude Code MCP integration — SOMA as MCP server for Claude | Production |
+| [soma-project-s2s](soma-project-s2s/) | SOMA-to-SOMA: transport, delegation, schema/routine transfer (42 tests) | Production |
 
 Legacy (not active): soma-core/, soma-plugins/, soma-synthesizer/, poc/, pow/
 
@@ -49,7 +52,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
 Runtime Logic — goal parsing, skill selection, belief state, policy, plan-following
 Adapter Layer — bridges traits to implementations (embedder, predictor, critic, executor)
 Memory Stores — episodes (ring buffer), schemas (PrefixSpan-induced), routines (compiled)
-Interfaces — CLI (11 commands), MCP server (16 tools)
+Interfaces — CLI (11 commands), MCP server (19 tools)
 Distributed — TCP/TLS, WebSocket, Unix socket, peer delegation
 Ports — built-in (filesystem, http) + dynamic (.dylib/.so via soma-port-sdk)
 ```
@@ -70,7 +73,7 @@ Consolidation cycle: episodes accumulate → HashEmbedder clusters by semantic s
 
 - [Vision](docs/vision.md) — Why SOMA exists, Web 4, the LLM context problem
 - [Architecture](docs/architecture.md) — 6-layer runtime, type system, skill/port/pack contracts
-- [MCP Interface](docs/mcp.md) — 16 tools, invoke_port, dump_state, JSON-RPC
+- [MCP Interface](docs/mcp.md) — 19 tools, invoke_port, dump_state, distributed peer tools, JSON-RPC
 - [Ports](docs/ports.md) — SDK, dynamic loading, all 12 ports (88 capabilities)
 - [Distributed](docs/distributed.md) — Peer transport, delegation, sync
 - [Building Projects](docs/building-projects.md) — How to create soma-project-*

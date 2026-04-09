@@ -6,7 +6,7 @@
 
 ## Abstract
 
-SOMA (from Greek σῶμα, "body") is a computational architecture in which the runtime itself constitutes the program. No application source code is written, generated, compiled, or interpreted. A single Rust binary receives typed goals, maintains a structured belief state, selects skills from a ranked hierarchy, invokes external systems through dynamically loaded port adapters, observes results, patches beliefs, and iterates under policy constraints until the goal is satisfied or a budget is exhausted. The architecture implements a 16-step control loop with multi-objective skill selection, observation-grounded belief patching, rule-based critic evaluation, and an episodic learning pipeline that promotes observed execution patterns into reusable schemas and compiled routines. External intelligence — typically a large language model — drives the runtime through a 16-tool MCP interface; the runtime drives external systems through typed port libraries. The implementation comprises a ~10MB binary with 1144 tests and zero warnings, a workspace of 11 dynamically loaded port adapters covering databases, cryptography, email, object storage, authentication, geolocation, image processing, push notifications, and timers, and multiple deployed projects demonstrating end-to-end operation. We present the architecture, its formal properties, the episodic learning pipeline, and the distributed execution model.
+SOMA (from Greek σῶμα, "body") is a computational architecture in which the runtime itself constitutes the program. No application source code is written, generated, compiled, or interpreted. A single Rust binary receives typed goals, maintains a structured belief state, selects skills from a ranked hierarchy, invokes external systems through dynamically loaded port adapters, observes results, patches beliefs, and iterates under policy constraints until the goal is satisfied or a budget is exhausted. The architecture implements a 16-step control loop with multi-objective skill selection, observation-grounded belief patching, rule-based critic evaluation, and an episodic learning pipeline that promotes observed execution patterns into reusable schemas and compiled routines. External intelligence — typically a large language model — drives the runtime through a 19-tool MCP interface; the runtime drives external systems through typed port libraries. The implementation comprises a ~10MB binary with 1177 tests and zero warnings, a workspace of 11 dynamically loaded port adapters covering databases, cryptography, email, object storage, authentication, geolocation, image processing, push notifications, and timers, and multiple deployed projects demonstrating end-to-end operation. We present the architecture, its formal properties, the episodic learning pipeline, and the distributed execution model.
 
 ---
 
@@ -41,7 +41,7 @@ This paper makes the following contributions:
 3. A three-tier episodic learning pipeline (episodes → schema induction → routine compilation) that extracts reusable control structures from observed execution traces.
 4. A skill hierarchy (routines → schemas → composites → primitives) with tier-weighted multi-objective scoring and policy-gated selection.
 5. A policy system with seven lifecycle hooks providing fine-grained safety enforcement over a deliberative control loop.
-6. A working implementation: 1144 tests, 11 port adapters, multiple deployed projects, and a distributed execution layer supporting TCP/TLS, WebSocket, and Unix socket transport.
+6. A working implementation: 1177 tests, 11 port adapters, six deployed projects, a distributed execution layer supporting TCP/TLS, WebSocket, and Unix socket transport with verified cross-instance skill delegation and routine transfer.
 
 ---
 
@@ -129,7 +129,7 @@ This separation is load-bearing. The runtime's state is permanent and queryable 
 │  ┌─────────────┐ ┌──────┴──────┐ ┌──────────────┐  │
 │  │   Memory    │ │ Interfaces  │ │ Distributed  │  │
 │  │  episodes   │ │  CLI (11)   │ │  TCP / TLS   │  │
-│  │  schemas    │ │  MCP (16)   │ │  WebSocket   │  │
+│  │  schemas    │ │  MCP (19)   │ │  WebSocket   │  │
 │  │  routines   │ │             │ │  Unix socket  │  │
 │  └─────────────┘ └─────────────┘ └──────────────┘  │
 │  ┌───────────────────────────────────────────────┐  │
@@ -152,7 +152,7 @@ The runtime is organized into six layers:
 
 3. **Memory Stores**: Bounded, append-oriented stores for episodes (execution traces), schemas (abstract control structures), and routines (compiled shortcuts). In-memory by default; disk-backed when a data directory is configured.
 
-4. **Interfaces**: CLI with 11 commands for direct operation. MCP server with 16 JSON-RPC tools for external orchestration.
+4. **Interfaces**: CLI with 11 commands for direct operation. MCP server with 19 JSON-RPC tools for external orchestration (16 core + 3 distributed peer tools).
 
 5. **Distributed Transport**: TCP with optional TLS, WebSocket, and Unix Domain Socket transport. Delegation model with five units: skill invocation, subgoal submission, session migration, resource operation, and schema/routine transfer.
 
@@ -511,7 +511,7 @@ Per-peer, per-action rate limiting with configurable windows. Graduated response
 
 ### 11.1 MCP Server
 
-The MCP server implements JSON-RPC 2.0 over stdin/stdout with 16 tools:
+The MCP server implements JSON-RPC 2.0 over stdin/stdout with 19 tools:
 
 | Tool | Purpose |
 |---|---|
@@ -531,8 +531,11 @@ The MCP server implements JSON-RPC 2.0 over stdin/stdout with 16 tools:
 | `dump_state` | Full runtime state snapshot |
 | `invoke_port` | Direct port capability invocation |
 | `list_ports` | Enumerate registered ports and capabilities |
+| `list_peers` | Enumerate connected remote SOMA peers |
+| `invoke_remote_skill` | Invoke a skill on a remote SOMA peer |
+| `transfer_routine` | Push a compiled routine to a remote peer |
 
-The final two tools — `invoke_port` and `list_ports` — provide direct port access, bypassing the goal/session/skill machinery. This enables an LLM to discover available capabilities and invoke them directly when goal-level orchestration is not needed.
+The `invoke_port` and `list_ports` tools provide direct port access, bypassing the goal/session/skill machinery. The three distributed tools — `list_peers`, `invoke_remote_skill`, and `transfer_routine` — enable LLM-orchestrated multi-instance coordination. MCP mode supports `--listen`, `--peer`, `--unix-listen`, and `--unix-peer` flags for distributed operation.
 
 ### 11.2 The LLM Interaction Model
 
@@ -602,7 +605,7 @@ No controllers, no routes, no ORM mappings, no serialization layers, no build co
 
 Single Rust binary. ~56,000 lines across: runtime logic (session controller, belief, skill registry, skill executor, selector, predictor, critic, policy engine, goal runtime, port runtime, pack runtime, resource runtime, metrics, proprioception, dynamic port loading, port signature verification), adapter layer, memory stores (episodes, schemas, routines, checkpoints, persistence, working memory, world state), interfaces (CLI, MCP, internal API types), distributed transport (TCP/TLS, WebSocket, Unix socket, delegation, routing, streaming, sync, rate limiting, heartbeat, authentication, peer management, message queue, chunked transfer, distributed trace), type definitions (goals, sessions, skills, ports, packs, policies, beliefs, observations, resources, episodes, routines, schemas, peers), and built-in ports (filesystem, http).
 
-1144 tests. Zero compiler warnings. Zero clippy warnings. ~10MB release binary.
+1177 tests. Zero compiler warnings. Zero clippy warnings. ~11MB release binary. 19 MCP tools (16 core + 3 distributed).
 
 ### 13.2 soma-ports
 
@@ -612,13 +615,16 @@ Ports with external system dependencies: postgres (`SOMA_POSTGRES_URL`), redis (
 
 ### 13.3 Deployed Projects
 
-Three deployed projects demonstrate end-to-end operation:
+Six deployed projects demonstrate end-to-end operation:
 
 - **soma-project-smtp**: Email delivery via SOMA MCP. The LLM discovers SMTP capabilities via `list_ports`, invokes `send_plain`, `send_html`, or `send_attachment` via `invoke_port`.
 - **soma-project-s3**: Object storage via SOMA MCP. Upload, download, delete, presign, and list operations.
 - **soma-project-postgres**: Database access via SOMA MCP. SQL queries, CRUD, DDL, and transaction operations.
+- **soma-project-llm**: Ollama integration. A local LLM (gemma4:e2b) generates SQL from natural language questions, SOMA executes via the postgres port, LLM interprets results. Demonstrates the brain/body split with a non-cloud LLM.
+- **soma-project-mcp**: Claude Code integration. SOMA runs as an MCP server registered in `.mcp.json`, enabling Claude to use all SOMA tools directly. Demonstrates the LLM-driven path with a production LLM.
+- **soma-project-s2s**: SOMA-to-SOMA communication. Two SOMA instances cooperate over TCP: transport layer verification (ping/pong, skill invocation, goal submission), cross-instance delegation via MCP (`invoke_remote_skill`), and schema/routine transfer between peers. 42 tests across three levels.
 
-Each project follows the standard project pattern: runtime binary, port library, pack manifest, MCP test client, launch scripts.
+Each project follows the standard project pattern: runtime binary, port library, pack manifest, test scripts, launch scripts.
 
 ---
 
@@ -710,7 +716,7 @@ Routines compiled from historical episodes may become stale as external system b
 
 SOMA is a computational architecture where the runtime is the program. A goal-driven control loop selects skills, invokes ports, observes outcomes, and adapts through an episodic learning pipeline — without generating, compiling, or interpreting application source code at any layer. The policy engine enforces safety at seven lifecycle hooks. The type system makes side effects, risk classes, trust levels, and determinism properties explicit and machine-evaluable. The distributed layer enables multi-instance delegation and knowledge transfer.
 
-The implementation — 1144 tests, 11 port adapters, 88 capabilities, multiple deployed projects — demonstrates that the architecture is operational, not theoretical. The episodic learning pipeline (episodes → schemas → routines) provides a concrete mechanism for experience-based adaptation. The pack manifest pattern provides a concrete answer to "what do developers write instead of code."
+The implementation — 1177 tests, 11 port adapters, 88 capabilities, six deployed projects including verified SOMA-to-SOMA communication — demonstrates that the architecture is operational, not theoretical. The episodic learning pipeline (episodes → schemas → routines) provides a concrete mechanism for experience-based adaptation. The pack manifest pattern provides a concrete answer to "what do developers write instead of code."
 
 SOMA does not generate code. It eliminates the need for it.
 

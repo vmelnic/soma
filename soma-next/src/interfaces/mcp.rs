@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::distributed::remote::RemoteExecutor;
 use crate::errors::Result;
 use crate::memory::episodes::EpisodeStore;
 use crate::memory::routines::RoutineStore;
@@ -92,6 +93,8 @@ pub struct RuntimeHandle {
     pub routine_store: Arc<Mutex<dyn RoutineStore + Send>>,
     pub embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>,
     pub start_time: Instant,
+    pub remote_executor: Option<Arc<dyn RemoteExecutor>>,
+    pub peer_ids: Vec<String>,
 }
 
 impl RuntimeHandle {
@@ -110,7 +113,20 @@ impl RuntimeHandle {
             routine_store: runtime.routine_store,
             embedder: runtime.embedder,
             start_time: runtime.start_time,
+            remote_executor: None,
+            peer_ids: Vec::new(),
         }
+    }
+
+    /// Attach a remote executor and the list of known peer IDs.
+    pub fn with_remote(
+        mut self,
+        executor: Box<dyn RemoteExecutor>,
+        peer_ids: Vec<String>,
+    ) -> Self {
+        self.remote_executor = Some(Arc::from(executor));
+        self.peer_ids = peer_ids;
+        self
     }
 }
 
@@ -186,6 +202,9 @@ impl McpServer {
             "dump_state" => self.handle_dump_state(request.id, request.params),
             "invoke_port" => self.handle_invoke_port(request.id, request.params),
             "list_ports" => self.handle_list_ports(request.id, request.params),
+            "list_peers" => self.handle_list_peers(request.id, request.params),
+            "invoke_remote_skill" => self.handle_invoke_remote_skill(request.id, request.params),
+            "transfer_routine" => self.handle_transfer_routine(request.id, request.params),
 
             _ => Ok(Self::error_response(
                 request.id,
@@ -265,6 +284,9 @@ impl McpServer {
             "dump_state" => self.handle_dump_state(inner_id, arguments),
             "invoke_port" => self.handle_invoke_port(inner_id, arguments),
             "list_ports" => self.handle_list_ports(inner_id, arguments),
+            "list_peers" => self.handle_list_peers(inner_id, arguments),
+            "invoke_remote_skill" => self.handle_invoke_remote_skill(inner_id, arguments),
+            "transfer_routine" => self.handle_transfer_routine(inner_id, arguments),
             _ => {
                 return Ok(Self::error_response(
                     id,
@@ -1474,6 +1496,228 @@ impl McpServer {
     }
 
     // -----------------------------------------------------------------------
+    // Distributed tool handlers
+    // -----------------------------------------------------------------------
+
+    fn handle_list_peers(&self, id: Value, _params: Option<Value>) -> Result<McpResponse> {
+        if let Some(rt) = &self.runtime {
+            let peers: Vec<Value> = rt
+                .peer_ids
+                .iter()
+                .map(|pid| {
+                    serde_json::json!({
+                        "peer_id": pid,
+                        "registered": true,
+                        "has_executor": rt.remote_executor.is_some(),
+                    })
+                })
+                .collect();
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({ "peers": peers, "count": peers.len() }),
+            ))
+        } else {
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({ "peers": [], "count": 0 }),
+            ))
+        }
+    }
+
+    fn handle_invoke_remote_skill(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: peer_id, skill_id".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let peer_id = match params.get("peer_id").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "peer_id is required".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let skill_id = match params.get("skill_id").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "skill_id is required".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let input = params
+            .get("input")
+            .cloned()
+            .unwrap_or(serde_json::json!({}));
+
+        if let Some(rt) = &self.runtime {
+            if let Some(ref exec) = rt.remote_executor {
+                match exec.invoke_skill(&peer_id, &skill_id, input) {
+                    Ok(resp) => Ok(Self::success_response(
+                        id,
+                        serde_json::json!({
+                            "skill_id": resp.skill_id,
+                            "peer_id": resp.peer_id,
+                            "success": resp.success,
+                            "observation": resp.observation,
+                            "latency_ms": resp.latency_ms,
+                            "trace_id": resp.trace_id.to_string(),
+                            "timestamp": resp.timestamp.to_rfc3339(),
+                        }),
+                    )),
+                    Err(e) => Ok(Self::error_response(
+                        id,
+                        INTERNAL_ERROR,
+                        format!("remote skill invocation failed: {}", e),
+                        None,
+                    )),
+                }
+            } else {
+                Ok(Self::error_response(
+                    id,
+                    INTERNAL_ERROR,
+                    "no remote executor configured (start with --peer flag)".to_string(),
+                    None,
+                ))
+            }
+        } else {
+            Ok(Self::error_response(
+                id,
+                INTERNAL_ERROR,
+                "runtime not available".to_string(),
+                None,
+            ))
+        }
+    }
+
+    fn handle_transfer_routine(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: peer_id, routine_id".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let peer_id = match params.get("peer_id").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "peer_id is required".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let routine_id = match params.get("routine_id").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "routine_id is required".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        if let Some(rt) = &self.runtime {
+            // Look up the routine locally.
+            let routine = {
+                let store = rt.routine_store.lock().unwrap();
+                store.list_all().into_iter().find(|r| r.routine_id == routine_id).cloned()
+            };
+
+            let routine = match routine {
+                Some(r) => r,
+                None => {
+                    return Ok(Self::error_response(
+                        id,
+                        INVALID_PARAMS,
+                        format!("routine '{}' not found locally", routine_id),
+                        None,
+                    ));
+                }
+            };
+
+            if let Some(ref exec) = rt.remote_executor {
+                // Convert to transfer format.
+                let transfer = crate::types::peer::RoutineTransfer {
+                    routine_id: routine.routine_id.clone(),
+                    match_conditions: routine.match_conditions.clone(),
+                    compiled_skill_path: routine.compiled_skill_path.clone(),
+                    guard_conditions: routine.guard_conditions.clone(),
+                    expected_cost: routine.expected_cost,
+                    expected_effect: routine.expected_effect.clone(),
+                    confidence: routine.confidence,
+                };
+
+                match exec.transfer_routine(&peer_id, &transfer) {
+                    Ok(()) => Ok(Self::success_response(
+                        id,
+                        serde_json::json!({
+                            "transferred": true,
+                            "routine_id": routine_id,
+                            "peer_id": peer_id,
+                            "compiled_skill_path": routine.compiled_skill_path,
+                        }),
+                    )),
+                    Err(e) => Ok(Self::error_response(
+                        id,
+                        INTERNAL_ERROR,
+                        format!("routine transfer failed: {}", e),
+                        None,
+                    )),
+                }
+            } else {
+                Ok(Self::error_response(
+                    id,
+                    INTERNAL_ERROR,
+                    "no remote executor configured (start with --peer flag)".to_string(),
+                    None,
+                ))
+            }
+        } else {
+            Ok(Self::error_response(
+                id,
+                INTERNAL_ERROR,
+                "runtime not available".to_string(),
+                None,
+            ))
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
@@ -1803,6 +2047,54 @@ impl McpServer {
                     }
                 }),
             },
+            McpTool {
+                name: "list_peers".to_string(),
+                description: "List connected remote SOMA peers. Each peer is another SOMA instance reachable over TCP, WebSocket, or Unix socket.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {}
+                }),
+            },
+            McpTool {
+                name: "invoke_remote_skill".to_string(),
+                description: "Invoke a skill on a remote SOMA peer. The remote peer executes the skill using its own loaded packs and ports, and returns the observation.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "peer_id": {
+                            "type": "string",
+                            "description": "The peer identifier (e.g. \"peer-0\", \"unix-peer-0\")"
+                        },
+                        "skill_id": {
+                            "type": "string",
+                            "description": "The skill to invoke on the remote peer"
+                        },
+                        "input": {
+                            "type": "object",
+                            "description": "Input payload for the skill"
+                        }
+                    },
+                    "required": ["peer_id", "skill_id"]
+                }),
+            },
+            McpTool {
+                name: "transfer_routine".to_string(),
+                description: "Transfer a locally compiled routine to a remote peer. The peer stores the routine and can use it for plan-following without re-learning.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "peer_id": {
+                            "type": "string",
+                            "description": "The target peer identifier"
+                        },
+                        "routine_id": {
+                            "type": "string",
+                            "description": "The local routine ID to transfer"
+                        }
+                    },
+                    "required": ["peer_id", "routine_id"]
+                }),
+            },
         ]
     }
 }
@@ -1846,7 +2138,7 @@ mod tests {
     fn test_list_tools_count() {
         let server = McpServer::new_stub();
         let tools = server.list_tools();
-        assert_eq!(tools.len(), 16);
+        assert_eq!(tools.len(), 19);
     }
 
     #[test]
@@ -2236,7 +2528,7 @@ mod tests {
     #[test]
     fn test_default_impl() {
         let server = McpServer::default();
-        assert_eq!(server.list_tools().len(), 16);
+        assert_eq!(server.list_tools().len(), 19);
     }
 
     /// Build a real RuntimeHandle from a bootstrapped runtime (no packs).
