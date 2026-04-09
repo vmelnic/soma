@@ -1,102 +1,106 @@
-# SOMA: A Universal Neural Architecture for Direct Intent-to-Execution Computing
+# SOMA: A Goal-Driven Runtime Architecture for Direct Intent-to-Execution Computing
 
-**Version 0.4 — April 2026**
+**Version 1.0 — April 2026**
 
 ---
 
 ## Abstract
 
-SOMA (from Greek σῶμα, "body") is a computational paradigm in which a trained neural architecture maps structured intents directly to executable programs — sequences of plugin convention calls with resolved arguments — without generating, compiling, or interpreting source code at any layer. The runtime is a single Rust binary (~14MB) with six components: a Mind Engine (BiLSTM encoder + GRU autoregressive decoder), Plugin Manager, Memory System with neuroscience-inspired LoRA adaptation, Synaptic Protocol for inter-instance communication, MCP Server for LLM integration, and Proprioception. SOMA scales from ESP32 microcontrollers (50K parameters, 168KB RAM) to cloud servers (50M+ parameters). Conversational intelligence is delegated to external LLMs that connect via the Model Context Protocol (MCP); SOMA provides deterministic execution, permanent state, and experiential memory.
-
-We present the architecture, a working implementation (101 tests, 6 plugins, 62 conventions), and three proofs of work validating core claims: (1) a neural mind generates multi-step programs of libc function calls executed by a generic bridge with zero domain logic, (2) LoRA experiential memory measurably improves performance on novel phrasings with checkpoint/restore and consolidation, and (3) two SOMA instances discover each other and exchange data via a binary wire protocol, with the neural mind deciding routing.
+SOMA (from Greek σῶμα, "body") is a computational architecture in which the runtime itself constitutes the program. No application source code is written, generated, compiled, or interpreted. A single Rust binary receives typed goals, maintains a structured belief state, selects skills from a ranked hierarchy, invokes external systems through dynamically loaded port adapters, observes results, patches beliefs, and iterates under policy constraints until the goal is satisfied or a budget is exhausted. The architecture implements a 16-step control loop with multi-objective skill selection, observation-grounded belief patching, rule-based critic evaluation, and an episodic learning pipeline that promotes observed execution patterns into reusable schemas and compiled routines. External intelligence — typically a large language model — drives the runtime through a 16-tool MCP interface; the runtime drives external systems through typed port libraries. The implementation comprises a ~10MB binary with 1144 tests and zero warnings, a workspace of 11 dynamically loaded port adapters covering databases, cryptography, email, object storage, authentication, geolocation, image processing, push notifications, and timers, and multiple deployed projects demonstrating end-to-end operation. We present the architecture, its formal properties, the episodic learning pipeline, and the distributed execution model.
 
 ---
 
 ## 1. Introduction
 
-### 1.1 The Problem with Software
+### 1.1 The Problem
 
-Every program ever written follows the same pattern: a human understands what needs to happen, then encodes that understanding into a formal language the machine can execute. The encoding is lossy — the developer's mental model of behavior is compressed into syntax, type systems, and control flow. The resulting artifact (the codebase) grows in complexity, accumulates technical debt, and eventually resists modification. The gap between intent and execution is bridged by millions of developers writing billions of lines of code.
+Every application ever built follows the same pattern: a human understands what needs to happen, then encodes that understanding into a formal language the machine can execute. The encoding is lossy — the developer's mental model of behavior is compressed into syntax, type systems, and control flow. The resulting artifact grows in complexity, accumulates technical debt, and eventually resists modification. The gap between intent and execution is bridged by writing and maintaining source code.
 
-SOMA eliminates this gap — not by generating code more efficiently, but by removing application code from the equation.
+Recent advances in large language models have accelerated code generation but not eliminated the intermediate artifact. AI-assisted development still produces source code — it merely produces it faster. The artifact remains: a codebase that must be reviewed, tested, deployed, versioned, and maintained. The LLM understands intent; the generated code does not. The entire middle layer — source files, build tools, dependency managers, deployment pipelines — persists.
 
 ### 1.2 The SOMA Paradigm
 
-A SOMA is a computational organism with five components:
+SOMA eliminates the intermediate artifact. Instead of generating code that encodes behavior, the runtime *is* the behavior. A SOMA instance boots from declarative manifests that describe available capabilities (ports), executable operations (skills), abstract control structures (schemas), habitual shortcuts (routines), and safety constraints (policies). An external caller — an LLM, another SOMA, or any MCP client — submits a typed goal. The runtime selects skills, invokes ports, observes outcomes, updates its beliefs about the world, and iterates until the goal is satisfied.
 
-- **Mind**: A trained neural model that maps structured intents to execution programs — sequences of plugin convention calls with resolved arguments. The model IS the program.
-- **Body**: Plugins that interface with the physical and digital world. Everything outside the Mind — databases, filesystems, sensors, network protocols, user interfaces — is a plugin.
-- **Memory**: Experiential LoRA layers that accumulate over time, enabling improvement from experience without full retraining. Grounded in complementary learning systems theory (McClelland et al., 1995).
-- **Protocol**: The Synaptic Protocol, a binary wire protocol for SOMA-to-SOMA communication.
-- **State**: The complete, persistent, queryable truth — database schema, plugin configurations, decisions, execution history, experiential memory. Transferable across LLM sessions.
+The key structural claim: the control loop, its skill hierarchy, its belief state, and its learned routines collectively *are* the program. There is no compilation step, no code generation step, no intermediate representation between the caller's intent and the runtime's execution. New capabilities arrive as loaded ports and pack manifests, not as application rewrites.
 
-### 1.3 The Interaction Model
+The interaction model separates concerns cleanly:
 
-The human does not interact with SOMA directly. They speak to any LLM (Claude, ChatGPT, Ollama), which translates intent into structured MCP tool calls. SOMA executes deterministically. The LLM explains results. SOMA holds all state permanently — when a new LLM session begins, `soma.get_state()` returns complete context in one call.
+- The **LLM** provides natural language understanding, planning, and conversational intelligence. It is temporary and replaceable.
+- The **runtime** provides deterministic execution, permanent state, episodic memory, and safety enforcement. It persists across LLM sessions.
+- **Ports** provide typed interfaces to external systems — databases, filesystems, email servers, object stores, sensors, actuators.
 
-This separation is fundamental: the LLM is the brain (temporary, replaceable), SOMA is the body and memory (permanent, deterministic). Any LLM can drive any SOMA. Switching LLMs loses zero context.
+Any LLM can drive any SOMA instance. Switching LLMs loses zero context: the runtime's belief state, episode history, and loaded capabilities are queryable in a single call.
 
-### 1.4 Contributions
+### 1.3 Contributions
 
 This paper makes the following contributions:
 
-1. A formal architecture for intent-to-execution computing without application code as an intermediate artifact.
-2. A four-tier memory system (permanent, experiential, working, diffuse) with neuroscience-grounded LoRA adaptation and consolidation.
-3. A binary wire protocol (Synaptic Protocol) for inter-instance communication with 22-byte overhead, encryption, and discovery.
-4. A working Rust implementation with 101 tests, 6 production plugins (62 conventions), and a Python synthesis pipeline.
-5. Experimental validation through three proofs of work demonstrating program generation, experiential learning, and multi-instance communication.
+1. A formal architecture for intent-to-execution computing where the runtime replaces application source code. The architecture is domain-agnostic; domains are expressed as pack manifests.
+2. A 16-step control loop with multi-objective skill selection, observation-grounded belief patching, budget-constrained execution, and rule-based critic evaluation.
+3. A three-tier episodic learning pipeline (episodes → schema induction → routine compilation) that extracts reusable control structures from observed execution traces.
+4. A skill hierarchy (routines → schemas → composites → primitives) with tier-weighted multi-objective scoring and policy-gated selection.
+5. A policy system with seven lifecycle hooks providing fine-grained safety enforcement over a deliberative control loop.
+6. A working implementation: 1144 tests, 11 port adapters, multiple deployed projects, and a distributed execution layer supporting TCP/TLS, WebSocket, and Unix socket transport.
 
 ---
 
 ## 2. Related Work
 
-### 2.1 Neural Program Synthesis
+### 2.1 Cognitive Architectures
 
-Neural program synthesis maps specifications to programs. DeepCoder (Balog et al., 2017) uses neural networks to guide search over a DSL. RobustFill (Devlin et al., 2017) generates string transformation programs from input-output examples. AlphaCode (Li et al., 2022) generates competition-level code from natural language. These systems generate source code as text — a human-readable artifact that must be parsed, compiled, or interpreted. SOMA generates programs as structured data (sequences of convention IDs, argument types, and references) that are executed directly by the plugin manager. No intermediate textual representation exists.
+SOAR (Laird, Newell & Rosenbloom, 1987) implements a propose-decide-apply cycle with chunking — the automatic compilation of problem-solving traces into production rules. ACT-R (Anderson et al., 2004) uses a modular architecture with declarative and procedural memory, where frequently accessed declarative chunks gain activation strength. Both systems maintain an explicit world model, select operators through conflict resolution, and learn from execution traces.
 
-### 2.2 Tool-Augmented Language Models
+SOMA shares the deliberative cycle structure and trace-based learning but differs in three respects: (a) SOMA's skill selection uses multi-objective scoring over five weighted dimensions rather than utility-theoretic conflict resolution, (b) SOMA's learning pipeline produces typed schemas and routines with explicit confidence thresholds rather than opaque production rules or activation levels, and (c) SOMA's port abstraction provides a typed boundary to external systems that cognitive architectures typically lack.
 
-Toolformer (Schick et al., 2023) teaches LLMs to call external APIs by inserting tool calls into text. ToolLLM (Qin et al., 2023) extends this to 16K+ APIs. Gorilla (Patil et al., 2023) fine-tunes LLMs for API call generation. These approaches embed tool use within the LLM itself — the LLM decides which tool to call and generates the call as text. SOMA inverts this: the LLM provides natural language understanding, but program generation is delegated to a specialized small model (the Mind, 800K-50M parameters) that operates deterministically. The Mind does not understand language — it maps tokenized intents to programs. This separation enables: (a) SOMA to run on embedded hardware where LLMs cannot, (b) deterministic execution independent of LLM non-determinism, and (c) experiential memory that persists across LLM sessions.
+### 2.2 BDI Agents
 
-### 2.3 Low-Rank Adaptation and Continual Learning
+The Belief-Desire-Intention model (Rao & Georgeff, 1995) grounds agent behavior in beliefs about the world, desires (goals), and intentions (committed plans). SOMA's belief state corresponds to BDI beliefs; goals correspond to desires; the selected skill execution path corresponds to intentions. SOMA extends the BDI model with: structured observation records (PortCallRecord), budget-constrained execution across three dimensions (risk, latency, resource), and a critic that detects loops, dead ends, and progress stalls with explicit heuristics rather than relying on plan failure alone.
 
-LoRA (Hu et al., 2021) enables parameter-efficient fine-tuning by injecting low-rank matrices into frozen model weights. Recent work extends LoRA to mixture-of-experts: X-LoRA (Buehler & Buehler, 2024) dynamically weights multiple LoRA adapters per token, MoLoRA (2025) routes per-token to specialized adapters, and InfLoRA (Liang & Li, 2024) addresses interference in continual learning. SOMA uses LoRA for runtime experiential memory — successful executions update adapter weights, and periodic consolidation merges high-magnitude adaptations into permanent weights. This is distinct from fine-tuning: SOMA's LoRA operates at inference time on a deployed system, not during offline training.
+### 2.3 Neural Program Synthesis
+
+DeepCoder (Balog et al., 2017) uses neural networks to guide search over a domain-specific language. AlphaCode (Li et al., 2022) generates competition-level source code from natural language. Toolformer (Schick et al., 2023) teaches LLMs to insert tool calls into generated text. ToolLLM (Qin et al., 2023) extends this to 16,000+ APIs.
+
+These systems generate source code or tool-call sequences as text — human-readable artifacts that must be parsed and dispatched. SOMA does not generate text. The control loop selects and executes skills directly through typed interfaces. The distinction is structural: there is no serialization-deserialization boundary between decision and execution.
 
 ### 2.4 Positioning
 
-SOMA differs from prior work along three axes:
-
-| | Neural Program Synthesis | Tool-Augmented LLMs | SOMA |
-|---|---|---|---|
-| **Output** | Source code (text) | API calls (text) | Programs (structured data) |
-| **Execution** | Parsed/compiled/interpreted | LLM + tool dispatcher | Direct plugin dispatch |
-| **Memory** | None | LLM context window | Permanent LoRA + state |
-| **Scale** | Server only | Server only | ESP32 to cloud |
-| **Determinism** | Varies | Non-deterministic | Deterministic at temp=0 |
+|  | Cognitive Architectures | Neural Program Synthesis | Tool-Augmented LLMs | SOMA |
+|---|---|---|---|---|
+| **Decision mechanism** | Production rules | Neural inference | LLM generation | Multi-objective scoring |
+| **Output** | Operator applications | Source code (text) | API calls (text) | Direct port invocations |
+| **Learning** | Chunking / activation | Offline training | In-context examples | Episodes → schemas → routines |
+| **Safety** | Domain axioms | None | Prompt guardrails | 7-hook policy engine |
+| **External systems** | Ad hoc | None | Tool dispatchers | Typed port contracts |
+| **State persistence** | Working memory | None | Context window | Belief state + episodes |
 
 ---
 
 ## 3. Foundational Principles
 
-### 3.1 No Application Code
+### 3.1 The Runtime Is the Program
 
-SOMA does not generate source code. The Mind generates **programs**: sequences of plugin convention calls with typed arguments. Programs are ephemeral internal data structures, never serialized to a human-readable language.
+SOMA does not generate, compile, or interpret application source code at any layer. The runtime's control loop, skill registry, belief state, and accumulated routines collectively constitute the executable behavior. New behavior is introduced by loading pack manifests that declare skills, ports, schemas, routines, and policies — not by writing application code.
 
-Programs may contain domain-specific strings as convention arguments — SQL queries, file paths, email templates. These are data values within the program, not source code. The Mind learns to compose them from training data.
+Pack manifests contain domain-specific strings as data values — SQL queries in skill input schemas, email templates in port configurations, file paths in capability declarations. These are declarative parameters within the manifest, not source code. The manifest describes what the runtime should be able to do; the runtime decides how and when to do it.
 
-### 3.2 Everything Is a Plugin
+### 3.2 Everything Is a Port
 
-The SOMA Core contains exactly six components: Mind Engine, Plugin Manager, Memory System, Synaptic Protocol, MCP Server, and Proprioception. Every capability — filesystem, database, email, rendering, authentication, GPIO — is a plugin. An ESP32 SOMA loads GPIO and I2C plugins. A web backend loads PostgreSQL and Redis. Same core, different body.
+The runtime contains exactly six layers: runtime logic, adapter layer, memory stores, interfaces, distributed transport, and built-in ports. Every external capability — databases, filesystems, email, object storage, authentication, cryptography, image processing, geolocation, push notifications, timers, sensors, actuators — is a dynamically loaded port. A server SOMA loads PostgreSQL and S3 ports. An embedded SOMA loads GPIO and I2C ports. Same runtime, different body.
 
-### 3.3 Deterministic Execution
+### 3.3 Observation-Grounded Execution
 
-Given the same intent, model weights, and softmax temperature (typically 0.0 for production), the Mind produces the same program. Plugins execute deterministically where the underlying operation is deterministic. At temperature > 0, the Mind samples from the output distribution, introducing controlled variation. This property separates SOMA from LLMs, which are inherently non-deterministic even at temperature 0 due to floating-point non-associativity.
+Every port invocation produces a typed `PortCallRecord` — regardless of success or failure. The record contains: invocation identifier, outcome classification, latency measurement, resource cost, confidence estimate, input hash, session provenance, and auth/policy/sandbox results. The control loop makes all decisions based on these observations, not on assumptions about what ports will do. Belief patches are derived from observations. Critic evaluations are derived from observation sequences. Episodes record the complete observation history.
 
-### 3.4 Separation of Concerns
+### 3.4 Budget-Constrained Deliberation
 
-SOMA does not converse, ask questions, or generate natural language. It receives structured intents, generates programs, executes them, and returns structured results. Conversational intelligence belongs to the external LLM layer. This is a deliberate architectural decision: conversational understanding requires 1B+ parameters; SOMA runs on ESP32 with 50K parameters. Keeping conversation external keeps SOMA small, universal, and focused.
+Every session operates under three budgets: risk (cumulative exposure to side effects), latency (wall-clock time), and resource (abstract cost units). The control loop checks budgets before each iteration. The policy engine enforces budget thresholds. The critic triggers termination when any budget dimension falls below 10% of its initial allocation. This makes execution bounded by construction — the runtime cannot enter unbounded loops or accumulate unbounded costs.
 
-Any LLM can drive any SOMA via MCP. The human chooses their preferred LLM. SOMA is LLM-agnostic.
+### 3.5 Separation of Intelligence and Execution
+
+The runtime does not converse, parse natural language beyond goal extraction, or generate human-readable text. Conversational intelligence belongs to the external LLM. The runtime provides: deterministic skill execution, permanent belief state, episodic memory, safety enforcement, and self-description. The LLM provides: natural language understanding, intent decomposition, result explanation, and user interaction.
+
+This separation is load-bearing. The runtime's state is permanent and queryable — when a new LLM session begins, `dump_state` returns complete context (loaded ports, registered skills, active sessions, recent episodes, current metrics, belief state) in a single call. No context is lost across LLM sessions, model switches, or provider changes.
 
 ---
 
@@ -105,431 +109,540 @@ Any LLM can drive any SOMA via MCP. The human chooses their preferred LLM. SOMA 
 ### 4.1 System Overview
 
 ```
-┌──────────────────────────────────────────────────┐
-│  Human                                            │
-└─────────────────────┬────────────────────────────┘
-                      │ natural language
-                      ▼
-┌──────────────────────────────────────────────────┐
-│  LLM (Claude, ChatGPT, Ollama, etc.)              │
-└─────────────────────┬────────────────────────────┘
-                      │ MCP (JSON-RPC 2.0)
-                      ▼
-┌──────────────────────────────────────────────────┐
-│  SOMA Core (single Rust binary, ~14MB)            │
-│  ┌──────────┐ ┌──────────┐ ┌──────────────────┐ │
-│  │   Mind   │ │ Synaptic │ │    MCP Server    │ │
-│  │  Engine  │ │ Protocol │ │  (LLM ↔ SOMA)   │ │
-│  └────┬─────┘ └────┬─────┘ └───────┬──────────┘ │
-│  ┌────┴─────────────┴───────────────┴──────────┐ │
-│  │            Plugin Manager                    │ │
-│  └────┬────────────────────────────────────────┘ │
-│  ┌────┴──────┐  ┌──────────────┐                │
-│  │  Memory   │  │Proprioception│                │
-│  │ (LoRA +   │  │ (self-model) │                │
-│  │checkpoint)│  └──────────────┘                │
-│  └───────────┘                                   │
-└──────────────────────────────────────────────────┘
-         │                        │
-    ┌────┴────┐              ┌────┴────┐
-    │ Plugins │              │  Peer   │
-    │ (body)  │              │  SOMAs  │
-    └─────────┘              └─────────┘
+┌─────────────────────────────────────────────────────┐
+│  Caller (LLM, MCP client, peer SOMA)                │
+└──────────────────────┬──────────────────────────────┘
+                       │  MCP (JSON-RPC 2.0) / Transport
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│  SOMA Runtime (single Rust binary, ~10MB)           │
+│                                                     │
+│  ┌───────────────────────────────────────────────┐  │
+│  │  Runtime Logic                                │  │
+│  │  session · belief · skill · selector ·        │  │
+│  │  predictor · critic · policy · goal ·         │  │
+│  │  port · pack · resource · trace · metrics     │  │
+│  └───────────────────────┬───────────────────────┘  │
+│  ┌───────────────────────┴───────────────────────┐  │
+│  │  Adapter Layer (trait wiring)                  │  │
+│  └───────────────────────┬───────────────────────┘  │
+│  ┌─────────────┐ ┌──────┴──────┐ ┌──────────────┐  │
+│  │   Memory    │ │ Interfaces  │ │ Distributed  │  │
+│  │  episodes   │ │  CLI (11)   │ │  TCP / TLS   │  │
+│  │  schemas    │ │  MCP (16)   │ │  WebSocket   │  │
+│  │  routines   │ │             │ │  Unix socket  │  │
+│  └─────────────┘ └─────────────┘ └──────────────┘  │
+│  ┌───────────────────────────────────────────────┐  │
+│  │  Ports: filesystem · http (built-in)          │  │
+│  │         + dynamic .dylib/.so (loaded at boot) │  │
+│  └───────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────┘
+         │                              │
+    ┌────┴─────┐                  ┌─────┴─────┐
+    │ External │                  │   Peer    │
+    │ Systems  │                  │   SOMAs   │
+    └──────────┘                  └───────────┘
 ```
 
-MCP exposes two tool categories: **state queries** (`soma.get_state()`, `soma.get_schema()`, `soma.get_plugins()`, `soma.get_decisions()`, `soma.get_health()`, etc.) and **actions** (`soma.intent()`, plugin conventions as `soma.{plugin}.{convention}()`, `soma.checkpoint()`, `soma.record_decision()`). All plugin conventions are discoverable dynamically via `soma.get_conventions()`.
+The runtime is organized into six layers:
 
-MCP connections authenticate with tokens at three levels: admin (full access), builder (read + execute), viewer (read-only). Destructive actions require two-step confirmation. Every action is logged as an audit trail.
+1. **Runtime Logic**: The core deliberation engine. All components are trait-based and injected at bootstrap. The `SessionController` orchestrates the 16-step control loop. The `PolicyEngine` gates actions at seven lifecycle hooks. The `PortRuntime` manages port lifecycle and dispatch. The `SkillRuntime` registers and resolves skills.
 
-### 4.2 Why Rust
+2. **Adapter Layer**: Wires trait interfaces to concrete implementations. The bootstrap process assembles the full runtime by constructing adapters from configuration and pack manifests.
 
-The runtime is a single Rust binary with zero runtime dependencies.
+3. **Memory Stores**: Bounded, append-oriented stores for episodes (execution traces), schemas (abstract control structures), and routines (compiled shortcuts). In-memory by default; disk-backed when a data directory is configured.
 
-- **Single binary deployment**: `./soma` — one file, copy and run.
-- **No garbage collector**: critical for real-time signal processing.
-- **True concurrency**: tokio async runtime, no GIL.
-- **Memory safety**: no segfaults or buffer overflows — critical for hardware control.
-- **Cross-compilation**: x86-64, ARM64, RISC-V, and ESP32 (via `no_std`).
-- **Small binaries**: server ~14MB, embedded ~200KB-2MB.
+4. **Interfaces**: CLI with 11 commands for direct operation. MCP server with 16 JSON-RPC tools for external orchestration.
 
-Python is used only for the Synthesizer — a build tool that trains the Mind. Analogous to a compiler written in C for programs that do not require C.
+5. **Distributed Transport**: TCP with optional TLS, WebSocket, and Unix Domain Socket transport. Delegation model with five units: skill invocation, subgoal submission, session migration, resource operation, and schema/routine transfer.
 
-### 4.3 Dual Mind Engine
+6. **Ports**: Two built-in ports (filesystem, HTTP). All other capabilities load dynamically from shared libraries (`.dylib` on macOS, `.so` on Linux) discovered from configured search paths.
 
-The Mind Engine defines an abstract `MindEngine` trait with a single method: `infer(&str) -> Program`. Two backends implement it:
+### 4.2 Type System
 
-**ONNX Engine (server, desktop, Raspberry Pi):**
-Uses `tract-onnx` (pure Rust, no C++ dependencies). Model files: `encoder.onnx` + `decoder.onnx` (float32). LoRA: rank 4-64 on all target layers. Dynamic plugin loading (.so/.dylib).
+The architecture uses a rich classification system that makes safety properties explicit and machine-evaluable:
 
-**Embedded Engine (ESP32, microcontrollers):**
-Custom inference in pure `no_std` Rust. `.soma-model` format (int8 quantized). Implements only required operations: matmul, sigmoid, tanh, softmax, argmax, embedding lookup (~3-5K lines). LoRA: rank 2-4, output heads only.
+- **SideEffectClass**: None, ReadOnly, LocalStateMutation, ExternalStateMutation, Destructive, Irreversible
+- **RiskClass**: Negligible, Low, Medium, High, Critical
+- **DeterminismClass**: Deterministic, PartiallyDeterministic, Stochastic, DelegatedVariant
+- **TrustLevel**: Untrusted, Restricted, Verified, Trusted, BuiltIn
+- **CapabilityScope**: Local → Session → Tenant → Device → Peer → Public
+- **IdempotenceClass**: Idempotent, NonIdempotent, ConditionallyIdempotent
+- **FactProvenance**: Asserted, Observed, Inferred, Stale, Remote
 
-| Target | Parameters | Model Size | RAM | Conventions |
-|---|---|---|---|---|
-| ESP32 (no PSRAM) | ~50K | ~100KB | ~168KB | 8-16 |
-| ESP32 (PSRAM) | ~200K | ~400KB | ~2MB | 16-32 |
-| Raspberry Pi | ~800K | ~1.6MB | ~20MB | 32-64 |
-| Desktop/Server | ~800K-50M | 3-200MB | 50MB-2GB | 64-500+ |
+These classifications are not advisory metadata. The policy engine evaluates them at runtime: a `Destructive` side effect class triggers the destructive-operation policy gate; a `TrustLevel` below `Verified` restricts capability scope; a non-idempotent operation is not retried automatically.
 
-The SOMA Core does not know which backend is running. Both implement the same trait and produce the same output format.
+### 4.3 Bootstrap
+
+The runtime assembles from configuration (`soma.toml`) and pack manifests (`manifest.json`):
+
+1. Initialize port runtime with host capabilities and sandbox profile.
+2. For each pack manifest: parse, validate, register declared ports (create adapters by kind), register declared skills.
+3. Resolve data directory; create memory stores (in-memory if no data directory; disk-backed otherwise).
+4. Construct all adapters: belief source, episode store, schema store, routine store, skill registry, skill executor, predictor, critic.
+5. Build policy engine; register host-level default safety policies; register pack-declared policies (rejected on conflict with host policies).
+6. Assemble `SessionController` from all components.
+7. Return `Runtime` with session controller, goal runtime, skill runtime, port runtime, stores, pack specs, metrics.
+
+Configuration precedence: compiled defaults < `soma.toml` < `SOMA_*` environment variables < CLI flags.
 
 ---
 
-## 5. The Mind
+## 5. The Control Loop
 
-### 5.1 Program Definition
+### 5.1 Session Lifecycle
 
-A program **P** is a finite sequence of steps **s₁, s₂, ..., sₙ** where n ≤ `max_program_steps` (default: 16). Each step **sᵢ** is a tuple:
+A session begins when a caller submits a goal and ends when the critic decides to stop, a budget is exhausted, or the caller aborts. Each iteration of the control loop executes the following steps:
 
-```
-sᵢ = (opcode, arg₁, arg₂, ...)
-```
+1. **Budget validation**: Check risk, latency, resource, and step-count budgets. Terminate if any is exhausted.
+2. **Belief capture**: Snapshot current belief state (facts, resources, bindings, world hash).
+3. **Episode retrieval**: Query episode store for traces of similar goals (longest-common-prefix matching on goal fingerprint).
+4. **Schema retrieval**: Query schema store for schemas whose trigger conditions match current belief.
+5. **Routine retrieval**: Query routine store for routines whose match and guard conditions are satisfied.
+6. **Candidate enumeration**: Collect all eligible skills from the skill registry.
+7. **Working memory cleanup**: Clear unresolved slots from prior iterations.
+8. **Candidate scoring**: Score each candidate on five weighted dimensions (predicted success, cost, latency, risk, information gain) with tier bonuses.
+9. **Candidate ranking**: Select top-*k* candidates (default *k* = 3).
+10. **Skill selection**: Choose highest-scored candidate. Apply policy gate (`BeforeCandidateSelection`).
+11. **Skill execution**: Run the 8-step skill lifecycle (scope enforcement → input binding → precondition validation → authorization → execution → observation collection → belief patching → termination evaluation).
+12. **Budget deduction**: Deduct observed costs from remaining budgets.
+13. **Observable evaluation**: Compare observation against declared observable fields.
+14. **Critic evaluation**: Evaluate the observation sequence and decide loop control: `Continue`, `Revise`, `Backtrack`, `Delegate`, or `Stop`.
+15. **Failure recovery**: If the critic decides to revise or backtrack, adjust state accordingly.
+16. **Trace recording**: Append step record (belief summary, candidates, scores, selected skill, observation, belief patch, critic decision) to the session trace.
 
-where:
-- **opcode** ∈ {convention₁, ..., conventionₖ, EMIT, STOP} — an index into the convention catalog plus two control opcodes.
-- Each **argⱼ** has a type ∈ {literal, span, ref}:
-  - **literal**: a constant value embedded in the program.
-  - **span(start, end)**: a substring extracted from the input intent by token position.
-  - **ref(step_index)**: a pointer to the output of a previous step sᵢ where i < current step.
+### 5.2 Goal Specification
 
-The decoder generates steps autoregressively until it predicts STOP or reaches the step limit. EMIT signals which step's output to return to the caller.
+A `GoalSpec` is a typed structure with:
 
-**Example** — "list files in /tmp and cache the result":
+- **Objective**: Natural language description of the desired outcome.
+- **Success conditions**: JSON predicates evaluated against belief state.
+- **Budgets**: Risk (0.0–1.0), latency (milliseconds), resource (abstract units).
+- **Deadline**: Optional wall-clock bound.
+- **Permissions scope**: Capability scope constraints.
 
-```
-s₁ = (fs.list_dir,     span(4,4))          → arg extracted as "/tmp"
-s₂ = (redis.set,       literal("files:tmp"), ref(s₁), literal(300))
-s₃ = (EMIT,            ref(s₁))
-s₄ = (STOP)
-```
+Natural language input is wrapped as-is into the objective field with default budgets (risk=0.5, latency=30s, resource=100.0). Structured JSON input is deserialized directly. The goal runtime validates that the objective is non-empty, budgets are positive, any deadline is in the future, and success conditions are non-empty. Extreme values are capped (max latency=10 minutes, max resource=10,000).
 
-### 5.2 Neural Architecture
+### 5.3 Belief State
 
-**Encoder (BiLSTM):** 2-layer bidirectional LSTM. Input: tokenized intent (BPE vocabulary, 2K-6K tokens). Output: contextualized encoding **H** ∈ ℝ^(T×2d) where T is sequence length and d is hidden dimension (default: 128). A pooled representation **h₀** = mean(H) serves as the decoder's initial hidden state.
+The belief state is the runtime's model of what is true about the world at a given moment:
 
-**Decoder (GRU):** Autoregressive GRU cell. At each step t, produces:
-- **Opcode logits** ∈ ℝ^(K+2): softmax over K conventions + EMIT + STOP.
-- **Argument type logits** ∈ ℝ^(A×3): per argument slot, probability of literal/span/ref.
-- **Span position logits** ∈ ℝ^(A×2×T): start and end positions over input tokens.
-- **Ref logits** ∈ ℝ^(A×t): pointer attention over previous steps.
+- **Resources**: Typed entries with identity, version, and mutability. Version conflict detection on updates.
+- **Facts**: Subject-predicate-value triples with confidence (0.0–1.0) and provenance (`Asserted`, `Observed`, `Inferred`, `Stale`, `Remote`).
+- **Uncertainties**: Explicit declarations of what is unknown.
+- **Active bindings**: Current variable bindings for skill input resolution.
+- **World hash**: SHA-256 digest of the entire belief state, recomputed after every mutation. Used by the critic to detect belief-state loops.
 
-where K = number of conventions, A = max argument slots per step (default: 4).
+Belief patches are applied after every observation. A patch may add, update, or remove resources and facts. The world hash provides a deterministic fingerprint: if two consecutive iterations produce the same world hash, the critic detects a loop.
 
-### 5.3 Intent Complexity Classes
+### 5.4 Critic Evaluation
 
-**Class 1 — Direct mapping.** One or two program steps. "Read file hello.txt" → `fs.read_file("hello.txt"), EMIT, STOP`. The majority of operations.
+The critic is a rule-based pattern detector that evaluates the observation history and decides the control loop's next action:
 
-**Class 2 — Multi-step.** Multiple plugins chained via references. "Upload photo, generate thumbnail, store both" → 4-5 steps across image-proc, s3, and postgres plugins.
+- **Loop detection**: Belief hash repetition (three or more identical world hashes) or skill selection repetition (same skill selected three or more times in a five-step window).
+- **Dead-end detection**: Three or more consecutive execution failures.
+- **Budget proximity**: Any budget dimension below 10% of its initial allocation.
+- **Progress stall**: Moving average of progress deltas below 0.01 over three steps.
 
-**Class 3 — Decomposed.** The LLM decomposes complex requests into multiple `soma.intent()` calls via MCP, each Class 1 or 2. The Mind stays simple; the LLM handles planning.
+The critic outputs a `CriticDecision` enum with five values:
 
-### 5.4 Inference Complexity
+| Decision | Meaning |
+|---|---|
+| `Continue` | Goal not yet satisfied; progress is being made. |
+| `Revise` | Current approach is stalling; try a different skill or binding. |
+| `Backtrack` | Current path has failed; undo last belief patch and retry. |
+| `Delegate` | Goal exceeds local capabilities; submit to a peer. |
+| `Stop` | Goal is satisfied, or no further progress is possible. |
 
-Encoder: O(T × d²) for 2-layer BiLSTM where T is intent token count and d is hidden dimension.
-Decoder: O(n × (K + A×T)) per step for n steps, dominated by the softmax over K conventions.
-Total: O(T × d² + n × K) for typical intents where T < 50 and n < 16.
-
-On server (tract-onnx): 1-10ms per inference.
-On ESP32: 50-500ms depending on model size and convention count.
-
----
-
-## 6. The Synthesizer
-
-The Synthesizer is a Python + PyTorch build tool. It is the only component that requires Python. Everything it produces is consumed by the Rust SOMA Core.
-
-### 6.1 Pipeline
-
-```
-Inputs:                              Outputs:
-  Plugin training data    ──────→    encoder.onnx + decoder.onnx (server)
-  Architecture config     ──────→    model.soma-model (embedded, int8)
-  Target specification    ──────→    vocab.json, catalog.json
-                                     *.lora (per-plugin LoRA weights)
-```
-
-1. **Collect** training data from plugins. Each provides `training/examples.json` with (intent, program) pairs.
-2. **Build tokenizer** — BPE with character-level fallback. Handles multilingual input, SQL, file paths, URLs.
-3. **Expand** pairs via parameter pools and augmentation (synonym replacement, word dropout, typo injection).
-4. **Train** the Mind. Combined cross-entropy loss over: opcode prediction, argument type, span position, ref pointers. Target: >95% opcode accuracy, >85% end-to-end program match.
-5. **Train plugin LoRA** (optional): freeze base weights, attach LoRA adapters (rank=8, alpha=16), train on single-plugin data.
-6. **Export**: ONNX float32 for server; `.soma-model` int8 quantized (post-training quantization with calibration) for embedded. Expected accuracy impact: 1-3% for int8 vs float32.
+Each decision carries a confidence value and a human-readable reason string for auditability.
 
 ---
 
-## 7. Plugins — The Body
+## 6. Skills
 
-### 7.1 Definition
+### 6.1 Taxonomy
 
-A plugin provides:
+Skills are the executable units of behavior. Four kinds form a hierarchy:
 
-1. **Calling conventions**: operations the Mind can invoke. Each has a name, argument specification (types, constraints), return type, estimated latency, and optional cleanup action for error recovery.
-2. **LoRA knowledge** (optional): pre-trained weight adaptations that teach the Mind how to use the conventions effectively. Installing a plugin with LoRA is gaining the tool AND the expertise.
+**Primitive**: A single port invocation. The skill specifies a port, a capability, an input schema, and an output schema. Execution dispatches to the port's `invoke` method and returns the `PortCallRecord`.
 
-Every plugin implements the `SomaPlugin` trait: `name()`, `version()`, `conventions()`, `execute()`, `on_load()`, `on_unload()`. Optional: `lora_weights()`, `training_data()`, `execute_stream()`, `checkpoint_state()`, `restore_state()`.
+**Composite**: An ordered subskill graph with conditional branching. Each subskill may itself be primitive, composite, or delegated. The composite executor iterates subskills, evaluates branch conditions against belief state, and aggregates observations (minimum confidence, summed latency, concatenated port calls).
 
-### 7.2 Distribution and Categories
+**Routine**: A compiled habitual shortcut. Routines have match conditions (belief predicates that must hold for activation), guard conditions (additional safety predicates), a compiled skill path (ordered list of skills to execute), expected cost, expected effect, and a confidence threshold. Routines execute without the full deliberation overhead of the control loop.
 
-Plugins are packaged as `.soma-plugin` archives (binary + manifest + LoRA + training data). 40 plugins are specified across five tiers:
+**Delegated**: Execution dispatched to a remote peer. The delegation context carries session identity, remaining budget, required trust level, policy context, execution trace cursor, and attribution.
 
-- **Core (T0)**: MCP bridge, PostgreSQL, Redis, filesystem, crypto.
-- **Foundation (T1)**: HTTP bridge, S3, SMTP, Twilio, push, auth, image processing, geolocation, text search, DOM renderer, design knowledge, timer.
-- **Features (T2)**: audio/video, WebRTC, calendar, messaging, reviews, analytics, AI inference, job queue, webhooks.
-- **Specialized (T3)**: SPI, UART, BLE, PDF, data export.
-- **Embedded**: GPIO, I2C, WiFi (built-in, not dynamically loaded).
+### 6.2 Multi-Objective Selection
 
-Six plugins are implemented: crypto (13 conventions), PostgreSQL (15), Redis (14), auth (10), geo (5), HTTP bridge (5) — totaling 62 conventions.
+The selector scores each candidate skill on five weighted dimensions:
 
-### 7.3 LoRA Plugin Knowledge — Mixture of Experts
+| Dimension | Weight | Source |
+|---|---|---|
+| Predicted success | 0.40 | Predictor (exponential moving average from past observations) |
+| Cost | 0.20 | Skill's declared cost prior + predictor estimate |
+| Latency | 0.15 | Skill's declared latency profile + predictor estimate |
+| Risk | 0.15 | Skill's declared risk class + current budget remaining |
+| Information gain | 0.10 | Predictor estimate of novel information yield |
 
-Multiple plugin LoRAs are active simultaneously. A gating mechanism dynamically weights which plugin's LoRA to activate per operation. This is consistent with MoE research: X-LoRA (Buehler & Buehler, 2024), L-MoE (2025), LoRA-Mixer (2025), MoLoRA (2025) — all demonstrating that independently trained LoRAs compose at inference time without retraining.
+Tier bonuses shift scores toward more abstract, proven skills:
 
-### 7.4 MCP Bridge Plugin
+| Tier | Bonus |
+|---|---|
+| Routine | +0.30 |
+| Schema-derived | +0.20 |
+| Composite | +0.10 |
+| Primitive | +0.00 |
 
-The most strategically important plugin. Connects SOMA to the MCP ecosystem — hundreds of existing MCP servers (GitHub, Slack, Stripe, etc.) become SOMA capabilities without per-service plugins. Each MCP tool is dynamically registered as a SOMA convention.
+Tiebreaker: reversible (rollback-capable) skills are preferred. Delegated candidates are filtered if delegation policy disallows remote execution.
 
----
+### 6.3 Execution Lifecycle
 
-## 8. Memory Architecture
+Each skill execution passes through eight inner steps:
 
-### 8.1 Four-Tier Memory
-
-Grounded in complementary learning systems theory (McClelland et al., 1995) and sleep consolidation research (Diekelmann & Born, 2010; Klinzing et al., 2019):
-
-| Tier | Biological Analogy | Implementation | Lifetime |
-|---|---|---|---|
-| **Permanent** | Neocortical long-term | Base model weights | Immutable until re-synthesis |
-| **Experiential** | Hippocampal recent memory | LoRA A/B matrices | Runtime, checkpointable |
-| **Working** | Active neural firing | Decoder hidden states | Per-execution, transient |
-| **Diffuse** | Asking a colleague | Synaptic queries to peers | Network-dependent |
-
-### 8.2 Experiential Memory (LoRA)
-
-After successful executions, SOMA records experience. Periodically, LoRA weights update via gradient descent on frozen decoder hidden states.
-
-Implementation: for `nn.Linear` layers, `y = W_frozen(x) + scale · (x · Aᵀ) · Bᵀ` where only A and B are trainable. B is zero-initialized so LoRA has no initial effect. For `nn.GRUCell`, LoRA is applied to both W_ih and W_hh gate weights with a reimplemented forward pass computing `W' = W_base + scale · B · A` before gate computation, preserving correct gradient flow.
-
-### 8.3 Consolidation
-
-High-magnitude LoRA adaptations are periodically merged into permanent weights: `W_base += scale · B · A`, then A and B reset. Proven patterns become permanent memory. On embedded, consolidation writes to flash infrequently (daily/weekly) to respect flash endurance limits (~100K cycles).
-
-### 8.4 Checkpoint and Restore
-
-A checkpoint serializes: base model hash (SHA-256), all LoRA A/B matrices, experience statistics, plugin manifest, and critical plugin state. Restore verifies model hash match. The checkpoint is the mind at that moment.
-
-### 8.5 Institutional Memory
-
-Beyond neural memory, SOMA stores permanent queryable state: database schema, decision log (what was built, why, when, by which LLM session), plugin configurations, and execution history. Exposed via MCP — when any LLM calls `soma.get_state()`, it receives all of this. No context is ever lost. This solves the LLM context problem: the LLM is ephemeral, SOMA is permanent.
+1. **Capability scope enforcement**: Verify the skill's required scope does not exceed the session's granted scope.
+2. **Input binding**: Extract values from belief state, goal fields, and working memory. Bind with provenance tracking.
+3. **Precondition validation**: Evaluate belief-contains conditions declared by the skill.
+4. **Authorization**: Apply policy hooks (`BeforeBindingFinalInputs`, `BeforeExecutionBegins`, `BeforeSideEffectingStep`).
+5. **Execution**: Dispatch by skill kind — port invocation for primitives, subskill iteration for composites, skill path execution for routines, transport dispatch for delegated.
+6. **Observation collection**: Receive `PortCallRecord` (primitives) or aggregated observation (composites/routines).
+7. **Belief patching**: Apply observation-derived patches to belief state.
+8. **Termination evaluation**: Check if the skill's declared termination conditions are met. Execute rollback if needed.
 
 ---
 
-## 9. The Synaptic Protocol
+## 7. Ports — The Body
 
-The Synaptic Protocol is the SOMA-to-SOMA communication layer. MCP is for LLM↔SOMA; Synaptic is for SOMA↔SOMA.
+### 7.1 The Port Contract
 
-Binary wire protocol, 22-byte overhead per signal (vs HTTP's 500-2000 bytes). Transport-agnostic: TCP, Unix Domain Socket, WebSocket. Big-endian. CRC32 checksum. Optional zstd compression.
+A port is a typed interface to an external system. Every port implements a trait with the following obligations:
 
-**26 signal types across six categories:**
-- **Protocol**: HANDSHAKE, HANDSHAKE_ACK, CLOSE, PING, PONG, ERROR, CONTROL
-- **Data**: INTENT, RESULT, INVOKE, QUERY, DATA, BINARY
-- **Streaming**: STREAM_START, STREAM_DATA, STREAM_END
-- **Chunked**: CHUNK_START, CHUNK_DATA, CHUNK_END, CHUNK_ACK (resumable)
-- **Discovery**: DISCOVER, DISCOVER_ACK, PEER_QUERY, PEER_LIST
-- **Pub/Sub**: SUBSCRIBE, UNSUBSCRIBE
+- **`spec()`**: Return a `PortSpec` declaring the port's identity, capabilities, side-effect class, latency profile, cost profile, authentication requirements, and sandbox requirements.
+- **`invoke(capability_id, input)`**: Execute a capability and return a `PortCallRecord`. The record must be returned even on failure — it is the observation that drives the control loop.
+- **`validate_input(capability_id, input)`**: Validate input against the capability's declared schema before dispatch.
 
-INVOKE and QUERY signals provide direct convention calling and state querying between SOMAs, giving SOMA-to-SOMA communication full parity with LLM-to-SOMA via MCP.
+The `PortCallRecord` is the fundamental observation unit:
 
-Key capabilities: multiplexed channels, resumable uploads (SHA-256 verified), pub/sub with durable subscriptions and catch-up, peer discovery via presence broadcasting with decaying TTL, auto-reconnect with exponential backoff, and protocol versioning negotiated at handshake.
+| Field | Purpose |
+|---|---|
+| `invocation_id` | Unique identifier for tracing |
+| `success` | Boolean outcome |
+| `failure_class` | Typed failure classification (if failed) |
+| `output` | Structured result data |
+| `latency_ms` | Measured wall-clock time |
+| `resource_cost` | Measured resource consumption |
+| `input_hash` | SHA-256 of input (for deduplication and replay) |
+| `retry_safe` | Whether the same invocation can be retried |
+| `session_id`, `goal_id` | Provenance chain |
+| `auth_outcome`, `policy_outcome` | Gate results |
 
-**Security**: ChaCha20-Poly1305 per-signal encryption, X25519 key exchange, Ed25519 identity — all via dalek crates (production cryptography, not placeholders). Rate limiting per connection with graduated response: throttle → reduce window → disconnect + blacklist.
+### 7.2 Dynamic Loading
 
----
+External ports are compiled as shared libraries (`cdylib` crates) exporting a single C-ABI symbol:
 
-## 10. The Interface SOMA
-
-The Interface SOMA runs on the user's device. It is a SOMA instance with a renderer plugin as its body (DOM for browsers, UIKit for iOS, Compose for Android). It receives semantic signals from Backend SOMAs via Synaptic Protocol and renders them using design knowledge absorbed from pencil.dev .pen files as LoRA.
-
-It does not converse. The human tells the LLM; the LLM updates the view specification via MCP; the Backend sends updated semantic signals; the Interface renders.
-
-**Semantic signals, not markup.** Backend SOMAs send meaning:
-
-```json
-{
-  "view": "contact_list",
-  "data": [{"name": "Ana M.", "service": "Hair Stylist", "rating": 4.8,
-            "online": true, "distance_km": 2.3}],
-  "actions": ["chat", "book", "favorite"],
-  "filters": ["service", "location", "rating"]
+```rust
+#[unsafe(no_mangle)]
+pub extern "C" fn soma_port_init() -> *mut dyn soma_port_sdk::Port {
+    Box::into_raw(Box::new(MyPort::new()))
 }
 ```
 
-The Interface Mind decides HOW to render based on proprioception (screen size, device type, accessibility settings) and design LoRA. Same signal renders as a grid on desktop, a list on phone, voice output on a speaker.
+At bootstrap, the runtime discovers libraries from configured search paths using the naming convention `libsoma_port_{port_id}.{dylib|so|dll}`. The `SdkPortAdapter` bridges the SDK's `Port` trait to the runtime's internal `Port` trait via JSON serialization, avoiding ABI mismatch between independently compiled binaries.
 
-**Browser deployment**: compiles to WebAssembly (~1-3MB). Synaptic Protocol over WebSocket transport. First meaningful paint: ~550ms after WASM cached. Note: for the current milestone (HelperBook), a pragmatic JS renderer is used. Neural rendering is a research direction documented for future implementation.
+Optional Ed25519 signature verification: when `require_signatures` is enabled, the runtime checks `.sig` and `.pub` sidecar files before loading any port library.
 
----
+### 7.3 Port Catalog
 
-## 11. Runtime Behavior
+The current implementation provides 11 external ports plus an SDK:
 
-**Startup**: Load config → Load Mind model → Load plugins → Restore checkpoint → Start Synaptic Protocol → Start MCP Server → Ready. Failed plugin: skip and continue with reduced capabilities. Corrupt checkpoint: start fresh.
-
-**Concurrency**: Per-request inference context. Encoder is stateless (sharable). Decoder hidden state is per-request. LoRA weights shared via `Arc<RwLock>` — read lock for inference (many concurrent), write lock for adaptation (~10ms pause). Embedded: sequential.
-
-**Error handling**: Retry same step → re-infer (may produce different program at temp > 0) → degrade to partial result → report error. Crashed plugins caught at `catch_unwind` boundary, unloaded; SOMA continues with reduced capabilities. Cleanup conventions handle resource leaks.
-
-**Shutdown**: Stop accepting → notify peers → drain in-flight → checkpoint → unload plugins → close listeners → exit. Embedded: save LoRA to flash with double-buffer for crash safety.
-
-**Observability**: Structured logging via `tracing` (JSON lines). Trace ID propagation across SOMA networks. 21 Prometheus-compatible metrics covering inference, plugins, memory, protocol, and adaptation. Signal capture via `soma-dump` CLI tool.
-
----
-
-## 12. Security
-
-**MCP**: Role-based auth tokens (admin/builder/viewer). Destructive action two-step confirmation with 60s expiry. Full audit trail.
-
-**Plugins**: Five trust levels — built-in (full trust), community (code review), vendor (signed), private (in-house), untrusted (WASM sandbox via wasmtime, future). Ed25519 signing. Least privilege declarations.
-
-**Synaptic Protocol**: ChaCha20-Poly1305 encryption, X25519 key exchange, Ed25519 identity. Per-connection rate limiting with graduated response.
-
----
-
-## 13. Implementation Status
-
-The SOMA paradigm is not theoretical. The following components are implemented and tested:
-
-### 13.1 SOMA Core (`soma-core/`)
-
-Single Rust binary (~14MB). 101 tests passing. Approximately 14,900 lines of Rust across: Mind Engine (tract-onnx inference with LoRA and temperature), Plugin Manager (`Arc<RwLock>`, topological sort, convention routing via `plugin_idx*1000` offset, crashed plugin tracking), Memory System (experience ring buffer, LoRA adaptation via gradient descent, checkpoint v2 with SHA-256 model hash, consolidation), Synaptic Protocol (17 source modules: signal codec, TCP/WebSocket/Unix transport, pub/sub, chunked transfer, streaming, discovery, relay, rate limiting, encryption, offline queue), MCP Server (JSON-RPC 2.0, 22+ tools, three auth roles, audit trail), Proprioception (RSS tracking, health reporting), Metrics (21 Prometheus counters), and State (decision log, execution history).
-
-### 13.2 Plugins (`soma-plugins/`)
-
-Six plugins implemented as Rust cdylib crates plus a shared SDK. Approximately 4,500 lines:
-
-| Plugin | Conventions | Description |
+| Port | Capabilities | External System |
 |---|---|---|
-| crypto | 13 | Hash, sign, encrypt, JWT, random generation |
-| postgres | 15 | Query, execute, ORM-style operations |
-| redis | 14 | Strings, hashes, lists, pub/sub, keys |
-| auth | 10 | OTP, sessions, TOTP, password hashing |
-| geo | 5 | Distance, radius filter, geocoding |
-| http-bridge | 5 | HTTP client (GET/POST/PUT/DELETE) |
-
-### 13.3 Synthesizer (`soma-synthesizer/`)
-
-Full Python + PyTorch training pipeline (~4,500 lines). CLI commands: train, train-lora, export, validate, test, benchmark. Produces ONNX models and int8 quantized `.soma-model` format.
-
-### 13.4 HelperBook (`soma-helperbook/`)
-
-First real-world SOMA application — a service marketplace connecting clients with service providers. 19-table PostgreSQL schema (users, connections, messages, chats, appointments, reviews, services, etc.), seed data (13 users, 4 chats, 19 messages, 7 appointments, 4 reviews), Express bridge frontend, Docker Compose for PostgreSQL + Redis.
+| auth | 10 | OTP, sessions, TOTP, bearer tokens |
+| crypto | 13 | SHA, HMAC, bcrypt, AES-GCM, RSA, JWT, randomness |
+| geo | 5 | Haversine distance, radius filter, bounds check |
+| image | 5 | Thumbnail, resize, crop, format conversion |
+| postgres | 15 | Raw SQL, CRUD, DDL, transactions |
+| push | 4 | FCM, WebPush, device registry |
+| redis | 13 | Strings, hashes, lists, pub/sub, key listing |
+| s3 | 5 | Put, get, delete, presign, list |
+| smtp | 3 | Plain text, HTML, attachment email |
+| timer | 4 | Timeout, interval, cancellation, listing |
+| filesystem | 7 | readdir, readfile, writefile, stat, mkdir, rmdir, rm (built-in) |
+| http | 4 | GET, POST, PUT, DELETE (built-in) |
 
 ---
 
-## 14. Experimental Validation
+## 8. Memory and Adaptation
 
-Three proofs of work validate the core claims. Complete source code and trained model artifacts are available in the repository (`poc/`, `pow/pow1`, `pow/pow2`, `pow/pow3`).
+### 8.1 Episode Store
 
-### 14.1 POW 1 — The Model IS the Program
+An episode is a complete trace of a finished session:
 
-**Claim (§3, §5):** A neural architecture can map human intent directly to hardware operations without code as an intermediate step.
+- **Goal fingerprint**: Normalized representation of the goal for similarity matching.
+- **Initial belief summary**: Snapshot of belief state at session start.
+- **Steps**: Ordered sequence of `EpisodeStep` records, each containing: belief summary, candidate list, scores, selected skill, observation, belief patch, progress delta, and critic decision.
+- **Outcome**: Success, Failure, PartialSuccess, Aborted, Timeout, or BudgetExhausted.
+- **Cost summary**: Total resource consumption across all dimensions.
 
-**Method:** A body discovery module scans the target system (macOS ARM64) and catalogs 16 libc calling conventions — `open`, `read`, `write`, `opendir`, `readdir`, `stat`, `getcwd`, `uname`, `gettimeofday`, and others — as structured data entries with argument schemas, ctypes type signatures, and calling patterns.
+The store is a bounded ring buffer (default capacity 1024). Retrieval uses longest-common-prefix matching on the goal fingerprint, with optional embedding-based cosine similarity and tag-based filtering.
 
-A seq2seq neural network (BiLSTM encoder + GRU autoregressive decoder, ~800K parameters, vocabulary size 223) is synthesized to map natural language intent to sequences of convention IDs with data dependencies. A generic execution bridge dispatches on 7 calling patterns (direct, buffered_read, write_bytes, struct_query, iterate, buffered_str, synapse_send) — analogous to CPU addressing modes. No function name appears in the execution path.
+### 8.2 Schema Induction
 
-**Results:**
+When the episode store reaches 75% capacity, the schema induction process activates. A schema is an abstract control structure extracted from multiple successful episodes:
+
+- **Trigger conditions**: Belief predicates that must hold for the schema to be relevant.
+- **Subgoal structure**: A graph of subgoal nodes with descriptions, candidate skill lists, and dependency edges.
+- **Candidate skill ordering**: Linear ordering of skills for execution.
+- **Stop conditions**: Predicates for termination.
+- **Rollback bias**: Eager, Cautious, Minimal, or None.
+- **Confidence**: Proportion of successful episodes that followed this pattern.
+
+Induction requires three or more successful episodes with the same goal fingerprint. The common skill sequence is extracted and generalized into the schema's subgoal structure. Induction is conservative: only patterns that recur and succeed are promoted.
+
+### 8.3 Routine Compilation
+
+A schema with confidence exceeding 0.7 is eligible for compilation into a routine. Routines are the fastest execution path — they bypass the full deliberation loop and execute a fixed skill sequence:
+
+- **Match conditions**: Belief predicates for activation (all must hold).
+- **Guard conditions**: Additional safety predicates (all must hold).
+- **Compiled skill path**: Ordered list of skills to execute.
+- **Expected cost and effect**: Predicted resource consumption and belief changes.
+- **Origin**: PackAuthored (declared in manifest), EpisodeInduced, SchemaCompiled, or PeerTransferred.
+
+Routines are invalidated when: a resource schema changes, a precondition fails at runtime, a policy changes, the pack version changes, or confidence drops below threshold. Invalidated routines fall back to schema-level or primitive-level execution.
+
+### 8.4 The Learning Pipeline
+
+The three stores form an ascending pipeline:
 
 ```
-intent> list files in /tmp
-
-  [Mind] Program (5 steps):
-    $0 = libc.opendir("/tmp")
-    $1 = libc.readdir($0)
-    $2 = libc.closedir($0)
-    $3 = EMIT($1)
-    STOP
-
-  [Body] (12 items): file1.txt, file2.txt, ...
+Execution traces → Episodes (raw observation history)
+                         ↓  (3+ successful episodes, same fingerprint)
+                   Schemas (abstract control structures)
+                         ↓  (confidence > 0.7)
+                   Routines (compiled shortcuts)
 ```
 
-The model generates multi-step programs that correctly sequence libc calls with data dependencies ($0, $1 references). Adding a new libc function requires only a catalog data entry declaring its pattern — no code changes.
+This pipeline implements a form of experience-based learning: the runtime observes its own execution, detects recurring patterns, abstracts them into reusable structures, and compiles them into fast paths. The process is conservative (high thresholds), transparent (every routine traces back to specific episodes), and reversible (routines can be invalidated and recomputed).
 
-**Prior validation (POC):** An earlier proof of concept with 644K parameters and 15 operations achieved 22/22 (100%) accuracy on a test set of 9 known-pattern + 13 novel phrasings, with 2,300 synthesized training examples and ~60s training time on Apple M4.
+The pipeline is related to chunking in SOAR (Laird, Newell & Rosenbloom, 1987) and compilation in ACT-R (Anderson, 1982), but operates on typed skill sequences with explicit confidence tracking rather than on production rules or declarative chunks.
 
-| Conventional (Alexa, Siri) | SOMA |
+---
+
+## 9. Policy and Safety
+
+### 9.1 Lifecycle Hooks
+
+The policy engine evaluates safety constraints at seven points in the execution lifecycle:
+
+| Hook | When |
 |---|---|
-| NLU classifies intent | Mind generates multi-step program |
-| Hand-coded skill handler executes | Generic bridge dispatches via patterns |
-| Adding skill = writing code | Adding capability = catalog data entry |
-| Model selects which program to run | Model IS the program |
+| `BeforeCandidateSelection` | Before the selector enumerates skill candidates |
+| `BeforeBindingFinalInputs` | After candidate selection, before input binding |
+| `BeforeExecutionBegins` | After binding, before dispatch |
+| `BeforeSideEffectingStep` | Before any step with non-None side-effect class |
+| `BeforeDelegation` | Before dispatching to a remote peer |
+| `BeforeRollback` | Before executing a rollback action |
+| `BeforeRemoteExposure` | Before exposing internal state to a peer |
 
-### 14.2 POW 2 — The Model GROWS as the Program
+### 9.2 Policy Rules
 
-**Claim (§8):** A SOMA accumulates experiential memory through LoRA adaptation, can checkpoint/restore its mind state, and consolidates experience into permanent memory.
+A policy rule consists of:
 
-**Method:** The base model from POW 1 is deliberately synthesized on only 50% of intent templates, leaving 50% as novel phrasings. LoRA adapters (rank 8, alpha 2.0) are applied to the decoder GRU and all output heads, adding 44,480 trainable parameters on top of 1,071,864 frozen base parameters.
+- **Conditions**: Predicates over the action context (resource exists, trust level ≥ threshold, budget ≥ threshold, side-effect class matches).
+- **Effect**: `Allow`, `Deny`, or `RequireApproval`.
+- **Priority**: Host policies override pack policies. Among same-priority rules, the most restrictive effect wins (default-deny on deadlock).
 
-Controlled experiment protocol:
+Default host safety policies enforce:
 
-1. **Baseline**: Measure model confidence on 12 novel phrasings never seen during synthesis.
-2. **Experience**: Execute the novel phrasings and record (input, program) pairs in an experience buffer. 12 novel + 6 known-good intents, replayed 4x = 72 total experiences.
-3. **Adaptation**: Run 40 LoRA training cycles on sampled experience batches (lr=2e-3). Only LoRA parameters update; base weights frozen.
-4. **Post-adaptation**: Re-measure confidence on the same 12 novel phrasings.
-5. **Rollback**: Reset LoRA to zero. Verify confidence returns to baseline.
+- **Destructive operation gate**: `RequireApproval` for any action with `Destructive` or `Irreversible` side-effect class when trust level is `Verified` or below.
+- **Read-only allowance**: `Allow` unconditionally for `ReadOnly` side-effect class.
+- **Budget enforcement**: `Deny` when step count exceeds configured maximum.
+- **Bounded loops**: `Deny` when the critic detects a loop condition.
 
-**Results** (measured on Apple M4, April 2026):
+### 9.3 Rate Limiting
+
+Per-rule rate limiting uses a sliding-window algorithm (ring buffer of timestamps). Configurable burst limit and sustained rate. Exceeding the limit triggers the rule's overflow effect (typically `Deny`).
+
+---
+
+## 10. Distributed Execution
+
+### 10.1 Transport
+
+The distributed layer supports three transport protocols:
+
+- **TCP with optional TLS**: Length-framed JSON-RPC messages (4-byte big-endian length prefix). TLS via configured certificate and key files.
+- **WebSocket**: Standard WebSocket framing over HTTP upgrade.
+- **Unix Domain Socket**: For same-host inter-instance communication.
+
+Typed message envelope:
+
+| Message | Purpose |
+|---|---|
+| `InvokeSkill` | Execute a skill on a peer |
+| `QueryResource` | Query a resource on a peer |
+| `SubmitGoal` | Submit a goal for remote execution |
+| `TransferSchema` | Transfer a learned schema to a peer |
+| `TransferRoutine` | Transfer a compiled routine to a peer |
+| `ChunkedTransfer*` | Resumable large transfers with hash verification |
+| `Ping` / `Pong` | Heartbeat with nonce and load reporting |
+
+### 10.2 Delegation Model
+
+Five delegation units:
+
+1. **Skill invocation**: Execute a single skill on a remote peer. The result is an observation in the local session.
+2. **Subgoal submission**: Submit a subgoal to a peer for full control-loop execution. The result is a completed episode.
+3. **Session migration**: Transfer an entire in-progress session to a peer, including belief state, trace, budget, policy context, and resource bindings.
+4. **Resource operation**: Query or mutate a resource on a peer.
+5. **Schema/routine transfer**: Share learned control structures with peers.
+
+Delegation context carries: session identity, remaining budget, required trust level, policy context, trace cursor, and attribution. Acceptance requires: peer trust ≥ required trust, verified peer capability, and sufficient peer budget.
+
+Session mirroring provides redundancy without transfer of authority — the same session runs on multiple peers simultaneously.
+
+### 10.3 Peer Rate Limiting
+
+Per-peer, per-action rate limiting with configurable windows. Graduated response: throttle → reduce window → disconnect and blacklist. Blacklist threshold is configurable. This prevents a compromised or misbehaving peer from consuming unbounded resources.
+
+---
+
+## 11. Interfaces
+
+### 11.1 MCP Server
+
+The MCP server implements JSON-RPC 2.0 over stdin/stdout with 16 tools:
+
+| Tool | Purpose |
+|---|---|
+| `create_goal` | Submit a goal, create a session, run to completion or wait state |
+| `inspect_session` | Query session state (goal, belief, budget, status, trace) |
+| `inspect_belief` | Query belief state and facts |
+| `inspect_resources` | Enumerate resources in belief |
+| `inspect_packs` | List loaded packs and their skills |
+| `inspect_skills` | Query skill metadata |
+| `inspect_trace` | Fetch session trace |
+| `pause_session` | Pause an active session |
+| `resume_session` | Resume a paused session |
+| `abort_session` | Terminate a session |
+| `list_sessions` | Enumerate all sessions |
+| `query_metrics` | Runtime metrics (sessions, steps, port calls, policy denials) |
+| `query_policy` | Evaluate a hypothetical policy decision |
+| `dump_state` | Full runtime state snapshot |
+| `invoke_port` | Direct port capability invocation |
+| `list_ports` | Enumerate registered ports and capabilities |
+
+The final two tools — `invoke_port` and `list_ports` — provide direct port access, bypassing the goal/session/skill machinery. This enables an LLM to discover available capabilities and invoke them directly when goal-level orchestration is not needed.
+
+### 11.2 The LLM Interaction Model
+
+A typical LLM-to-SOMA interaction:
+
+1. The LLM calls `dump_state` to obtain full runtime context.
+2. The LLM calls `list_ports` to discover available capabilities.
+3. Based on the human's request, the LLM either:
+   - Calls `create_goal` for complex, multi-step objectives (the runtime handles skill selection, sequencing, and error recovery), or
+   - Calls `invoke_port` directly for simple, single-capability operations.
+4. The LLM calls `inspect_session` or `inspect_trace` to monitor progress.
+5. The LLM explains results to the human.
+
+The runtime holds all state. The LLM is stateless with respect to the SOMA instance — it can be replaced at any point without loss of execution context, belief state, or episode history.
+
+---
+
+## 12. Packs and Projects
+
+### 12.1 Pack Manifests
+
+A pack is the deployment unit. A pack manifest (`manifest.json`) declares:
+
+- **Ports**: External system adapters to register.
+- **Skills**: Executable operations (primitive, composite, routine, delegated) with full contracts — inputs, outputs, observables, termination conditions, rollback actions, cost priors, risk classes, determinism, remote exposure.
+- **Schemas**: Abstract control structures.
+- **Routines**: Pre-compiled execution paths.
+- **Policies**: Safety constraints.
+- **Exposure metadata**: What the pack exposes to peers.
+- **Dependency metadata**: What the pack requires from the runtime.
+
+The manifest is the application. Different manifests produce different application behaviors from the same runtime binary.
+
+### 12.2 The Project Pattern
+
+A `soma-project-*` is a self-contained, deployable unit:
 
 ```
-Intent                                    Before   After    Delta
-show directory listing for /tmp           98.9%    98.9%    +0.00%
-enumerate all files in /var/log           62.6%    77.9%   +15.30% ↑
-what exists in ~/Documents                99.4%    98.6%    -0.81%
-get directory contents of /etc            72.7%    75.7%    +3.00% ↑
-output the contents of hello.txt          64.7%    81.8%   +17.05% ↑
-show hello.txt contents                   99.9%    99.9%    -0.01%
-what does test.txt contain                83.9%    95.7%   +11.72% ↑
-describe this computer                    98.5%    97.9%    -0.58%
-show computer details                     99.1%    98.2%    -0.96%
-what's the date today                     99.8%    99.6%    -0.21%
-scan /tmp for files                       54.3%    63.6%    +9.40% ↑
-peek at hello.txt                         78.5%    92.1%   +13.52% ↑
-
-Baseline avg:  84.36%
-Adapted avg:   89.98%
-Delta:         +5.62%
-Improved:      6/12 intents
+soma-project-<name>/
+  bin/soma                                 # Pre-compiled runtime binary
+  packs/<port>/manifest.json               # Pack manifest
+  packs/<port>/libsoma_port_<name>.dylib   # Port shared library
+  .env                                     # Configuration (credentials, etc.)
+  mcp-client.mjs                           # MCP test client
+  scripts/run-mcp.sh                       # Launch MCP server
+  scripts/test-all.sh                      # Smoke tests
+  samples/                                 # Test payloads
 ```
 
-Adaptation loss converged from 0.132 (cycle 10) to 0.065 (cycle 40). The largest improvements occurred on intents with lowest baseline confidence: "scan /tmp for files" (+9.4%), "output the contents of hello.txt" (+17.1%), "enumerate all files in /var/log" (+15.3%). Intents already at >98% confidence showed negligible change, consistent with LoRA's inability to significantly improve already-correct predictions.
+The project pattern makes deployment a directory copy. No build step. No dependency resolution. No container image construction. The binary, the port libraries, and the manifest together constitute the entire application.
 
-Rollback validation: resetting LoRA to zero returned all confidences to exact baseline values, confirming the improvement exists solely in the LoRA weights.
+### 12.3 What Developers Write
 
-The improvement exists in the LoRA weights — rollback eliminates it. The four-tier memory hierarchy is operational: permanent memory (frozen base), experiential memory (LoRA), working memory (hidden states). Checkpoint/restore serializes and restores the complete experiential state. Consolidation merges experience into permanent memory via `W_base += scale · B · A`.
+To build a new application on SOMA, a developer writes:
 
-### 14.3 POW 3 — SOMAs Communicate via Synaptic Protocol
+1. A pack manifest declaring the application's skills, port requirements, schemas, and policies.
+2. Port adapters, if the required external system interface does not already exist.
+3. Nothing else.
 
-**Claim (§9):** Multiple SOMA instances can discover each other and exchange data, with the neural mind deciding when and what to communicate.
+No controllers, no routes, no ORM mappings, no serialization layers, no build configuration for the application itself. The runtime exists. The ports exist. The application is the manifest plus the running instance.
 
-**Method:** Two SOMA instances (SOMA-A on port 9001, SOMA-B on port 9002) on the same host, each with its own mind, body, and synapse server. The model (17 conventions, vocabulary size 239) treats `send_signal` as a body capability alongside libc functions. The Mind learns during synthesis that intents containing "send to soma-b" produce programs ending with `send_signal` instead of EMIT. The routing decision is neural, not coded.
+---
 
-**Demonstration protocol:**
+## 13. Implementation
 
-1. **Discovery**: SOMA-A broadcasts presence → SOMA-B discovers SOMA-A.
-2. **Data delegation**: "list files in /tmp and send to soma-b" → SOMA-A lists files via libc, sends result to SOMA-B via TCP.
-3. **Content sharing**: "read /tmp/test.txt and send to soma-b" → SOMA-A reads file, sends content.
-4. **Time sharing**: "get the time and send to soma-b" → SOMA-A gets time, sends to SOMA-B.
-5. **Local verification**: "what time is it" → SOMA-A gets time, EMITs locally (does NOT send). Proves the model distinguishes local display from network transmission.
+### 13.1 soma-next
 
-**Results:** All five tests pass. The demo captures signal count, data types (file listing, file content, timestamps), and protocol metadata. The bridge is fully pattern-based — all execution (libc calls and network sends alike) flows through 7 generic patterns. No function name appears in the execution path.
+Single Rust binary. ~56,000 lines across: runtime logic (session controller, belief, skill registry, skill executor, selector, predictor, critic, policy engine, goal runtime, port runtime, pack runtime, resource runtime, metrics, proprioception, dynamic port loading, port signature verification), adapter layer, memory stores (episodes, schemas, routines, checkpoints, persistence, working memory, world state), interfaces (CLI, MCP, internal API types), distributed transport (TCP/TLS, WebSocket, Unix socket, delegation, routing, streaming, sync, rate limiting, heartbeat, authentication, peer management, message queue, chunked transfer, distributed trace), type definitions (goals, sessions, skills, ports, packs, policies, beliefs, observations, resources, episodes, routines, schemas, peers), and built-in ports (filesystem, http).
 
-### 14.4 Summary
+1144 tests. Zero compiler warnings. Zero clippy warnings. ~10MB release binary.
 
-| POW | Sections Validated | Core Claim | Result |
-|---|---|---|---|
-| 1 | §3, §5, §6 | Neural mind generates multi-step programs of discovered functions; generic bridge executes via patterns | Validated |
-| 2 | §8 | LoRA experiential memory improves performance; checkpoint/restore serializes mind state; consolidation merges to permanent memory | Validated |
-| 3 | §9 | SOMAs discover peers, exchange data via Synaptic Protocol; neural mind decides routing (EMIT vs SEND) | Validated |
+### 13.2 soma-ports
 
-Combined, these experiments demonstrate: a neural architecture is synthesized onto a target system, discovers its body, generates programs of body operations from natural language intent, accumulates experiential memory through LoRA adaptation, serializes/restores its complete state, and communicates with peer SOMAs through a binary protocol — all without generating, compiling, or interpreting code at any layer.
+Workspace of 11 port crates plus an SDK. Each port compiles to a `cdylib` shared library. Total: 88 capabilities across 11 ports. The SDK defines the `Port` trait, `PortSpec`, `PortCapabilitySpec`, `PortCallRecord`, and all classification enums.
+
+Ports with external system dependencies: postgres (`SOMA_POSTGRES_URL`), redis (`SOMA_REDIS_URL`), s3 (AWS SDK with `SOMA_S3_*` configuration), smtp (`SOMA_SMTP_*` configuration). Ports with no external dependency: auth, crypto, geo, image, push, timer (pure local logic or in-memory state).
+
+### 13.3 Deployed Projects
+
+Three deployed projects demonstrate end-to-end operation:
+
+- **soma-project-smtp**: Email delivery via SOMA MCP. The LLM discovers SMTP capabilities via `list_ports`, invokes `send_plain`, `send_html`, or `send_attachment` via `invoke_port`.
+- **soma-project-s3**: Object storage via SOMA MCP. Upload, download, delete, presign, and list operations.
+- **soma-project-postgres**: Database access via SOMA MCP. SQL queries, CRUD, DDL, and transaction operations.
+
+Each project follows the standard project pattern: runtime binary, port library, pack manifest, MCP test client, launch scripts.
+
+---
+
+## 14. Historical Validation
+
+The SOMA paradigm was originally validated through three proofs of work using an earlier prototype (`soma-core`) that employed neural inference — a BiLSTM encoder with a GRU autoregressive decoder mapping tokenized intents to sequences of function calls. The architecture has since evolved from neural program generation to deliberative goal-driven control, but the proofs validated the foundational principle that intent can map to execution without an intermediate code artifact.
+
+### 14.1 POW 1 — Intent to Execution Without Code
+
+A seq2seq neural network (~800K parameters) mapped natural language to sequences of libc calling conventions (open, read, write, opendir, readdir, stat, getcwd, uname, gettimeofday, and others) on macOS ARM64. A generic execution bridge dispatched calls through seven calling patterns (direct, buffered_read, write_bytes, struct_query, iterate, buffered_str, synapse_send) — analogous to CPU addressing modes. No function name appeared in the execution path. Adding a new function required only a catalog entry declaring its pattern.
+
+The model generated multi-step programs with data dependencies (output of step *i* as input to step *j*) and correctly sequenced libc calls for filesystem operations, system queries, and cross-instance communication.
+
+### 14.2 POW 2 — Experiential Learning
+
+LoRA adapters (rank 8, alpha 2.0, 44,480 trainable parameters on 1,071,864 frozen base parameters) were applied to the decoder. The base model was deliberately trained on only 50% of intent templates, leaving 50% as novel phrasings. After 40 adaptation cycles on 72 experience samples, average confidence on 12 novel phrasings increased from 84.36% to 89.98% (+5.62%). The largest improvements occurred on intents with lowest baseline confidence (up to +17.1%). Resetting LoRA to zero returned all confidences to exact baseline values, confirming the improvement resided solely in the adapter weights.
+
+### 14.3 POW 3 — Inter-Instance Communication
+
+Two SOMA instances on the same host, each with its own model, discovered each other via presence broadcasting and exchanged data via TCP. The model treated `send_signal` as a body capability alongside libc functions. The routing decision (local EMIT vs. network SEND) was neural — the model learned during synthesis that intents containing "send to soma-b" produce programs ending with `send_signal`. All five protocol tests passed.
+
+### 14.4 Architectural Evolution
+
+The transition from neural inference (soma-core) to deliberative control (soma-next) preserved the core thesis — the runtime is the program — while changing the mechanism. In the neural prototype, a trained model *generated* execution sequences. In the current architecture, a control loop *selects* from declared skills. Both eliminate the intermediate code artifact. The deliberative architecture provides: explicit auditability (every decision is traceable through the session trace), safety enforcement (the policy engine gates every action), and transparent learning (episodes, schemas, and routines are inspectable data structures rather than opaque weight matrices).
 
 ---
 
@@ -537,91 +650,67 @@ Combined, these experiments demonstrate: a neural architecture is synthesized on
 
 ### 15.1 The Bootstrap Problem
 
-SOMA replaces application code, but the SOMA Core itself is coded in Rust and the Synthesizer in Python. This is the same bootstrapping problem faced by every compiler: the first instance must be hand-written. The SOMA Core and Synthesizer are the last programs that need to be hand-coded. Once operational, SOMAs assist in their own evolution via MCP + LLM, and eventually a SOMA with PyTorch as a plugin could synthesize other SOMAs.
+SOMA eliminates application source code, but the runtime itself is written in Rust. This is the standard bootstrapping constraint: the first compiler must be written in another language. The SOMA runtime and its port adapters are the last programs that need to be hand-written for a given domain. Once operational, the runtime handles all domain behavior through pack manifests and loaded ports.
 
-### 15.2 Coexistence and Migration
+### 15.2 Cognitive Architecture, Not Neural Inference
 
-SOMA does not require replacing existing systems. Three coexistence models: (A) SOMA behind a traditional API via HTTP bridge plugin — transparent to clients, (B) SOMA orchestrating legacy services via MCP bridge, (C) gradual migration — one microservice at a time becomes a SOMA.
+The current SOMA architecture is a cognitive architecture — a structured system that perceives (observations), believes (belief state), decides (skill selection), acts (port invocation), and learns (episodic pipeline). It does not perform neural inference. The phrase "neural architecture" in SOMA's tagline refers to the cognitive architecture pattern: the runtime's structure mirrors a nervous system's function (sense → model → decide → act → adapt), not its implementation (neural networks).
 
-SOMA excels at: data-driven applications, CRUD, API orchestration, IoT, automation, multi-service coordination. Traditional code remains preferable for: performance-critical inner loops (game engines, codecs), UI frameworks themselves (though SOMA can use them as plugins), and systems requiring formal verification (until SOMA's verification story matures).
+This is a deliberate design choice. Neural inference provides generalization but sacrifices auditability, safety enforcement, and deterministic replay. Deliberative control provides full transparency — every decision is traceable, every policy gate is auditable, every learned routine can be inspected and invalidated. For a system that executes operations with real-world side effects (database writes, email sends, file deletions), auditability is a hard requirement.
 
-### 15.3 Real-Time Guarantees
-
-Embedded and industrial applications demand hard real-time guarantees. Neural inference has variable latency. For hard real-time operations, SOMA uses **deterministic pathways**: pre-compiled programs with known timing bounds, bypassing Mind inference at runtime. For soft real-time (web applications, IoT), inference latency (1-10ms on server, 50-500ms on ESP32) is acceptable.
-
-### 15.4 Comparison with Existing Paradigms
+### 15.3 Comparison with Existing Paradigms
 
 | Aspect | Traditional Software | AI Code Generation | SOMA |
 |---|---|---|---|
-| Artifact | Source code | Source code (AI-generated) | Neural weights (no code) |
-| Maintenance | Manual | Regenerate (may break) | Adapts from experience |
-| Context | Developer's head | LLM context window (lost) | SOMA state (permanent) |
-| Platform | Framework-specific | Same | Plugin-based (swap body) |
-| Embedded | Separate toolchain | Poor support | Same architecture, smaller model |
-| Collaboration | Git, PRs, meetings | Prompt sharing | Query same SOMA state |
+| **Artifact** | Source code | Source code (AI-generated) | Pack manifests (no code) |
+| **Maintenance** | Manual edit-test-deploy | Regenerate (may break) | Update manifest or load port |
+| **Context** | Developer's knowledge | LLM context window (lost) | Runtime state (permanent) |
+| **Safety** | Unit tests, code review | Prompt guardrails | Policy engine, 7 lifecycle hooks |
+| **Learning** | Manual refactoring | Re-prompting | Episodes → schemas → routines |
+| **External systems** | Libraries, SDKs | Generated integration code | Typed port contracts |
+| **Deployment** | Build pipeline | Build pipeline | Directory copy |
 
-### 15.5 Ethical Considerations
+### 15.4 Coexistence
 
-SOMA reduces the need for traditional software development. This is the explicit goal, not an unintended side effect. The ethical response: honest acknowledgment and focus on new roles — plugin developers, synthesizer specialists, domain knowledge trainers, SOMA operators.
+SOMA does not require replacing existing systems. Three coexistence models: (A) SOMA behind a traditional API via the HTTP port — transparent to existing clients, (B) SOMA orchestrating legacy services via port adapters, (C) gradual migration — one capability at a time becomes a SOMA port and skill.
 
-SOMA executes what it is told via MCP. Destructive actions require confirmation. Every execution is logged. Every decision is recorded. Program traces show exactly what happened. There is no hidden logic. The human remains in control: the LLM may suggest, but execution requires explicit MCP tool calls, which require human approval for critical actions.
+SOMA is well-suited to: data-driven applications, CRUD operations, API orchestration, IoT automation, multi-service coordination. Traditional code remains preferable for: performance-critical inner loops, UI framework implementation, and systems requiring formal verification beyond what the policy engine provides.
 
 ---
 
 ## 16. Limitations and Open Questions
 
-### 16.1 Model Capacity
+### 16.1 Skill Authoring
 
-How much complexity can a 50M-parameter Mind encode? A 200K-line codebase represents ~5,000 unique decisions. Empirical testing on HelperBook (62 conventions, 19 tables) will establish scaling curves.
+Skills are currently declared in pack manifests as JSON. Complex composite skills with conditional branching require careful manual specification. Tooling for skill authoring, validation, and testing would lower the barrier to creating new applications.
 
-### 16.2 LoRA Composition
+### 16.2 Schema Induction Quality
 
-How many plugin LoRAs compose before MoE gating degrades? Research shows 8-16 experts work well (Buehler & Buehler, 2024). Real applications may need 20+. This requires experimentation.
+Schema induction requires three or more successful episodes with the same goal fingerprint. Goals with high variance in phrasing may not cluster. The current fingerprinting uses longest-common-prefix matching, which is sensitive to word order. Semantic similarity matching would improve induction coverage but introduces embedding model dependencies.
 
-### 16.3 Formal Verification
+### 16.3 Predictor Accuracy
 
-Can SOMA programs be formally verified? The deterministic execution model and finite program structure (bounded steps, typed arguments, known conventions) make this more tractable than verifying LLM outputs, but the tools do not yet exist.
+The predictor uses exponential moving average calibration (alpha=0.1) from past observations. This is effective for stationary environments but may lag in environments where port behavior changes (e.g., database latency spikes). More sophisticated predictive models — Bayesian updating, contextual bandits — could improve selection quality at the cost of complexity.
 
-### 16.4 Training Data Quality
+### 16.4 Formal Verification
 
-The Mind is only as good as its training data. Poor examples produce poor programs. The Synthesizer includes validation (convention coverage, duplicate detection, conflict detection), but systematic quality assurance across hundreds of plugins is an open problem.
+The deterministic control loop, finite skill hierarchy, typed observations, and explicit policy gates make SOMA more amenable to formal verification than LLM-based systems. However, the tools do not yet exist. The bounded execution model (budget constraints, step limits) provides termination guarantees, but correctness guarantees over arbitrary skill compositions remain an open problem.
 
-### 16.5 Adversarial Intents
+### 16.5 Adversarial Inputs
 
-Can an adversary craft intents that cause SOMA to generate harmful programs? Input validation at the LLM layer provides one defense (the LLM can refuse harmful requests), but SOMA itself has no ethical reasoning. Convention-level permission boundaries (plugins declare capabilities) provide a second defense. A formal analysis of attack surfaces is needed.
+An adversary who controls the MCP client can submit goals designed to exhaust budgets, trigger expensive port invocations, or exploit policy gaps. Defense layers include: the LLM's own refusal mechanisms, the policy engine's budget enforcement, per-action rate limiting, and the destructive-operation confirmation gate. A formal analysis of the attack surface — particularly the interaction between policy rules and composite skill execution — is needed.
 
-### 16.6 Experiential Drift
+### 16.6 Routine Staleness
 
-After thousands of LoRA adaptations and consolidations, the Mind's behavior may drift from its original synthesis. Detection via periodic validation against held-out test sets and correction via targeted LoRA reset are plausible approaches but untested at scale.
-
----
-
-## 17. Research Roadmap
-
-Dependency-ordered. Milestones 1-6 are complete; 7 is in progress.
-
-| Milestone | Status | Description |
-|---|---|---|
-| **1. SOMA Core** | ✓ Complete | Rust binary, mind engine, plugin manager, config |
-| **2. MCP Server** | ✓ Complete | State exposure, action tools, auth. LLM can drive SOMA. |
-| **3. Data Layer** | ✓ Complete | PostgreSQL + Redis plugins, schema exposure |
-| **4. Memory** | ✓ Complete | LoRA in Rust, experience, adaptation, checkpoint, consolidation |
-| **5. Synaptic Protocol** | ✓ Complete | TCP/WebSocket/Unix transport, codec, routing, discovery, encryption |
-| **6. HelperBook Core** | ✓ Complete | 6 plugins, 19-table schema, Express frontend |
-| **7. Web Frontend** | In progress | Real-time updates, WebSocket push |
-| **8. MCP Bridge** | Planned | Connect to external MCP servers |
-| **9. Production** | Partial | Metrics and auth done; retry, resource limits remaining |
-| **10. ONNX Runtime** | Planned | GPU/NPU acceleration when tract-onnx is bottleneck |
-| **11. Self-Hosting** | Research | SOMA that synthesizes other SOMAs |
-| **12. Neuromorphic** | Research | Synthesis onto Intel Loihi or equivalent |
+Routines compiled from historical episodes may become stale as external system behavior changes. The current invalidation triggers (resource schema change, precondition failure, policy change, confidence drop) are reactive. Proactive staleness detection — periodic re-evaluation of routine confidence against recent episodes — would improve reliability.
 
 ---
 
-## 18. Conclusion
+## 17. Conclusion
 
-SOMA is a neural architecture that IS the program. It receives structured intents via MCP from any LLM, generates execution programs through a trained Mind, and orchestrates plugins that interface with the world. Its state is permanent, queryable, and transferable across LLM sessions. Its memory grows from experience. Its body adapts through plugins.
+SOMA is a computational architecture where the runtime is the program. A goal-driven control loop selects skills, invokes ports, observes outcomes, and adapts through an episodic learning pipeline — without generating, compiling, or interpreting application source code at any layer. The policy engine enforces safety at seven lifecycle hooks. The type system makes side effects, risk classes, trust levels, and determinism properties explicit and machine-evaluable. The distributed layer enables multi-instance delegation and knowledge transfer.
 
-The architecture is implemented: a 14MB Rust binary with 101 tests, 6 production plugins providing 62 conventions, a full synthesis pipeline, and a 19-table application (HelperBook) with Express frontend. Three proofs of work validate the core claims: program generation without code, experiential learning via LoRA, and multi-instance communication via Synaptic Protocol.
+The implementation — 1144 tests, 11 port adapters, 88 capabilities, multiple deployed projects — demonstrates that the architecture is operational, not theoretical. The episodic learning pipeline (episodes → schemas → routines) provides a concrete mechanism for experience-based adaptation. The pack manifest pattern provides a concrete answer to "what do developers write instead of code."
 
 SOMA does not generate code. It eliminates the need for it.
 
@@ -629,34 +718,28 @@ SOMA does not generate code. It eliminates the need for it.
 
 ## References
 
-- Balog, M. et al. (2017). "DeepCoder: Learning to Write Programs." ICLR 2017.
-- Devlin, J. et al. (2017). "RobustFill: Neural Program Learning under Noisy I/O." ICML 2017.
-- Li, Y. et al. (2022). "Competition-Level Code Generation with AlphaCode." Science, 378(6624).
-- Schick, T. et al. (2023). "Toolformer: Language Models Can Teach Themselves to Use Tools." NeurIPS 2023.
-- Qin, Y. et al. (2023). "ToolLLM: Facilitating Large Language Models to Master 16000+ Real-world APIs." arXiv:2307.16789.
-- Patil, S. et al. (2023). "Gorilla: Large Language Model Connected with Massive APIs." arXiv:2305.15334.
-- Gulwani, S. et al. (2017). "Program Synthesis." Foundations and Trends in Programming Languages, 4(1-2).
-- Hu, E.J. et al. (2021). "LoRA: Low-Rank Adaptation of Large Language Models." ICLR 2022.
-- Buehler, E.L. & Buehler, M.J. (2024). "X-LoRA: Mixture of Low-Rank Adapter Experts." APL Machine Learning, 2(2), 026119.
-- Wu, X. et al. (2024). "Mixture of LoRA Experts." arXiv:2404.13628.
-- L-MoE (2025). "End-to-End Training of a Lightweight Mixture of Low-Rank Adaptation Experts." arXiv:2510.17898.
-- LoRA-Mixer (2025). "Coordinate Modular LoRA Experts Through Serial Attention Routing." OpenReview.
-- MoLoRA (2025). "Composable Specialization via Per-Token Adapter Routing." arXiv:2603.15965.
-- Liang, Y.S. & Li, W.J. (2024). "InfLoRA: Interference-Free Low-Rank Adaptation for Continual Learning." CVPR 2024.
-- Wu, Y. et al. (2025). "SD-LoRA: Scalable Decoupled Low-Rank Adaptation for Class Incremental Learning." ICLR 2025.
-- McClelland, J.L., McNaughton, B.L. & O'Reilly, R.C. (1995). "Why There Are Complementary Learning Systems in the Hippocampus and Neocortex." Psychological Review, 102(3), 419–457.
-- Diekelmann, S. & Born, J. (2010). "The Memory Function of Sleep." Nature Reviews Neuroscience, 11, 114–126.
-- Klinzing, J.G., Niethard, N. & Born, J. (2019). "Mechanisms of Systems Memory Consolidation During Sleep." Nature Neuroscience, 22, 1598–1610.
-- Yang, W. et al. (2024). "Sharp Wave Ripples Tag Memories for Consolidation." Science.
-- Daume, J. et al. (2024). "Control of Working Memory by Phase–Amplitude Coupling of Human Hippocampal Neurons." Nature.
-- Baddeley, A.D. & Hitch, G. (1974). "Working Memory." Psychology of Learning and Motivation, 8, 47–89.
-- Squire, L.R. (2004). "Memory Systems of the Brain." Neurobiology of Learning and Memory, 82(3), 171–177.
-- McCloskey, M. & Cohen, N.J. (1989). "Catastrophic Interference in Connectionist Networks." Psychology of Learning and Motivation, 24, 109–165.
-- Karpathy, A. (2017). "Software 2.0." Medium.
-- Thompson, K. (1984). "Reflections on Trusting Trust." Communications of the ACM.
-- Mead, C. (1990). "Neuromorphic Electronic Systems." Proceedings of the IEEE.
-- Davies, M. et al. (2018). "Loihi: A Neuromorphic Manycore Processor with On-Chip Learning." IEEE Micro.
-- Hennessy, J. & Patterson, D. (2019). "A New Golden Age for Computer Architecture." Communications of the ACM.
-- Lee, E.A. (2008). "Cyber Physical Systems: Design Challenges." ISORC.
-- Amodei, D. et al. (2016). "Concrete Problems in AI Safety." arXiv.
-- Emelyanov, P. (2011). "CRIU: Checkpoint/Restore In Userspace." Linux Plumbers Conference.
+Anderson, J.R. (1982). "Acquisition of Cognitive Skill." *Psychological Review*, 89(4), 369–406.
+
+Anderson, J.R. et al. (2004). "An Integrated Theory of the Mind." *Psychological Review*, 111(4), 1036–1060.
+
+Balog, M. et al. (2017). "DeepCoder: Learning to Write Programs." *ICLR 2017*.
+
+Buehler, E.L. & Buehler, M.J. (2024). "X-LoRA: Mixture of Low-Rank Adapter Experts." *APL Machine Learning*, 2(2), 026119.
+
+Devlin, J. et al. (2017). "RobustFill: Neural Program Learning under Noisy I/O." *ICML 2017*.
+
+Hu, E.J. et al. (2021). "LoRA: Low-Rank Adaptation of Large Language Models." *ICLR 2022*.
+
+Laird, J.E., Newell, A. & Rosenbloom, P.S. (1987). "SOAR: An Architecture for General Intelligence." *Artificial Intelligence*, 33(1), 1–64.
+
+Li, Y. et al. (2022). "Competition-Level Code Generation with AlphaCode." *Science*, 378(6624).
+
+McClelland, J.L., McNaughton, B.L. & O'Reilly, R.C. (1995). "Why There Are Complementary Learning Systems in the Hippocampus and Neocortex." *Psychological Review*, 102(3), 419–457.
+
+Patil, S. et al. (2023). "Gorilla: Large Language Model Connected with Massive APIs." arXiv:2305.15334.
+
+Qin, Y. et al. (2023). "ToolLLM: Facilitating Large Language Models to Master 16000+ Real-world APIs." arXiv:2307.16789.
+
+Rao, A.S. & Georgeff, M.P. (1995). "BDI Agents: From Theory to Practice." *Proceedings of the First International Conference on Multi-Agent Systems (ICMAS-95)*.
+
+Schick, T. et al. (2023). "Toolformer: Language Models Can Teach Themselves to Use Tools." *NeurIPS 2023*.
