@@ -67,6 +67,7 @@ pub const INTERNAL_ERROR: i64 = -32603;
 pub struct McpTool {
     pub name: String,
     pub description: String,
+    #[serde(rename = "inputSchema")]
     pub input_schema: Value,
 }
 
@@ -244,29 +245,43 @@ impl McpServer {
             .unwrap_or("");
         let arguments = params.get("arguments").cloned();
 
-        match tool_name {
-            "create_goal" => self.handle_create_goal(id, arguments),
-            "inspect_session" => self.handle_inspect_session(id, arguments),
-            "inspect_belief" => self.handle_inspect_belief(id, arguments),
-            "inspect_resources" => self.handle_inspect_resources(id, arguments),
-            "inspect_packs" => self.handle_inspect_packs(id, arguments),
-            "inspect_skills" => self.handle_inspect_skills(id, arguments),
-            "inspect_trace" => self.handle_inspect_trace(id, arguments),
-            "pause_session" => self.handle_pause_session(id, arguments),
-            "resume_session" => self.handle_resume_session(id, arguments),
-            "abort_session" => self.handle_abort_session(id, arguments),
-            "list_sessions" => self.handle_list_sessions(id, arguments),
-            "query_metrics" => self.handle_query_metrics(id, arguments),
-            "query_policy" => self.handle_query_policy(id, arguments),
-            "dump_state" => self.handle_dump_state(id, arguments),
-            "invoke_port" => self.handle_invoke_port(id, arguments),
-            "list_ports" => self.handle_list_ports(id, arguments),
-            _ => Ok(Self::error_response(
-                id,
-                METHOD_NOT_FOUND,
-                format!("unknown tool: {}", tool_name),
-                None,
-            )),
+        // Use a dummy id for the inner handler; we re-wrap the result with the
+        // real id in MCP content format below.
+        let inner_id = serde_json::json!(0);
+        let inner = match tool_name {
+            "create_goal" => self.handle_create_goal(inner_id, arguments),
+            "inspect_session" => self.handle_inspect_session(inner_id, arguments),
+            "inspect_belief" => self.handle_inspect_belief(inner_id, arguments),
+            "inspect_resources" => self.handle_inspect_resources(inner_id, arguments),
+            "inspect_packs" => self.handle_inspect_packs(inner_id, arguments),
+            "inspect_skills" => self.handle_inspect_skills(inner_id, arguments),
+            "inspect_trace" => self.handle_inspect_trace(inner_id, arguments),
+            "pause_session" => self.handle_pause_session(inner_id, arguments),
+            "resume_session" => self.handle_resume_session(inner_id, arguments),
+            "abort_session" => self.handle_abort_session(inner_id, arguments),
+            "list_sessions" => self.handle_list_sessions(inner_id, arguments),
+            "query_metrics" => self.handle_query_metrics(inner_id, arguments),
+            "query_policy" => self.handle_query_policy(inner_id, arguments),
+            "dump_state" => self.handle_dump_state(inner_id, arguments),
+            "invoke_port" => self.handle_invoke_port(inner_id, arguments),
+            "list_ports" => self.handle_list_ports(inner_id, arguments),
+            _ => {
+                return Ok(Self::error_response(
+                    id,
+                    METHOD_NOT_FOUND,
+                    format!("unknown tool: {}", tool_name),
+                    None,
+                ));
+            }
+        }?;
+
+        // Wrap in MCP content array format for tools/call responses.
+        if let Some(result) = inner.result {
+            Ok(Self::tool_success_response(id, result))
+        } else if let Some(err) = inner.error {
+            Ok(Self::error_response(id, err.code, err.message, err.data))
+        } else {
+            Ok(Self::tool_success_response(id, Value::Null))
         }
     }
 
@@ -1479,6 +1494,17 @@ impl McpServer {
         }
     }
 
+    /// Wrap a tool result in the MCP content array format required by tools/call.
+    fn tool_success_response(id: Value, result: Value) -> McpResponse {
+        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        Self::success_response(
+            id,
+            serde_json::json!({
+                "content": [{ "type": "text", "text": text }]
+            }),
+        )
+    }
+
     fn error_response(id: Value, code: i64, message: String, data: Option<Value>) -> McpResponse {
         McpResponse {
             jsonrpc: "2.0".to_string(),
@@ -1804,6 +1830,12 @@ mod tests {
         }
     }
 
+    /// Extract the inner JSON from an MCP content-wrapped tools/call response.
+    fn unwrap_tool_result(result: &Value) -> Value {
+        let text = result["content"][0]["text"].as_str().unwrap();
+        serde_json::from_str(text).unwrap()
+    }
+
     #[test]
     fn test_new_server() {
         let server = McpServer::new_stub();
@@ -2091,7 +2123,8 @@ mod tests {
         let resp = server.handle_request(req).unwrap();
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
-        assert_eq!(result["status"], "created");
+        let inner = unwrap_tool_result(&result);
+        assert_eq!(inner["status"], "created");
     }
 
     #[test]
@@ -2342,7 +2375,8 @@ mod tests {
         let resp = server.handle_request(req).unwrap();
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
-        assert!(result["belief"].is_array());
+        let inner = unwrap_tool_result(&result);
+        assert!(inner["belief"].is_array());
     }
 
     #[test]
@@ -2472,7 +2506,8 @@ mod tests {
         let resp = server.handle_request(req).unwrap();
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
-        assert_eq!(result["port_id"], "smtp");
+        let inner = unwrap_tool_result(&result);
+        assert_eq!(inner["port_id"], "smtp");
     }
 
     #[test]
@@ -2488,7 +2523,8 @@ mod tests {
         let resp = server.handle_request(req).unwrap();
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
-        assert!(result["ports"].is_array());
+        let inner = unwrap_tool_result(&result);
+        assert!(inner["ports"].is_array());
     }
 
     #[test]

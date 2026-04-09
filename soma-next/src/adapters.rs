@@ -505,18 +505,36 @@ fn port_call_to_observation(
 
 /// Scores candidates using keyword matching against the goal description.
 /// Skills whose name or description shares words with the goal score higher.
-pub struct SimpleCandidatePredictor;
+/// Penalizes skills that have failed recently within the session.
+pub struct SimpleCandidatePredictor {
+    failure_counts: std::sync::Mutex<std::collections::HashMap<String, u32>>,
+}
 
 impl SimpleCandidatePredictor {
+    pub fn new() -> Self {
+        Self {
+            failure_counts: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// Record a skill invocation result for score adjustment.
+    pub fn record_outcome(&self, skill_id: &str, success: bool) {
+        if let Ok(mut counts) = self.failure_counts.lock() {
+            if success {
+                counts.remove(skill_id);
+            } else {
+                *counts.entry(skill_id.to_string()).or_insert(0) += 1;
+            }
+        }
+    }
+
     /// Compute a relevance score for a skill against a goal description.
-    /// Tokenizes both into lowercase words and counts overlaps.
     fn relevance_score(skill: &SkillSpec, goal_text: &str) -> f64 {
         let goal_lower = goal_text.to_lowercase();
         let goal_words: Vec<&str> = goal_lower.split_whitespace().collect();
 
         let mut score = 0.0;
 
-        // Check skill name and description for matching words
         let skill_text = format!(
             "{} {} {} {}",
             skill.name.to_lowercase(),
@@ -527,28 +545,36 @@ impl SimpleCandidatePredictor {
 
         for word in &goal_words {
             if word.len() < 3 {
-                continue; // skip short words
+                continue;
             }
             if skill_text.contains(word) {
                 score += 1.0;
             }
         }
 
-        // Keyword-to-capability mapping for common filesystem operations
+        // Keyword-to-capability mapping for filesystem and database operations.
         let keyword_map: &[(&[&str], &str)] = &[
+            // Filesystem
             (&["list", "ls", "dir", "files", "directory", "readdir", "entries"], "readdir"),
             (&["read", "cat", "show", "view", "content", "contents", "readfile"], "readfile"),
-            (&["write", "create", "save", "writefile"], "writefile"),
+            (&["write", "save", "writefile"], "writefile"),
             (&["stat", "info", "metadata", "size", "permissions"], "stat"),
-            (&["mkdir", "make", "create directory"], "mkdir"),
+            (&["mkdir", "make directory"], "mkdir"),
             (&["rmdir", "remove directory"], "rmdir"),
-            (&["rm", "delete", "remove file", "unlink"], "rm"),
+            (&["rm", "remove file", "unlink"], "rm"),
+            // Database
+            (&["count", "how many", "total number"], "count"),
+            (&["query", "select", "sql", "fetch rows"], "query"),
+            (&["find", "look up", "search", "find_many"], "find"),
+            (&["insert", "add", "create record"], "insert"),
+            (&["update", "modify", "change", "set"], "update"),
+            (&["delete", "remove", "drop row"], "delete"),
+            (&["aggregate", "sum", "average", "avg", "min", "max", "group"], "aggregate"),
         ];
 
         for (keywords, cap_id) in keyword_map {
             for kw in *keywords {
                 if goal_lower.contains(kw) {
-                    // Check if this skill maps to this capability
                     for req in &skill.capability_requirements {
                         if req.contains(cap_id) {
                             score += 10.0;
@@ -562,6 +588,12 @@ impl SimpleCandidatePredictor {
     }
 }
 
+impl Default for SimpleCandidatePredictor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CandidatePredictor for SimpleCandidatePredictor {
     fn score(
         &self,
@@ -571,14 +603,25 @@ impl CandidatePredictor for SimpleCandidatePredictor {
         _episodes: &[Episode],
     ) -> Vec<CandidateScore> {
         let goal_text = &goal.objective.description;
+        let failure_counts = self.failure_counts.lock().ok();
+
         candidates
             .iter()
             .map(|skill| {
                 let relevance = Self::relevance_score(skill, goal_text);
+
+                // Penalize skills that have failed — score decays with each failure.
+                let failures = failure_counts
+                    .as_ref()
+                    .and_then(|m| m.get(&skill.skill_id))
+                    .copied()
+                    .unwrap_or(0);
+                let penalty = 1.0 / (1.0 + failures as f64);
+
                 CandidateScore {
                     skill_id: skill.skill_id.clone(),
-                    score: relevance,
-                    predicted_success: 0.9,
+                    score: relevance * penalty,
+                    predicted_success: 0.9 * penalty,
                     predicted_cost: 0.01,
                     predicted_latency_ms: 10,
                     information_gain: 0.5,
@@ -603,8 +646,27 @@ impl CandidatePredictor for SimpleCandidatePredictor {
 // SimpleSessionCritic
 // ---------------------------------------------------------------------------
 
-/// Returns Stop on success (goal achieved in one step), Continue on failure.
-pub struct SimpleSessionCritic;
+/// Returns Stop on success, Abort after repeated identical failures, Continue otherwise.
+pub struct SimpleSessionCritic {
+    recent_errors: std::sync::Mutex<Vec<String>>,
+}
+
+impl SimpleSessionCritic {
+    pub fn new() -> Self {
+        Self {
+            recent_errors: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Max consecutive identical errors before aborting.
+    const DEAD_END_THRESHOLD: usize = 3;
+}
+
+impl Default for SimpleSessionCritic {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Critic for SimpleSessionCritic {
     fn evaluate(
@@ -616,10 +678,34 @@ impl Critic for SimpleSessionCritic {
         _step_index: u32,
     ) -> CriticDecision {
         if observation.success {
-            CriticDecision::Stop
-        } else {
-            CriticDecision::Continue
+            // Clear error history on success.
+            if let Ok(mut errors) = self.recent_errors.lock() {
+                errors.clear();
+            }
+            return CriticDecision::Stop;
         }
+
+        // Track error messages to detect dead ends.
+        let error_msg = observation
+            .raw_result
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if let Ok(mut errors) = self.recent_errors.lock() {
+            errors.push(error_msg);
+
+            // Check if the last N errors are all identical.
+            if errors.len() >= Self::DEAD_END_THRESHOLD {
+                let recent = &errors[errors.len() - Self::DEAD_END_THRESHOLD..];
+                if recent.windows(2).all(|w| w[0] == w[1]) && !recent[0].is_empty() {
+                    return CriticDecision::Stop;
+                }
+            }
+        }
+
+        CriticDecision::Continue
     }
 }
 
@@ -1066,7 +1152,7 @@ mod tests {
 
     #[test]
     fn simple_predictor_scores_by_relevance() {
-        let predictor = SimpleCandidatePredictor;
+        let predictor = SimpleCandidatePredictor::new();
         let skills = vec![test_skill("a"), test_skill("b"), test_skill("c")];
         let goal = test_goal();
         let belief = DefaultBeliefRuntime::new()
@@ -1080,7 +1166,7 @@ mod tests {
 
     #[test]
     fn simple_predictor_predict_top_limits() {
-        let predictor = SimpleCandidatePredictor;
+        let predictor = SimpleCandidatePredictor::new();
         let skills = vec![test_skill("a"), test_skill("b"), test_skill("c")];
         let goal = test_goal();
         let belief = DefaultBeliefRuntime::new()
@@ -1094,7 +1180,7 @@ mod tests {
     #[test]
     fn simple_predictor_favors_readdir_for_list_files() {
         
-        let predictor = SimpleCandidatePredictor;
+        let predictor = SimpleCandidatePredictor::new();
 
         let mut readdir_skill = test_skill("reference.readdir");
         readdir_skill.name = "Read Directory".to_string();
@@ -1122,7 +1208,7 @@ mod tests {
 
     #[test]
     fn simple_critic_stops_on_success() {
-        let critic = SimpleSessionCritic;
+        let critic = SimpleSessionCritic::new();
         let goal = test_goal();
         let belief = DefaultBeliefRuntime::new()
             .create_belief(Uuid::new_v4())

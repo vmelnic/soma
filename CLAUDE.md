@@ -14,6 +14,8 @@ Active deliverables:
 - **soma-project-smtp/** — Email delivery proof.
 - **soma-project-s3/** — AWS S3 proof.
 - **soma-project-postgres/** — PostgreSQL proof.
+- **soma-project-llm/** — Ollama + SOMA proof. LLM generates SQL from natural language, SOMA executes via postgres port.
+- **soma-project-mcp/** — Claude Code MCP integration. SOMA as MCP server for Claude (.mcp.json at repo root).
 
 Legacy (in repo but not active): soma-core/, soma-plugins/, soma-synthesizer/, poc/, pow/
 
@@ -100,6 +102,9 @@ soma/
   soma-project-smtp/          # Email delivery proof
   soma-project-s3/            # AWS S3 proof
   soma-project-postgres/      # PostgreSQL proof
+  soma-project-llm/           # Ollama LLM + SOMA proof (ollama.js CLI, docker-compose)
+  soma-project-mcp/           # Claude Code MCP integration (SOMA as MCP server)
+  .mcp.json                   # Root MCP config — registers SOMA for Claude Code
   docs/                       # 7 docs: vision, architecture, mcp, ports, distributed, building-projects, helperbook
 ```
 
@@ -142,19 +147,43 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
 - **Episode ring buffer**: VecDeque with capacity 1024. Evicts oldest, returns to caller for consolidation.
 - **Plan-following**: WorkingMemory.active_plan + plan_step. Set from matching routine's compiled_skill_path. Critic advances/clears plan.
 - **MCP episode storage**: create_goal in MCP handler stores episodes + triggers learning (was missing, added).
+- **MCP protocol compliance**: tools/list must return `inputSchema` (camelCase, not snake_case). tools/call results must be wrapped in `{"content": [{"type": "text", "text": "..."}]}`. Both were bugs, both fixed.
 - **macOS binary copy**: copied binaries may need `xattr -d com.apple.quarantine` + `codesign -fs -` to run.
+- **Failure recovery spec**: BindingFailure → SwitchCandidate, not Continue. The architecture.md failure recovery table is the source of truth for critic behavior.
+- **Predictor calibration**: SimpleCandidatePredictor must penalize skills that fail repeatedly within a session. Score decay prevents infinite retry loops.
+
+## Core Analogy
+
+SOMA = body. The runtime is an organism's body — it executes, senses, adapts. It does NOT interpret intent. Understanding these roles is critical:
+
+| Role | Responsibility | Example |
+|---|---|---|
+| **Brain** (LLM or caller) | Intent interpretation, decision-making, composing inputs | Decides `table="users"`, writes SQL, chooses which port to call |
+| **Body** (SOMA runtime) | Execution, observation, adaptation, proprioception | Invokes the port, records the result, updates belief, learns from episodes |
+
+The body does not think. It acts. An organism's hand doesn't decide where to reach — the brain does. The hand provides proprioception (where it is, what it's touching), and the brain uses that to decide the next action.
+
+**This means for soma-next:**
+- The runtime MUST be domain-agnostic. It knows about skills, ports, observations, episodes — never about SQL, table names, HTTP verbs, or any port-specific semantics.
+- Input binding comes from the caller (brain), belief state, working memory, or goal fields — never from hardcoded domain extraction in the runtime.
+- The autonomous path works when skills have self-contained input schemas and the caller provides bindings via `GoalSpec.objective.structured` or prior observations populate working memory.
+- `goal_utils.rs` extracts filesystem paths because `/tmp` is syntactically recognizable (starts with `/`). This is pattern recognition, not domain knowledge. Do NOT add SQL parsing, table name extraction, or any port-specific logic here.
+
+**When editing soma-next, ask:** "Would this code change if the port were different?" If yes, it doesn't belong in the runtime.
 
 ## Rules
 
 - **NEVER GUESS.** Read the code. Read the spec. If neither answers, ask the user.
 - **NO SPEC CITATIONS IN COMMENTS.** Comments explain what and why, not where the requirement came from.
+- **BODY ≠ BRAIN.** Never add port-specific or domain-specific logic to soma-next. The runtime is universal. Domain knowledge lives in pack manifests, skill declarations, and the caller (LLM).
+- **READ THE ARCHITECTURE.** Before changing session.rs, adapters.rs, or any runtime component, read docs/architecture.md. The 16-step control loop, failure recovery table, and skill lifecycle are specified there. Follow the spec — don't invent new behavior.
 
 ## When Editing
 
 ### soma-next
 - `cargo test` after changes — 1177+ tests passing.
 - `cargo clippy` — zero warnings.
-- MCP tool changes: update build_tools(), add handler, add routing (tools/call AND direct dispatch), update tool count in tests (currently 16).
+- MCP tool changes: update build_tools(), add handler, add routing (tools/call AND direct dispatch), update tool count in tests (currently 16). The `McpTool` struct uses `#[serde(rename = "inputSchema")]` — MCP spec requires camelCase. tools/call responses are wrapped via `tool_success_response()` into MCP content array format.
 - Episode/learning changes: update both cli.rs AND mcp.rs (both paths store episodes).
 - Memory system: embedder.rs (GoalEmbedder trait), sequence_mining.rs (PrefixSpan), schemas.rs (induction), routines.rs (compilation).
 - Plan-following: session.rs (active_plan logic after step 6), adapters.rs (SkillRegistryAdapter, SimpleSessionCritic).
