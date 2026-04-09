@@ -1,0 +1,5 @@
+bin/
+packs/*/*.dylib
+packs/*/*.so
+node_modules/
+.ollama/

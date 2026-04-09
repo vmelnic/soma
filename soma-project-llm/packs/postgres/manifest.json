@@ -1,0 +1,112 @@
+{
+  "id": "soma.ports.postgres",
+  "name": "PostgreSQL",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.postgres",
+  "description": "PostgreSQL database operations: queries, DDL, ORM-style CRUD, transactions",
+  "capabilities": [
+    {
+      "group_name": "database",
+      "scope": "local",
+      "capabilities": ["query", "execute", "find", "find_many", "count", "aggregate", "insert", "update", "delete", "create_table", "drop_table", "alter_table", "begin_transaction", "commit", "rollback"]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [
+      "soma.ports.postgres.query",
+      "soma.ports.postgres.execute",
+      "soma.ports.postgres.find",
+      "soma.ports.postgres.find_many",
+      "soma.ports.postgres.count",
+      "soma.ports.postgres.aggregate",
+      "soma.ports.postgres.insert",
+      "soma.ports.postgres.update",
+      "soma.ports.postgres.delete",
+      "soma.ports.postgres.create_table",
+      "soma.ports.postgres.drop_table",
+      "soma.ports.postgres.alter_table",
+      "soma.ports.postgres.begin_transaction",
+      "soma.ports.postgres.commit",
+      "soma.ports.postgres.rollback"
+    ],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
+  },
+  "observability": {
+    "health_checks": ["postgres_reachable"],
+    "version_metadata": {"version": "0.1.0"},
+    "dependency_status": [],
+    "capability_inventory": ["query", "execute", "find", "find_many", "count", "aggregate", "insert", "update", "delete", "create_table", "drop_table", "alter_table", "begin_transaction", "commit", "rollback"],
+    "expected_latency_classes": ["fast"],
+    "expected_failure_modes": ["validation_error", "external_error", "transport_error", "timeout", "dependency_unavailable"],
+    "trace_categories": ["database"],
+    "metric_names": ["pg_query_count", "pg_query_latency_ms"],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": ["postgres", "database", "sql"],
+  "ports": [
+    {
+      "port_id": "postgres",
+      "name": "postgres",
+      "version": "0.1.0",
+      "kind": "database",
+      "description": "PostgreSQL database operations: queries, DDL, ORM-style CRUD, transactions",
+      "namespace": "soma.ports.postgres",
+      "trust_level": "verified",
+      "capabilities": [
+        {
+          "capability_id": "query",
+          "name": "query",
+          "purpose": "Execute a SELECT query and return rows",
+          "input_schema": {"schema": {"type": "object", "required": ["sql"], "properties": {"sql": {"type": "string"}, "params": {"type": "array"}}}},
+          "output_schema": {"schema": {"type": "object", "properties": {"rows": {"type": "array"}, "row_count": {"type": "integer"}}}},
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": {"expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 30000},
+          "cost_profile": {"cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "low", "energy_cost_class": "negligible"},
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "execute",
+          "name": "execute",
+          "purpose": "Execute an INSERT/UPDATE/DELETE and return rows affected",
+          "input_schema": {"schema": {"type": "object", "required": ["sql"], "properties": {"sql": {"type": "string"}, "params": {"type": "array"}}}},
+          "output_schema": {"schema": {"type": "object", "properties": {"rows_affected": {"type": "integer"}}}},
+          "effect_class": "external_state_mutation",
+          "rollback_support": "compensating_action",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "medium",
+          "latency_profile": {"expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 30000},
+          "cost_profile": {"cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "low", "energy_cost_class": "negligible"},
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": {"schema": {"type": "object"}},
+      "output_schema": {"schema": {"type": "object"}},
+      "failure_modes": ["validation_error", "dependency_unavailable", "transport_error", "external_error", "timeout"],
+      "side_effect_class": "external_state_mutation",
+      "latency_profile": {"expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 30000},
+      "cost_profile": {"cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "low", "energy_cost_class": "negligible"},
+      "auth_requirements": {"methods": ["local_process_trust"], "required": false},
+      "sandbox_requirements": {"filesystem_access": false, "network_access": true, "device_access": false, "process_access": false, "memory_limit_mb": null, "cpu_limit_percent": null, "time_limit_ms": 30000, "syscall_limit": null},
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
+  "skills": [],
+  "port_dependencies": []
+}
