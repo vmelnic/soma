@@ -155,48 +155,151 @@ async function ollamaHealthy() {
   }
 }
 
-// -- DB schema context for LLM -------------------------------------------------
+// -- DB schema discovery (live introspection via SOMA) -------------------------
 
-const DB_SCHEMA = `HelperBook database (PostgreSQL). Key tables:
+const SCHEMA_SQL = `
+SELECT
+  c.table_name,
+  c.column_name,
+  c.data_type,
+  c.udt_name,
+  c.is_nullable,
+  c.column_default,
+  tc.constraint_type,
+  ccu.table_name AS fk_table
+FROM information_schema.columns c
+LEFT JOIN information_schema.key_column_usage kcu
+  ON kcu.table_schema = c.table_schema
+  AND kcu.table_name = c.table_name
+  AND kcu.column_name = c.column_name
+LEFT JOIN information_schema.table_constraints tc
+  ON tc.constraint_name = kcu.constraint_name
+  AND tc.table_schema = kcu.table_schema
+  AND tc.constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY')
+LEFT JOIN information_schema.constraint_column_usage ccu
+  ON ccu.constraint_name = kcu.constraint_name
+  AND ccu.table_schema = kcu.table_schema
+  AND tc.constraint_type = 'FOREIGN KEY'
+WHERE c.table_schema = 'public'
+  AND c.table_name NOT LIKE '\\_%'
+ORDER BY c.table_name, c.ordinal_position;`;
 
-users (id UUID PK, phone, name, photo_url, bio, location_lat, location_lon,
-       role ['client','provider','both'], subscription_plan, is_verified, slug, locale, currency, created_at)
+const CHECK_SQL = `
+SELECT
+  tc.table_name,
+  tc.constraint_name,
+  cc.check_clause
+FROM information_schema.table_constraints tc
+JOIN information_schema.check_constraints cc
+  ON cc.constraint_name = tc.constraint_name
+  AND cc.constraint_schema = tc.constraint_schema
+WHERE tc.table_schema = 'public'
+  AND tc.constraint_type = 'CHECK'
+  AND cc.check_clause NOT LIKE '%IS NOT NULL%'
+ORDER BY tc.table_name;`;
 
-connections (id UUID PK, requester_id FK users, recipient_id FK users,
-             status ['pending','accepted','declined','blocked'], message, created_at)
+let schemaCache = null;
 
-chats (id UUID PK, type ['direct','group'], name, created_by FK users, created_at)
-chat_members (chat_id FK chats, user_id FK users, role, joined_at, muted_until)
+// Columns with special types that need sample values shown to the LLM.
+const SAMPLE_TYPES = new Set(["ARRAY", "jsonb", "USER-DEFINED"]);
 
-messages (id UUID PK, chat_id FK chats, sender_id FK users,
-          type ['text','photo','video','voice','document','location','contact_card','appointment_card','service_card'],
-          content, media_url, status ['sent','delivered','read'], reply_to_id, created_at)
+async function discoverSchema(somaClient) {
+  if (schemaCache) return schemaCache;
 
-appointments (id UUID PK, chat_id, creator_id, client_id FK users, provider_id FK users,
-              service TEXT, start_time, end_time, location, rate_amount DECIMAL, rate_currency,
-              rate_type ['hourly','fixed','negotiable'],
-              status ['proposed','confirmed','in_progress','completed','dismissed','cancelled','no_show'],
-              notes, created_at)
+  const [colResult, chkResult] = await Promise.all([
+    somaClient.callTool("invoke_port", {
+      port_id: "postgres",
+      capability_id: "query",
+      input: { sql: SCHEMA_SQL },
+    }),
+    somaClient.callTool("invoke_port", {
+      port_id: "postgres",
+      capability_id: "query",
+      input: { sql: CHECK_SQL },
+    }),
+  ]);
 
-reviews (id UUID PK, appointment_id FK appointments, reviewer_id FK users, reviewed_id FK users,
-         rating INT 1-5, feedback TEXT, tags TEXT[], created_at)
+  if (!colResult.success) throw new Error(`Schema query failed: ${JSON.stringify(colResult)}`);
 
-provider_profiles (user_id UUID PK FK users, bio_extended, certifications TEXT[],
-                   working_schedule JSONB, service_area_radius INT, communication_languages TEXT[],
-                   response_rate, avg_response_time)
+  const rows = colResult.structured_result?.rows || [];
+  const checks = chkResult.success ? (chkResult.structured_result?.rows || []) : [];
 
-services_history (id UUID PK, appointment_id FK, services TEXT[], hours, rate, total_amount,
-                  confirmed_by_client, confirmed_by_provider, disputed, created_at)
+  // Group check constraints by table.
+  const checksByTable = {};
+  for (const chk of checks) {
+    const t = chk.table_name;
+    if (!checksByTable[t]) checksByTable[t] = [];
+    checksByTable[t].push(chk.check_clause);
+  }
 
-notifications (id UUID PK, user_id FK users, type, title, body, data JSONB, read BOOLEAN, created_at)
+  // Identify columns that need sample values (arrays, jsonb).
+  // Map: table → [column_name, ...]
+  const sampleCols = {};
+  for (const row of rows) {
+    if (SAMPLE_TYPES.has(row.data_type)) {
+      if (!sampleCols[row.table_name]) sampleCols[row.table_name] = [];
+      sampleCols[row.table_name].push(row.column_name);
+    }
+  }
 
-contact_notes (user_id, contact_id, note_text, updated_at)`;
+  // Fetch sample values only for those columns.
+  const samplesByTable = {};
+  const fetches = Object.entries(sampleCols).map(async ([table, cols]) => {
+    const colList = cols.map((c) => `"${c}"`).join(", ");
+    const res = await somaClient.callTool("invoke_port", {
+      port_id: "postgres",
+      capability_id: "query",
+      input: { sql: `SELECT DISTINCT ${colList} FROM "${table}" LIMIT 3` },
+    });
+    if (res.success && res.structured_result?.rows?.length) {
+      samplesByTable[table] = res.structured_result.rows;
+    }
+  });
+  await Promise.all(fetches);
 
-const SQL_SYSTEM = `You are a PostgreSQL query generator for the HelperBook service marketplace.
-You receive a question from a user and the database schema. Return ONLY a single SQL SELECT query.
-No explanation, no markdown fences, no comments — just the raw SQL ending with a semicolon.
+  // Group columns by table, format compactly.
+  const tables = {};
+  for (const row of rows) {
+    const t = row.table_name;
+    if (!tables[t]) tables[t] = [];
+    let dtype = row.data_type;
+    if (dtype === "ARRAY" && row.udt_name) {
+      dtype = row.udt_name.replace(/^_/, "") + "[]";
+    }
+    let col = `${row.column_name} ${dtype}`;
+    if (row.constraint_type === "PRIMARY KEY") col += " PK";
+    if (row.constraint_type === "FOREIGN KEY" && row.fk_table) col += ` FK→${row.fk_table}`;
+    if (row.is_nullable === "NO" && row.constraint_type !== "PRIMARY KEY") col += " NOT NULL";
+    tables[t].push(col);
+  }
 
-${DB_SCHEMA}`;
+  const lines = ["HelperBook database (PostgreSQL).\n"];
+  for (const [table, cols] of Object.entries(tables)) {
+    lines.push(`${table} (${cols.join(", ")})`);
+    const tableChecks = checksByTable[table];
+    if (tableChecks) {
+      lines.push(`  CHECK: ${tableChecks.join("; ")}`);
+    }
+    if (samplesByTable[table]) {
+      lines.push(`  SAMPLE VALUES: ${JSON.stringify(samplesByTable[table])}`);
+    }
+    lines.push("");
+  }
+
+  schemaCache = lines.join("\n");
+  return schemaCache;
+}
+
+function buildSqlSystem(schema) {
+  return `Output a single PostgreSQL SELECT query. Nothing else — no explanation, no markdown, no comments. Just raw SQL ending with a semicolon.
+
+Rules:
+- Always SELECT human-readable columns (name, service, rating, etc.), not just id.
+- text[] columns: use 'value' = ANY(column_name). NEVER use LIKE or ILIKE on arrays.
+- SAMPLE VALUES show real stored data. Use those exact values (e.g. language code 'fr' not 'French').
+
+${schema}`;
+}
 
 const ANSWER_SYSTEM = `You are a helpful assistant for HelperBook, a service marketplace app.
 Given a user's question and the query results, provide a clear, concise answer in natural language.
@@ -236,12 +339,21 @@ const SCENARIOS = {
 // -- Core loop: question → SQL → SOMA → answer ---------------------------------
 
 function extractSql(text) {
-  // Strip markdown fences if present despite instructions.
   let sql = text.trim();
+  // Strip markdown fences if present.
   if (sql.startsWith("```")) {
     sql = sql.replace(/^```(?:sql)?\n?/, "").replace(/\n?```$/, "");
   }
+  // If the LLM buried a SELECT inside prose, extract it.
+  if (!/^\s*SELECT/i.test(sql)) {
+    const match = sql.match(/SELECT[\s\S]+?;/i);
+    if (match) return match[0].trim();
+  }
   return sql.trim();
+}
+
+function looksLikeSql(text) {
+  return /^\s*SELECT\s/i.test(text);
 }
 
 async function askQuestion(somaClient, question, role) {
@@ -250,14 +362,31 @@ async function askQuestion(somaClient, question, role) {
     ? `The current user is ${scenario.label} (id: ${scenario.userId}).`
     : "";
 
-  // Step 1: LLM generates SQL.
+  // Step 1: Discover schema from live DB, then ask LLM to generate SQL.
+  const schema = await discoverSchema(somaClient);
+  const sqlSystem = buildSqlSystem(schema);
   const sqlPrompt = `${contextHint}\n\nQuestion: ${question}`;
   process.stdout.write(`\n  Question: ${question}\n`);
   process.stdout.write("  Generating SQL...");
 
-  const rawSql = await ollamaGenerate(sqlPrompt, SQL_SYSTEM);
-  const sql = extractSql(rawSql);
+  let sql = extractSql(await ollamaGenerate(sqlPrompt, sqlSystem));
+
+  // If the LLM returned prose instead of SQL, retry once with a stricter nudge.
+  if (!looksLikeSql(sql)) {
+    process.stdout.write(" (retrying)...");
+    const retry = await ollamaGenerate(
+      `${sqlPrompt}\n\nYou MUST reply with ONLY a SQL SELECT query. No text.`,
+      sqlSystem,
+    );
+    sql = extractSql(retry);
+  }
+
   process.stdout.write(` done.\n  SQL: ${sql}\n`);
+
+  if (!looksLikeSql(sql)) {
+    process.stdout.write("  Skipped — model did not produce valid SQL.\n");
+    return;
+  }
 
   // Step 2: Execute via SOMA postgres port.
   process.stdout.write("  Executing via SOMA...");
@@ -350,14 +479,10 @@ async function run() {
       await somaClient.start();
       process.stdout.write("OK\n");
 
-      process.stdout.write("3. Querying DB via SOMA... ");
-      const users = await somaClient.callTool("invoke_port", {
-        port_id: "postgres",
-        capability_id: "query",
-        input: { sql: "SELECT id, name, role FROM users ORDER BY name LIMIT 3" },
-      });
-      if (!users.success) throw new Error(JSON.stringify(users));
-      process.stdout.write("OK\n");
+      process.stdout.write("3. Discovering DB schema via SOMA... ");
+      const schema = await discoverSchema(somaClient);
+      const tableCount = (schema.match(/^[a-z_]+ \(/gm) || []).length;
+      process.stdout.write(`${tableCount} tables found\n`);
 
       process.stdout.write("4. Ollama generate test... ");
       const reply = await ollamaGenerate("Say OK in one word.", "You are a test bot. Reply with one word only.");

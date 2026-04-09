@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "soma": {
+      "type": "stdio",
+      "command": "soma-project-mcp/scripts/run-mcp.sh"
+    }
+  }
+}
