@@ -1,40 +1,761 @@
 {
-  "id": "soma.ports.s3",
-  "name": "S3",
+  "id": "soma.s3",
+  "name": "s3",
   "version": "0.1.0",
   "runtime_compatibility": ">=0.1.0",
-  "namespace": "soma.ports.s3",
+  "namespace": "soma.s3",
   "description": "S3-compatible object storage: upload, download, delete, presign, list",
-  "port": {
-    "port_id": "s3",
-    "kind": "database",
-    "trust_level": "verified"
+  "capabilities": [
+    {
+      "group_name": "storage",
+      "scope": "local",
+      "capabilities": [
+        "put_object",
+        "get_object",
+        "delete_object",
+        "presign_url",
+        "list_objects"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
   },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "put_object",
+      "get_object",
+      "delete_object",
+      "presign_url",
+      "list_objects"
+    ],
+    "expected_latency_classes": [
+      "medium",
+      "slow"
+    ],
+    "expected_failure_modes": [
+      "validation_error",
+      "external_error",
+      "timeout",
+      "authorization_denied"
+    ],
+    "trace_categories": [
+      "storage"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "s3",
+    "storage",
+    "object"
+  ],
+  "ports": [
+    {
+      "port_id": "s3",
+      "name": "s3",
+      "version": "0.1.0",
+      "kind": "database",
+      "description": "S3-compatible object storage: upload, download, delete, presign, list",
+      "namespace": "soma.s3",
+      "trust_level": "verified",
+      "capabilities": [
+        {
+          "capability_id": "put_object",
+          "name": "put_object",
+          "purpose": "Upload an object to an S3 bucket",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "compensating_action",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 200,
+            "p95_latency_ms": 2000,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "medium",
+            "network_cost_class": "medium",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        },
+        {
+          "capability_id": "get_object",
+          "name": "get_object",
+          "purpose": "Download an object from an S3 bucket",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 150,
+            "p95_latency_ms": 1500,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "medium",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        },
+        {
+          "capability_id": "delete_object",
+          "name": "delete_object",
+          "purpose": "Delete an object from an S3 bucket",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "destructive",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "medium",
+          "latency_profile": {
+            "expected_latency_ms": 100,
+            "p95_latency_ms": 1000,
+            "max_latency_ms": 10000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "presign_url",
+          "name": "presign_url",
+          "purpose": "Generate a presigned URL for temporary access to an object",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 10,
+            "p95_latency_ms": 100,
+            "max_latency_ms": 5000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        },
+        {
+          "capability_id": "list_objects",
+          "name": "list_objects",
+          "purpose": "List objects in an S3 bucket with optional prefix filter",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 100,
+            "p95_latency_ms": 1000,
+            "max_latency_ms": 15000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        }
+      ],
+      "input_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "output_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "failure_modes": [
+        "validation_error",
+        "external_error",
+        "timeout",
+        "authorization_denied"
+      ],
+      "side_effect_class": "external_state_mutation",
+      "latency_profile": {
+        "expected_latency_ms": 150,
+        "p95_latency_ms": 2000,
+        "max_latency_ms": 30000
+      },
+      "cost_profile": {
+        "cpu_cost_class": "negligible",
+        "memory_cost_class": "negligible",
+        "io_cost_class": "negligible",
+        "network_cost_class": "medium",
+        "energy_cost_class": "negligible"
+      },
+      "auth_requirements": {
+        "methods": [
+          "api_key"
+        ],
+        "required": true
+      },
+      "sandbox_requirements": {
+        "filesystem_access": false,
+        "network_access": true,
+        "device_access": false,
+        "process_access": false,
+        "memory_limit_mb": null,
+        "cpu_limit_percent": null,
+        "time_limit_ms": null,
+        "syscall_limit": null
+      },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": true
+    }
+  ],
   "skills": [
     {
-      "id": "soma.ports.s3.put_object",
-      "name": "Put Object",
-      "description": "Upload an object to an S3 bucket"
+      "skill_id": "soma.s3.put_object",
+      "namespace": "soma.s3",
+      "pack": "soma.s3",
+      "kind": "primitive",
+      "name": "put_object",
+      "description": "Upload an object to an S3 bucket via the s3 port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "upload an object to an s3 bucket",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "upload an object to an s3 bucket completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "compensating_action",
+        "compensation_skill": "soma.s3.delete_object",
+        "description": "compensate via soma.s3.delete_object"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 200,
+          "p95_latency_ms": 2000,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "medium",
+          "network_cost_class": "medium",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": true
+      },
+      "tags": [
+        "s3",
+        "storage",
+        "object"
+      ],
+      "capability_requirements": [
+        "port:s3/put_object"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.s3.get_object",
-      "name": "Get Object",
-      "description": "Download an object from an S3 bucket"
+      "skill_id": "soma.s3.get_object",
+      "namespace": "soma.s3",
+      "pack": "soma.s3",
+      "kind": "primitive",
+      "name": "get_object",
+      "description": "Download an object from an S3 bucket via the s3 port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "download an object from an s3 bucket returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 150,
+          "p95_latency_ms": 1500,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "medium",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": true
+      },
+      "tags": [
+        "s3",
+        "storage",
+        "object"
+      ],
+      "capability_requirements": [
+        "port:s3/get_object"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.s3.delete_object",
-      "name": "Delete Object",
-      "description": "Delete an object from an S3 bucket"
+      "skill_id": "soma.s3.delete_object",
+      "namespace": "soma.s3",
+      "pack": "soma.s3",
+      "kind": "primitive",
+      "name": "delete_object",
+      "description": "Delete an object from an S3 bucket via the s3 port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "deletion",
+          "target_resource": null,
+          "description": "delete an object from an s3 bucket",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "delete an object from an s3 bucket completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 100,
+          "p95_latency_ms": 1000,
+          "max_latency_ms": 10000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "medium",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "s3",
+        "storage",
+        "object"
+      ],
+      "capability_requirements": [
+        "port:s3/delete_object"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.s3.presign_url",
-      "name": "Presign URL",
-      "description": "Generate a presigned URL for temporary access to an object"
+      "skill_id": "soma.s3.presign_url",
+      "namespace": "soma.s3",
+      "pack": "soma.s3",
+      "kind": "primitive",
+      "name": "presign_url",
+      "description": "Generate a presigned URL for temporary access to an object via the s3 port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "generate a presigned url for temporary access to an object returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 10,
+          "p95_latency_ms": 100,
+          "max_latency_ms": 5000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": true
+      },
+      "tags": [
+        "s3",
+        "storage",
+        "object"
+      ],
+      "capability_requirements": [
+        "port:s3/presign_url"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.s3.list_objects",
-      "name": "List Objects",
-      "description": "List objects in an S3 bucket with optional prefix filter"
+      "skill_id": "soma.s3.list_objects",
+      "namespace": "soma.s3",
+      "pack": "soma.s3",
+      "kind": "primitive",
+      "name": "list_objects",
+      "description": "List objects in an S3 bucket with optional prefix filter via the s3 port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "list objects in an s3 bucket with optional prefix filter returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 100,
+          "p95_latency_ms": 1000,
+          "max_latency_ms": 15000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": true
+      },
+      "tags": [
+        "s3",
+        "storage",
+        "object"
+      ],
+      "capability_requirements": [
+        "port:s3/list_objects"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     }
-  ]
+  ],
+  "port_dependencies": []
 }

@@ -7,15 +7,21 @@ function getCurrentUserId() {
 
 async function loadChatContacts() {
   try {
-    // Load contacts that have chats with the current user
     const myId = getCurrentUserId();
     const result = await api.query(
-      `SELECT DISTINCT u.id, u.name, u.phone, u.role, u.bio, u.is_verified
+      `SELECT u.id, u.name, u.phone, u.role, u.bio, u.is_verified,
+              lm.content AS last_message, lm.created_at AS last_time
        FROM users u
        JOIN chat_members cm1 ON cm1.user_id = u.id
        JOIN chat_members cm2 ON cm2.chat_id = cm1.chat_id
+       LEFT JOIN LATERAL (
+         SELECT m.content, m.created_at
+         FROM messages m
+         WHERE m.chat_id = cm1.chat_id
+         ORDER BY m.created_at DESC LIMIT 1
+       ) lm ON true
        WHERE cm2.user_id = '${myId}' AND u.id != '${myId}'
-       ORDER BY u.name`
+       ORDER BY lm.created_at DESC NULLS LAST, u.name`
     );
     const rows = SomaAPI.extractRows(result);
     if (rows && Array.isArray(rows) && rows.length > 0) {

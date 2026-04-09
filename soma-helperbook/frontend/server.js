@@ -17,25 +17,35 @@ let pendingRequests = new Map();
 let stdoutBuffer = '';
 
 function startSoma() {
-  const somaBinary = path.join(__dirname, '../../soma-core/target/release/soma');
-  const somaConfig = path.join(__dirname, '../soma.toml');
-  const modelsDir = path.join(__dirname, '../../models');
+  const projectDir = path.join(__dirname, '..');
+  const somaBinary = path.join(projectDir, 'bin', 'soma');
+
+  const packs = ['postgres', 'redis', 'auth'];
+  const packPaths = packs.map(p => path.join(projectDir, 'packs', p, 'manifest.json'));
+  const pluginPath = packs.map(p => path.join(projectDir, 'packs', p)).join(':');
+
+  const args = ['--mcp'];
+  for (const p of packPaths) {
+    args.push('--pack', p);
+  }
 
   try {
-    soma = spawn(somaBinary, [
-      '--config', somaConfig,
-      '--model', modelsDir,
-      '--mcp'
-    ], {
-      env: { ...process.env, SOMA_PG_PASSWORD: 'soma' },
-      cwd: path.join(__dirname, '../../soma-core'),
+    soma = spawn(somaBinary, args, {
+      env: {
+        ...process.env,
+        SOMA_PORTS_PLUGIN_PATH: pluginPath,
+        SOMA_PORTS_REQUIRE_SIGNATURES: 'false',
+        SOMA_POSTGRES_URL: process.env.SOMA_POSTGRES_URL || 'host=localhost user=soma password=soma dbname=helperbook',
+        SOMA_REDIS_URL: process.env.SOMA_REDIS_URL || 'redis://localhost:6379/0',
+      },
+      cwd: projectDir,
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
     soma.stdout.on('data', (data) => {
       stdoutBuffer += data.toString();
       const lines = stdoutBuffer.split('\n');
-      stdoutBuffer = lines.pop(); // keep incomplete line in buffer
+      stdoutBuffer = lines.pop();
 
       for (const line of lines) {
         const trimmed = line.trim();
@@ -68,7 +78,6 @@ function startSoma() {
       soma = null;
       somaReady = false;
       mcpInitialized = false;
-      // Reject all pending requests
       for (const [id, { reject }] of pendingRequests) {
         reject(new Error('SOMA process exited'));
       }
@@ -124,7 +133,6 @@ async function ensureInitialized() {
         clientInfo: { name: 'soma-helperbook', version: '0.1.0' }
       }
     });
-    // Send initialized notification
     soma.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
     mcpInitialized = true;
     console.log('[SOMA] MCP initialized');

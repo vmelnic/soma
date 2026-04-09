@@ -5,3 +5,5 @@ pub mod routines;
 pub mod persistence;
 pub mod world;
 pub mod checkpoint;
+pub mod embedder;
+pub mod sequence_mining;

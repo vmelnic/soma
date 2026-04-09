@@ -56,18 +56,63 @@ primitive skills:
 
 ## Build and test
 
+The crate exposes a library target from [`src/lib.rs`](src/lib.rs) and a binary
+target named `soma` from [`src/main.rs`](src/main.rs).
+
+### Development build
+
 ```bash
 cd soma-next
 
-cargo build
-cargo test
-cargo clippy --all-targets --all-features
+cargo build                              # debug binary → target/debug/soma (~32 MB)
+cargo test                               # 1177+ tests, all must pass
+cargo clippy --all-targets --all-features # must be zero warnings
 ```
 
-The crate exposes:
+Debug builds include full debug info and are ~3x larger than release. Use them
+for day-to-day development — they compile faster and produce better backtraces.
 
-- a library target from [`src/lib.rs`](src/lib.rs)
-- a binary target named `soma` from [`src/main.rs`](src/main.rs)
+### Production release
+
+```bash
+cd soma-next
+
+cargo build --release                    # optimized binary → target/release/soma (~11 MB)
+cargo test --release                     # run tests against the release binary
+```
+
+The release binary is what gets deployed to project directories:
+
+```bash
+cp target/release/soma ../soma-project-postgres/bin/soma
+cp target/release/soma ../soma-helperbook/bin/soma
+cp target/release/soma ../soma-project-llm/bin/soma
+```
+
+### macOS post-copy
+
+Copied binaries on macOS may be quarantined by Gatekeeper. Fix with:
+
+```bash
+xattr -d com.apple.quarantine bin/soma
+codesign -fs - bin/soma
+```
+
+### Useful cargo commands
+
+```bash
+# Run tests matching a pattern.
+cargo test session              # all tests with "session" in the name
+
+# Run a single test with output.
+cargo test --release test_name -- --nocapture
+
+# Check without building (fast feedback).
+cargo check --all-targets
+
+# Build and show warnings without stopping on first error.
+cargo build 2>&1 | head -50
+```
 
 ## Running the binary
 
@@ -146,6 +191,8 @@ The server exposes these runtime tools:
 - `query_metrics`
 - `query_policy`
 - `dump_state`
+- `invoke_port`
+- `list_ports`
 
 Implementation lives in [`src/interfaces/mcp.rs`](src/interfaces/mcp.rs).
 

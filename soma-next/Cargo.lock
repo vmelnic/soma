@@ -1536,6 +1536,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "soma-port-sdk",
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
@@ -1543,6 +1544,18 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "soma-port-sdk"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
  "uuid",
 ]
 

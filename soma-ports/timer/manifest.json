@@ -1,35 +1,639 @@
 {
-  "id": "soma.ports.timer",
-  "name": "Timer",
+  "id": "soma.timer",
+  "name": "timer",
   "version": "0.1.0",
   "runtime_compatibility": ">=0.1.0",
-  "namespace": "soma.ports.timer",
+  "namespace": "soma.timer",
   "description": "Timer/scheduler: timeouts, intervals, cancellation, and listing",
-  "port": {
-    "port_id": "timer",
-    "kind": "custom",
-    "trust_level": "built_in"
+  "capabilities": [
+    {
+      "group_name": "scheduling",
+      "scope": "local",
+      "capabilities": [
+        "set_timeout",
+        "set_interval",
+        "cancel_timer",
+        "list_active"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
   },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "set_timeout",
+      "set_interval",
+      "cancel_timer",
+      "list_active"
+    ],
+    "expected_latency_classes": [
+      "fast"
+    ],
+    "expected_failure_modes": [
+      "validation_error"
+    ],
+    "trace_categories": [
+      "scheduling"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "timer",
+    "scheduler",
+    "timeout",
+    "interval"
+  ],
+  "ports": [
+    {
+      "port_id": "timer",
+      "name": "timer",
+      "version": "0.1.0",
+      "kind": "custom",
+      "description": "Timer/scheduler: timeouts, intervals, cancellation, and listing",
+      "namespace": "soma.timer",
+      "trust_level": "built_in",
+      "capabilities": [
+        {
+          "capability_id": "set_timeout",
+          "name": "set_timeout",
+          "purpose": "Set a one-shot timer that fires after a delay",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "compensating_action",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 10
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "set_interval",
+          "name": "set_interval",
+          "purpose": "Set a recurring timer that fires at regular intervals",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "compensating_action",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 10
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "cancel_timer",
+          "name": "cancel_timer",
+          "purpose": "Cancel an active timer by ID",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 10
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "list_active",
+          "name": "list_active",
+          "purpose": "List all active timers with remaining time",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 10
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "output_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "failure_modes": [
+        "validation_error"
+      ],
+      "side_effect_class": "local_state_mutation",
+      "latency_profile": {
+        "expected_latency_ms": 1,
+        "p95_latency_ms": 5,
+        "max_latency_ms": 10
+      },
+      "cost_profile": {
+        "cpu_cost_class": "negligible",
+        "memory_cost_class": "negligible",
+        "io_cost_class": "negligible",
+        "network_cost_class": "negligible",
+        "energy_cost_class": "negligible"
+      },
+      "auth_requirements": {
+        "methods": [],
+        "required": false
+      },
+      "sandbox_requirements": {
+        "filesystem_access": false,
+        "network_access": false,
+        "device_access": false,
+        "process_access": false,
+        "memory_limit_mb": null,
+        "cpu_limit_percent": null,
+        "time_limit_ms": null,
+        "syscall_limit": null
+      },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
   "skills": [
     {
-      "id": "soma.ports.timer.set_timeout",
-      "name": "Set Timeout",
-      "description": "Set a one-shot timer that fires after a delay"
+      "skill_id": "soma.timer.set_timeout",
+      "namespace": "soma.timer",
+      "pack": "soma.timer",
+      "kind": "primitive",
+      "name": "set_timeout",
+      "description": "Set a one-shot timer that fires after a delay via the timer port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "set a one-shot timer that fires after a delay",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "set a one-shot timer that fires after a delay completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "compensating_action",
+        "compensation_skill": "soma.timer.cancel_timer",
+        "description": "compensate via soma.timer.cancel_timer"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 10
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "timer",
+        "scheduler",
+        "timeout",
+        "interval"
+      ],
+      "capability_requirements": [
+        "port:timer/set_timeout"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.timer.set_interval",
-      "name": "Set Interval",
-      "description": "Set a recurring timer that fires at regular intervals"
+      "skill_id": "soma.timer.set_interval",
+      "namespace": "soma.timer",
+      "pack": "soma.timer",
+      "kind": "primitive",
+      "name": "set_interval",
+      "description": "Set a recurring timer that fires at regular intervals via the timer port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "set a recurring timer that fires at regular intervals",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "set a recurring timer that fires at regular intervals completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "compensating_action",
+        "compensation_skill": "soma.timer.cancel_timer",
+        "description": "compensate via soma.timer.cancel_timer"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 10
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "timer",
+        "scheduler",
+        "timeout",
+        "interval"
+      ],
+      "capability_requirements": [
+        "port:timer/set_interval"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.timer.cancel_timer",
-      "name": "Cancel Timer",
-      "description": "Cancel an active timer by ID"
+      "skill_id": "soma.timer.cancel_timer",
+      "namespace": "soma.timer",
+      "pack": "soma.timer",
+      "kind": "primitive",
+      "name": "cancel_timer",
+      "description": "Cancel an active timer by ID via the timer port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "deletion",
+          "target_resource": null,
+          "description": "cancel an active timer by id",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "cancel an active timer by id completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 10
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "timer",
+        "scheduler",
+        "timeout",
+        "interval"
+      ],
+      "capability_requirements": [
+        "port:timer/cancel_timer"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.timer.list_active",
-      "name": "List Active",
-      "description": "List all active timers with remaining time"
+      "skill_id": "soma.timer.list_active",
+      "namespace": "soma.timer",
+      "pack": "soma.timer",
+      "kind": "primitive",
+      "name": "list_active",
+      "description": "List all active timers with remaining time via the timer port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "list all active timers with remaining time returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 10
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "timer",
+        "scheduler",
+        "timeout",
+        "interval"
+      ],
+      "capability_requirements": [
+        "port:timer/list_active"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     }
-  ]
+  ],
+  "port_dependencies": []
 }

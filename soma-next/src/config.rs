@@ -303,7 +303,9 @@ impl SomaConfig {
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
             tracing::info!("No config file at {}, using defaults", path.display());
-            return Ok(Self::default());
+            let mut config = Self::default();
+            config.apply_env_overrides();
+            return Ok(config);
         }
 
         let content = std::fs::read_to_string(path).map_err(|e| {
@@ -415,6 +417,13 @@ impl SomaConfig {
             && let Ok(b) = v.parse::<bool>() {
                 self.ports.require_signatures = b;
             }
+        if let Ok(v) = std::env::var("SOMA_PORTS_PLUGIN_PATH") {
+            self.ports.plugin_path = v
+                .split(':')
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect();
+        }
     }
 }
 
@@ -635,5 +644,17 @@ tls_cert = "/path/to/cert.pem"
         assert!(matches!(err, SomaError::Config(_)));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn plugin_path_env_override() {
+        let mut cfg = SomaConfig::default();
+        assert!(cfg.ports.plugin_path.is_empty());
+
+        unsafe { std::env::set_var("SOMA_PORTS_PLUGIN_PATH", "/tmp/ports:/opt/ports"); }
+        cfg.apply_env_overrides();
+        unsafe { std::env::remove_var("SOMA_PORTS_PLUGIN_PATH"); }
+
+        assert_eq!(cfg.ports.plugin_path, vec!["/tmp/ports", "/opt/ports"]);
     }
 }

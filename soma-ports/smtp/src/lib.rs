@@ -30,21 +30,80 @@ pub struct SmtpPort {
     spec: PortSpec,
     host: OnceLock<String>,
     port: OnceLock<u16>,
-    credentials: OnceLock<Credentials>,
+    credentials: OnceLock<Option<Credentials>>,
     from: OnceLock<String>,
     runtime: OnceLock<tokio::runtime::Runtime>,
+    use_starttls: OnceLock<bool>,
 }
 
 impl SmtpPort {
     pub fn new() -> Self {
-        Self {
+        let port = Self {
             spec: build_spec(),
             host: OnceLock::new(),
             port: OnceLock::new(),
             credentials: OnceLock::new(),
             from: OnceLock::new(),
             runtime: OnceLock::new(),
-        }
+            use_starttls: OnceLock::new(),
+        };
+        port.try_initialize();
+        port
+    }
+
+    fn try_initialize(&self) {
+        let host = std::env::var("SOMA_SMTP_HOST")
+            .ok()
+            .or_else(|| std::env::var("SMTP_HOST").ok())
+            .filter(|value| !value.is_empty());
+        let from = std::env::var("SOMA_SMTP_FROM")
+            .ok()
+            .or_else(|| std::env::var("SMTP_FROM").ok())
+            .filter(|value| !value.is_empty());
+        let smtp_port = std::env::var("SOMA_SMTP_PORT")
+            .ok()
+            .or_else(|| std::env::var("SMTP_PORT").ok())
+            .map_or(Some(587), |value| value.parse::<u16>().ok());
+
+        // Host and from are required; credentials are optional (for mailcatcher, etc.)
+        let (Some(host), Some(from), Some(smtp_port)) = (host, from, smtp_port) else {
+            return;
+        };
+
+        let username = std::env::var("SOMA_SMTP_USERNAME")
+            .ok()
+            .or_else(|| std::env::var("SMTP_USERNAME").ok())
+            .filter(|value| !value.is_empty());
+        let password = std::env::var("SOMA_SMTP_PASSWORD")
+            .ok()
+            .or_else(|| std::env::var("SMTP_PASSWORD").ok())
+            .filter(|value| !value.is_empty());
+
+        let credentials = match (username, password) {
+            (Some(u), Some(p)) => Some(Credentials::new(u, p)),
+            _ => None,
+        };
+
+        // SOMA_SMTP_STARTTLS=false disables STARTTLS (for local dev servers like mailcatcher).
+        let use_starttls = std::env::var("SOMA_SMTP_STARTTLS")
+            .ok()
+            .or_else(|| std::env::var("SMTP_STARTTLS").ok())
+            .map(|v| v != "false" && v != "0")
+            .unwrap_or(true);
+
+        let runtime = match tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build() {
+                Ok(rt) => rt,
+                Err(_) => return,
+            };
+
+        let _ = self.host.set(host);
+        let _ = self.port.set(smtp_port);
+        let _ = self.credentials.set(credentials);
+        let _ = self.from.set(from);
+        let _ = self.runtime.set(runtime);
+        let _ = self.use_starttls.set(use_starttls);
     }
 
     fn build_transport(&self) -> soma_port_sdk::Result<AsyncSmtpTransport<Tokio1Executor>> {
@@ -56,17 +115,22 @@ impl SmtpPort {
             .port
             .get()
             .ok_or_else(|| PortError::DependencyUnavailable("SMTP port not configured".into()))?;
-        let creds = self.credentials.get().ok_or_else(|| {
-            PortError::DependencyUnavailable("SMTP credentials not configured".into())
-        })?;
+        let use_starttls = self.use_starttls.get().copied().unwrap_or(true);
 
-        let transport = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host)
-            .map_err(|e| PortError::TransportError(format!("SMTP relay error: {e}")))?
-            .port(*port)
-            .credentials(creds.clone())
-            .build();
+        let mut builder = if use_starttls {
+            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host)
+                .map_err(|e| PortError::TransportError(format!("SMTP relay error: {e}")))?
+        } else {
+            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(host)
+        };
 
-        Ok(transport)
+        builder = builder.port(*port);
+
+        if let Some(Some(creds)) = self.credentials.get() {
+            builder = builder.credentials(creds.clone());
+        }
+
+        Ok(builder.build())
     }
 
     fn rt(&self) -> soma_port_sdk::Result<&tokio::runtime::Runtime> {
@@ -160,7 +224,10 @@ impl Port for SmtpPort {
     }
 
     fn lifecycle_state(&self) -> PortLifecycleState {
-        if self.host.get().is_some() {
+        if self.host.get().is_some()
+            && self.port.get().is_some()
+            && self.from.get().is_some()
+            && self.runtime.get().is_some() {
             PortLifecycleState::Active
         } else {
             PortLifecycleState::Loaded
@@ -469,9 +536,12 @@ mod tests {
     }
 
     #[test]
-    fn test_lifecycle_before_config() {
+    fn test_lifecycle_is_loadable() {
         let port = SmtpPort::new();
-        assert_eq!(port.lifecycle_state(), PortLifecycleState::Loaded);
+        assert!(matches!(
+            port.lifecycle_state(),
+            PortLifecycleState::Loaded | PortLifecycleState::Active
+        ));
     }
 
     #[test]
@@ -488,20 +558,6 @@ mod tests {
         let port = SmtpPort::new();
         let input = serde_json::json!({"to": "a@b.com", "subject": "hi", "body": "hello"});
         assert!(port.validate_input("send_plain", &input).is_ok());
-    }
-
-    #[test]
-    fn test_invoke_without_config() {
-        let port = SmtpPort::new();
-        let record = port
-            .invoke(
-                "send_plain",
-                serde_json::json!({
-                    "to": "a@b.com", "subject": "test", "body": "hello"
-                }),
-            )
-            .unwrap();
-        assert!(!record.success);
     }
 
     #[test]

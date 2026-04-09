@@ -87,6 +87,15 @@ pub struct WorkingMemory {
     pub current_branch_state: Option<serde_json::Value>,
     pub budget_deltas: Vec<BudgetDelta>,
     pub output_bindings: Vec<OutputBinding>,
+    /// When a routine matches, the compiled skill path is loaded here for
+    /// plan-following mode. The control loop executes each skill in order
+    /// instead of scoring/selecting from scratch each step.
+    #[serde(default)]
+    pub active_plan: Option<Vec<String>>,
+    /// Current position within `active_plan`. Incremented after each
+    /// successful plan step; reset to 0 when a new plan is loaded.
+    #[serde(default)]
+    pub plan_step: usize,
 }
 
 /// Provenance of a bound input value — which source the runtime drew the value from.

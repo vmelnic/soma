@@ -1,23 +1,26 @@
 #!/bin/bash
-# Start HelperBook SOMA
+# Start HelperBook SOMA in REPL mode
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-SOMA_DIR="$(dirname "$PROJECT_DIR")"
 
-# Ensure services are running
 echo "Starting services..."
 cd "$PROJECT_DIR"
 docker compose up -d --wait
 
-# Set env vars
-export SOMA_PG_PASSWORD=soma
+if [ -f "$PROJECT_DIR/.env" ]; then
+  set -a
+  . "$PROJECT_DIR/.env"
+  set +a
+fi
 
-# Run SOMA
+export SOMA_PORTS_PLUGIN_PATH="$PROJECT_DIR/packs/postgres:$PROJECT_DIR/packs/redis:$PROJECT_DIR/packs/auth"
+export SOMA_PORTS_REQUIRE_SIGNATURES="${SOMA_PORTS_REQUIRE_SIGNATURES:-false}"
+
 echo "Starting SOMA HelperBook..."
-cd "$SOMA_DIR/soma-core"
-cargo run --release --bin soma -- \
-    --config "$PROJECT_DIR/soma.toml" \
-    --model "$SOMA_DIR/models" \
-    "$@"
+exec "$PROJECT_DIR/bin/soma" \
+  --pack "$PROJECT_DIR/packs/postgres/manifest.json" \
+  --pack "$PROJECT_DIR/packs/redis/manifest.json" \
+  --pack "$PROJECT_DIR/packs/auth/manifest.json" \
+  repl "$@"

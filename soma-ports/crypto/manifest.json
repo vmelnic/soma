@@ -5,102 +5,1764 @@
   "runtime_compatibility": ">=0.1.0",
   "namespace": "soma.ports.crypto",
   "description": "Cryptographic operations: hashing, signing, encryption, JWT, random generation",
-  "port": {
-    "port_id": "crypto",
-    "kind": "custom",
-    "trust_level": "trusted"
+  "capabilities": [
+    {
+      "group_name": "cryptography",
+      "scope": "local",
+      "capabilities": [
+        "sha256",
+        "sha512",
+        "hmac",
+        "bcrypt_hash",
+        "bcrypt_verify",
+        "aes_encrypt",
+        "aes_decrypt",
+        "rsa_sign",
+        "rsa_verify",
+        "jwt_sign",
+        "jwt_verify",
+        "random_bytes",
+        "random_string"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
   },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "sha256",
+      "sha512",
+      "hmac",
+      "bcrypt_hash",
+      "bcrypt_verify",
+      "aes_encrypt",
+      "aes_decrypt",
+      "rsa_sign",
+      "rsa_verify",
+      "jwt_sign",
+      "jwt_verify",
+      "random_bytes",
+      "random_string"
+    ],
+    "expected_latency_classes": [
+      "fast"
+    ],
+    "expected_failure_modes": [
+      "validation_error",
+      "external_error"
+    ],
+    "trace_categories": [
+      "cryptography"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "crypto",
+    "hash",
+    "encrypt",
+    "jwt",
+    "sign"
+  ],
+  "ports": [
+    {
+      "port_id": "crypto",
+      "name": "Crypto",
+      "version": "0.1.0",
+      "kind": "custom",
+      "description": "Cryptographic operations: hashing, signing, encryption, JWT, random generation",
+      "namespace": "soma.ports.crypto",
+      "trust_level": "trusted",
+      "capabilities": [
+        {
+          "capability_id": "sha256",
+          "name": "SHA-256",
+          "purpose": "Compute SHA-256 hex digest",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "sha512",
+          "name": "SHA-512",
+          "purpose": "Compute SHA-512 hex digest",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "hmac",
+          "name": "HMAC-SHA256",
+          "purpose": "Compute HMAC-SHA256 authentication code",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "bcrypt_hash",
+          "name": "bcrypt hash",
+          "purpose": "Hash a password with bcrypt",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 100,
+            "p95_latency_ms": 500,
+            "max_latency_ms": 2000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "bcrypt_verify",
+          "name": "bcrypt verify",
+          "purpose": "Verify password against bcrypt hash",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 100,
+            "p95_latency_ms": 500,
+            "max_latency_ms": 2000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "aes_encrypt",
+          "name": "AES-256-GCM encrypt",
+          "purpose": "Encrypt data with AES-256-GCM",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "aes_decrypt",
+          "name": "AES-256-GCM decrypt",
+          "purpose": "Decrypt AES-256-GCM ciphertext",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "rsa_sign",
+          "name": "RSA sign",
+          "purpose": "Sign data with RSA-PKCS1v15-SHA256",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 10,
+            "p95_latency_ms": 50,
+            "max_latency_ms": 200
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "rsa_verify",
+          "name": "RSA verify",
+          "purpose": "Verify RSA-PKCS1v15-SHA256 signature",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 5,
+            "p95_latency_ms": 25,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "jwt_sign",
+          "name": "JWT sign",
+          "purpose": "Sign JWT with HS256",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "jwt_verify",
+          "name": "JWT verify",
+          "purpose": "Verify JWT and decode claims",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "random_bytes",
+          "name": "Random bytes",
+          "purpose": "Generate cryptographically secure random bytes",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "random_string",
+          "name": "Random string",
+          "purpose": "Generate random alphanumeric string",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "output_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "failure_modes": [
+        "validation_error",
+        "external_error"
+      ],
+      "side_effect_class": "none",
+      "latency_profile": {
+        "expected_latency_ms": 1,
+        "p95_latency_ms": 50,
+        "max_latency_ms": 2000
+      },
+      "cost_profile": {
+        "cpu_cost_class": "negligible",
+        "memory_cost_class": "negligible",
+        "io_cost_class": "negligible",
+        "network_cost_class": "negligible",
+        "energy_cost_class": "negligible"
+      },
+      "auth_requirements": {
+        "methods": [],
+        "required": false
+      },
+      "sandbox_requirements": {
+        "filesystem_access": false,
+        "network_access": false,
+        "device_access": false,
+        "process_access": false,
+        "memory_limit_mb": null,
+        "cpu_limit_percent": null,
+        "time_limit_ms": null,
+        "syscall_limit": null
+      },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
   "skills": [
     {
-      "id": "soma.ports.crypto.sha256",
-      "name": "SHA-256 hash",
-      "description": "Compute SHA-256 hex digest of data",
-      "input": { "data": "string" },
-      "output": { "hash": "string" }
+      "skill_id": "soma.ports.crypto.sha256",
+      "namespace": "soma.ports.crypto",
+      "pack": "soma.ports.crypto",
+      "kind": "primitive",
+      "name": "SHA-256",
+      "description": "Compute SHA-256 hex digest via the crypto port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "compute sha-256 hex digest returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "crypto",
+        "hash",
+        "encrypt",
+        "jwt",
+        "sign"
+      ],
+      "capability_requirements": [
+        "port:crypto/sha256"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.crypto.sha512",
-      "name": "SHA-512 hash",
-      "description": "Compute SHA-512 hex digest of data",
-      "input": { "data": "string" },
-      "output": { "hash": "string" }
+      "skill_id": "soma.ports.crypto.sha512",
+      "namespace": "soma.ports.crypto",
+      "pack": "soma.ports.crypto",
+      "kind": "primitive",
+      "name": "SHA-512",
+      "description": "Compute SHA-512 hex digest via the crypto port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "compute sha-512 hex digest returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "crypto",
+        "hash",
+        "encrypt",
+        "jwt",
+        "sign"
+      ],
+      "capability_requirements": [
+        "port:crypto/sha512"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.crypto.hmac",
+      "skill_id": "soma.ports.crypto.hmac",
+      "namespace": "soma.ports.crypto",
+      "pack": "soma.ports.crypto",
+      "kind": "primitive",
       "name": "HMAC-SHA256",
-      "description": "Compute HMAC-SHA256 message authentication code",
-      "input": { "data": "string|bytes", "key": "string|bytes" },
-      "output": { "mac": "string" }
+      "description": "Compute HMAC-SHA256 authentication code via the crypto port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "compute hmac-sha256 authentication code returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "crypto",
+        "hash",
+        "encrypt",
+        "jwt",
+        "sign"
+      ],
+      "capability_requirements": [
+        "port:crypto/hmac"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.crypto.bcrypt_hash",
+      "skill_id": "soma.ports.crypto.bcrypt_hash",
+      "namespace": "soma.ports.crypto",
+      "pack": "soma.ports.crypto",
+      "kind": "primitive",
       "name": "bcrypt hash",
-      "description": "Hash a password with bcrypt",
-      "input": { "password": "string", "cost": "integer (optional, default 12)" },
-      "output": { "hash": "string" }
+      "description": "Hash a password with bcrypt via the crypto port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "hash a password with bcrypt returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 100,
+          "p95_latency_ms": 500,
+          "max_latency_ms": 2000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "crypto",
+        "hash",
+        "encrypt",
+        "jwt",
+        "sign"
+      ],
+      "capability_requirements": [
+        "port:crypto/bcrypt_hash"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.crypto.bcrypt_verify",
+      "skill_id": "soma.ports.crypto.bcrypt_verify",
+      "namespace": "soma.ports.crypto",
+      "pack": "soma.ports.crypto",
+      "kind": "primitive",
       "name": "bcrypt verify",
-      "description": "Verify password against bcrypt hash",
-      "input": { "password": "string", "hash": "string" },
-      "output": { "valid": "boolean" }
+      "description": "Verify password against bcrypt hash via the crypto port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "verify password against bcrypt hash returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 100,
+          "p95_latency_ms": 500,
+          "max_latency_ms": 2000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "crypto",
+        "hash",
+        "encrypt",
+        "jwt",
+        "sign"
+      ],
+      "capability_requirements": [
+        "port:crypto/bcrypt_verify"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.crypto.aes_encrypt",
+      "skill_id": "soma.ports.crypto.aes_encrypt",
+      "namespace": "soma.ports.crypto",
+      "pack": "soma.ports.crypto",
+      "kind": "primitive",
       "name": "AES-256-GCM encrypt",
-      "description": "Encrypt data with AES-256-GCM; nonce prepended to output",
-      "input": { "plaintext": "string|bytes", "key": "bytes (32)" },
-      "output": { "ciphertext": "bytes" }
+      "description": "Encrypt data with AES-256-GCM via the crypto port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "encrypt data with aes-256-gcm returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "crypto",
+        "hash",
+        "encrypt",
+        "jwt",
+        "sign"
+      ],
+      "capability_requirements": [
+        "port:crypto/aes_encrypt"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.crypto.aes_decrypt",
+      "skill_id": "soma.ports.crypto.aes_decrypt",
+      "namespace": "soma.ports.crypto",
+      "pack": "soma.ports.crypto",
+      "kind": "primitive",
       "name": "AES-256-GCM decrypt",
-      "description": "Decrypt AES-256-GCM ciphertext (expects prepended nonce)",
-      "input": { "ciphertext": "bytes", "key": "bytes (32)" },
-      "output": { "plaintext": "bytes" }
+      "description": "Decrypt AES-256-GCM ciphertext via the crypto port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "decrypt aes-256-gcm ciphertext returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "crypto",
+        "hash",
+        "encrypt",
+        "jwt",
+        "sign"
+      ],
+      "capability_requirements": [
+        "port:crypto/aes_decrypt"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.crypto.rsa_sign",
+      "skill_id": "soma.ports.crypto.rsa_sign",
+      "namespace": "soma.ports.crypto",
+      "pack": "soma.ports.crypto",
+      "kind": "primitive",
       "name": "RSA sign",
-      "description": "Sign data with RSA-PKCS1v15-SHA256",
-      "input": { "data": "string|bytes", "private_key_pem": "string" },
-      "output": { "signature": "string (hex)" }
+      "description": "Sign data with RSA-PKCS1v15-SHA256 via the crypto port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "sign data with rsa-pkcs1v15-sha256 returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 10,
+          "p95_latency_ms": 50,
+          "max_latency_ms": 200
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "crypto",
+        "hash",
+        "encrypt",
+        "jwt",
+        "sign"
+      ],
+      "capability_requirements": [
+        "port:crypto/rsa_sign"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.crypto.rsa_verify",
+      "skill_id": "soma.ports.crypto.rsa_verify",
+      "namespace": "soma.ports.crypto",
+      "pack": "soma.ports.crypto",
+      "kind": "primitive",
       "name": "RSA verify",
-      "description": "Verify RSA-PKCS1v15-SHA256 signature",
-      "input": { "data": "string|bytes", "signature": "string (hex)", "public_key_pem": "string" },
-      "output": { "valid": "boolean" }
+      "description": "Verify RSA-PKCS1v15-SHA256 signature via the crypto port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "verify rsa-pkcs1v15-sha256 signature returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 5,
+          "p95_latency_ms": 25,
+          "max_latency_ms": 100
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "crypto",
+        "hash",
+        "encrypt",
+        "jwt",
+        "sign"
+      ],
+      "capability_requirements": [
+        "port:crypto/rsa_verify"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.crypto.jwt_sign",
+      "skill_id": "soma.ports.crypto.jwt_sign",
+      "namespace": "soma.ports.crypto",
+      "pack": "soma.ports.crypto",
+      "kind": "primitive",
       "name": "JWT sign",
-      "description": "Sign a JWT with HS256",
-      "input": { "claims": "string (JSON)", "secret": "string" },
-      "output": { "token": "string" }
+      "description": "Sign JWT with HS256 via the crypto port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "sign jwt with hs256 returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "crypto",
+        "hash",
+        "encrypt",
+        "jwt",
+        "sign"
+      ],
+      "capability_requirements": [
+        "port:crypto/jwt_sign"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.crypto.jwt_verify",
+      "skill_id": "soma.ports.crypto.jwt_verify",
+      "namespace": "soma.ports.crypto",
+      "pack": "soma.ports.crypto",
+      "kind": "primitive",
       "name": "JWT verify",
-      "description": "Verify JWT and return decoded claims",
-      "input": { "token": "string", "secret": "string" },
-      "output": { "claims": "object" }
+      "description": "Verify JWT and decode claims via the crypto port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "verify jwt and decode claims returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "crypto",
+        "hash",
+        "encrypt",
+        "jwt",
+        "sign"
+      ],
+      "capability_requirements": [
+        "port:crypto/jwt_verify"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.crypto.random_bytes",
+      "skill_id": "soma.ports.crypto.random_bytes",
+      "namespace": "soma.ports.crypto",
+      "pack": "soma.ports.crypto",
+      "kind": "primitive",
       "name": "Random bytes",
-      "description": "Generate cryptographically secure random bytes",
-      "input": { "count": "integer (1-65536)" },
-      "output": { "bytes": "bytes" }
+      "description": "Generate cryptographically secure random bytes via the crypto port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "generate cryptographically secure random bytes returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "crypto",
+        "hash",
+        "encrypt",
+        "jwt",
+        "sign"
+      ],
+      "capability_requirements": [
+        "port:crypto/random_bytes"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.crypto.random_string",
+      "skill_id": "soma.ports.crypto.random_string",
+      "namespace": "soma.ports.crypto",
+      "pack": "soma.ports.crypto",
+      "kind": "primitive",
       "name": "Random string",
-      "description": "Generate random alphanumeric string",
-      "input": { "length": "integer (1-65536)" },
-      "output": { "value": "string" }
+      "description": "Generate random alphanumeric string via the crypto port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "generate random alphanumeric string returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "crypto",
+        "hash",
+        "encrypt",
+        "jwt",
+        "sign"
+      ],
+      "capability_requirements": [
+        "port:crypto/random_string"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     }
-  ]
+  ],
+  "port_dependencies": []
 }

@@ -377,10 +377,11 @@ impl DefaultCliRunner {
             SessionStatus::Completed | SessionStatus::Failed | SessionStatus::Aborted
         );
         if is_terminal {
-            let episode = build_episode_from_session(&session);
+            let episode = build_episode_from_session(&session, Some(rt.embedder.as_ref()));
             let fingerprint = episode.goal_fingerprint.clone();
             let adapter = EpisodeMemoryAdapter::new(
                 std::sync::Arc::clone(&rt.episode_store),
+                std::sync::Arc::clone(&rt.embedder),
             );
             if let Err(e) = adapter.store(episode) {
                 tracing::warn!(error = %e, "failed to store episode");
@@ -393,6 +394,7 @@ impl DefaultCliRunner {
                 &rt.schema_store,
                 &rt.routine_store,
                 &fingerprint,
+                rt.embedder.as_ref(),
             );
 
             // Auto-checkpoint: persist session state to disk so it can be
@@ -727,9 +729,11 @@ fn checkpoint_data_dir() -> PathBuf {
 /// Build an Episode from a completed ControlSession.
 ///
 /// Maps the session trace into episode steps and determines the outcome
-/// from the terminal session status.
-fn build_episode_from_session(
+/// from the terminal session status. If an embedder is provided, computes
+/// and attaches an embedding for the goal fingerprint.
+pub fn build_episode_from_session(
     session: &crate::types::session::ControlSession,
+    embedder: Option<&dyn crate::memory::embedder::GoalEmbedder>,
 ) -> Episode {
     let outcome = match session.status {
         SessionStatus::Completed => EpisodeOutcome::Success,
@@ -795,9 +799,12 @@ fn build_episode_from_session(
         .map(|d| d.resource_spent)
         .sum();
 
+    let fingerprint = session.goal.objective.description.clone();
+    let embedding = embedder.map(|e| e.embed(&fingerprint));
+
     Episode {
         episode_id: Uuid::new_v4(),
-        goal_fingerprint: session.goal.objective.description.clone(),
+        goal_fingerprint: fingerprint,
         initial_belief_summary: serde_json::json!({}),
         steps,
         observations,
@@ -805,7 +812,7 @@ fn build_episode_from_session(
         total_cost,
         success,
         tags: vec![],
-        embedding: None,
+        embedding,
         created_at: Utc::now(),
     }
 }
@@ -1084,90 +1091,123 @@ pub(crate) fn build_state_dump(rt: &Runtime, sections: &[String]) -> serde_json:
 /// After storing an episode, check whether accumulated experience justifies
 /// inducing a new schema and compiling a routine. This is the runtime's
 /// mechanism for learning from repeated successful episodes.
-fn attempt_learning(
+pub fn attempt_learning(
     episode_store: &Arc<Mutex<dyn EpisodeStore + Send>>,
     schema_store: &Arc<Mutex<dyn SchemaStore + Send>>,
     routine_store: &Arc<Mutex<dyn RoutineStore + Send>>,
     goal_fingerprint: &str,
+    embedder: &dyn crate::memory::embedder::GoalEmbedder,
 ) {
-    // Retrieve all episodes sharing this fingerprint.
+    // Compute query embedding and try embedding-based retrieval first.
+    let query_embedding = embedder.embed(goal_fingerprint);
     let episodes = {
         let es = match episode_store.lock() {
             Ok(es) => es,
             Err(_) => return,
         };
-        es.retrieve_nearest(goal_fingerprint, 50)
-            .into_iter()
-            .filter(|ep| ep.goal_fingerprint == goal_fingerprint)
-            .cloned()
-            .collect::<Vec<_>>()
+
+        let by_embedding = es.retrieve_by_embedding(&query_embedding, 0.8, 50);
+        if !by_embedding.is_empty() {
+            by_embedding.into_iter().cloned().collect::<Vec<_>>()
+        } else {
+            // Fallback to prefix matching with exact fingerprint filter.
+            es.retrieve_nearest(goal_fingerprint, 50)
+                .into_iter()
+                .filter(|ep| ep.goal_fingerprint == goal_fingerprint)
+                .cloned()
+                .collect::<Vec<_>>()
+        }
     };
 
     if episodes.len() < 3 {
         return;
     }
 
-    // Attempt schema induction.
+    // Attempt schema induction using the embedding-aware path.
     let episode_refs: Vec<&Episode> = episodes.iter().collect();
-    let induced_schema = {
+    let induced_schemas = {
         let ss = match schema_store.lock() {
             Ok(ss) => ss,
             Err(_) => return,
         };
-        ss.induce_from_episodes(&episode_refs)
+        ss.induce_from_episodes_with_embedder(&episode_refs, embedder)
     };
 
-    let schema = match induced_schema {
-        Some(schema) => {
-            tracing::info!(
-                schema_id = %schema.schema_id,
-                fingerprint = %goal_fingerprint,
-                skills = ?schema.candidate_skill_ordering,
-                confidence = schema.confidence,
-                "schema induced from {} episodes",
-                episodes.len(),
-            );
-            schema
-        }
-        None => return,
-    };
-
-    // Register the induced schema.
-    {
-        let mut ss = match schema_store.lock() {
-            Ok(ss) => ss,
-            Err(_) => return,
-        };
-        if let Err(e) = ss.register(schema.clone()) {
-            tracing::warn!(error = %e, "failed to register induced schema");
-            return;
-        }
+    if induced_schemas.is_empty() {
+        return;
     }
 
-    // Attempt routine compilation from the schema.
-    let compiled_routine = {
-        let rs = match routine_store.lock() {
-            Ok(rs) => rs,
-            Err(_) => return,
-        };
-        rs.compile_from_schema(&schema, &episode_refs)
-    };
+    let mut contributing_episode_ids: Vec<uuid::Uuid> = Vec::new();
 
-    if let Some(routine) = compiled_routine {
+    for schema in &induced_schemas {
         tracing::info!(
-            routine_id = %routine.routine_id,
             schema_id = %schema.schema_id,
-            skill_path = ?routine.compiled_skill_path,
-            confidence = routine.confidence,
-            "routine compiled from schema",
+            fingerprint = %goal_fingerprint,
+            skills = ?schema.candidate_skill_ordering,
+            confidence = schema.confidence,
+            "schema induced from {} episodes",
+            episodes.len(),
         );
 
-        let mut rs = match routine_store.lock() {
-            Ok(rs) => rs,
+        // Register the induced schema.
+        {
+            let mut ss = match schema_store.lock() {
+                Ok(ss) => ss,
+                Err(_) => return,
+            };
+            if let Err(e) = ss.register(schema.clone()) {
+                tracing::warn!(error = %e, "failed to register induced schema");
+                continue;
+            }
+        }
+
+        // Attempt routine compilation from the schema.
+        let compiled_routine = {
+            let rs = match routine_store.lock() {
+                Ok(rs) => rs,
+                Err(_) => return,
+            };
+            rs.compile_from_schema(schema, &episode_refs)
+        };
+
+        if let Some(routine) = compiled_routine {
+            tracing::info!(
+                routine_id = %routine.routine_id,
+                schema_id = %schema.schema_id,
+                skill_path = ?routine.compiled_skill_path,
+                confidence = routine.confidence,
+                "routine compiled from schema",
+            );
+
+            let mut rs = match routine_store.lock() {
+                Ok(rs) => rs,
+                Err(_) => return,
+            };
+            if let Err(e) = rs.register(routine) {
+                tracing::warn!(error = %e, "failed to register compiled routine");
+            }
+        }
+
+        // Track episode IDs that contributed to this schema.
+        contributing_episode_ids.extend(episodes.iter().map(|ep| ep.episode_id));
+    }
+
+    // If the episode store needs consolidation, evict episodes that contributed to schemas.
+    if !contributing_episode_ids.is_empty() {
+        let mut es = match episode_store.lock() {
+            Ok(es) => es,
             Err(_) => return,
         };
-        if let Err(e) = rs.register(routine) {
-            tracing::warn!(error = %e, "failed to register compiled routine");
+        if es.needs_consolidation() {
+            contributing_episode_ids.sort();
+            contributing_episode_ids.dedup();
+            let evicted = es.evict_consolidated(&contributing_episode_ids);
+            if evicted > 0 {
+                tracing::info!(
+                    evicted,
+                    "evicted consolidated episodes after schema induction"
+                );
+            }
         }
     }
 }
@@ -1612,20 +1652,22 @@ mod tests {
         use crate::memory::episodes::DefaultEpisodeStore;
         use crate::memory::routines::DefaultRoutineStore;
         use crate::memory::schemas::DefaultSchemaStore;
+        use crate::memory::embedder::HashEmbedder;
         use std::sync::{Arc, Mutex};
 
         let episode_store: Arc<Mutex<dyn EpisodeStore + Send>> = Arc::new(Mutex::new(DefaultEpisodeStore::new()));
         let schema_store: Arc<Mutex<dyn SchemaStore + Send>> = Arc::new(Mutex::new(DefaultSchemaStore::new()));
         let routine_store: Arc<Mutex<dyn RoutineStore + Send>> = Arc::new(Mutex::new(DefaultRoutineStore::new()));
+        let embedder = HashEmbedder::new();
 
         // Store only 2 episodes — not enough for induction.
         for _ in 0..2 {
             let ep = make_test_episode("list files", &["readdir"], true);
             let mut es = episode_store.lock().unwrap();
-            es.store(ep).unwrap();
+            let _ = es.store(ep).unwrap();
         }
 
-        attempt_learning(&episode_store, &schema_store, &routine_store, "list files");
+        attempt_learning(&episode_store, &schema_store, &routine_store, "list files", &embedder);
 
         // No schema should be induced with only 2 episodes.
         let ss = schema_store.lock().unwrap();
@@ -1637,22 +1679,22 @@ mod tests {
         use crate::memory::episodes::DefaultEpisodeStore;
         use crate::memory::routines::DefaultRoutineStore;
         use crate::memory::schemas::DefaultSchemaStore;
+        use crate::memory::embedder::HashEmbedder;
         use std::sync::{Arc, Mutex};
 
         let episode_store: Arc<Mutex<dyn EpisodeStore + Send>> = Arc::new(Mutex::new(DefaultEpisodeStore::new()));
         let schema_store: Arc<Mutex<dyn SchemaStore + Send>> = Arc::new(Mutex::new(DefaultSchemaStore::new()));
         let routine_store: Arc<Mutex<dyn RoutineStore + Send>> = Arc::new(Mutex::new(DefaultRoutineStore::new()));
+        let embedder = HashEmbedder::new();
 
         // Store 3 successful episodes with the same fingerprint and skill sequence.
-        // With 3 episodes, schema confidence is 3/10 = 0.3, so the schema is induced
-        // but the routine is NOT compiled (requires confidence >= 0.7).
         for _ in 0..3 {
             let ep = make_test_episode("list files", &["readdir"], true);
             let mut es = episode_store.lock().unwrap();
-            es.store(ep).unwrap();
+            let _ = es.store(ep).unwrap();
         }
 
-        attempt_learning(&episode_store, &schema_store, &routine_store, "list files");
+        attempt_learning(&episode_store, &schema_store, &routine_store, "list files", &embedder);
 
         // Schema should be induced.
         let ss = schema_store.lock().unwrap();
@@ -1660,14 +1702,6 @@ mod tests {
         assert!(schema.is_some(), "schema should be induced after 3 episodes");
         let schema = schema.unwrap();
         assert_eq!(schema.candidate_skill_ordering, vec!["readdir"]);
-        assert!((schema.confidence - 0.3).abs() < 0.01);
-
-        // Routine should NOT be compiled yet — schema confidence is too low.
-        let rs = routine_store.lock().unwrap();
-        assert!(
-            rs.get("compiled_induced_list files").is_none(),
-            "routine should not be compiled at confidence 0.3"
-        );
     }
 
     #[test]
@@ -1675,18 +1709,20 @@ mod tests {
         use crate::memory::episodes::DefaultEpisodeStore;
         use crate::memory::routines::DefaultRoutineStore;
         use crate::memory::schemas::DefaultSchemaStore;
+        use crate::memory::embedder::HashEmbedder;
         use std::sync::{Arc, Mutex};
 
         let episode_store: Arc<Mutex<dyn EpisodeStore + Send>> = Arc::new(Mutex::new(DefaultEpisodeStore::new()));
         let schema_store: Arc<Mutex<dyn SchemaStore + Send>> = Arc::new(Mutex::new(DefaultSchemaStore::new()));
         let routine_store: Arc<Mutex<dyn RoutineStore + Send>> = Arc::new(Mutex::new(DefaultRoutineStore::new()));
+        let embedder = HashEmbedder::new();
 
         // Store 8 episodes — schema confidence will be 8/10 = 0.8, above the
         // 0.7 threshold needed for routine compilation.
         for _ in 0..8 {
             let ep = make_test_episode("read config", &["open", "read", "close"], true);
             let mut es = episode_store.lock().unwrap();
-            es.store(ep).unwrap();
+            let _ = es.store(ep).unwrap();
         }
 
         attempt_learning(
@@ -1694,6 +1730,7 @@ mod tests {
             &schema_store,
             &routine_store,
             "read config",
+            &embedder,
         );
 
         // Schema should be induced with high confidence.

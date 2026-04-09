@@ -1,35 +1,656 @@
 {
-  "id": "soma.ports.push",
-  "name": "Push",
+  "id": "soma.push",
+  "name": "push",
   "version": "0.1.0",
   "runtime_compatibility": ">=0.1.0",
-  "namespace": "soma.ports.push",
+  "namespace": "soma.push",
   "description": "Push notifications: FCM, WebPush (VAPID), device registration",
-  "port": {
-    "port_id": "push",
-    "kind": "messaging",
-    "trust_level": "verified"
+  "capabilities": [
+    {
+      "group_name": "messaging",
+      "scope": "local",
+      "capabilities": [
+        "send_fcm",
+        "send_webpush",
+        "register_device",
+        "unregister_device"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
   },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "send_fcm",
+      "send_webpush",
+      "register_device",
+      "unregister_device"
+    ],
+    "expected_latency_classes": [
+      "fast",
+      "medium",
+      "slow"
+    ],
+    "expected_failure_modes": [
+      "validation_error",
+      "external_error",
+      "transport_error",
+      "timeout"
+    ],
+    "trace_categories": [
+      "messaging"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "push",
+    "fcm",
+    "webpush",
+    "notifications"
+  ],
+  "ports": [
+    {
+      "port_id": "push",
+      "name": "push",
+      "version": "0.1.0",
+      "kind": "messaging",
+      "description": "Push notifications: FCM, WebPush (VAPID), device registration",
+      "namespace": "soma.push",
+      "trust_level": "verified",
+      "capabilities": [
+        {
+          "capability_id": "send_fcm",
+          "name": "send_fcm",
+          "purpose": "Send push notification via Firebase Cloud Messaging HTTP v1 API",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 500,
+            "p95_latency_ms": 3000,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "send_webpush",
+          "name": "send_webpush",
+          "purpose": "Send push notification via Web Push protocol (VAPID)",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 500,
+            "p95_latency_ms": 3000,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "register_device",
+          "name": "register_device",
+          "purpose": "Register a device token for push notifications",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "compensating_action",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 10
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "unregister_device",
+          "name": "unregister_device",
+          "purpose": "Unregister a device from push notifications",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "compensating_action",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 10
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "output_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "failure_modes": [
+        "validation_error",
+        "external_error",
+        "transport_error",
+        "timeout"
+      ],
+      "side_effect_class": "external_state_mutation",
+      "latency_profile": {
+        "expected_latency_ms": 200,
+        "p95_latency_ms": 3000,
+        "max_latency_ms": 30000
+      },
+      "cost_profile": {
+        "cpu_cost_class": "negligible",
+        "memory_cost_class": "negligible",
+        "io_cost_class": "negligible",
+        "network_cost_class": "low",
+        "energy_cost_class": "negligible"
+      },
+      "auth_requirements": {
+        "methods": [
+          "api_key"
+        ],
+        "required": true
+      },
+      "sandbox_requirements": {
+        "filesystem_access": false,
+        "network_access": true,
+        "device_access": false,
+        "process_access": false,
+        "memory_limit_mb": null,
+        "cpu_limit_percent": null,
+        "time_limit_ms": null,
+        "syscall_limit": null
+      },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
   "skills": [
     {
-      "id": "soma.ports.push.send_fcm",
-      "name": "Send FCM",
-      "description": "Send push notification via Firebase Cloud Messaging HTTP v1 API"
+      "skill_id": "soma.push.send_fcm",
+      "namespace": "soma.push",
+      "pack": "soma.push",
+      "kind": "primitive",
+      "name": "send_fcm",
+      "description": "Send push notification via Firebase Cloud Messaging HTTP v1 API via the push port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "send push notification via firebase cloud messaging http v1 api",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "send push notification via firebase cloud messaging http v1 api completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 500,
+          "p95_latency_ms": 3000,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "push",
+        "fcm",
+        "webpush",
+        "notifications"
+      ],
+      "capability_requirements": [
+        "port:push/send_fcm"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.push.send_webpush",
-      "name": "Send WebPush",
-      "description": "Send push notification via Web Push protocol (VAPID)"
+      "skill_id": "soma.push.send_webpush",
+      "namespace": "soma.push",
+      "pack": "soma.push",
+      "kind": "primitive",
+      "name": "send_webpush",
+      "description": "Send push notification via Web Push protocol (VAPID) via the push port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "send push notification via web push protocol (vapid)",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "send push notification via web push protocol (vapid) completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 500,
+          "p95_latency_ms": 3000,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "push",
+        "fcm",
+        "webpush",
+        "notifications"
+      ],
+      "capability_requirements": [
+        "port:push/send_webpush"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.push.register_device",
-      "name": "Register Device",
-      "description": "Register a device token for push notifications"
+      "skill_id": "soma.push.register_device",
+      "namespace": "soma.push",
+      "pack": "soma.push",
+      "kind": "primitive",
+      "name": "register_device",
+      "description": "Register a device token for push notifications via the push port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "register a device token for push notifications",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "register a device token for push notifications completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "compensating_action",
+        "compensation_skill": "soma.push.unregister_device",
+        "description": "compensate via soma.push.unregister_device"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 10
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "push",
+        "fcm",
+        "webpush",
+        "notifications"
+      ],
+      "capability_requirements": [
+        "port:push/register_device"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.push.unregister_device",
-      "name": "Unregister Device",
-      "description": "Unregister a device from push notifications"
+      "skill_id": "soma.push.unregister_device",
+      "namespace": "soma.push",
+      "pack": "soma.push",
+      "kind": "primitive",
+      "name": "unregister_device",
+      "description": "Unregister a device from push notifications via the push port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "unregister a device from push notifications",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "unregister a device from push notifications completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "compensating_action",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 10
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "push",
+        "fcm",
+        "webpush",
+        "notifications"
+      ],
+      "capability_requirements": [
+        "port:push/unregister_device"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     }
-  ]
+  ],
+  "port_dependencies": []
 }

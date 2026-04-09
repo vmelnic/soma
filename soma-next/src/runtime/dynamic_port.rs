@@ -6,7 +6,7 @@
 //!
 //! ```text
 //! #[no_mangle]
-//! pub extern "C" fn soma_port_init() -> *mut dyn Port {
+//! pub extern "C" fn soma_port_init() -> *mut dyn soma_port_sdk::Port {
 //!     Box::into_raw(Box::new(MyPort::new()))
 //! }
 //! ```
@@ -14,6 +14,11 @@
 //! The loader searches configured directories for libraries matching the
 //! platform naming convention (`lib<name>.dylib` on macOS, `lib<name>.so`
 //! on Linux), loads the symbol, and returns a boxed `Port` trait object.
+//!
+//! Because `soma_port_sdk::Port` and `crate::runtime::port::Port` are
+//! separate traits (even though they mirror each other), the loader wraps
+//! the SDK port in an `SdkPortAdapter` that bridges between them via JSON
+//! serialization of `PortSpec` and `PortCallRecord`.
 
 use std::path::PathBuf;
 
@@ -57,8 +62,9 @@ impl DynamicPortLoader {
     ///
     /// Searches `search_paths` for a file named `lib{library_name}.dylib`
     /// (macOS) or `lib{library_name}.so` (Linux). Loads the library, resolves
-    /// the `soma_port_init` symbol, calls it to obtain a `Box<dyn Port>`, and
-    /// retains the library handle so the code stays mapped.
+    /// the `soma_port_init` symbol, calls it to obtain a `Box<dyn soma_port_sdk::Port>`,
+    /// wraps it in an `SdkPortAdapter`, and retains the library handle so the
+    /// code stays mapped.
     pub fn load_port(&mut self, library_name: &str) -> Result<Box<dyn Port>> {
         let ext = if cfg!(target_os = "macos") {
             "dylib"
@@ -97,15 +103,18 @@ impl DynamicPortLoader {
             })?
         };
 
-        let init_fn: libloading::Symbol<unsafe extern "C" fn() -> *mut dyn Port> = unsafe {
-            lib.get(b"soma_port_init").map_err(|e| {
-                SomaError::Port(format!(
-                    "port library '{}' missing soma_port_init symbol: {}",
-                    lib_path.display(),
-                    e
-                ))
-            })?
-        };
+        // The port library exports soma_port_init() returning *mut dyn soma_port_sdk::Port.
+        // We use the SDK trait here so the vtable is correct.
+        let init_fn: libloading::Symbol<unsafe extern "C" fn() -> *mut dyn soma_port_sdk::Port> =
+            unsafe {
+                lib.get(b"soma_port_init").map_err(|e| {
+                    SomaError::Port(format!(
+                        "port library '{}' missing soma_port_init symbol: {}",
+                        lib_path.display(),
+                        e
+                    ))
+                })?
+            };
 
         let port_ptr = unsafe { init_fn() };
         if port_ptr.is_null() {
@@ -115,10 +124,10 @@ impl DynamicPortLoader {
             )));
         }
 
-        let port = unsafe { Box::from_raw(port_ptr) };
+        let sdk_port = unsafe { Box::from_raw(port_ptr) };
 
         tracing::info!(
-            port_id = %port.spec().port_id,
+            port_id = %sdk_port.spec().port_id,
             path = %lib_path.display(),
             "dynamic port loaded"
         );
@@ -126,7 +135,9 @@ impl DynamicPortLoader {
         // Keep the library alive — the port holds references to its symbols.
         self.loaded_libs.push(lib);
 
-        Ok(port)
+        // Wrap in adapter that bridges SDK Port → runtime Port.
+        let adapter = SdkPortAdapter::new(sdk_port)?;
+        Ok(Box::new(adapter))
     }
 
     /// Return the number of libraries currently held open.
@@ -139,6 +150,83 @@ impl DynamicPortLoader {
         &self.search_paths
     }
 }
+
+// ---------------------------------------------------------------------------
+// SdkPortAdapter — bridges soma_port_sdk::Port to crate::runtime::port::Port
+// ---------------------------------------------------------------------------
+
+/// Adapter that wraps a `soma_port_sdk::Port` and presents it as a
+/// `crate::runtime::port::Port`.
+///
+/// Type conversion between SDK and runtime types is done via JSON
+/// serialization — both sides implement `Serialize`/`Deserialize` with
+/// identical schemas.
+struct SdkPortAdapter {
+    inner: Box<dyn soma_port_sdk::Port>,
+    /// Cached spec converted from SDK format to runtime format.
+    spec: crate::types::port::PortSpec,
+}
+
+impl SdkPortAdapter {
+    fn new(inner: Box<dyn soma_port_sdk::Port>) -> Result<Self> {
+        let sdk_spec = inner.spec();
+        let spec_json = serde_json::to_value(sdk_spec).map_err(|e| {
+            SomaError::Port(format!("failed to serialize SDK port spec: {e}"))
+        })?;
+        let spec: crate::types::port::PortSpec = serde_json::from_value(spec_json).map_err(|e| {
+            SomaError::Port(format!("failed to convert SDK port spec to runtime format: {e}"))
+        })?;
+        Ok(Self { inner, spec })
+    }
+}
+
+impl Port for SdkPortAdapter {
+    fn spec(&self) -> &crate::types::port::PortSpec {
+        &self.spec
+    }
+
+    fn invoke(
+        &self,
+        capability_id: &str,
+        input: serde_json::Value,
+    ) -> Result<crate::types::observation::PortCallRecord> {
+        match self.inner.invoke(capability_id, input) {
+            Ok(sdk_record) => {
+                let json = serde_json::to_value(&sdk_record).map_err(|e| {
+                    SomaError::Port(format!("failed to serialize SDK PortCallRecord: {e}"))
+                })?;
+                let record: crate::types::observation::PortCallRecord =
+                    serde_json::from_value(json).map_err(|e| {
+                        SomaError::Port(format!(
+                            "failed to convert SDK PortCallRecord to runtime format: {e}"
+                        ))
+                    })?;
+                Ok(record)
+            }
+            Err(sdk_err) => Err(SomaError::Port(sdk_err.to_string())),
+        }
+    }
+
+    fn validate_input(
+        &self,
+        capability_id: &str,
+        input: &serde_json::Value,
+    ) -> Result<()> {
+        self.inner
+            .validate_input(capability_id, input)
+            .map_err(|e| SomaError::Port(e.to_string()))
+    }
+
+    fn lifecycle_state(&self) -> crate::types::port::PortLifecycleState {
+        let sdk_state = self.inner.lifecycle_state();
+        let json = serde_json::to_value(sdk_state).unwrap_or_default();
+        serde_json::from_value(json).unwrap_or(crate::types::port::PortLifecycleState::Loaded)
+    }
+}
+
+// Mark SdkPortAdapter as thread-safe — the inner SDK port is Send + Sync.
+unsafe impl Send for SdkPortAdapter {}
+unsafe impl Sync for SdkPortAdapter {}
 
 #[cfg(test)]
 mod tests {

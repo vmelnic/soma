@@ -1,4 +1,4 @@
-//! SOMA Redis Port — 14 capabilities for Redis key-value operations.
+//! SOMA Redis Port — 13 capabilities for Redis key-value operations.
 //!
 //! Provides string get/set/del, hash operations (hget/hset/hdel/hgetall),
 //! list operations (lpush/lpop/lrange), pub/sub (publish/subscribe),
@@ -72,7 +72,7 @@ impl RedisPort {
             .ok_or_else(|| PortError::DependencyUnavailable("Redis not connected".into()))
     }
 
-    /// Async implementation for all 14 capabilities.
+    /// Async implementation for all 13 capabilities.
     async fn invoke_async(
         &self,
         capability_id: &str,

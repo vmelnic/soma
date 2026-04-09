@@ -22,6 +22,19 @@ pub trait SchemaStore {
     /// Returns None if there is insufficient evidence for induction.
     fn induce_from_episodes(&self, episodes: &[&Episode]) -> Option<Schema>;
 
+    /// Induce schemas from episodes using embedding-based clustering.
+    /// Groups episodes by embedding similarity rather than requiring
+    /// identical goal fingerprints, then uses PrefixSpan to find
+    /// common skill subsequences within each cluster.
+    fn induce_from_episodes_with_embedder(
+        &self,
+        episodes: &[&Episode],
+        embedder: &dyn crate::memory::embedder::GoalEmbedder,
+    ) -> Vec<Schema> {
+        let _ = embedder;
+        self.induce_from_episodes(episodes).into_iter().collect()
+    }
+
     /// List all registered schemas.
     fn list_all(&self) -> Vec<&Schema>;
 }
@@ -105,6 +118,137 @@ impl SchemaStore for DefaultSchemaStore {
 
     fn list_all(&self) -> Vec<&Schema> {
         self.schemas.iter().collect()
+    }
+
+    fn induce_from_episodes_with_embedder(
+        &self,
+        episodes: &[&Episode],
+        embedder: &dyn crate::memory::embedder::GoalEmbedder,
+    ) -> Vec<Schema> {
+        if episodes.is_empty() {
+            return Vec::new();
+        }
+
+        // Cluster episodes by embedding similarity (greedy, cosine threshold 0.8).
+        let embedding_threshold = 0.8;
+        let mut clusters: Vec<(Vec<f32>, Vec<usize>)> = Vec::new(); // (centroid, episode_indices)
+        let mut fingerprint_groups: HashMap<String, Vec<usize>> = HashMap::new();
+
+        for (i, ep) in episodes.iter().enumerate() {
+            if let Some(ref emb) = ep.embedding {
+                let mut assigned = false;
+                for (centroid, members) in &mut clusters {
+                    let sim = embedder.similarity(emb, centroid);
+                    if sim >= embedding_threshold {
+                        members.push(i);
+                        assigned = true;
+                        break;
+                    }
+                }
+                if !assigned {
+                    clusters.push((emb.clone(), vec![i]));
+                }
+            } else {
+                // No embedding: group by exact goal_fingerprint.
+                fingerprint_groups
+                    .entry(ep.goal_fingerprint.clone())
+                    .or_default()
+                    .push(i);
+            }
+        }
+
+        // Merge fingerprint groups into the cluster list.
+        for (_fp, indices) in fingerprint_groups {
+            clusters.push((Vec::new(), indices));
+        }
+
+        let mut schemas = Vec::new();
+
+        for (_centroid, members) in &clusters {
+            // Need at least 3 successful episodes.
+            let successful_indices: Vec<usize> = members
+                .iter()
+                .copied()
+                .filter(|&i| episodes[i].success)
+                .collect();
+
+            if successful_indices.len() < 3 {
+                continue;
+            }
+
+            // Extract skill sequences from successful episodes.
+            let skill_sequences: Vec<Vec<String>> = successful_indices
+                .iter()
+                .map(|&i| {
+                    episodes[i]
+                        .steps
+                        .iter()
+                        .map(|s| s.selected_skill.clone())
+                        .collect()
+                })
+                .collect();
+
+            // Use PrefixSpan to find the longest frequent subsequence.
+            if let Some(freq) =
+                crate::memory::sequence_mining::longest_frequent_subsequence(&skill_sequences, 0.7)
+            {
+                let candidate_ordering = freq.pattern;
+                if candidate_ordering.is_empty() {
+                    continue;
+                }
+
+                // Use the first successful episode's fingerprint for the schema ID.
+                let fingerprint = &episodes[successful_indices[0]].goal_fingerprint;
+                let confidence = (freq.support_ratio).min(0.95);
+
+                let subgoals: Vec<SubgoalNode> = candidate_ordering
+                    .iter()
+                    .enumerate()
+                    .map(|(i, skill)| SubgoalNode {
+                        subgoal_id: format!("step_{i}"),
+                        description: format!("Execute {skill}"),
+                        skill_candidates: vec![skill.clone()],
+                        dependencies: if i > 0 {
+                            vec![format!("step_{}", i - 1)]
+                        } else {
+                            Vec::new()
+                        },
+                        optional: false,
+                    })
+                    .collect();
+
+                // Collect all tags from the contributing episodes.
+                let mut all_tags: Vec<String> = successful_indices
+                    .iter()
+                    .flat_map(|&i| episodes[i].tags.iter().cloned())
+                    .collect();
+                all_tags.sort();
+                all_tags.dedup();
+
+                let schema = Schema {
+                    schema_id: format!("induced_{fingerprint}"),
+                    namespace: String::new(),
+                    pack: String::new(),
+                    name: format!("Induced schema for {fingerprint}"),
+                    version: semver::Version::new(0, 1, 0),
+                    trigger_conditions: vec![Precondition {
+                        condition_type: "goal_fingerprint".to_string(),
+                        expression: serde_json::json!({ "goal_fingerprint": fingerprint }),
+                        description: format!("Goal matches {fingerprint}"),
+                    }],
+                    resource_requirements: Vec::new(),
+                    subgoal_structure: subgoals,
+                    candidate_skill_ordering: candidate_ordering,
+                    stop_conditions: Vec::new(),
+                    rollback_bias: RollbackBias::Cautious,
+                    confidence,
+                };
+
+                schemas.push(schema);
+            }
+        }
+
+        schemas
     }
 
     fn induce_from_episodes(&self, episodes: &[&Episode]) -> Option<Schema> {
@@ -418,5 +562,115 @@ mod tests {
 
         let ctx_missing = serde_json::json!({ "other": "val" });
         assert!(!precondition_matches(&pc, &ctx_missing));
+    }
+
+    // --- induce_from_episodes_with_embedder tests ---
+
+    fn make_episode_with_embedding(fingerprint: &str, skills: &[&str], embedding: Vec<f32>) -> Episode {
+        let mut ep = make_episode_with_steps(fingerprint, skills);
+        ep.embedding = Some(embedding);
+        ep
+    }
+
+    #[test]
+    fn test_induce_with_embedder_clusters_by_embedding() {
+        use crate::memory::embedder::HashEmbedder;
+        let store = DefaultSchemaStore::new();
+        let embedder = HashEmbedder::new();
+
+        // Three episodes with the same embedding cluster and shared skill pattern.
+        let ep1 = make_episode_with_embedding("list files", &["open", "read", "close"], vec![1.0, 0.0, 0.0]);
+        let ep2 = make_episode_with_embedding("list files", &["open", "read", "close"], vec![0.99, 0.1, 0.0]);
+        let ep3 = make_episode_with_embedding("list files", &["open", "read", "close"], vec![0.98, 0.15, 0.0]);
+
+        let refs: Vec<&Episode> = vec![&ep1, &ep2, &ep3];
+        let schemas = store.induce_from_episodes_with_embedder(&refs, &embedder);
+
+        assert!(!schemas.is_empty(), "should induce at least one schema");
+        assert_eq!(schemas[0].candidate_skill_ordering, vec!["open", "read", "close"]);
+    }
+
+    #[test]
+    fn test_induce_with_embedder_separate_clusters() {
+        use crate::memory::embedder::HashEmbedder;
+        let store = DefaultSchemaStore::new();
+        let embedder = HashEmbedder::new();
+
+        // Cluster A: 3 episodes with similar embeddings.
+        let a1 = make_episode_with_embedding("read file", &["open", "read", "close"], vec![1.0, 0.0, 0.0]);
+        let a2 = make_episode_with_embedding("read file", &["open", "read", "close"], vec![0.99, 0.05, 0.0]);
+        let a3 = make_episode_with_embedding("read file", &["open", "read", "close"], vec![0.98, 0.1, 0.0]);
+
+        // Cluster B: 3 episodes with different embeddings.
+        let b1 = make_episode_with_embedding("send email", &["connect", "auth", "send"], vec![0.0, 0.0, 1.0]);
+        let b2 = make_episode_with_embedding("send email", &["connect", "auth", "send"], vec![0.0, 0.05, 0.99]);
+        let b3 = make_episode_with_embedding("send email", &["connect", "auth", "send"], vec![0.0, 0.1, 0.98]);
+
+        let refs: Vec<&Episode> = vec![&a1, &a2, &a3, &b1, &b2, &b3];
+        let schemas = store.induce_from_episodes_with_embedder(&refs, &embedder);
+
+        assert_eq!(schemas.len(), 2, "should produce two schemas from two clusters");
+    }
+
+    #[test]
+    fn test_induce_with_embedder_too_few_episodes() {
+        use crate::memory::embedder::HashEmbedder;
+        let store = DefaultSchemaStore::new();
+        let embedder = HashEmbedder::new();
+
+        // Only 2 episodes in one cluster — not enough.
+        let ep1 = make_episode_with_embedding("fp", &["a", "b"], vec![1.0, 0.0]);
+        let ep2 = make_episode_with_embedding("fp", &["a", "b"], vec![0.99, 0.1]);
+
+        let refs: Vec<&Episode> = vec![&ep1, &ep2];
+        let schemas = store.induce_from_episodes_with_embedder(&refs, &embedder);
+
+        assert!(schemas.is_empty(), "two episodes should not be enough for induction");
+    }
+
+    #[test]
+    fn test_induce_with_embedder_fallback_no_embeddings() {
+        use crate::memory::embedder::HashEmbedder;
+        let store = DefaultSchemaStore::new();
+        let embedder = HashEmbedder::new();
+
+        // Episodes without embeddings: should fall back to fingerprint grouping.
+        let ep1 = make_episode_with_steps("file_read", &["open", "read", "close"]);
+        let ep2 = make_episode_with_steps("file_read", &["open", "read", "close"]);
+        let ep3 = make_episode_with_steps("file_read", &["open", "read", "close"]);
+
+        let refs: Vec<&Episode> = vec![&ep1, &ep2, &ep3];
+        let schemas = store.induce_from_episodes_with_embedder(&refs, &embedder);
+
+        assert!(!schemas.is_empty());
+        assert_eq!(schemas[0].candidate_skill_ordering, vec!["open", "read", "close"]);
+    }
+
+    #[test]
+    fn test_induce_with_embedder_confidence_capped() {
+        use crate::memory::embedder::HashEmbedder;
+        let store = DefaultSchemaStore::new();
+        let embedder = HashEmbedder::new();
+
+        // All episodes are in one cluster, all have the same pattern.
+        let eps: Vec<Episode> = (0..5)
+            .map(|_| make_episode_with_embedding("goal", &["a", "b"], vec![1.0, 0.0, 0.0]))
+            .collect();
+
+        let refs: Vec<&Episode> = eps.iter().collect();
+        let schemas = store.induce_from_episodes_with_embedder(&refs, &embedder);
+
+        assert!(!schemas.is_empty());
+        assert!(schemas[0].confidence <= 0.95, "confidence should be capped at 0.95");
+    }
+
+    #[test]
+    fn test_induce_with_embedder_empty_input() {
+        use crate::memory::embedder::HashEmbedder;
+        let store = DefaultSchemaStore::new();
+        let embedder = HashEmbedder::new();
+
+        let schemas = store.induce_from_episodes_with_embedder(&[], &embedder);
+        assert!(schemas.is_empty());
     }
 }

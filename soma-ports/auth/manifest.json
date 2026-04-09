@@ -5,81 +5,1425 @@
   "runtime_compatibility": ">=0.1.0",
   "namespace": "soma.ports.auth",
   "description": "Authentication: OTP, sessions, TOTP, bearer tokens",
-  "port": {
-    "port_id": "auth",
-    "kind": "custom",
-    "trust_level": "trusted"
+  "capabilities": [
+    {
+      "group_name": "authentication",
+      "scope": "local",
+      "capabilities": [
+        "otp_generate",
+        "otp_verify",
+        "session_create",
+        "session_validate",
+        "session_revoke",
+        "totp_generate",
+        "totp_verify",
+        "token_generate",
+        "token_validate",
+        "token_refresh"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
   },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "otp_generate",
+      "otp_verify",
+      "session_create",
+      "session_validate",
+      "session_revoke",
+      "totp_generate",
+      "totp_verify",
+      "token_generate",
+      "token_validate",
+      "token_refresh"
+    ],
+    "expected_latency_classes": [
+      "fast"
+    ],
+    "expected_failure_modes": [
+      "validation_error",
+      "external_error"
+    ],
+    "trace_categories": [
+      "authentication"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "auth",
+    "otp",
+    "session",
+    "totp",
+    "token"
+  ],
+  "ports": [
+    {
+      "port_id": "auth",
+      "name": "Auth",
+      "version": "0.1.0",
+      "kind": "custom",
+      "description": "Authentication: OTP, sessions, TOTP, bearer tokens",
+      "namespace": "soma.ports.auth",
+      "trust_level": "trusted",
+      "capabilities": [
+        {
+          "capability_id": "otp_generate",
+          "name": "Generate OTP",
+          "purpose": "Generate a 6-digit OTP for phone verification",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 5,
+            "p95_latency_ms": 25,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "otp_verify",
+          "name": "Verify OTP",
+          "purpose": "Verify an OTP code against stored hash",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 5,
+            "p95_latency_ms": 25,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "session_create",
+          "name": "Create session",
+          "purpose": "Create an authenticated session with expiry",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 5,
+            "p95_latency_ms": 25,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "session_validate",
+          "name": "Validate session",
+          "purpose": "Check if a session token is valid and not expired",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "session_revoke",
+          "name": "Revoke session",
+          "purpose": "Mark a session as revoked",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "totp_generate",
+          "name": "Generate TOTP secret",
+          "purpose": "Generate a TOTP secret and provisioning URI for 2FA setup",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 5,
+            "p95_latency_ms": 25,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "totp_verify",
+          "name": "Verify TOTP",
+          "purpose": "Verify a TOTP code against a secret",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "token_generate",
+          "name": "Generate token",
+          "purpose": "Generate a random bearer token with expiry",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 5,
+            "p95_latency_ms": 25,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "token_validate",
+          "name": "Validate token",
+          "purpose": "Check if a bearer token is valid and not expired",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "token_refresh",
+          "name": "Refresh token",
+          "purpose": "Extend the expiry of a valid bearer token",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "output_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "failure_modes": [
+        "validation_error",
+        "external_error"
+      ],
+      "side_effect_class": "local_state_mutation",
+      "latency_profile": {
+        "expected_latency_ms": 5,
+        "p95_latency_ms": 50,
+        "max_latency_ms": 500
+      },
+      "cost_profile": {
+        "cpu_cost_class": "negligible",
+        "memory_cost_class": "negligible",
+        "io_cost_class": "negligible",
+        "network_cost_class": "negligible",
+        "energy_cost_class": "negligible"
+      },
+      "auth_requirements": {
+        "methods": [],
+        "required": false
+      },
+      "sandbox_requirements": {
+        "filesystem_access": false,
+        "network_access": false,
+        "device_access": false,
+        "process_access": false,
+        "memory_limit_mb": null,
+        "cpu_limit_percent": null,
+        "time_limit_ms": null,
+        "syscall_limit": null
+      },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
   "skills": [
     {
-      "id": "soma.ports.auth.otp_generate",
+      "skill_id": "soma.ports.auth.otp_generate",
+      "namespace": "soma.ports.auth",
+      "pack": "soma.ports.auth",
+      "kind": "primitive",
       "name": "Generate OTP",
-      "description": "Generate a 6-digit OTP for phone verification",
-      "input": { "phone": "string" },
-      "output": { "phone": "string", "debug_code": "string", "expires_at": "string (ISO 8601)" }
+      "description": "Generate a 6-digit OTP for phone verification via the auth port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "generate a 6-digit otp for phone verification",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "generate a 6-digit otp for phone verification completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 5,
+          "p95_latency_ms": 25,
+          "max_latency_ms": 100
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "auth",
+        "otp",
+        "session",
+        "totp",
+        "token"
+      ],
+      "capability_requirements": [
+        "port:auth/otp_generate"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.auth.otp_verify",
+      "skill_id": "soma.ports.auth.otp_verify",
+      "namespace": "soma.ports.auth",
+      "pack": "soma.ports.auth",
+      "kind": "primitive",
       "name": "Verify OTP",
-      "description": "Verify OTP code (max 5 attempts, 5-minute expiry)",
-      "input": { "phone": "string", "code": "string" },
-      "output": { "valid": "boolean", "user_id": "string|null" }
+      "description": "Verify an OTP code against stored hash via the auth port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "update",
+          "target_resource": null,
+          "description": "verify an otp code against stored hash",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "verify an otp code against stored hash completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 5,
+          "p95_latency_ms": 25,
+          "max_latency_ms": 100
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "auth",
+        "otp",
+        "session",
+        "totp",
+        "token"
+      ],
+      "capability_requirements": [
+        "port:auth/otp_verify"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.auth.session_create",
+      "skill_id": "soma.ports.auth.session_create",
+      "namespace": "soma.ports.auth",
+      "pack": "soma.ports.auth",
+      "kind": "primitive",
       "name": "Create session",
-      "description": "Create an authenticated session token",
-      "input": { "user_id": "string", "device_info": "string (optional)", "ttl_hours": "integer (optional, default 720)" },
-      "output": { "token": "string", "user_id": "string", "expires_at": "string (ISO 8601)" }
+      "description": "Create an authenticated session with expiry via the auth port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "create an authenticated session with expiry",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "create an authenticated session with expiry completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 5,
+          "p95_latency_ms": 25,
+          "max_latency_ms": 100
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "auth",
+        "otp",
+        "session",
+        "totp",
+        "token"
+      ],
+      "capability_requirements": [
+        "port:auth/session_create"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.auth.session_validate",
+      "skill_id": "soma.ports.auth.session_validate",
+      "namespace": "soma.ports.auth",
+      "pack": "soma.ports.auth",
+      "kind": "primitive",
       "name": "Validate session",
-      "description": "Check if a session token is valid and not expired",
-      "input": { "token": "string" },
-      "output": { "valid": "boolean", "user_id": "string|null" }
+      "description": "Check if a session token is valid and not expired via the auth port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "check if a session token is valid and not expired returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "auth",
+        "otp",
+        "session",
+        "totp",
+        "token"
+      ],
+      "capability_requirements": [
+        "port:auth/session_validate"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.auth.session_revoke",
+      "skill_id": "soma.ports.auth.session_revoke",
+      "namespace": "soma.ports.auth",
+      "pack": "soma.ports.auth",
+      "kind": "primitive",
       "name": "Revoke session",
-      "description": "Revoke a session by token",
-      "input": { "token": "string" },
-      "output": { "revoked": "boolean" }
+      "description": "Mark a session as revoked via the auth port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "deletion",
+          "target_resource": null,
+          "description": "mark a session as revoked",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "mark a session as revoked completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "auth",
+        "otp",
+        "session",
+        "totp",
+        "token"
+      ],
+      "capability_requirements": [
+        "port:auth/session_revoke"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.auth.totp_generate",
+      "skill_id": "soma.ports.auth.totp_generate",
+      "namespace": "soma.ports.auth",
+      "pack": "soma.ports.auth",
+      "kind": "primitive",
       "name": "Generate TOTP secret",
-      "description": "Generate a TOTP secret and provisioning URI for 2FA setup",
-      "input": { "user_id": "string" },
-      "output": { "secret": "string (base32)", "provisioning_uri": "string", "user_id": "string" }
+      "description": "Generate a TOTP secret and provisioning URI for 2FA setup via the auth port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "generate a totp secret and provisioning uri for 2fa setup returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 5,
+          "p95_latency_ms": 25,
+          "max_latency_ms": 100
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "auth",
+        "otp",
+        "session",
+        "totp",
+        "token"
+      ],
+      "capability_requirements": [
+        "port:auth/totp_generate"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.auth.totp_verify",
+      "skill_id": "soma.ports.auth.totp_verify",
+      "namespace": "soma.ports.auth",
+      "pack": "soma.ports.auth",
+      "kind": "primitive",
       "name": "Verify TOTP",
-      "description": "Verify a TOTP code against a base32 secret",
-      "input": { "secret": "string (base32)", "code": "string" },
-      "output": { "valid": "boolean" }
+      "description": "Verify a TOTP code against a secret via the auth port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "verify a totp code against a secret returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "auth",
+        "otp",
+        "session",
+        "totp",
+        "token"
+      ],
+      "capability_requirements": [
+        "port:auth/totp_verify"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.auth.token_generate",
+      "skill_id": "soma.ports.auth.token_generate",
+      "namespace": "soma.ports.auth",
+      "pack": "soma.ports.auth",
+      "kind": "primitive",
       "name": "Generate token",
-      "description": "Generate a random bearer token with expiry",
-      "input": { "user_id": "string", "ttl_hours": "integer (optional, default 24)" },
-      "output": { "token": "string", "user_id": "string", "expires_at": "string (ISO 8601)" }
+      "description": "Generate a random bearer token with expiry via the auth port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "generate a random bearer token with expiry",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "generate a random bearer token with expiry completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 5,
+          "p95_latency_ms": 25,
+          "max_latency_ms": 100
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "auth",
+        "otp",
+        "session",
+        "totp",
+        "token"
+      ],
+      "capability_requirements": [
+        "port:auth/token_generate"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.auth.token_validate",
+      "skill_id": "soma.ports.auth.token_validate",
+      "namespace": "soma.ports.auth",
+      "pack": "soma.ports.auth",
+      "kind": "primitive",
       "name": "Validate token",
-      "description": "Check if a bearer token is valid",
-      "input": { "token": "string" },
-      "output": { "valid": "boolean", "user_id": "string|null" }
+      "description": "Check if a bearer token is valid and not expired via the auth port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "check if a bearer token is valid and not expired returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "auth",
+        "otp",
+        "session",
+        "totp",
+        "token"
+      ],
+      "capability_requirements": [
+        "port:auth/token_validate"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.auth.token_refresh",
+      "skill_id": "soma.ports.auth.token_refresh",
+      "namespace": "soma.ports.auth",
+      "pack": "soma.ports.auth",
+      "kind": "primitive",
       "name": "Refresh token",
-      "description": "Extend the expiry of a valid bearer token",
-      "input": { "token": "string", "ttl_hours": "integer (optional, default 24)" },
-      "output": { "refreshed": "boolean", "expires_at": "string (ISO 8601)" }
+      "description": "Extend the expiry of a valid bearer token via the auth port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "update",
+          "target_resource": null,
+          "description": "extend the expiry of a valid bearer token",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "extend the expiry of a valid bearer token completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "auth",
+        "otp",
+        "session",
+        "totp",
+        "token"
+      ],
+      "capability_requirements": [
+        "port:auth/token_refresh"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     }
-  ]
+  ],
+  "port_dependencies": []
 }

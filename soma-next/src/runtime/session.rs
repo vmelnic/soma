@@ -1466,6 +1466,8 @@ impl SessionRuntime for SessionController {
                 current_branch_state: None,
                 budget_deltas: Vec::new(),
                 output_bindings: Vec::new(),
+                active_plan: None,
+                plan_step: 0,
             },
             status: SessionStatus::Created,
             trace: SessionTrace { steps: Vec::new() },
@@ -1603,6 +1605,36 @@ impl SessionRuntime for SessionController {
             candidates.iter().map(|c| c.skill_id.clone()).collect();
 
         // ---------------------------------------------------------------
+        // Step 6b: plan-following — load or advance an active plan
+        // ---------------------------------------------------------------
+        // If no active plan and a routine was found, load the routine's
+        // compiled skill path as the plan.
+        if session.working_memory.active_plan.is_none()
+            && let Some(routine) = routines.iter().find(|r| !r.compiled_skill_path.is_empty())
+        {
+            debug!(
+                session_id = %session.session_id,
+                routine_id = %routine.routine_id,
+                path_len = routine.compiled_skill_path.len(),
+                "activating plan-following mode from routine"
+            );
+            session.working_memory.active_plan = Some(routine.compiled_skill_path.clone());
+            session.working_memory.plan_step = 0;
+        }
+
+        // If active plan is exhausted, clear it.
+        if let Some(ref plan) = session.working_memory.active_plan
+            && session.working_memory.plan_step >= plan.len()
+        {
+            debug!(
+                session_id = %session.session_id,
+                "plan-following complete, clearing active plan"
+            );
+            session.working_memory.active_plan = None;
+            session.working_memory.plan_step = 0;
+        }
+
+        // ---------------------------------------------------------------
         // Step 7: bind inputs from belief/resources
         // ---------------------------------------------------------------
         // Try to bind for each candidate; track unresolved slots.
@@ -1611,37 +1643,74 @@ impl SessionRuntime for SessionController {
         session.working_memory.unresolved_slots.clear();
 
         // ---------------------------------------------------------------
-        // Step 8: score candidates
+        // Steps 8-10: score, rank, and choose a candidate.
+        // In plan-following mode, skip scoring and use the next skill
+        // from the active plan directly.
         // ---------------------------------------------------------------
-        let scores = self.predictor.score(
-            &candidates,
-            &session.goal,
-            &session.belief,
-            &episodes,
-        );
 
-        // ---------------------------------------------------------------
-        // Step 9: predict top candidates
-        // ---------------------------------------------------------------
-        let top_scores = self.predictor.predict_top(&scores, 3);
+        // Try plan-following first: resolve the next skill from the active plan.
+        let plan_selected = session
+            .working_memory
+            .active_plan
+            .as_ref()
+            .and_then(|plan| plan.get(session.working_memory.plan_step))
+            .cloned()
+            .and_then(|skill_id| {
+                self.skill_registry.get_skill(&skill_id).map(|s| {
+                    debug!(
+                        session_id = %session.session_id,
+                        plan_step = session.working_memory.plan_step,
+                        skill_id = %skill_id,
+                        "plan-following: selecting skill from active plan"
+                    );
+                    (skill_id, s.clone())
+                })
+            });
 
-        if top_scores.is_empty() {
-            session.status = SessionStatus::Failed;
-            session.updated_at = Utc::now();
-            return Err(SomaError::NoCandidates);
+        // If plan resolution failed (skill not found), abandon the plan.
+        if session.working_memory.active_plan.is_some() && plan_selected.is_none() {
+            warn!(
+                session_id = %session.session_id,
+                "plan skill not found in registry, abandoning plan"
+            );
+            session.working_memory.active_plan = None;
+            session.working_memory.plan_step = 0;
         }
 
-        // ---------------------------------------------------------------
-        // Step 10: choose one candidate
-        // ---------------------------------------------------------------
-        let chosen_score = &top_scores[0];
-        let chosen_skill = match self.skill_registry.get_skill(&chosen_score.skill_id) {
-            Some(skill) => skill.clone(),
-            None => {
+        let (scores, chosen_skill) = if let Some((skill_id, skill)) = plan_selected {
+            let plan_score = CandidateScore {
+                skill_id,
+                score: 1.0,
+                predicted_success: 0.95,
+                predicted_cost: 0.01,
+                predicted_latency_ms: 10,
+                information_gain: 0.0,
+            };
+            (vec![plan_score], skill)
+        } else {
+            // Normal deliberation path: score, rank, choose.
+            let scores = self.predictor.score(
+                &candidates,
+                &session.goal,
+                &session.belief,
+                &episodes,
+            );
+            let top_scores = self.predictor.predict_top(&scores, 3);
+            if top_scores.is_empty() {
                 session.status = SessionStatus::Failed;
                 session.updated_at = Utc::now();
-                return Err(SomaError::SkillNotFound(chosen_score.skill_id.clone()));
+                return Err(SomaError::NoCandidates);
             }
+            let chosen_score = &top_scores[0];
+            let chosen_skill = match self.skill_registry.get_skill(&chosen_score.skill_id) {
+                Some(skill) => skill.clone(),
+                None => {
+                    session.status = SessionStatus::Failed;
+                    session.updated_at = Utc::now();
+                    return Err(SomaError::SkillNotFound(chosen_score.skill_id.clone()));
+                }
+            };
+            (scores, chosen_skill)
         };
 
         // ---------------------------------------------------------------
@@ -1788,13 +1857,64 @@ impl SessionRuntime for SessionController {
             0.0
         };
 
-        let critic_decision = self.critic.evaluate(
+        let raw_critic_decision = self.critic.evaluate(
             &session.goal,
             &session.belief,
             &observation,
             &session.budget_remaining,
             step_index,
         );
+
+        // ---------------------------------------------------------------
+        // Plan-following: override the critic decision based on plan state
+        // ---------------------------------------------------------------
+        let critic_decision = if session.working_memory.active_plan.is_some() {
+            if !observation.success {
+                // Failure during plan execution — abandon the plan and
+                // fall back to deliberation on the next step.
+                debug!(
+                    session_id = %session.session_id,
+                    step = step_index,
+                    "plan step failed, abandoning active plan"
+                );
+                session.working_memory.active_plan = None;
+                session.working_memory.plan_step = 0;
+                CriticDecision::Revise
+            } else {
+                // Advance to the next step in the plan.
+                session.working_memory.plan_step += 1;
+                let plan_len = session
+                    .working_memory
+                    .active_plan
+                    .as_ref()
+                    .map(|p| p.len())
+                    .unwrap_or(0);
+
+                if session.working_memory.plan_step >= plan_len {
+                    // Plan complete — signal completion.
+                    debug!(
+                        session_id = %session.session_id,
+                        step = step_index,
+                        "plan-following: all steps completed"
+                    );
+                    session.working_memory.active_plan = None;
+                    session.working_memory.plan_step = 0;
+                    CriticDecision::Stop
+                } else {
+                    // More steps remain — continue regardless of what the
+                    // base critic decided (it would Stop on first success).
+                    debug!(
+                        session_id = %session.session_id,
+                        step = step_index,
+                        remaining = plan_len - session.working_memory.plan_step,
+                        "plan-following: continuing to next plan step"
+                    );
+                    CriticDecision::Continue
+                }
+            }
+        } else {
+            raw_critic_decision
+        };
 
         debug!(
             session_id = %session.session_id,

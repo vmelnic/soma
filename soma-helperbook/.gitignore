@@ -1,1 +1,5 @@
-checkpoints/
+bin/
+packs/*/*.dylib
+packs/*/*.so
+frontend/node_modules/
+data/

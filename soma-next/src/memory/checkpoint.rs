@@ -197,6 +197,8 @@ mod tests {
                 current_branch_state: None,
                 budget_deltas: Vec::new(),
                 output_bindings: Vec::new(),
+                active_plan: None,
+                plan_step: 0,
             },
             status: SessionStatus::Completed,
             trace: SessionTrace { steps: Vec::new() },

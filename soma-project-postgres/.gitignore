@@ -1,0 +1,3 @@
+bin/
+packs/*/*.dylib
+packs/*/*.so

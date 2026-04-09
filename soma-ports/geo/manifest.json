@@ -5,46 +5,744 @@
   "runtime_compatibility": ">=0.1.0",
   "namespace": "soma.ports.geo",
   "description": "Geolocation: distance calculation, radius filtering, geocoding, bounds checking",
-  "port": {
-    "port_id": "geo",
-    "kind": "custom",
-    "trust_level": "trusted"
+  "capabilities": [
+    {
+      "group_name": "geolocation",
+      "scope": "local",
+      "capabilities": [
+        "distance",
+        "radius_filter",
+        "geocode",
+        "reverse_geocode",
+        "bounds_check"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
   },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "distance",
+      "radius_filter",
+      "geocode",
+      "reverse_geocode",
+      "bounds_check"
+    ],
+    "expected_latency_classes": [
+      "fast"
+    ],
+    "expected_failure_modes": [
+      "validation_error",
+      "external_error",
+      "dependency_unavailable"
+    ],
+    "trace_categories": [
+      "geolocation"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "geo",
+    "distance",
+    "geocode",
+    "location"
+  ],
+  "ports": [
+    {
+      "port_id": "geo",
+      "name": "Geo",
+      "version": "0.1.0",
+      "kind": "custom",
+      "description": "Geolocation: distance calculation, radius filtering, geocoding, bounds checking",
+      "namespace": "soma.ports.geo",
+      "trust_level": "trusted",
+      "capabilities": [
+        {
+          "capability_id": "distance",
+          "name": "Haversine distance",
+          "purpose": "Compute great-circle distance between two lat/lon points",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "radius_filter",
+          "name": "Radius filter",
+          "purpose": "Filter a JSON array of points to those within a radius",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "geocode",
+          "name": "Geocode",
+          "purpose": "Convert address to lat/lon coordinates (requires API key)",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "delegated_variant",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 500,
+            "p95_latency_ms": 2500,
+            "max_latency_ms": 10000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "reverse_geocode",
+          "name": "Reverse geocode",
+          "purpose": "Convert lat/lon to address (requires API key)",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "delegated_variant",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 500,
+            "p95_latency_ms": 2500,
+            "max_latency_ms": 10000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "bounds_check",
+          "name": "Bounds check",
+          "purpose": "Check if a point falls within a bounding box",
+          "input_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "output_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "failure_modes": [
+        "validation_error",
+        "external_error",
+        "dependency_unavailable"
+      ],
+      "side_effect_class": "none",
+      "latency_profile": {
+        "expected_latency_ms": 1,
+        "p95_latency_ms": 10,
+        "max_latency_ms": 1000
+      },
+      "cost_profile": {
+        "cpu_cost_class": "negligible",
+        "memory_cost_class": "negligible",
+        "io_cost_class": "negligible",
+        "network_cost_class": "negligible",
+        "energy_cost_class": "negligible"
+      },
+      "auth_requirements": {
+        "methods": [],
+        "required": false
+      },
+      "sandbox_requirements": {
+        "filesystem_access": false,
+        "network_access": false,
+        "device_access": false,
+        "process_access": false,
+        "memory_limit_mb": null,
+        "cpu_limit_percent": null,
+        "time_limit_ms": null,
+        "syscall_limit": null
+      },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
   "skills": [
     {
-      "id": "soma.ports.geo.distance",
+      "skill_id": "soma.ports.geo.distance",
+      "namespace": "soma.ports.geo",
+      "pack": "soma.ports.geo",
+      "kind": "primitive",
       "name": "Haversine distance",
-      "description": "Compute great-circle distance between two lat/lon points in km",
-      "input": { "lat1": "float", "lon1": "float", "lat2": "float", "lon2": "float" },
-      "output": { "distance_km": "float" }
+      "description": "Compute great-circle distance between two lat/lon points via the geo port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "compute great-circle distance between two lat/lon points returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "geo",
+        "distance",
+        "geocode",
+        "location"
+      ],
+      "capability_requirements": [
+        "port:geo/distance"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.geo.radius_filter",
+      "skill_id": "soma.ports.geo.radius_filter",
+      "namespace": "soma.ports.geo",
+      "pack": "soma.ports.geo",
+      "kind": "primitive",
       "name": "Radius filter",
-      "description": "Filter a JSON array of points to those within a radius",
-      "input": { "lat": "float", "lon": "float", "radius_km": "float", "points": "string (JSON array)" },
-      "output": { "matches": "array", "count": "integer" }
+      "description": "Filter a JSON array of points to those within a radius via the geo port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "filter a json array of points to those within a radius returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "geo",
+        "distance",
+        "geocode",
+        "location"
+      ],
+      "capability_requirements": [
+        "port:geo/radius_filter"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.geo.geocode",
+      "skill_id": "soma.ports.geo.geocode",
+      "namespace": "soma.ports.geo",
+      "pack": "soma.ports.geo",
+      "kind": "primitive",
       "name": "Geocode",
-      "description": "Convert address to lat/lon coordinates (requires api_key)",
-      "input": { "address": "string", "api_key": "string" },
-      "output": { "lat": "float", "lon": "float", "display_name": "string" }
+      "description": "Convert address to lat/lon coordinates (requires API key) via the geo port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "convert address to lat/lon coordinates (requires api key) returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 500,
+          "p95_latency_ms": 2500,
+          "max_latency_ms": 10000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "delegated_variant",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "geo",
+        "distance",
+        "geocode",
+        "location"
+      ],
+      "capability_requirements": [
+        "port:geo/geocode"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.geo.reverse_geocode",
+      "skill_id": "soma.ports.geo.reverse_geocode",
+      "namespace": "soma.ports.geo",
+      "pack": "soma.ports.geo",
+      "kind": "primitive",
       "name": "Reverse geocode",
-      "description": "Convert lat/lon to address (requires api_key)",
-      "input": { "lat": "float", "lon": "float", "api_key": "string" },
-      "output": { "address": "string", "city": "string", "country": "string" }
+      "description": "Convert lat/lon to address (requires API key) via the geo port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "convert lat/lon to address (requires api key) returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 500,
+          "p95_latency_ms": 2500,
+          "max_latency_ms": 10000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "delegated_variant",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "geo",
+        "distance",
+        "geocode",
+        "location"
+      ],
+      "capability_requirements": [
+        "port:geo/reverse_geocode"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.geo.bounds_check",
+      "skill_id": "soma.ports.geo.bounds_check",
+      "namespace": "soma.ports.geo",
+      "pack": "soma.ports.geo",
+      "kind": "primitive",
       "name": "Bounds check",
-      "description": "Check if a point falls within a bounding box",
-      "input": { "lat": "float", "lon": "float", "min_lat": "float", "max_lat": "float", "min_lon": "float", "max_lon": "float" },
-      "output": { "within": "boolean" }
+      "description": "Check if a point falls within a bounding box via the geo port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "check if a point falls within a bounding box returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "geo",
+        "distance",
+        "geocode",
+        "location"
+      ],
+      "capability_requirements": [
+        "port:geo/bounds_check"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     }
-  ]
+  ],
+  "port_dependencies": []
 }

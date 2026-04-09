@@ -1,270 +1,2062 @@
 {
   "id": "soma.ports.postgres",
-  "name": "Postgres",
+  "name": "postgres",
   "version": "0.1.0",
   "runtime_compatibility": ">=0.1.0",
   "namespace": "soma.ports.postgres",
   "description": "PostgreSQL database operations: queries, DDL, ORM-style CRUD, transactions",
-  "port": {
-    "port_id": "postgres",
-    "kind": "database",
-    "trust_level": "verified",
-    "side_effect_class": "external_state_mutation",
-    "latency_profile": {
-      "expected_latency_ms": 20,
-      "p95_latency_ms": 200,
-      "max_latency_ms": 30000
-    },
-    "sandbox_requirements": {
-      "filesystem_access": false,
-      "network_access": true,
-      "device_access": false,
-      "process_access": false,
-      "time_limit_ms": 30000
-    },
-    "remote_exposure": false
+  "capabilities": [
+    {
+      "group_name": "database",
+      "scope": "local",
+      "capabilities": [
+        "query",
+        "execute",
+        "find",
+        "find_many",
+        "count",
+        "aggregate",
+        "create_table",
+        "drop_table",
+        "alter_table",
+        "insert",
+        "update",
+        "delete",
+        "begin_transaction",
+        "commit",
+        "rollback"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
   },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "query",
+      "execute",
+      "find",
+      "find_many",
+      "count",
+      "aggregate",
+      "create_table",
+      "drop_table",
+      "alter_table",
+      "insert",
+      "update",
+      "delete",
+      "begin_transaction",
+      "commit",
+      "rollback"
+    ],
+    "expected_latency_classes": [
+      "fast",
+      "medium"
+    ],
+    "expected_failure_modes": [
+      "validation_error",
+      "dependency_unavailable",
+      "transport_error",
+      "external_error",
+      "timeout"
+    ],
+    "trace_categories": [
+      "database"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "postgres",
+    "database",
+    "sql"
+  ],
+  "ports": [
+    {
+      "port_id": "postgres",
+      "name": "postgres",
+      "version": "0.1.0",
+      "kind": "database",
+      "description": "PostgreSQL database operations: queries, DDL, ORM-style CRUD, transactions",
+      "namespace": "soma.ports.postgres",
+      "trust_level": "verified",
+      "capabilities": [
+        {
+          "capability_id": "query",
+          "name": "query",
+          "purpose": "Execute a SELECT query and return rows",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 20,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "execute",
+          "name": "execute",
+          "purpose": "Execute an INSERT/UPDATE/DELETE and return rows affected",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "compensating_action",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "medium",
+          "latency_profile": {
+            "expected_latency_ms": 20,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "find",
+          "name": "find",
+          "purpose": "Find a single row by ID (ORM-style)",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 20,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "find_many",
+          "name": "find_many",
+          "purpose": "Find multiple rows with structured filter",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 20,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "count",
+          "name": "count",
+          "purpose": "Count rows matching a filter",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 20,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "aggregate",
+          "name": "aggregate",
+          "purpose": "Run an aggregate function (SUM/AVG/MIN/MAX) with optional grouping",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 20,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "create_table",
+          "name": "create_table",
+          "purpose": "Create a table (DDL CREATE TABLE IF NOT EXISTS)",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "compensating_action",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "high",
+          "latency_profile": {
+            "expected_latency_ms": 20,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "drop_table",
+          "name": "drop_table",
+          "purpose": "Drop a table (DDL DROP TABLE IF EXISTS)",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "destructive",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "critical",
+          "latency_profile": {
+            "expected_latency_ms": 20,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "alter_table",
+          "name": "alter_table",
+          "purpose": "Alter a table (DDL ALTER TABLE)",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "compensating_action",
+          "determinism_class": "deterministic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "high",
+          "latency_profile": {
+            "expected_latency_ms": 20,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "insert",
+          "name": "insert",
+          "purpose": "Insert a row with column/value pairs",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "compensating_action",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 20,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "update",
+          "name": "update",
+          "purpose": "Update rows matching a WHERE filter",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "compensating_action",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "conditionally_idempotent",
+          "risk_class": "medium",
+          "latency_profile": {
+            "expected_latency_ms": 20,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "delete",
+          "name": "delete",
+          "purpose": "Delete rows matching a WHERE filter",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "destructive",
+          "rollback_support": "irreversible",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "high",
+          "latency_profile": {
+            "expected_latency_ms": 20,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "begin_transaction",
+          "name": "begin_transaction",
+          "purpose": "Execute multiple statements atomically within a transaction",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "full_reversal",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "medium",
+          "latency_profile": {
+            "expected_latency_ms": 20,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "commit",
+          "name": "commit",
+          "purpose": "Commit a transaction (provided for API completeness)",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 20,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "rollback",
+          "name": "rollback",
+          "purpose": "Rollback a transaction (provided for API completeness)",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "full_reversal",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 20,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "output_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "failure_modes": [
+        "validation_error",
+        "dependency_unavailable",
+        "transport_error",
+        "external_error",
+        "timeout"
+      ],
+      "side_effect_class": "external_state_mutation",
+      "latency_profile": {
+        "expected_latency_ms": 20,
+        "p95_latency_ms": 200,
+        "max_latency_ms": 30000
+      },
+      "cost_profile": {
+        "cpu_cost_class": "low",
+        "memory_cost_class": "low",
+        "io_cost_class": "low",
+        "network_cost_class": "low",
+        "energy_cost_class": "negligible"
+      },
+      "auth_requirements": {
+        "methods": [
+          "local_process_trust"
+        ],
+        "required": false
+      },
+      "sandbox_requirements": {
+        "filesystem_access": false,
+        "network_access": true,
+        "device_access": false,
+        "process_access": false,
+        "memory_limit_mb": null,
+        "cpu_limit_percent": null,
+        "time_limit_ms": 30000,
+        "syscall_limit": null
+      },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
   "skills": [
     {
       "skill_id": "soma.ports.postgres.query",
+      "namespace": "soma.ports.postgres",
+      "pack": "soma.ports.postgres",
+      "kind": "primitive",
       "name": "query",
-      "purpose": "Execute a SELECT query and return rows",
-      "effect_class": "read_only",
-      "determinism_class": "partially_deterministic",
-      "idempotence_class": "idempotent",
-      "risk_class": "low",
-      "input": {
-        "sql": "string (required) — SELECT statement, supports $1/$2 params",
-        "params": "array (optional) — parameter values"
+      "description": "Execute a SELECT query and return rows via the postgres port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
       },
-      "output": {
-        "rows": "array of row objects",
-        "count": "integer — number of rows returned"
-      }
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "execute a select query and return rows returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 20,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "partially_deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "postgres",
+        "database",
+        "sql"
+      ],
+      "capability_requirements": [
+        "port:postgres/query"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
       "skill_id": "soma.ports.postgres.execute",
+      "namespace": "soma.ports.postgres",
+      "pack": "soma.ports.postgres",
+      "kind": "primitive",
       "name": "execute",
-      "purpose": "Execute an INSERT/UPDATE/DELETE and return rows affected",
-      "effect_class": "external_state_mutation",
-      "determinism_class": "partially_deterministic",
-      "idempotence_class": "non_idempotent",
-      "risk_class": "medium",
-      "input": {
-        "sql": "string (required) — SQL statement",
-        "params": "array (optional) — parameter values"
+      "description": "Execute an INSERT/UPDATE/DELETE and return rows affected via the postgres port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
       },
-      "output": {
-        "rows_affected": "integer"
-      }
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "update",
+          "target_resource": null,
+          "description": "execute an insert/update/delete and return rows affected",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "execute an insert/update/delete and return rows affected completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "compensating_action",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 20,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "medium",
+      "determinism": "partially_deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "postgres",
+        "database",
+        "sql"
+      ],
+      "capability_requirements": [
+        "port:postgres/execute"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
       "skill_id": "soma.ports.postgres.find",
+      "namespace": "soma.ports.postgres",
+      "pack": "soma.ports.postgres",
+      "kind": "primitive",
       "name": "find",
-      "purpose": "Find a single row by ID (ORM-style)",
-      "effect_class": "read_only",
-      "determinism_class": "partially_deterministic",
-      "idempotence_class": "idempotent",
-      "risk_class": "low",
-      "input": {
-        "table": "string (required) — table name",
-        "id": "string|number (required) — row identifier",
-        "id_column": "string (optional, default 'id') — primary key column name"
+      "description": "Find a single row by ID (ORM-style) via the postgres port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
       },
-      "output": "row object or null"
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "find a single row by id (orm-style) returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 20,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "partially_deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "postgres",
+        "database",
+        "sql"
+      ],
+      "capability_requirements": [
+        "port:postgres/find"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
       "skill_id": "soma.ports.postgres.find_many",
+      "namespace": "soma.ports.postgres",
+      "pack": "soma.ports.postgres",
+      "kind": "primitive",
       "name": "find_many",
-      "purpose": "Find multiple rows with structured filter",
-      "effect_class": "read_only",
-      "determinism_class": "partially_deterministic",
-      "idempotence_class": "idempotent",
-      "risk_class": "low",
-      "input": {
-        "table": "string (required) — table name",
-        "where": "object (optional) — filter conditions",
-        "order_by": "array (optional) — sort specification",
-        "limit": "integer (optional)",
-        "offset": "integer (optional)"
+      "description": "Find multiple rows with structured filter via the postgres port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
       },
-      "output": {
-        "rows": "array of row objects",
-        "count": "integer"
-      }
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "find multiple rows with structured filter returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 20,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "partially_deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "postgres",
+        "database",
+        "sql"
+      ],
+      "capability_requirements": [
+        "port:postgres/find_many"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
       "skill_id": "soma.ports.postgres.count",
+      "namespace": "soma.ports.postgres",
+      "pack": "soma.ports.postgres",
+      "kind": "primitive",
       "name": "count",
-      "purpose": "Count rows matching a filter",
-      "effect_class": "read_only",
-      "determinism_class": "partially_deterministic",
-      "idempotence_class": "idempotent",
-      "risk_class": "negligible",
-      "input": {
-        "table": "string (required) — table name",
-        "where": "object (optional) — filter conditions"
+      "description": "Count rows matching a filter via the postgres port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
       },
-      "output": {
-        "count": "integer"
-      }
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "count rows matching a filter returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 20,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "partially_deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "postgres",
+        "database",
+        "sql"
+      ],
+      "capability_requirements": [
+        "port:postgres/count"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
       "skill_id": "soma.ports.postgres.aggregate",
+      "namespace": "soma.ports.postgres",
+      "pack": "soma.ports.postgres",
+      "kind": "primitive",
       "name": "aggregate",
-      "purpose": "Run an aggregate function (SUM/AVG/MIN/MAX) with optional grouping",
-      "effect_class": "read_only",
-      "determinism_class": "partially_deterministic",
-      "idempotence_class": "idempotent",
-      "risk_class": "low",
-      "input": {
-        "table": "string (required)",
-        "function": "string (required) — one of SUM, AVG, MIN, MAX, COUNT",
-        "column": "string (required) — column to aggregate",
-        "where": "object (optional) — filter conditions",
-        "group_by": "array of strings (optional)"
+      "description": "Run an aggregate function (SUM/AVG/MIN/MAX) with optional grouping via the postgres port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
       },
-      "output": {
-        "rows": "array of result objects"
-      }
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "run an aggregate function (sum/avg/min/max) with optional grouping returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 20,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "partially_deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "postgres",
+        "database",
+        "sql"
+      ],
+      "capability_requirements": [
+        "port:postgres/aggregate"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
       "skill_id": "soma.ports.postgres.create_table",
+      "namespace": "soma.ports.postgres",
+      "pack": "soma.ports.postgres",
+      "kind": "primitive",
       "name": "create_table",
-      "purpose": "Create a table (DDL CREATE TABLE IF NOT EXISTS)",
-      "effect_class": "external_state_mutation",
-      "determinism_class": "deterministic",
-      "idempotence_class": "idempotent",
-      "risk_class": "high",
-      "input": {
-        "table": "string (required) — table name",
-        "columns": "string (required) — column definitions"
+      "description": "Create a table (DDL CREATE TABLE IF NOT EXISTS) via the postgres port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
       },
-      "output": {
-        "created": "string — table name"
-      }
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "create a table (ddl create table if not exists)",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "create a table (ddl create table if not exists) completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "compensating_action",
+        "compensation_skill": "soma.ports.drop_table",
+        "description": "compensate via soma.ports.drop_table"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 20,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "high",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "postgres",
+        "database",
+        "sql"
+      ],
+      "capability_requirements": [
+        "port:postgres/create_table"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
       "skill_id": "soma.ports.postgres.drop_table",
+      "namespace": "soma.ports.postgres",
+      "pack": "soma.ports.postgres",
+      "kind": "primitive",
       "name": "drop_table",
-      "purpose": "Drop a table (DDL DROP TABLE IF EXISTS)",
-      "effect_class": "destructive",
-      "determinism_class": "deterministic",
-      "idempotence_class": "idempotent",
-      "risk_class": "critical",
-      "input": {
-        "table": "string (required) — table name",
-        "cascade": "boolean (optional, default false)"
+      "description": "Drop a table (DDL DROP TABLE IF EXISTS) via the postgres port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
       },
-      "output": {
-        "dropped": "string — table name"
-      }
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "deletion",
+          "target_resource": null,
+          "description": "drop a table (ddl drop table if exists)",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "drop a table (ddl drop table if exists) completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 20,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "critical",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "postgres",
+        "database",
+        "sql"
+      ],
+      "capability_requirements": [
+        "port:postgres/drop_table"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
       "skill_id": "soma.ports.postgres.alter_table",
+      "namespace": "soma.ports.postgres",
+      "pack": "soma.ports.postgres",
+      "kind": "primitive",
       "name": "alter_table",
-      "purpose": "Alter a table (DDL ALTER TABLE)",
-      "effect_class": "external_state_mutation",
-      "determinism_class": "deterministic",
-      "idempotence_class": "non_idempotent",
-      "risk_class": "high",
-      "input": {
-        "table": "string (required) — table name",
-        "changes": "string (required) — ALTER TABLE clause"
+      "description": "Alter a table (DDL ALTER TABLE) via the postgres port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
       },
-      "output": {
-        "altered": "string — table name"
-      }
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "update",
+          "target_resource": null,
+          "description": "alter a table (ddl alter table)",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "alter a table (ddl alter table) completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "compensating_action",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 20,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "high",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "postgres",
+        "database",
+        "sql"
+      ],
+      "capability_requirements": [
+        "port:postgres/alter_table"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
       "skill_id": "soma.ports.postgres.insert",
+      "namespace": "soma.ports.postgres",
+      "pack": "soma.ports.postgres",
+      "kind": "primitive",
       "name": "insert",
-      "purpose": "Insert a row with column/value pairs",
-      "effect_class": "external_state_mutation",
-      "determinism_class": "partially_deterministic",
-      "idempotence_class": "non_idempotent",
-      "risk_class": "low",
-      "input": {
-        "table": "string (required) — table name",
-        "values": "object (required) — column:value pairs",
-        "returning": "string (optional, default '*') — RETURNING clause"
+      "description": "Insert a row with column/value pairs via the postgres port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
       },
-      "output": "inserted row object or {inserted: true}"
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "insert a row with column/value pairs",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "insert a row with column/value pairs completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "compensating_action",
+        "compensation_skill": "soma.ports.delete",
+        "description": "compensate via soma.ports.delete"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 20,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "partially_deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "postgres",
+        "database",
+        "sql"
+      ],
+      "capability_requirements": [
+        "port:postgres/insert"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
       "skill_id": "soma.ports.postgres.update",
+      "namespace": "soma.ports.postgres",
+      "pack": "soma.ports.postgres",
+      "kind": "primitive",
       "name": "update",
-      "purpose": "Update rows matching a WHERE filter",
-      "effect_class": "external_state_mutation",
-      "determinism_class": "partially_deterministic",
-      "idempotence_class": "conditionally_idempotent",
-      "risk_class": "medium",
-      "input": {
-        "table": "string (required) — table name",
-        "set": "object (required) — column:value pairs to update",
-        "where": "object (optional) — filter conditions"
+      "description": "Update rows matching a WHERE filter via the postgres port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
       },
-      "output": {
-        "rows_affected": "integer"
-      }
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "update",
+          "target_resource": null,
+          "description": "update rows matching a where filter",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "update rows matching a where filter completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "compensating_action",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 20,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "medium",
+      "determinism": "partially_deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "postgres",
+        "database",
+        "sql"
+      ],
+      "capability_requirements": [
+        "port:postgres/update"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
       "skill_id": "soma.ports.postgres.delete",
+      "namespace": "soma.ports.postgres",
+      "pack": "soma.ports.postgres",
+      "kind": "primitive",
       "name": "delete",
-      "purpose": "Delete rows matching a WHERE filter",
-      "effect_class": "destructive",
-      "determinism_class": "partially_deterministic",
-      "idempotence_class": "idempotent",
-      "risk_class": "high",
-      "input": {
-        "table": "string (required) — table name",
-        "where": "object (required) — filter conditions"
+      "description": "Delete rows matching a WHERE filter via the postgres port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
       },
-      "output": {
-        "rows_affected": "integer"
-      }
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "deletion",
+          "target_resource": null,
+          "description": "delete rows matching a where filter",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "delete rows matching a where filter completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 20,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "high",
+      "determinism": "partially_deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "postgres",
+        "database",
+        "sql"
+      ],
+      "capability_requirements": [
+        "port:postgres/delete"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
       "skill_id": "soma.ports.postgres.begin_transaction",
+      "namespace": "soma.ports.postgres",
+      "pack": "soma.ports.postgres",
+      "kind": "primitive",
       "name": "begin_transaction",
-      "purpose": "Execute multiple statements atomically within a transaction",
-      "effect_class": "external_state_mutation",
-      "determinism_class": "partially_deterministic",
-      "idempotence_class": "non_idempotent",
-      "risk_class": "medium",
-      "input": {
-        "statements": "array (required) — [{sql: string, params?: array}]"
+      "description": "Execute multiple statements atomically within a transaction via the postgres port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
       },
-      "output": {
-        "committed": "boolean",
-        "results": "array of per-statement results"
-      }
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "update",
+          "target_resource": null,
+          "description": "execute multiple statements atomically within a transaction",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "execute multiple statements atomically within a transaction completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "full_reversal",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 20,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "medium",
+      "determinism": "partially_deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "postgres",
+        "database",
+        "sql"
+      ],
+      "capability_requirements": [
+        "port:postgres/begin_transaction"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
       "skill_id": "soma.ports.postgres.commit",
+      "namespace": "soma.ports.postgres",
+      "pack": "soma.ports.postgres",
+      "kind": "primitive",
       "name": "commit",
-      "purpose": "Commit a transaction (provided for API completeness)",
-      "effect_class": "external_state_mutation",
-      "determinism_class": "deterministic",
-      "idempotence_class": "idempotent",
+      "description": "Commit a transaction (provided for API completeness) via the postgres port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "update",
+          "target_resource": null,
+          "description": "commit a transaction (provided for api completeness)",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "commit a transaction (provided for api completeness) completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 20,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
       "risk_class": "low",
-      "input": {},
-      "output": {
-        "committed": "boolean"
-      }
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "postgres",
+        "database",
+        "sql"
+      ],
+      "capability_requirements": [
+        "port:postgres/commit"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
       "skill_id": "soma.ports.postgres.rollback",
+      "namespace": "soma.ports.postgres",
+      "pack": "soma.ports.postgres",
+      "kind": "primitive",
       "name": "rollback",
-      "purpose": "Rollback a transaction (provided for API completeness)",
-      "effect_class": "none",
-      "determinism_class": "deterministic",
-      "idempotence_class": "idempotent",
+      "description": "Rollback a transaction (provided for API completeness) via the postgres port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "rollback a transaction (provided for api completeness) returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "full_reversal",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 20,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
       "risk_class": "negligible",
-      "input": {},
-      "output": {
-        "rolled_back": "boolean"
-      }
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "postgres",
+        "database",
+        "sql"
+      ],
+      "capability_requirements": [
+        "port:postgres/rollback"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     }
-  ]
+  ],
+  "port_dependencies": []
 }

@@ -41,4 +41,5 @@ package-lock.json
 # SOMA checkpoints
 soma-helperbook/checkpoints/
 soma-next/target/
+soma-next/data/
 soma-ports/target/

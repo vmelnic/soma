@@ -100,19 +100,35 @@ impl EpisodeMemory for EmptyEpisodeMemory {
 /// after session completion.
 pub struct EpisodeMemoryAdapter {
     store: Arc<Mutex<dyn EpisodeStore + Send>>,
+    embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>,
 }
 
 impl EpisodeMemoryAdapter {
-    pub fn new(store: Arc<Mutex<dyn EpisodeStore + Send>>) -> Self {
-        Self { store }
+    pub fn new(
+        store: Arc<Mutex<dyn EpisodeStore + Send>>,
+        embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>,
+    ) -> Self {
+        Self { store, embedder }
     }
 
     /// Store a completed episode. Called by the CLI after a session finishes.
-    pub fn store(&self, episode: Episode) -> Result<()> {
+    /// If the store is at capacity, the evicted episode is logged at debug level.
+    /// Computes the embedding before storing if the episode lacks one.
+    pub fn store(&self, mut episode: Episode) -> Result<()> {
+        if episode.embedding.is_none() {
+            episode.embedding = Some(self.embedder.embed(&episode.goal_fingerprint));
+        }
         let mut s = self.store.lock().map_err(|e| {
             SomaError::Memory(format!("episode store lock poisoned: {}", e))
         })?;
-        s.store(episode)
+        if let Some(evicted) = s.store(episode)? {
+            tracing::debug!(
+                episode_id = %evicted.episode_id,
+                goal = %evicted.goal_fingerprint,
+                "evicted episode from ring buffer"
+            );
+        }
+        Ok(())
     }
 }
 
@@ -127,6 +143,15 @@ impl EpisodeMemory for EpisodeMemoryAdapter {
             Ok(s) => s,
             Err(_) => return vec![],
         };
+
+        // Try embedding-based retrieval first.
+        let embedding = self.embedder.embed(&goal.objective.description);
+        let by_embedding = s.retrieve_by_embedding(&embedding, 0.7, limit);
+        if !by_embedding.is_empty() {
+            return by_embedding.into_iter().cloned().collect();
+        }
+
+        // Fallback to prefix matching.
         s.retrieve_nearest(&goal.objective.description, limit)
             .into_iter()
             .cloned()
@@ -252,9 +277,39 @@ impl SkillRegistry for SkillRegistryAdapter {
         &self,
         _goal: &GoalSpec,
         _belief: &BeliefState,
-        _schemas: &[Schema],
-        _routines: &[Routine],
+        schemas: &[Schema],
+        routines: &[Routine],
     ) -> Vec<SkillSpec> {
+        // If a routine matches and has a compiled skill path, narrow
+        // candidates to just those skills (plan-following mode).
+        if let Some(routine) = routines.iter().find(|r| !r.compiled_skill_path.is_empty()) {
+            let narrowed: Vec<SkillSpec> = routine
+                .compiled_skill_path
+                .iter()
+                .filter_map(|sid| self.skills.iter().find(|s| s.skill_id == *sid))
+                .cloned()
+                .collect();
+            if !narrowed.is_empty() {
+                return narrowed;
+            }
+            // If none of the routine's skill IDs could be resolved, fall through.
+        }
+
+        // If a schema matches but no routine, narrow to the schema's
+        // candidate_skill_ordering.
+        if let Some(schema) = schemas.iter().find(|s| !s.candidate_skill_ordering.is_empty()) {
+            let narrowed: Vec<SkillSpec> = schema
+                .candidate_skill_ordering
+                .iter()
+                .filter_map(|sid| self.skills.iter().find(|s| s.skill_id == *sid))
+                .cloned()
+                .collect();
+            if !narrowed.is_empty() {
+                return narrowed;
+            }
+        }
+
+        // Fallback: return all skills for full deliberation.
         self.skills.clone()
     }
 
@@ -859,26 +914,30 @@ impl PolicyEngine for PolicyEngineAdapter {
                 Self::warn_write_operations(skill);
             }
             PolicyHook::BeforeExecutionBegins => {
-                // Final gate: run the full rule evaluation.
-                let context = Self::build_context(skill, session);
-                match self.inner.check_skill(&skill.skill_id, &context) {
-                    Ok(decision) if !decision.allowed => {
-                        return PolicyCheckResult {
-                            allowed: false,
-                            reason: decision.reason,
-                            blocked_by_policy: true,
-                            waiting_for_input: None,
-                        };
+                // Read-only skills skip rule evaluation — the wildcard
+                // RequireConfirmation rule is only meant for destructive ops.
+                let side_effect = Self::derive_side_effect_class(skill);
+                if !matches!(side_effect, SideEffectClass::None | SideEffectClass::ReadOnly) {
+                    let context = Self::build_context(skill, session);
+                    match self.inner.check_skill(&skill.skill_id, &context) {
+                        Ok(decision) if !decision.allowed => {
+                            return PolicyCheckResult {
+                                allowed: false,
+                                reason: decision.reason,
+                                blocked_by_policy: true,
+                                waiting_for_input: None,
+                            };
+                        }
+                        Err(e) => {
+                            return PolicyCheckResult {
+                                allowed: false,
+                                reason: format!("policy evaluation error: {}", e),
+                                blocked_by_policy: true,
+                                waiting_for_input: None,
+                            };
+                        }
+                        _ => {}
                     }
-                    Err(e) => {
-                        return PolicyCheckResult {
-                            allowed: false,
-                            reason: format!("policy evaluation error: {}", e),
-                            blocked_by_policy: true,
-                            waiting_for_input: None,
-                        };
-                    }
-                    _ => {}
                 }
             }
             PolicyHook::BeforeDelegation => {
@@ -1215,6 +1274,8 @@ mod tests {
                 current_branch_state: None,
                 budget_deltas: vec![],
                 output_bindings: vec![],
+                active_plan: None,
+                plan_step: 0,
             },
             status: SessionStatus::Created,
             trace: SessionTrace { steps: vec![] },
@@ -1337,7 +1398,8 @@ mod tests {
         use crate::types::episode::{Episode, EpisodeOutcome};
 
         let store: Arc<Mutex<dyn EpisodeStore + Send>> = Arc::new(Mutex::new(DefaultEpisodeStore::new()));
-        let adapter = EpisodeMemoryAdapter::new(Arc::clone(&store));
+        let embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync> = Arc::new(crate::memory::embedder::HashEmbedder::new());
+        let adapter = EpisodeMemoryAdapter::new(Arc::clone(&store), embedder);
 
         let episode = Episode {
             episode_id: Uuid::new_v4(),

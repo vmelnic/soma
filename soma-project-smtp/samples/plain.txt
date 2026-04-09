@@ -1,0 +1,2 @@
+Hello from soma-project-smtp.
+This is the plain-text smoke test body.

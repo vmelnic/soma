@@ -1,0 +1,557 @@
+{
+  "id": "helperbook.redis",
+  "name": "HelperBook Redis",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "helperbook.redis",
+  "description": "Redis port for HelperBook",
+  "capabilities": [
+    {
+      "group_name": "database",
+      "scope": "local",
+      "capabilities": [
+        "get",
+        "set",
+        "del",
+        "hget",
+        "hset",
+        "hdel",
+        "hgetall",
+        "lpush",
+        "lpop",
+        "lrange",
+        "publish",
+        "subscribe",
+        "keys"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
+  },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "get"
+    ],
+    "expected_latency_classes": [
+      "fast"
+    ],
+    "expected_failure_modes": [
+      "dependency_unavailable",
+      "external_error"
+    ],
+    "trace_categories": [
+      "database"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "redis"
+  ],
+  "ports": [
+    {
+      "port_id": "redis",
+      "name": "redis",
+      "version": "0.1.0",
+      "kind": "database",
+      "description": "Redis key-value store: strings, hashes, lists, pub/sub",
+      "namespace": "helperbook.redis",
+      "trust_level": "verified",
+      "capabilities": [
+        {
+          "capability_id": "get",
+          "name": "get",
+          "purpose": "Get string value by key",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        },
+        {
+          "capability_id": "set",
+          "name": "set",
+          "purpose": "Set string value with optional TTL",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        },
+        {
+          "capability_id": "del",
+          "name": "del",
+          "purpose": "Delete a key",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        },
+        {
+          "capability_id": "hget",
+          "name": "hget",
+          "purpose": "Get a hash field value",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        },
+        {
+          "capability_id": "hset",
+          "name": "hset",
+          "purpose": "Set a hash field value",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        },
+        {
+          "capability_id": "hdel",
+          "name": "hdel",
+          "purpose": "Delete a hash field",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        },
+        {
+          "capability_id": "hgetall",
+          "name": "hgetall",
+          "purpose": "Get all hash fields and values",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        },
+        {
+          "capability_id": "lpush",
+          "name": "lpush",
+          "purpose": "Push value to head of list",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        },
+        {
+          "capability_id": "lpop",
+          "name": "lpop",
+          "purpose": "Pop value from head of list",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        },
+        {
+          "capability_id": "lrange",
+          "name": "lrange",
+          "purpose": "Get a range of elements from a list",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        },
+        {
+          "capability_id": "publish",
+          "name": "publish",
+          "purpose": "Publish a message to a channel",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        },
+        {
+          "capability_id": "subscribe",
+          "name": "subscribe",
+          "purpose": "Subscribe to a channel (streaming, not yet supported)",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        },
+        {
+          "capability_id": "keys",
+          "name": "keys",
+          "purpose": "Find keys matching a glob pattern",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 100
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": true
+        }
+      ],
+      "input_schema": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "output_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "failure_modes": [
+        "dependency_unavailable",
+        "timeout",
+        "external_error",
+        "validation_error"
+      ],
+      "side_effect_class": "external_state_mutation",
+      "latency_profile": {
+        "expected_latency_ms": 1,
+        "p95_latency_ms": 10,
+        "max_latency_ms": 500
+      },
+      "cost_profile": {
+        "cpu_cost_class": "low",
+        "memory_cost_class": "low",
+        "io_cost_class": "low",
+        "network_cost_class": "low",
+        "energy_cost_class": "negligible"
+      },
+      "auth_requirements": {
+        "methods": [],
+        "required": false
+      },
+      "sandbox_requirements": {
+        "filesystem_access": false,
+        "network_access": true,
+        "device_access": false,
+        "process_access": false,
+        "memory_limit_mb": null,
+        "cpu_limit_percent": null,
+        "time_limit_ms": null,
+        "syscall_limit": null
+      },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
+  "skills": [],
+  "port_dependencies": []
+}

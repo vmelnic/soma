@@ -1,30 +1,520 @@
 {
-  "id": "soma.ports.smtp",
-  "name": "SMTP",
+  "id": "soma.smtp",
+  "name": "smtp",
   "version": "0.1.0",
   "runtime_compatibility": ">=0.1.0",
-  "namespace": "soma.ports.smtp",
+  "namespace": "soma.smtp",
   "description": "SMTP email delivery: plain text, HTML, and attachments via lettre",
-  "port": {
-    "port_id": "smtp",
-    "kind": "messaging",
-    "trust_level": "verified"
+  "capabilities": [
+    {
+      "group_name": "messaging",
+      "scope": "local",
+      "capabilities": [
+        "send_plain",
+        "send_html",
+        "send_attachment"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
   },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "send_plain",
+      "send_html",
+      "send_attachment"
+    ],
+    "expected_latency_classes": [
+      "medium",
+      "slow"
+    ],
+    "expected_failure_modes": [
+      "validation_error",
+      "external_error",
+      "transport_error",
+      "timeout",
+      "dependency_unavailable"
+    ],
+    "trace_categories": [
+      "messaging"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "smtp",
+    "email",
+    "messaging"
+  ],
+  "ports": [
+    {
+      "port_id": "smtp",
+      "name": "smtp",
+      "version": "0.1.0",
+      "kind": "messaging",
+      "description": "SMTP email delivery: plain text, HTML, and attachments via lettre",
+      "namespace": "soma.smtp",
+      "trust_level": "verified",
+      "capabilities": [
+        {
+          "capability_id": "send_plain",
+          "name": "send_plain",
+          "purpose": "Send a plain-text email to a recipient",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 500,
+            "p95_latency_ms": 5000,
+            "max_latency_ms": 10000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "send_html",
+          "name": "send_html",
+          "purpose": "Send an HTML email to a recipient",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 500,
+            "p95_latency_ms": 5000,
+            "max_latency_ms": 10000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "send_attachment",
+          "name": "send_attachment",
+          "purpose": "Send an email with a binary attachment",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 1000,
+            "p95_latency_ms": 10000,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "medium",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "output_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "failure_modes": [
+        "validation_error",
+        "external_error",
+        "transport_error",
+        "timeout",
+        "dependency_unavailable"
+      ],
+      "side_effect_class": "external_state_mutation",
+      "latency_profile": {
+        "expected_latency_ms": 500,
+        "p95_latency_ms": 5000,
+        "max_latency_ms": 30000
+      },
+      "cost_profile": {
+        "cpu_cost_class": "negligible",
+        "memory_cost_class": "negligible",
+        "io_cost_class": "negligible",
+        "network_cost_class": "medium",
+        "energy_cost_class": "negligible"
+      },
+      "auth_requirements": {
+        "methods": [
+          "api_key"
+        ],
+        "required": true
+      },
+      "sandbox_requirements": {
+        "filesystem_access": false,
+        "network_access": true,
+        "device_access": false,
+        "process_access": false,
+        "memory_limit_mb": null,
+        "cpu_limit_percent": null,
+        "time_limit_ms": null,
+        "syscall_limit": null
+      },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
   "skills": [
     {
-      "id": "soma.ports.smtp.send_plain",
-      "name": "Send Plain",
-      "description": "Send a plain-text email to a recipient"
+      "skill_id": "soma.smtp.send_plain",
+      "namespace": "soma.smtp",
+      "pack": "soma.smtp",
+      "kind": "primitive",
+      "name": "send_plain",
+      "description": "Send a plain-text email to a recipient via the smtp port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "send a plain-text email to a recipient",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "send a plain-text email to a recipient completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 500,
+          "p95_latency_ms": 5000,
+          "max_latency_ms": 10000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "smtp",
+        "email",
+        "messaging"
+      ],
+      "capability_requirements": [
+        "port:smtp/send_plain"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.smtp.send_html",
-      "name": "Send HTML",
-      "description": "Send an HTML email to a recipient"
+      "skill_id": "soma.smtp.send_html",
+      "namespace": "soma.smtp",
+      "pack": "soma.smtp",
+      "kind": "primitive",
+      "name": "send_html",
+      "description": "Send an HTML email to a recipient via the smtp port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "send an html email to a recipient",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "send an html email to a recipient completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 500,
+          "p95_latency_ms": 5000,
+          "max_latency_ms": 10000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "smtp",
+        "email",
+        "messaging"
+      ],
+      "capability_requirements": [
+        "port:smtp/send_html"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     },
     {
-      "id": "soma.ports.smtp.send_attachment",
-      "name": "Send Attachment",
-      "description": "Send an email with a binary attachment"
+      "skill_id": "soma.smtp.send_attachment",
+      "namespace": "soma.smtp",
+      "pack": "soma.smtp",
+      "kind": "primitive",
+      "name": "send_attachment",
+      "description": "Send an email with a binary attachment via the smtp port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "send an email with a binary attachment",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "send an email with a binary attachment completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1000,
+          "p95_latency_ms": 10000,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "medium",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "stochastic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "smtp",
+        "email",
+        "messaging"
+      ],
+      "capability_requirements": [
+        "port:smtp/send_attachment"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
     }
-  ]
+  ],
+  "port_dependencies": []
 }

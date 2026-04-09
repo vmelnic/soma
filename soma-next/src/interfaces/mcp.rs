@@ -89,6 +89,7 @@ pub struct RuntimeHandle {
     pub episode_store: Arc<Mutex<dyn EpisodeStore + Send>>,
     pub schema_store: Arc<Mutex<dyn SchemaStore + Send>>,
     pub routine_store: Arc<Mutex<dyn RoutineStore + Send>>,
+    pub embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>,
     pub start_time: Instant,
 }
 
@@ -106,6 +107,7 @@ impl RuntimeHandle {
             episode_store: runtime.episode_store,
             schema_store: runtime.schema_store,
             routine_store: runtime.routine_store,
+            embedder: runtime.embedder,
             start_time: runtime.start_time,
         }
     }
@@ -181,6 +183,8 @@ impl McpServer {
             "query_metrics" => self.handle_query_metrics(request.id, request.params),
             "query_policy" => self.handle_query_policy(request.id, request.params),
             "dump_state" => self.handle_dump_state(request.id, request.params),
+            "invoke_port" => self.handle_invoke_port(request.id, request.params),
+            "list_ports" => self.handle_list_ports(request.id, request.params),
 
             _ => Ok(Self::error_response(
                 request.id,
@@ -255,6 +259,8 @@ impl McpServer {
             "query_metrics" => self.handle_query_metrics(id, arguments),
             "query_policy" => self.handle_query_policy(id, arguments),
             "dump_state" => self.handle_dump_state(id, arguments),
+            "invoke_port" => self.handle_invoke_port(id, arguments),
+            "list_ports" => self.handle_list_ports(id, arguments),
             _ => Ok(Self::error_response(
                 id,
                 METHOD_NOT_FOUND,
@@ -419,6 +425,34 @@ impl McpServer {
                     result_data = serde_json::json!({ "error": e.to_string() });
                     break;
                 }
+            }
+        }
+
+        // Store episode and attempt learning if the session reached a terminal state.
+        let is_terminal = matches!(
+            final_status.as_str(),
+            "completed" | "failed" | "aborted" | "error"
+        );
+        if is_terminal {
+            let episode = crate::interfaces::cli::build_episode_from_session(
+                &session,
+                Some(&*rt.embedder),
+            );
+            let fingerprint = episode.goal_fingerprint.clone();
+            let adapter = crate::adapters::EpisodeMemoryAdapter::new(
+                Arc::clone(&rt.episode_store),
+                Arc::clone(&rt.embedder),
+            );
+            if let Err(e) = adapter.store(episode) {
+                tracing::warn!(error = %e, "failed to store episode from MCP goal");
+            } else {
+                crate::interfaces::cli::attempt_learning(
+                    &rt.episode_store,
+                    &rt.schema_store,
+                    &rt.routine_store,
+                    &fingerprint,
+                    &*rt.embedder,
+                );
             }
         }
 
@@ -1303,6 +1337,128 @@ impl McpServer {
     }
 
     // -----------------------------------------------------------------------
+    // Port invocation and discovery
+    // -----------------------------------------------------------------------
+
+    fn handle_invoke_port(&self, id: Value, params: Option<Value>) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: port_id, capability_id, input".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let port_id = match params.get("port_id").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "port_id must be a non-empty string".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let capability_id = match params.get("capability_id").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "capability_id must be a non-empty string".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let input = params
+            .get("input")
+            .cloned()
+            .unwrap_or(serde_json::json!({}));
+
+        if let Some(rt) = &self.runtime {
+            let ctx = crate::types::port::InvocationContext {
+                caller_identity: Some("mcp".to_string()),
+                ..Default::default()
+            };
+
+            let port_rt = rt.port_runtime.lock().unwrap();
+            match port_rt.invoke(&port_id, &capability_id, input, &ctx) {
+                Ok(record) => {
+                    let record_json = serde_json::to_value(&record).unwrap_or_default();
+                    Ok(Self::success_response(id, record_json))
+                }
+                Err(e) => Ok(Self::error_response(
+                    id,
+                    INTERNAL_ERROR,
+                    format!("port invocation failed: {e}"),
+                    None,
+                )),
+            }
+        } else {
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({
+                    "port_id": port_id,
+                    "capability_id": capability_id,
+                    "success": false,
+                    "raw_result": null,
+                    "structured_result": null,
+                    "failure_class": "DependencyUnavailable",
+                    "latency_ms": 0
+                }),
+            ))
+        }
+    }
+
+    fn handle_list_ports(&self, id: Value, params: Option<Value>) -> Result<McpResponse> {
+        let namespace = params
+            .as_ref()
+            .and_then(|p| p.get("namespace"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
+        if let Some(rt) = &self.runtime {
+            let port_rt = rt.port_runtime.lock().unwrap();
+            let ports = port_rt.list_ports(namespace.as_deref());
+            let port_json: Vec<Value> = ports
+                .iter()
+                .map(|p| {
+                    serde_json::json!({
+                        "port_id": p.port_id,
+                        "name": p.name,
+                        "namespace": p.namespace,
+                        "kind": format!("{:?}", p.kind),
+                        "capabilities": p.capabilities.iter().map(|c| {
+                            serde_json::json!({
+                                "capability_id": c.capability_id,
+                                "name": c.name,
+                                "purpose": &c.purpose,
+                                "effect_class": format!("{:?}", c.effect_class),
+                                "risk_class": format!("{:?}", c.risk_class),
+                                "input_schema": c.input_schema,
+                                "output_schema": c.output_schema,
+                            })
+                        }).collect::<Vec<_>>(),
+                    })
+                })
+                .collect();
+            Ok(Self::success_response(id, serde_json::json!({ "ports": port_json })))
+        } else {
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({ "ports": [] }),
+            ))
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
@@ -1586,6 +1742,41 @@ impl McpServer {
                     }
                 }),
             },
+            McpTool {
+                name: "invoke_port".to_string(),
+                description: "Invoke a capability on a loaded port. Returns a PortCallRecord with the result, latency, success status, and tracing metadata.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "port_id": {
+                            "type": "string",
+                            "description": "The port identifier (e.g. \"smtp\", \"postgres\", \"s3\")"
+                        },
+                        "capability_id": {
+                            "type": "string",
+                            "description": "The capability to invoke (e.g. \"send_plain\", \"query\", \"put_object\")"
+                        },
+                        "input": {
+                            "type": "object",
+                            "description": "Input payload for the capability"
+                        }
+                    },
+                    "required": ["port_id", "capability_id"]
+                }),
+            },
+            McpTool {
+                name: "list_ports".to_string(),
+                description: "List all loaded ports and their capabilities. Use this to discover available ports before invoking them.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "namespace": {
+                            "type": "string",
+                            "description": "Optional namespace filter"
+                        }
+                    }
+                }),
+            },
         ]
     }
 }
@@ -1623,7 +1814,7 @@ mod tests {
     fn test_list_tools_count() {
         let server = McpServer::new_stub();
         let tools = server.list_tools();
-        assert_eq!(tools.len(), 14);
+        assert_eq!(tools.len(), 16);
     }
 
     #[test]
@@ -1644,6 +1835,8 @@ mod tests {
         assert!(names.contains(&"query_metrics".to_string()));
         assert!(names.contains(&"query_policy".to_string()));
         assert!(names.contains(&"dump_state".to_string()));
+        assert!(names.contains(&"invoke_port".to_string()));
+        assert!(names.contains(&"list_ports".to_string()));
     }
 
     #[test]
@@ -2010,7 +2203,7 @@ mod tests {
     #[test]
     fn test_default_impl() {
         let server = McpServer::default();
-        assert_eq!(server.list_tools().len(), 14);
+        assert_eq!(server.list_tools().len(), 16);
     }
 
     /// Build a real RuntimeHandle from a bootstrapped runtime (no packs).
@@ -2198,5 +2391,136 @@ mod tests {
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert!(result["sessions"].is_array());
+    }
+
+    #[test]
+    fn test_invoke_port_stub() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "invoke_port",
+            Some(serde_json::json!({
+                "port_id": "smtp",
+                "capability_id": "send_plain",
+                "input": { "to": "test@example.com", "subject": "test", "body": "hello" }
+            })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["port_id"], "smtp");
+        assert_eq!(result["capability_id"], "send_plain");
+        assert_eq!(result["success"], false);
+    }
+
+    #[test]
+    fn test_invoke_port_missing_port_id() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "invoke_port",
+            Some(serde_json::json!({ "capability_id": "send_plain" })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_invoke_port_missing_capability_id() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "invoke_port",
+            Some(serde_json::json!({ "port_id": "smtp" })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_invoke_port_no_params() {
+        let server = McpServer::new_stub();
+        let req = make_request("invoke_port", None);
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_list_ports_stub() {
+        let server = McpServer::new_stub();
+        let req = make_request("list_ports", None);
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert!(result["ports"].is_array());
+    }
+
+    #[test]
+    fn test_invoke_port_via_tools_call() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "invoke_port",
+                "arguments": {
+                    "port_id": "smtp",
+                    "capability_id": "send_plain",
+                    "input": { "to": "test@example.com" }
+                }
+            })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["port_id"], "smtp");
+    }
+
+    #[test]
+    fn test_list_ports_via_tools_call() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "list_ports",
+                "arguments": {}
+            })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert!(result["ports"].is_array());
+    }
+
+    #[test]
+    fn test_wired_invoke_port_on_filesystem() {
+        let config = crate::config::SomaConfig::default();
+        let runtime = crate::bootstrap::bootstrap(&config, &[]).unwrap();
+        let handle = RuntimeHandle::from_runtime(runtime);
+        let server = McpServer::new(handle);
+        let req = make_request(
+            "invoke_port",
+            Some(serde_json::json!({
+                "port_id": "nonexistent",
+                "capability_id": "read",
+                "input": {}
+            })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["success"], false);
+    }
+
+    #[test]
+    fn test_wired_list_ports_empty() {
+        let config = crate::config::SomaConfig::default();
+        let runtime = crate::bootstrap::bootstrap(&config, &[]).unwrap();
+        let handle = RuntimeHandle::from_runtime(runtime);
+        let server = McpServer::new(handle);
+        let req = make_request("list_ports", None);
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert!(result["ports"].is_array());
     }
 }

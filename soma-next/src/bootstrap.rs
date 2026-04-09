@@ -54,6 +54,8 @@ pub struct Runtime {
     pub pack_specs: Vec<PackSpec>,
     /// Shared metrics collector, threaded through to subsystems.
     pub metrics: Arc<RuntimeMetrics>,
+    /// Goal embedder used for embedding-based episode retrieval and schema induction.
+    pub embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>,
     /// Instant when the runtime was created, used for uptime and CPU tracking.
     pub start_time: Instant,
 }
@@ -176,9 +178,13 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
         )
     };
 
+    let embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync> = Arc::new(
+        crate::memory::embedder::HashEmbedder::new(),
+    );
+
     let skill_registry = SkillRegistryAdapter::new(&skill_runtime);
     let skill_executor = PortBackedSkillExecutor::new(Arc::clone(&port_runtime));
-    let episode_memory = EpisodeMemoryAdapter::new(Arc::clone(&episode_store));
+    let episode_memory = EpisodeMemoryAdapter::new(Arc::clone(&episode_store), Arc::clone(&embedder));
     let schema_memory = SchemaMemoryAdapter::new(Arc::clone(&schema_store));
     let routine_memory = RoutineMemoryAdapter::new(Arc::clone(&routine_store));
 
@@ -231,6 +237,7 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
         routine_store,
         pack_specs,
         metrics,
+        embedder,
         start_time: Instant::now(),
     })
 }
@@ -323,9 +330,13 @@ pub fn bootstrap_with_remote(
         )
     };
 
+    let embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync> = Arc::new(
+        crate::memory::embedder::HashEmbedder::new(),
+    );
+
     let skill_registry = SkillRegistryAdapter::new(&skill_runtime);
     let skill_executor = PortBackedSkillExecutor::new(Arc::clone(&port_runtime));
-    let episode_memory = EpisodeMemoryAdapter::new(Arc::clone(&episode_store));
+    let episode_memory = EpisodeMemoryAdapter::new(Arc::clone(&episode_store), Arc::clone(&embedder));
     let schema_memory = SchemaMemoryAdapter::new(Arc::clone(&schema_store));
     let routine_memory = RoutineMemoryAdapter::new(Arc::clone(&routine_store));
 
@@ -376,6 +387,7 @@ pub fn bootstrap_with_remote(
         routine_store,
         pack_specs,
         metrics,
+        embedder,
         start_time: Instant::now(),
     })
 }

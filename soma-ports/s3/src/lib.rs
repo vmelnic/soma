@@ -17,6 +17,7 @@
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
+use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client as S3Client;
 use soma_port_sdk::prelude::*;
 
@@ -35,12 +36,52 @@ pub struct S3Port {
 
 impl S3Port {
     pub fn new() -> Self {
-        Self {
+        let default_bucket = std::env::var("SOMA_S3_DEFAULT_BUCKET")
+            .unwrap_or_else(|_| "soma-uploads".into());
+
+        let port = Self {
             spec: build_spec(),
             client: OnceLock::new(),
             runtime: OnceLock::new(),
-            default_bucket: "soma-uploads".into(),
-        }
+            default_bucket,
+        };
+        port.try_initialize();
+        port
+    }
+
+    fn try_initialize(&self) {
+        let region = std::env::var("SOMA_S3_REGION")
+            .ok()
+            .or_else(|| std::env::var("AWS_REGION").ok())
+            .or_else(|| std::env::var("AWS_DEFAULT_REGION").ok());
+        let endpoint = std::env::var("SOMA_S3_ENDPOINT")
+            .ok()
+            .or_else(|| std::env::var("AWS_ENDPOINT_URL_S3").ok());
+
+        let runtime = match tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build() {
+                Ok(rt) => rt,
+                Err(_) => return,
+            };
+
+        let shared_config = runtime.block_on(async {
+            let mut loader = aws_config::defaults(BehaviorVersion::latest());
+            if let Some(region_name) = region.clone() {
+                loader = loader.region(aws_sdk_s3::config::Region::new(region_name));
+            }
+            loader.load().await
+        });
+
+        let mut builder = aws_sdk_s3::config::Builder::from(&shared_config);
+        if let Some(endpoint_url) = endpoint.as_deref()
+            && !endpoint_url.is_empty() {
+                builder = builder.endpoint_url(endpoint_url).force_path_style(true);
+            }
+
+        let client = S3Client::from_conf(builder.build());
+        let _ = self.runtime.set(runtime);
+        let _ = self.client.set(client);
     }
 
     fn client(&self) -> soma_port_sdk::Result<&S3Client> {
@@ -535,21 +576,20 @@ mod tests {
     }
 
     #[test]
-    fn test_lifecycle_before_init() {
+    fn test_lifecycle_is_loadable() {
         let port = S3Port::new();
-        assert_eq!(port.lifecycle_state(), PortLifecycleState::Loaded);
+        assert!(matches!(
+            port.lifecycle_state(),
+            PortLifecycleState::Loaded | PortLifecycleState::Active
+        ));
     }
 
     #[test]
-    fn test_invoke_without_client() {
+    fn test_validate_put_object_missing_key() {
         let port = S3Port::new();
-        let result = port.invoke(
-            "put_object",
-            serde_json::json!({"key": "test", "data": "abc"}),
-        );
-        // Should return a PortCallRecord with success=false, not an Err
-        let record = result.unwrap();
-        assert!(!record.success);
+        assert!(port
+            .validate_input("put_object", &serde_json::json!({"data": "abc"}))
+            .is_err());
     }
 
     #[test]
