@@ -1662,6 +1662,7 @@ tls_key = "/tmp/key.pem"
 
     #[test]
     fn tls_executor_ok_without_ca() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let tls = TlsConfig {
             cert_path: String::new(),
             key_path: String::new(),
