@@ -1,0 +1,14 @@
+[package]
+name = "soma-esp32-port-adc"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "soma_esp32_port_adc"
+crate-type = ["rlib"]
+
+[dependencies]
+soma-esp32-leaf = { path = "../../leaf" }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+esp-hal = { version = "0.23" }
+nb = "1"

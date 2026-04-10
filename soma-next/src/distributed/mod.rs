@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod chunked;
 pub mod delegation;
+pub mod discovery;
 pub mod heartbeat;
 pub mod peer;
 pub mod queue;

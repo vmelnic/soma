@@ -1,0 +1,17 @@
+[package]
+name = "soma-project-multistep"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "prove-multistep"
+path = "src/main.rs"
+
+[dependencies]
+soma-next = { path = "../soma-next" }
+soma-port-sdk = { path = "../soma-ports/sdk" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+semver = { version = "1", features = ["serde"] }

@@ -1,0 +1,21 @@
+[package]
+name = "soma-esp32-port-i2c"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "soma_esp32_port_i2c"
+crate-type = ["rlib"]
+
+# Chip-agnostic by design. The port takes any type implementing
+# `embedded_hal::i2c::I2c` in its constructor, so the firmware can hand
+# it either a raw esp-hal `I2c<'d, Blocking>` (when the display port is
+# off) or an `embedded_hal_bus::i2c::RefCellDevice` (when multiple
+# consumers need to share the same bus). esp-hal 0.23 is NOT a direct
+# dependency here — it used to be, but removing the dep decouples the
+# port from any specific chip crate and simplifies the shared-bus story.
+
+[dependencies]
+soma-esp32-leaf = { path = "../../leaf" }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+embedded-hal = "1.0"

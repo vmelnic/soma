@@ -1,0 +1,64 @@
+[workspace]
+resolver = "2"
+members = [
+    "leaf",
+    "ports/gpio",
+    "ports/delay",
+    "ports/i2c",
+    "ports/spi",
+    "ports/adc",
+    "ports/pwm",
+    "ports/uart",
+    "ports/wifi",
+    "ports/storage",
+    "ports/thermistor",
+    "ports/board",
+    "ports/display",
+    "firmware",
+]
+
+exclude = [
+    # Vendored upstream — built via [patch.crates-io] below, not as a
+    # workspace member, so its lints/clippy/tests don't run with ours.
+    "vendor/esp-alloc",
+]
+
+# Replace upstream esp-alloc 0.6.0 with our vendored fork. The fork adds a
+# zero-sized-allocation guard to GlobalAlloc::alloc and GlobalAlloc::dealloc:
+# upstream returns null for layout.size() == 0, which the Rust standard
+# library interprets as allocation failure and panics. esp-wifi 0.12's
+# background tasks call alloc() with a zero-sized layout shortly after wifi
+# init, so the dispatch loop dies within ~10 ms of boot on stock esp-alloc.
+# The patched version returns a properly-aligned dangling pointer (matching
+# what alloc::alloc::Global::alloc does for zero-sized requests).
+#
+# Affects every dep that pulls in esp-alloc — most importantly esp-wifi 0.12.
+# When esp-hal/esp-wifi/esp-alloc are upgraded to a coherent newer set
+# (esp-alloc 0.8+ has the fix upstream), this patch can be removed.
+[patch.crates-io]
+esp-alloc = { path = "vendor/esp-alloc" }
+
+[profile.release]
+codegen-units = 1
+debug = 2
+debug-assertions = false
+incremental = false
+lto = "fat"
+opt-level = "s"
+overflow-checks = false
+
+# "release-nolto" — release profile with LTO disabled. Used for debugging
+# panics where the LTO-merged backtrace attributes source lines to the
+# wrong call sites. Not a default build; select with:
+#   cargo build --profile release-nolto
+[profile.release-nolto]
+inherits = "release"
+lto = false
+codegen-units = 16
+
+# esp-storage's flash write loops are timing-sensitive on the original
+# ESP32 (Xtensa LX6) — its build script refuses opt-level "s". Override
+# the package-level optimization so it always builds at opt-level 3, even
+# when the rest of the workspace stays at "s" for size.
+[profile.release.package.esp-storage]
+opt-level = 3

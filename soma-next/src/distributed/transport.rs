@@ -76,6 +76,15 @@ pub enum TransportMessage {
     Ping {
         nonce: u64,
     },
+    /// Query a peer for its full capability inventory (primitives + routines).
+    /// The receiver responds with `Capabilities`. Used by the brain to
+    /// discover what a leaf or peer can do without invoking it.
+    ListCapabilities,
+    /// Remove a previously transferred routine from a peer by ID.
+    /// The receiver responds with `RoutineRemoved`.
+    RemoveRoutine {
+        routine_id: String,
+    },
 }
 
 /// Envelope for all responses on the wire.
@@ -122,6 +131,53 @@ pub enum TransportResponse {
         nonce: u64,
         load: f64,
     },
+    /// Capability inventory of a peer. Returned in response to
+    /// `ListCapabilities`. The brain reads this to learn what skills the
+    /// peer provides — primitive ports the peer ships with, plus routines
+    /// previously transferred and stored on the peer.
+    Capabilities {
+        primitives: Vec<PeerCapability>,
+        routines: Vec<PeerRoutineSummary>,
+    },
+    /// Acknowledge that a transferred routine is now stored on the peer.
+    /// The receiver returns this in response to `TransferRoutine`. Newer
+    /// peers may return this instead of `RoutineOk` to provide more detail.
+    RoutineStored {
+        routine_id: String,
+        step_count: u32,
+    },
+    /// Acknowledge that a stored routine has been removed from the peer.
+    RoutineRemoved {
+        routine_id: String,
+    },
+}
+
+/// Description of one capability a peer provides. Mirrors the leaf's
+/// CapabilityDescriptor but lives in soma-next so the desktop runtime can
+/// reason about peer capabilities directly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerCapability {
+    pub skill_id: String,
+    pub description: String,
+    pub input_schema: String,
+    pub output_schema: String,
+    pub effect: PeerCapabilityEffect,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PeerCapabilityEffect {
+    ReadOnly,
+    StateMutation,
+    ExternalEffect,
+}
+
+/// Summary of one routine currently stored on a peer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerRoutineSummary {
+    pub routine_id: String,
+    pub description: String,
+    pub step_count: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -328,7 +384,15 @@ impl RemoteExecutor for TcpRemoteExecutor {
         let response = self.send_request(peer_id, &msg)?;
         Self::check_error(&response)?;
         match response {
-            TransportResponse::SkillResult { response } => Ok(response),
+            TransportResponse::SkillResult { mut response } => {
+                // Smaller peers (e.g. ESP32 leaf firmware) don't fill in
+                // peer_id on the wire. Patch it in post-receive so the
+                // returned record carries the caller-side peer ID.
+                if response.peer_id.is_empty() {
+                    response.peer_id = peer_id.to_string();
+                }
+                Ok(response)
+            }
             other => Err(SomaError::Distributed {
                 failure: DistributedFailure::TransportFailure,
                 details: format!("unexpected response type for invoke_skill: {:?}", other),
@@ -735,6 +799,51 @@ impl IncomingHandler for LocalDispatchHandler {
                 }
             }
             TransportMessage::Ping { nonce } => TransportResponse::Pong { nonce, load: 0.0 },
+            TransportMessage::ListCapabilities => {
+                // For now we report only stored routines because the
+                // SchemaStore/RoutineStore know about them. Primitive
+                // capabilities require pack-skill enumeration which is not
+                // yet wired into LocalDispatchHandler. Returning an empty
+                // primitives list keeps the wire compatible while leaving
+                // room for the runtime to populate it later.
+                let routines: Vec<PeerRoutineSummary> = if let Some(ref store) =
+                    self.routine_store
+                {
+                    store
+                        .lock()
+                        .unwrap()
+                        .list_all()
+                        .iter()
+                        .map(|r| PeerRoutineSummary {
+                            routine_id: r.routine_id.clone(),
+                            description: r.namespace.clone(),
+                            step_count: r.compiled_skill_path.len() as u32,
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                TransportResponse::Capabilities {
+                    primitives: Vec::new(),
+                    routines,
+                }
+            }
+            TransportMessage::RemoveRoutine { routine_id } => {
+                if let Some(ref store) = self.routine_store {
+                    match store.lock().unwrap().invalidate(&routine_id) {
+                        Ok(()) => TransportResponse::RoutineRemoved {
+                            routine_id: routine_id.clone(),
+                        },
+                        Err(e) => TransportResponse::Error {
+                            details: format!("failed to remove routine: {}", e),
+                        },
+                    }
+                } else {
+                    TransportResponse::RoutineRemoved {
+                        routine_id: routine_id.clone(),
+                    }
+                }
+            }
         }
     }
 }
@@ -1228,7 +1337,15 @@ impl RemoteExecutor for TlsTcpRemoteExecutor {
         let response = self.send_request(peer_id, &msg)?;
         Self::check_error(&response)?;
         match response {
-            TransportResponse::SkillResult { response } => Ok(response),
+            TransportResponse::SkillResult { mut response } => {
+                // Smaller peers (e.g. ESP32 leaf firmware) don't fill in
+                // peer_id on the wire. Patch it in post-receive so the
+                // returned record carries the caller-side peer ID.
+                if response.peer_id.is_empty() {
+                    response.peer_id = peer_id.to_string();
+                }
+                Ok(response)
+            }
             other => Err(SomaError::Distributed {
                 failure: DistributedFailure::TransportFailure,
                 details: format!("unexpected response type for invoke_skill: {:?}", other),
@@ -1389,6 +1506,13 @@ mod tests {
                 }
                 TransportMessage::Ping { nonce } => {
                     TransportResponse::Pong { nonce, load: 0.42 }
+                }
+                TransportMessage::ListCapabilities => TransportResponse::Capabilities {
+                    primitives: vec![],
+                    routines: vec![],
+                },
+                TransportMessage::RemoveRoutine { routine_id } => {
+                    TransportResponse::RoutineRemoved { routine_id }
                 }
             }
         }

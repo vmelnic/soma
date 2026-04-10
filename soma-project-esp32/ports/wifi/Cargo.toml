@@ -1,0 +1,24 @@
+[package]
+name = "soma-esp32-port-wifi"
+version = "0.1.0"
+edition = "2021"
+
+# WiFi configuration and status primitives.
+#
+# This crate is type-erased: it does NOT depend on esp-wifi directly. The
+# firmware constructs an implementation of WifiOps that wraps the actual
+# esp-wifi calls and passes it to WifiPort::new. The port stores the
+# WifiOps trait object and routes primitives through it.
+#
+# Why: keeps the port crate small and free of esp-wifi version churn.
+# WifiOps is a stable interface; esp-wifi internals change between
+# releases without affecting this crate.
+
+[lib]
+name = "soma_esp32_port_wifi"
+crate-type = ["rlib"]
+
+[dependencies]
+soma-esp32-leaf = { path = "../../leaf" }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }

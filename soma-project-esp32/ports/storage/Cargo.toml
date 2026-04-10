@@ -1,0 +1,19 @@
+[package]
+name = "soma-esp32-port-storage"
+version = "0.1.0"
+edition = "2021"
+
+# Persistent key-value storage primitives via NVS / SPI flash.
+#
+# Type-erased: depends on a KvStore trait the firmware implements with
+# esp-storage. Used by the wifi port to persist credentials, but also
+# usable for any other persistent state the brain wants to keep across
+# reboots (configuration, calibration, learned thresholds).
+
+[lib]
+name = "soma_esp32_port_storage"
+crate-type = ["rlib"]
+
+[dependencies]
+soma-esp32-leaf = { path = "../../leaf" }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }

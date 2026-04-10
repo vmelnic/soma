@@ -1,0 +1,18 @@
+[package]
+name = "soma-esp32-port-display"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "soma_esp32_port_display"
+crate-type = ["rlib"]
+
+# Chip-agnostic: the port crate knows nothing about esp-hal, ssd1306, or
+# embedded-graphics. The firmware builds closures that capture the real
+# driver state (Ssd1306 on top of a RefCellDevice on top of a shared
+# esp-hal I2c) and injects them via DisplayPort::new. Same pattern as
+# ports/adc, ports/pwm, ports/board.
+
+[dependencies]
+soma-esp32-leaf = { path = "../../leaf" }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }

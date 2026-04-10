@@ -54,16 +54,34 @@ pub struct RemoteGoalResponse {
 
 /// Response to a remote skill invocation, carrying the structured observation.
 /// Preserves audit traceability per distributed.md.
+///
+/// Deserialization is lenient on several fields so this struct can also
+/// accept responses from smaller peers (embedded leaf nodes like the ESP32
+/// firmware) that use a flatter wire format:
+///   - `peer_id` defaults to "" (the executor fills it in post-receive)
+///   - `observation` also accepts the legacy/leaf field name `structured_result`
+///   - `timestamp` defaults to `Utc::now()` at deserialize time
+///   - `trace_id` defaults to `Uuid::nil()`
+/// The ESP32 leaf additionally sends `failure_message` and `steps_executed`
+/// which serde silently ignores (no `deny_unknown_fields`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteSkillResponse {
     pub skill_id: String,
+    #[serde(default)]
     pub peer_id: String,
     pub success: bool,
+    #[serde(alias = "structured_result")]
     pub observation: serde_json::Value,
     pub latency_ms: u64,
+    #[serde(default = "default_remote_skill_timestamp")]
     pub timestamp: DateTime<Utc>,
     /// Trace ID for audit traceability.
+    #[serde(default)]
     pub trace_id: Uuid,
+}
+
+fn default_remote_skill_timestamp() -> DateTime<Utc> {
+    Utc::now()
 }
 
 /// Response to a remote resource query — includes snapshot or delta,

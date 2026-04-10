@@ -1,0 +1,148 @@
+[package]
+name = "soma-esp32-firmware"
+version = "0.1.0"
+edition = "2021"
+
+# L2 firmware: composes all 7 hardware port crates plus the thermistor sensor
+# example into a flashable ESP32-S3 binary.
+#
+# Build variants via cargo features:
+#
+#   cargo build --release
+#       -> default: gpio + delay + uart + i2c + spi + adc + pwm + thermistor
+#
+#   cargo build --release --no-default-features --features "gpio delay"
+#       -> minimal: only gpio + delay (smallest binary)
+#
+# Adding a new sensor/actuator crate is a 3-step recipe:
+#   1. Add the dep:    soma-esp32-port-foo = { path = "../ports/foo", optional = true }
+#   2. Add the feature: foo = ["dep:soma-esp32-port-foo"]
+#   3. Register in main.rs:
+#      #[cfg(feature = "foo")]
+#      composite.register(Box::new(soma_esp32_port_foo::FooPort::new(...)));
+#
+# No changes to leaf or other ports.
+
+[[bin]]
+name = "soma-esp32-firmware"
+path = "src/main.rs"
+
+[features]
+# Default = ESP32-S3 with all hardware ports, no wifi (the proven path).
+default = ["chip-esp32s3", "gpio", "delay", "uart", "i2c", "spi", "adc", "pwm", "storage", "thermistor", "board", "display"]
+
+# --- Chip selection (mutually exclusive — pick exactly one) -----------------
+#
+# These features fan out to every esp-* dep that needs to know which chip
+# you're targeting. The default is ESP32-S3 (the chip this firmware was
+# proven on). To target the original ESP32 (Xtensa LX6, e.g. WROOM-32D),
+# build with:
+#
+#   cargo +esp build --release --config firmware/chips/esp32.toml \
+#       --no-default-features \
+#       --features "chip-esp32 gpio delay uart i2c spi adc pwm storage thermistor" \
+#       -p soma-esp32-firmware
+#
+# Enabling both at once will fail to compile because esp-hal's chip features
+# are mutually exclusive at the dep level.
+chip-esp32 = [
+    "esp-hal/esp32",
+    "esp-backtrace/esp32",
+    "esp-println/esp32",
+    "esp-storage/esp32",
+    "xtensa-lx-rt/esp32",
+    # Optional chip feature on esp-wifi — only activates when the wifi
+    # cargo feature is also enabled (the `?` makes it conditional on the
+    # optional dep being present).
+    "esp-wifi?/esp32",
+]
+chip-esp32s3 = [
+    "esp-hal/esp32s3",
+    "esp-backtrace/esp32s3",
+    "esp-println/esp32s3",
+    "esp-storage/esp32s3",
+    "xtensa-lx-rt/esp32s3",
+    "esp-wifi?/esp32s3",
+]
+
+# --- Hardware port features -------------------------------------------------
+gpio = ["dep:soma-esp32-port-gpio"]
+delay = ["dep:soma-esp32-port-delay"]
+uart = ["dep:soma-esp32-port-uart"]
+i2c = ["dep:soma-esp32-port-i2c"]
+spi = ["dep:soma-esp32-port-spi"]
+adc = ["dep:soma-esp32-port-adc"]
+pwm = ["dep:soma-esp32-port-pwm"]
+# wifi pulls in esp-wifi (and through it esp-alloc 0.6, smoltcp). Off by
+# default during early bring-up. Enable explicitly with --features wifi.
+wifi = ["dep:soma-esp32-port-wifi", "dep:esp-wifi", "dep:smoltcp", "dep:edge-mdns", "dep:domain"]
+storage = ["dep:soma-esp32-port-storage"]
+thermistor = ["dep:soma-esp32-port-thermistor"]
+# board: diagnostic + runtime pin configuration skills. Enabled by default
+# because nearly every use case of the firmware benefits from being able
+# to probe / reconfigure / reboot without a reflash.
+board = ["dep:soma-esp32-port-board"]
+# display: SSD1306 OLED driver wired over the shared I2C0 bus. Pulls in
+# ssd1306 + embedded-graphics + embedded-hal-bus. When enabled, the
+# firmware wraps the esp-hal I2c instance in a leaked &'static RefCell
+# so both the i2c port and the display port can share the bus via
+# RefCellDevice. Disable if you want to save ~30KB of flash or use the
+# bus exclusively from the i2c port.
+display = ["dep:soma-esp32-port-display", "dep:ssd1306", "dep:embedded-graphics", "dep:embedded-hal-bus"]
+
+[dependencies]
+soma-esp32-leaf = { path = "../leaf" }
+soma-esp32-port-gpio = { path = "../ports/gpio", optional = true }
+soma-esp32-port-delay = { path = "../ports/delay", optional = true }
+soma-esp32-port-uart = { path = "../ports/uart", optional = true }
+soma-esp32-port-i2c = { path = "../ports/i2c", optional = true }
+soma-esp32-port-spi = { path = "../ports/spi", optional = true }
+soma-esp32-port-adc = { path = "../ports/adc", optional = true }
+soma-esp32-port-pwm = { path = "../ports/pwm", optional = true }
+soma-esp32-port-wifi = { path = "../ports/wifi", optional = true }
+soma-esp32-port-storage = { path = "../ports/storage", optional = true }
+soma-esp32-port-thermistor = { path = "../ports/thermistor", optional = true }
+soma-esp32-port-board = { path = "../ports/board", optional = true }
+soma-esp32-port-display = { path = "../ports/display", optional = true }
+
+# Display stack — only pulled in when the `display` feature is enabled.
+# ssd1306 0.10 targets embedded-hal 1.0 (which esp-hal 0.23 implements).
+# embedded-graphics 0.8 provides the text + primitive drawing APIs the
+# display port's closures use internally. embedded-hal-bus provides
+# RefCellDevice so the i2c port and display port can share I2C0.
+ssd1306 = { version = "0.10", optional = true, default-features = false, features = ["graphics"] }
+embedded-graphics = { version = "0.8", optional = true }
+embedded-hal-bus = { version = "0.3", optional = true }
+
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+nb = "1"
+
+# esp-* deps without chip features here — chip is selected by the
+# chip-esp32 / chip-esp32s3 cargo features above.
+esp-hal = { version = "0.23" }
+esp-backtrace = { version = "0.15", features = ["panic-handler", "println"] }
+esp-println = { version = "0.13", features = ["log"] }
+esp-alloc = "0.6"
+esp-storage = { version = "0.4", features = ["storage", "critical-section"] }
+embedded-storage = "0.3"
+# esp-wifi: chip feature is activated by chip-esp32 / chip-esp32s3 above
+# (via `esp-wifi?/esp32` syntax — only fires when the optional dep is on).
+esp-wifi = { version = "0.12", optional = true, features = ["wifi", "utils"] }
+# edge-mdns: no_std mDNS parser + builder. We disable the `io` feature so
+# we don't pull in embassy-futures/sync/time/edge-nal — we wire it by hand
+# to a smoltcp UdpSocket bound to the multicast address ourselves.
+edge-mdns = { version = "0.7", optional = true, default-features = false }
+# `domain` is edge-mdns's DNS wire-format parser, also needed for building
+# answer records. Same version edge-mdns uses internally.
+domain = { version = "0.10", optional = true, default-features = false, features = ["heapless"] }
+# Xtensa runtime — esp-hal 0.23 references xtensa_lx / xtensa_lx_rt by name
+# but does not depend on them directly when targeting Xtensa chips. The
+# firmware crate must pull them in so the linker has the panic, exception
+# and interrupt vectors. The chip feature is enabled via chip-esp32 /
+# chip-esp32s3 above.
+xtensa-lx = "0.10"
+xtensa-lx-rt = { version = "0.18" }
+log = "0.4"
+fugit = "0.3"
+heapless = "0.8"
+smoltcp = { version = "0.12", optional = true, default-features = false, features = ["proto-ipv4", "socket-tcp", "socket-udp", "socket-dhcpv4", "socket-mdns", "medium-ethernet", "multicast"] }

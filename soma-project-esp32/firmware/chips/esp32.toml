@@ -1,0 +1,24 @@
+# Cargo config overlay for ESP32 (original Xtensa LX6, e.g. ESP-WROOM-32D)
+# builds.
+#
+# Apply with:
+#   cargo +esp build --release --config firmware/chips/esp32.toml \
+#       --no-default-features --features "chip-esp32 gpio delay uart i2c spi adc pwm storage thermistor" \
+#       -p soma-esp32-firmware
+#
+# Edit the runner port to match your ESP32 dev board's serial device. Common
+# names on macOS: /dev/cu.usbserial-XXXX (CP210x or CH340 USB-to-UART
+# bridges).
+
+[build]
+target = "xtensa-esp32-none-elf"
+
+[target.xtensa-esp32-none-elf]
+runner = "espflash flash --monitor --port /dev/cu.usbserial-0001"
+rustflags = [
+  "-C", "link-arg=-Tlinkall.x",
+  "-C", "force-frame-pointers",
+]
+
+[unstable]
+build-std = ["core", "alloc"]

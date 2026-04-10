@@ -1,0 +1,4 @@
+bin/
+packs/*/*.dylib
+packs/*/*.so
+.env

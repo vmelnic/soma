@@ -1,0 +1,27 @@
+[package]
+name = "soma-esp32-leaf"
+version = "0.1.0"
+edition = "2021"
+
+# The no_std core of a SOMA leaf node:
+#   - Wire protocol (TransportMessage / TransportResponse)
+#   - LeafState — the body's brain-stem (routine storage + dispatch)
+#   - Routine type (transferred from server peer at runtime)
+#   - SomaEspPort trait — implemented by each port crate
+#   - CompositeDispatcher — aggregates multiple port crates into one
+#   - Frame codec (length-prefixed JSON)
+#
+# Has NO dependency on esp-hal, tokio, std, or any embedded HAL. Lives at the
+# protocol layer. Port crates and the firmware crate depend on this.
+
+[lib]
+name = "soma_esp32_leaf"
+crate-type = ["rlib"]
+
+[features]
+default = []
+std = ["serde/std", "serde_json/std"]
+
+[dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }

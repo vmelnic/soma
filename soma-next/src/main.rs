@@ -30,7 +30,8 @@ fn main() {
 
     // Check for --mcp flag → MCP JSON-RPC mode over stdin/stdout
     if args.iter().any(|a| a == "--mcp") {
-        // Extract --pack, --listen, --peer, --unix-listen, --unix-peer for MCP mode.
+        // Extract --pack, --listen, --peer, --unix-listen, --unix-peer,
+        // --discover-lan for MCP mode.
         let mut mcp_pack_paths: Vec<String> = Vec::new();
         let mut mcp_listen: Option<SocketAddr> = None;
         let mut mcp_peer_addrs: Vec<SocketAddr> = Vec::new();
@@ -38,6 +39,7 @@ fn main() {
         let mut mcp_unix_listen: Option<std::path::PathBuf> = None;
         #[cfg(unix)]
         let mut mcp_unix_peers: Vec<std::path::PathBuf> = Vec::new();
+        let mut mcp_discover_lan = false;
         let mut mcp_skip = false;
         for (i, arg) in args.iter().enumerate() {
             if mcp_skip {
@@ -63,6 +65,9 @@ fn main() {
                     }
                     mcp_skip = true;
                 }
+            if arg == "--discover-lan" {
+                mcp_discover_lan = true;
+            }
             #[cfg(unix)]
             if arg == "--unix-listen"
                 && let Some(path_str) = args.get(i + 1) {
@@ -80,6 +85,7 @@ fn main() {
         let mcp_distributed = McpDistributedConfig {
             listen: mcp_listen,
             peer_addrs: mcp_peer_addrs,
+            discover_lan: mcp_discover_lan,
             #[cfg(unix)]
             unix_listen: mcp_unix_listen,
             #[cfg(unix)]
@@ -406,6 +412,10 @@ FLAGS:
 struct McpDistributedConfig {
     listen: Option<SocketAddr>,
     peer_addrs: Vec<SocketAddr>,
+    /// When true, start an mDNS browser for `_soma._tcp.local.` and
+    /// register discovered peers dynamically. Discovered peers share
+    /// the same peer_map and peer_ids list as static `--peer` entries.
+    discover_lan: bool,
     #[cfg(unix)]
     unix_listen: Option<std::path::PathBuf>,
     #[cfg(unix)]
@@ -424,14 +434,20 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
     let has_unix_peers = !distributed.unix_peers.is_empty();
     #[cfg(not(unix))]
     let has_unix_peers = false;
-    let has_peers = has_tcp_peers || has_unix_peers;
+    // With --discover-lan the TCP remote executor is needed even when no
+    // static --peer is given, because discovered peers come in over TCP.
+    let has_peers = has_tcp_peers || has_unix_peers || distributed.discover_lan;
 
     let tcp_peer_map: PeerAddressMap = Arc::new(Mutex::new(HashMap::new()));
-    let mut all_peer_ids: Vec<String> = Vec::new();
+    // Dynamic peer-id list — Arc<Mutex<Vec<String>>> so the LAN discovery
+    // background thread can push/remove entries while the MCP handler
+    // reads them. Static --peer entries from the CLI are pre-populated
+    // into the same list.
+    let shared_peer_ids: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     for (i, addr) in distributed.peer_addrs.iter().enumerate() {
         let pid = format!("peer-{}", i);
         tcp_peer_map.lock().unwrap().insert(pid.clone(), *addr);
-        all_peer_ids.push(pid);
+        shared_peer_ids.lock().unwrap().push(pid);
     }
     #[cfg(unix)]
     let unix_peer_map: soma_next::distributed::unix_transport::UnixPeerPathMap =
@@ -440,15 +456,42 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
     for (i, path) in distributed.unix_peers.iter().enumerate() {
         let pid = format!("unix-peer-{}", i);
         unix_peer_map.lock().unwrap().insert(pid.clone(), path.clone());
-        all_peer_ids.push(pid);
+        shared_peer_ids.lock().unwrap().push(pid);
+    }
+
+    // Start the LAN discovery browser if requested. The handle needs to
+    // stay alive for the lifetime of the process — we leak it into a
+    // static via Box::leak since MCP mode never cleanly shuts down.
+    if distributed.discover_lan {
+        match soma_next::distributed::discovery::spawn_lan_browser(
+            Arc::clone(&tcp_peer_map),
+            Arc::clone(&shared_peer_ids),
+        ) {
+            Ok(daemon) => {
+                eprintln!(
+                    "MCP: LAN discovery active (browsing {})",
+                    soma_next::distributed::discovery::SOMA_SERVICE_TYPE
+                );
+                // Leak so the daemon thread keeps running
+                Box::leak(Box::new(daemon));
+            }
+            Err(e) => {
+                eprintln!("MCP: LAN discovery failed to start: {}", e);
+            }
+        }
     }
 
     // Build remote executor if peers are configured.
+    //
+    // With --discover-lan, use the TCP executor even if no static --peer
+    // is given, because discovered peers arrive on TCP and need an
+    // executor to route invocations to them.
+    let use_tcp_executor = has_tcp_peers || distributed.discover_lan;
     let make_executor = || -> Option<Box<dyn soma_next::distributed::remote::RemoteExecutor>> {
         if !has_peers {
             return None;
         }
-        if has_tcp_peers {
+        if use_tcp_executor {
             let tls_config = config.distributed.tls_config();
             if let Some(ref tls) = tls_config
                 && let Ok(executor) = TlsTcpRemoteExecutor::new(Arc::clone(&tcp_peer_map), tls)
@@ -493,7 +536,7 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
                 let handle = RuntimeHandle::from_runtime(runtime);
                 let handle = if has_peers {
                     if let Some(exec) = make_executor() {
-                        handle.with_remote(exec, all_peer_ids.clone())
+                        handle.with_remote_shared(exec, Arc::clone(&shared_peer_ids))
                     } else {
                         handle
                     }
@@ -513,7 +556,7 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
                 let handle = RuntimeHandle::from_runtime(runtime);
                 let handle = if has_peers {
                     if let Some(exec) = make_executor() {
-                        handle.with_remote(exec, all_peer_ids.clone())
+                        handle.with_remote_shared(exec, Arc::clone(&shared_peer_ids))
                     } else {
                         handle
                     }

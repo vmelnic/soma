@@ -1,0 +1,24 @@
+[package]
+name = "soma-esp32-port-thermistor"
+version = "0.1.0"
+edition = "2021"
+
+# Example sensor port: a thermistor reader.
+#
+# Demonstrates the SOMA port pattern for sensors. Real sensor ports (DHT22,
+# BME280, MPU6050, BH1750, ...) follow the same shape: a small no_std crate
+# that depends on soma-esp32-leaf and esp-hal, exposes a SomaEspPort
+# implementation, and is included in the firmware via cargo features.
+#
+# This particular port returns simulated temperature data so the build can
+# succeed without claiming any ADC hardware. A production thermistor port
+# would take an esp-hal AdcPin handle at construction and call adc.read on
+# real channels.
+
+[lib]
+name = "soma_esp32_port_thermistor"
+crate-type = ["rlib"]
+
+[dependencies]
+soma-esp32-leaf = { path = "../../leaf" }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }

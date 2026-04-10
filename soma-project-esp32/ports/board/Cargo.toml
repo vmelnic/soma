@@ -1,0 +1,17 @@
+[package]
+name = "soma-esp32-port-board"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "soma_esp32_port_board"
+crate-type = ["rlib"]
+
+# Chip-agnostic by design. Skills that need chip-specific capabilities
+# (soft reset, I2C peripheral stealing for probe) call into closures the
+# firmware injects at port construction time — same type-erased pattern
+# the adc/pwm ports use for their hardware backends.
+
+[dependencies]
+soma-esp32-leaf = { path = "../../leaf" }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }

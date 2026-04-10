@@ -94,7 +94,11 @@ pub struct RuntimeHandle {
     pub embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>,
     pub start_time: Instant,
     pub remote_executor: Option<Arc<dyn RemoteExecutor>>,
-    pub peer_ids: Vec<String>,
+    /// Live list of peer IDs known to the runtime. Static peers from
+    /// `--peer` are pushed in during bootstrap; mDNS-discovered peers
+    /// (when `--discover-lan` is active) push into the same list as they
+    /// appear and remove themselves on TTL expiry.
+    pub peer_ids: Arc<Mutex<Vec<String>>>,
 }
 
 impl RuntimeHandle {
@@ -114,7 +118,7 @@ impl RuntimeHandle {
             embedder: runtime.embedder,
             start_time: runtime.start_time,
             remote_executor: None,
-            peer_ids: Vec::new(),
+            peer_ids: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -123,6 +127,19 @@ impl RuntimeHandle {
         mut self,
         executor: Box<dyn RemoteExecutor>,
         peer_ids: Vec<String>,
+    ) -> Self {
+        self.remote_executor = Some(Arc::from(executor));
+        self.peer_ids = Arc::new(Mutex::new(peer_ids));
+        self
+    }
+
+    /// Attach a remote executor and a shared mutable peer-id list. Used
+    /// when the peer list is managed by a dynamic subsystem such as mDNS
+    /// LAN discovery — the discovery task pushes into the same mutex.
+    pub fn with_remote_shared(
+        mut self,
+        executor: Box<dyn RemoteExecutor>,
+        peer_ids: Arc<Mutex<Vec<String>>>,
     ) -> Self {
         self.remote_executor = Some(Arc::from(executor));
         self.peer_ids = peer_ids;
@@ -1501,8 +1518,8 @@ impl McpServer {
 
     fn handle_list_peers(&self, id: Value, _params: Option<Value>) -> Result<McpResponse> {
         if let Some(rt) = &self.runtime {
-            let peers: Vec<Value> = rt
-                .peer_ids
+            let ids = rt.peer_ids.lock().unwrap();
+            let peers: Vec<Value> = ids
                 .iter()
                 .map(|pid| {
                     serde_json::json!({
