@@ -217,8 +217,121 @@ The MCP client pattern: spawn `run-mcp.sh`, send a JSON-RPC `initialize` request
 
 ## Existing Projects
 
+### Server-side (dylib-based)
+
 | Project | Port | What it does |
 |---------|------|-------------|
 | `soma-project-smtp` | smtp | Email delivery via mailcatcher or real SMTP |
 | `soma-project-s3` | s3 | AWS S3 object storage |
 | `soma-project-postgres` | postgres | Database queries against HelperBook schema |
+| `soma-project-llm` | postgres | Ollama local LLM generates SQL, SOMA executes via postgres port |
+| `soma-project-mcp` | (any) | Claude Code MCP integration — SOMA registered as an MCP server |
+| `soma-project-s2s` | filesystem | SOMA-to-SOMA delegation and routine transfer (42 tests) |
+| `soma-project-multistep` | filesystem (reference pack) | End-to-end proof of multi-step autonomous routine learning |
+
+### Embedded (compile-time ports, no dylib)
+
+| Project | Target | What it does |
+|---------|--------|-------------|
+| `soma-project-esp32` | ESP32-S3, ESP32 LX6 | `no_std` leaf firmware with 12 hardware ports, runtime-configurable pins, mDNS auto-discovery, SSD1306 OLED display. Different structure from the dylib projects (see below). |
+
+## Building an Embedded Project (`soma-project-esp32` pattern)
+
+Embedded projects target microcontrollers, where dynamic library loading is impossible and the runtime deliberation logic is too heavy for the hardware. The solution is to deploy a **leaf** — a pure dispatcher with no control loop, no memory pipeline, and no policy engine — and drive it from a server SOMA over the distributed transport layer.
+
+The directory structure is different from the dylib projects. It is a full Rust cargo workspace rather than a single directory with a pre-built binary:
+
+```
+soma-project-esp32/
+  Cargo.toml                    # workspace root, 14 members
+  rust-toolchain.toml           # pins the +esp Xtensa toolchain
+  GETTING_STARTED.md            # full setup and build guide
+  leaf/                         # no_std wire protocol library
+  ports/                        # chip-agnostic hardware port crates
+    gpio/ delay/ uart/ i2c/ spi/ adc/ pwm/ wifi/ storage/
+    thermistor/ board/ display/
+  firmware/                     # the flashable binary
+    Cargo.toml                  # chip-esp32 / chip-esp32s3 cargo features
+    chips/                      # per-chip cargo config overlays
+      esp32s3.toml
+      esp32.toml
+    build.rs                    # custom linker fragment for ESP-IDF app descriptor
+    src/
+      main.rs                   # chip-agnostic: heap, dispatch loop, self-test
+      chip/
+        mod.rs                  # cfg-gated `pub use ... as active`
+        esp32s3.rs              # S3 pin map + register_all_ports()
+        esp32.rs                # ESP32 LX6 pin map + register_all_ports()
+      mdns.rs                   # edge-mdns responder on smoltcp UDP
+  scripts/
+    setup.sh boards.sh build.sh flash.sh monitor.sh
+    test.sh cycle.sh wire-test.py
+    wifi-scan.sh wifi-connect.sh
+    thermistor-to-display.py    # brain-side periodic sensor→display loop
+  vendor/
+    esp-alloc/                  # vendored + patched upstream crate
+```
+
+### Key differences from the dylib projects
+
+1. **Ports are `rlib` crates, not `cdylib`.** Microcontrollers can't dynamically load shared libraries. Each port is a compile-time dependency with an `optional = true` feature flag in `firmware/Cargo.toml`. Adding a port to a build means flipping a cargo feature, not copying a file.
+
+2. **Ports are chip-agnostic.** Port crates never depend on `esp-hal` or a specific chip feature. Hardware access happens through injected `Box<dyn FnMut(...)>` closures the firmware builds in the chip module. Adding a new chip is dropping one `chip/<chip>.rs` file — port crates are untouched.
+
+3. **No pack manifests.** The leaf has no notion of packs, sandbox permissions, or policy rules. All skills are compiled in via feature flags. Safety enforcement lives on the server SOMA that drives the leaf.
+
+4. **No `dump_state`.** The leaf has no episodic memory or belief state to dump. `ListCapabilities` returns the registered primitives + stored routines, which is the leaf's entire self-model.
+
+5. **Runtime pin configuration.** Pin assignments are loaded from `FlashKvStore` at boot with per-chip `DEFAULT_*` fallbacks. `board.configure_pin` + `board.reboot` changes pins without a reflash.
+
+6. **mDNS announcement.** The leaf announces `soma-<chip>-<mac>._soma._tcp.local.` after DHCP. A server SOMA running `--discover-lan` finds it automatically and `invoke_remote_skill` works immediately.
+
+### Build cycle
+
+Use the helper scripts — they're the single source of truth for chip→target/features/config mapping:
+
+```bash
+cd soma-project-esp32
+
+# One-time toolchain install
+./scripts/setup.sh
+
+# Probe connected boards and get serial-port suggestions
+./scripts/boards.sh
+
+# Edit scripts/devices.env so each chip's *_PORT matches your /dev/cu.usbserial-*
+
+# Build + flash + run the wire-protocol exerciser, all in one shot
+./scripts/cycle.sh esp32s3           # S3 without wifi
+./scripts/cycle.sh esp32s3 wifi      # S3 with wifi
+./scripts/cycle.sh esp32 wifi        # WROOM-32D with wifi
+```
+
+The full getting-started guide is in `soma-project-esp32/GETTING_STARTED.md`. It covers every step: toolchain install, chip detection, flashing, wire protocol reference, adding a new port, adding a new chip, the display port + shared I²C bus architecture, and the troubleshooting matrix.
+
+### Driving the leaf from an LLM
+
+Once the leaf is flashed and on the LAN, any MCP-aware LLM client can reach it through the server SOMA:
+
+```bash
+soma --mcp --discover-lan --pack packs/reference/manifest.json
+```
+
+Then from the LLM side:
+
+1. Call `list_peers` — the leaf shows up as `lan-soma-<chip>-<mac>`.
+2. Call `invoke_remote_skill` with that peer_id to invoke any skill the leaf exposes.
+
+Example brain-side loop reading a thermistor every 5 seconds and drawing the value on an OLED (see `scripts/thermistor-to-display.py` for a working Python implementation):
+
+```python
+for tick in range(N):
+    temp = invoke_remote_skill(peer, "thermistor.read_temp", {"channel": 0})
+    invoke_remote_skill(peer, "display.draw_text", {
+        "line": 0,
+        "text": f"Temp: {temp['observation']['temp_c']:.2f} C",
+    })
+    time.sleep(5)
+```
+
+The leaf has no concept of "every 5 seconds" and no concept of "read sensor, show on screen" — both are the brain's composition of two primitive invocations. Change the LLM, change the prompt, change the cadence, and the "application" changes without any code on the body.

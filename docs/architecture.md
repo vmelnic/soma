@@ -610,3 +610,47 @@ When `data_dir` is configured, each store writes through to a JSON file on disk 
 - `{data_dir}/routines.json`
 
 On construction, existing data is loaded from disk. When `data_dir` is empty, stores are purely in-memory.
+
+---
+
+## Deployment Targets
+
+The same architecture compiles to three deployment targets. The runtime logic, memory stores, and policy engine are source-compatible across all three; what changes is which ports load and which transports run.
+
+### 1. Server (default)
+
+A `~10 MB` `std` binary loaded from `cargo build --release -p soma-next`. Hosts the full 6-layer stack including the episodic memory pipeline (ring buffer → schemas → routines), the distributed transport layer, and all dynamically loaded `.dylib` / `.so` ports. This is the path every `soma-project-*` outside of `soma-project-esp32` uses. Cross-compiles cleanly to `aarch64-linux-android` (`10 MB` ELF via `cargo-ndk`) and `aarch64-apple-ios` (`9 MB` Mach-O via `xcrun`) with no source changes.
+
+### 2. Embedded leaf (`no_std`)
+
+The `soma-project-esp32` firmware is a `no_std` `cargo` workspace that deploys onto microcontrollers. It hosts a **leaf**, not a full runtime: the wire protocol surface (`InvokeSkill`, `ListCapabilities`, `TransferRoutine`, `RemoveRoutine`, `Ping`) and a composite dispatcher over a set of chip-agnostic port crates. There is no control loop, no skill selection, no goal runtime, no episodic memory, and no policy engine — all deliberation lives in a server SOMA reachable over TCP.
+
+This "cognitive body / dumb body" split exploits the same brain/body separation the server architecture relies on. The leaf executes, senses, and adapts the hardware to commands from a capable peer but never decides what to do next.
+
+**Key properties of the embedded leaf:**
+
+| Property | Detail |
+|---|---|
+| Memory | `no_std`, single global allocator (`esp-alloc 0.6` with a vendored zero-byte guard), 96 KB heap when wifi is on. |
+| Chip selection | Mutually-exclusive cargo features (`chip-esp32`, `chip-esp32s3`), enforced by `compile_error!` in `chip/mod.rs`. Adding a chip means dropping one file under `firmware/src/chip/` that implements a uniform interface (`NAME`, `TEST_LED_PIN`, `PinConfig`, `init_peripherals`, `register_all_ports`). `main.rs` and port crates are chip-agnostic. |
+| Port crates | Chip-agnostic by design. Ports that need hardware (adc, pwm, board, display) take their hardware state as `Box<dyn FnMut(...)>` closures injected by the firmware at construction. The port crate never depends on `esp-hal` or any specific driver. |
+| Pin assignments | Runtime-configurable. At boot, each chip module loads `pins.*` keys from a dedicated 4 KB flash sector and falls back to per-chip `DEFAULT_*` constants. Pin dispatch uses `AnyPin::steal(n)`; ADC uses a typed `match` because `AdcChannel` is only implemented for statically-known `GpioPin<N>`. Reconfiguring a pin is an MCP call to `board.configure_pin` followed by `board.reboot` — no reflash. |
+| Shared I²C bus | The `i2c` port and the `display` port share I²C0 through `embedded_hal_bus::i2c::RefCellDevice`. The firmware wraps the `esp-hal I2c` instance in a `Box::leak`ed `&'static RefCell` and hands each consumer its own `RefCellDevice` handle. The `I2cPort` crate is generic over any `embedded_hal::i2c::I2c` implementor, so the same port works with either a raw bus or a shared-bus wrapper. |
+| Distributed transport | smoltcp TCP listener on port 9100 after DHCP. mDNS responder via `edge-mdns` on `224.0.0.251:5353` announces `_soma._tcp.local.` so server SOMAs running `--discover-lan` find the leaf without static configuration. |
+| Wire protocol | Identical to the server — length-prefixed JSON envelopes, same `TransportMessage` / `TransportResponse` enum. The leaf and server use the same `soma-esp32-leaf` crate for encode/decode. |
+| Proven on hardware | Two chips (ESP32-S3 Sunton 1732S019, ESP32 LX6 WROOM-32D), both with and without wifi. Full discovery → configure → draw cycle verified end-to-end: `board.probe_i2c_buses` found an OLED at `0x3C`, `display.draw_text` rendered live thermistor readings on the physical panel under a brain-side 5-second loop. |
+
+**What the leaf does NOT have:**
+
+- No episodic memory pipeline. Schemas and routines are server-side concerns; the leaf only stores linear routines pushed via `TransferRoutine` and walks them on invocation.
+- No skill selection. Every `InvokeSkill` names a specific primitive or stored routine.
+- No policy engine. Safety enforcement happens on the server SOMA driving the leaf.
+- No standard library. No filesystem, no threads, no dynamic linking, no heap growth beyond the fixed pool.
+
+**Bridge from server to leaf.** A server SOMA reaches the leaf through the normal distributed transport layer. The MCP tool `invoke_remote_skill {peer_id, skill_id, input}` delegates to the leaf over TCP. `list_peers` returns mDNS-discovered leaves with IDs derived from the service instance name (`lan-soma-<chip>-<mac>`). An LLM driving the server SOMA via MCP can therefore invoke hardware skills on the leaf without any awareness that the body is running on a microcontroller — it's just another peer.
+
+### 3. Multi-step autonomous routines (proven)
+
+The autonomous path — episodes → schema induction → routine compilation → plan-following — is proven end-to-end against the real library in `soma-project-multistep`. Five phases cover: storing multi-step episodes, `PrefixSpan` inducing a 3-step `candidate_skill_ordering` with confidence `0.950`, `compile_from_schema` producing a 3-step `compiled_skill_path`, plan-following logic walking every step, and the real `SessionController.run_step()` walking a multi-step routine against `/tmp` with an injected `Binding { name: "path", value: "/tmp" }`. Trace: `stat → readdir → stat`. Final status: `Completed`.
+
+What's proven: multi-step routines work when multi-step episodes exist. What's still open: producing those episodes organically from a single goal via the autonomous control loop — that requires the selector and critic to chain skills without explicit prompting, which is a separate question from the routine pipeline itself.

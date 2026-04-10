@@ -2,7 +2,7 @@
 
 ## Overview
 
-SOMA exposes its full runtime as 16 JSON-RPC 2.0 tools over stdio. Any MCP-aware client (Claude Desktop, ChatGPT, custom tooling) can submit goals, control sessions, inspect state, invoke ports, and query metrics through this interface.
+SOMA exposes its full runtime as 19 JSON-RPC 2.0 tools over stdio. Any MCP-aware client (Claude Desktop, ChatGPT, custom tooling) can submit goals, control sessions, inspect state, invoke ports, invoke skills on remote peers (including embedded ESP32 leaves discovered via mDNS), transfer routines between instances, and query metrics through this interface.
 
 ## Protocol
 
@@ -336,6 +336,76 @@ List all loaded ports and their capabilities. Use this to discover available por
 {"ports":[{"port_id":"postgres","name":"PostgreSQL","namespace":"db","kind":"Database","capabilities":[{"capability_id":"query","name":"query","purpose":"Execute a SQL query","effect_class":"Read","risk_class":"Low","input_schema":{"type":"object","properties":{"sql":{"type":"string"}}},"output_schema":{"type":"object","properties":{"rows":{"type":"array"}}}}]},{"port_id":"smtp","name":"SMTP","namespace":"email","kind":"Network","capabilities":[{"capability_id":"send_plain","name":"send_plain","purpose":"Send a plain-text email","effect_class":"Write","risk_class":"Medium","input_schema":{"type":"object","properties":{"to":{"type":"string"},"subject":{"type":"string"},"body":{"type":"string"}}},"output_schema":{"type":"object","properties":{"message_id":{"type":"string"}}}}]}]}
 ```
 
+### 17. list_peers
+
+List all known distributed peers — both static peers registered via `--peer` / `--unix-peer` at boot and peers discovered at runtime via `--discover-lan` (mDNS). Each entry reports whether the peer has a reachable executor and whether the MCP layer recognizes it.
+
+**Input**: none.
+
+**Response**:
+
+```json
+{
+  "count": 1,
+  "peers": [
+    {
+      "peer_id": "lan-soma-esp32-ccdba79df9e8",
+      "has_executor": true,
+      "registered": true
+    }
+  ]
+}
+```
+
+Use this to confirm an embedded leaf is reachable before calling `invoke_remote_skill`. A peer with `has_executor: true` means the outbound transport is ready; `registered: true` means the MCP layer has a handle to it.
+
+### 18. invoke_remote_skill
+
+Invoke a skill on a remote peer. Same shape as `invoke_port` but dispatched through the distributed transport layer to another SOMA instance or an embedded leaf. The runtime routes the call through `RemoteExecutor::invoke_skill` and returns the peer's `RemoteSkillResponse` serialized as JSON.
+
+**Input**:
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `peer_id` | string | yes | Peer ID as reported by `list_peers`. For mDNS-discovered embedded leaves: `lan-soma-<chip>-<mac>`. |
+| `skill_id` | string | yes | Fully qualified skill ID on the remote peer (e.g., `display.draw_text`, `thermistor.read_temp`). |
+| `input` | object | yes | Arbitrary JSON value matching the remote skill's input schema. |
+
+**Response**:
+
+```json
+{
+  "skill_id": "display.draw_text",
+  "peer_id": "lan-soma-esp32-ccdba79df9e8",
+  "success": true,
+  "observation": {"rendered": true},
+  "latency_ms": 0,
+  "timestamp": "2026-04-10T20:12:01.346662+00:00",
+  "trace_id": "00000000-0000-0000-0000-000000000000"
+}
+```
+
+The embedded leaf use case is the cleanest demonstration: an LLM reads a sensor by calling `invoke_remote_skill thermistor.read_temp` and writes to an OLED by calling `invoke_remote_skill display.draw_text`. The leaf has no concept of the composition; the LLM (brain) composes two primitive invocations into behavior. See `soma-project-esp32/scripts/thermistor-to-display.py` for a working periodic loop.
+
+### 19. transfer_routine
+
+Push a compiled routine to a remote peer for local storage and future invocation. The peer stores the routine via its `RoutineStore` (or its leaf-side equivalent); subsequent `InvokeSkill { skill_id: routine.routine_id }` calls on that peer walk the compiled skill path locally. Used to promote schemas learned on one SOMA to other peers, or to hand an embedded leaf a fixed multi-step sequence it can execute without server round-trips per step.
+
+**Input**:
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `peer_id` | string | yes | Target peer ID from `list_peers`. |
+| `routine` | object | yes | Routine JSON (see `types::Routine` for the full shape). Required fields: `routine_id`, `description`, `steps` (array of `{skill_id, input}`). |
+
+**Response**:
+
+```json
+{"status": "stored", "routine_id": "demo_pulse", "steps": 4}
+```
+
+Transfer semantics depend on the peer: a server peer uses `LocalDispatchHandler::with_stores(..., routine_store)` to persist the routine to its `RoutineStore`; an embedded leaf stores the routine in RAM (vanishes on reboot — the leaf intentionally has no disk persistence for routines).
+
 ## Key Tools for LLMs
 
 ### dump_state
@@ -389,6 +459,25 @@ soma --mcp
 If no `--pack` is specified and `packs/reference/manifest.json` exists, it loads automatically.
 
 The server reads `soma.toml` from the current directory for configuration.
+
+**Distributed flags** (additive to `--mcp`):
+
+```bash
+# Static peer registration
+soma --mcp --peer 10.0.0.42:9999
+
+# Listen for incoming peer connections
+soma --mcp --listen 0.0.0.0:9999
+
+# mDNS LAN auto-discovery — picks up any SOMA peer (server or embedded leaf)
+# announcing _soma._tcp.local. on the local network
+soma --mcp --discover-lan
+
+# Combined: discover embedded leaves AND accept inbound connections
+soma --mcp --discover-lan --listen 0.0.0.0:9999
+```
+
+`--discover-lan` is how an LLM driving a server SOMA reaches physical ESP32 leaves without static configuration. The discovered peers appear in `list_peers` as soon as the mDNS browser resolves them; `invoke_remote_skill` then dispatches against them exactly like any other peer.
 
 ### Environment Variables
 

@@ -58,21 +58,40 @@ This means:
 loop with selection, prediction, criticism, and policy enforcement. Typed skills
 and ports. Belief state and resource tracking. Episode memory with persistence.
 Session checkpoints and restore. Distributed peer transport (TCP, TLS, WebSocket,
-Unix sockets). MCP server with 14 tools. CLI with 10 commands.
+Unix sockets, mDNS LAN discovery). MCP server with 19 tools. CLI with 11 commands.
+1177 tests, zero warnings. Cross-compiles unchanged to `aarch64-linux-android`
+(10 MB ELF) and `aarch64-apple-ios` (9 MB Mach-O).
 
 **soma-ports** -- 11 dynamically loaded port adapters in a Rust workspace:
 postgres, redis, auth, smtp, s3, crypto, geo, image, push, timer, plus an SDK
 crate. Each port is a shared library exporting `soma_port_init`. Ed25519
 signature verification for untrusted ports.
 
-**soma-project-*** -- Self-contained proof projects (smtp, s3, postgres). Each
-proves that a real-world integration works end-to-end through the SOMA paradigm:
-pack manifest, port, skills, goal execution.
+**soma-project-*** -- Self-contained proof projects. Server-side (smtp, s3,
+postgres, llm, mcp, s2s, multistep) each prove that a real-world integration
+works end-to-end through the SOMA paradigm. Embedded (`soma-project-esp32`)
+proves the same paradigm on microcontrollers: a `no_std` leaf firmware with
+12 hardware ports deployed to ESP32-S3 and ESP32 LX6 chips, runtime-configurable
+pins, mDNS auto-discovery, and an SSD1306 OLED display port sharing the I²C bus
+with the i2c port via `embedded-hal-bus`. A brain-side 5-second loop reading
+the thermistor and writing the temperature to the OLED was verified on the
+physical panel — the leaf has no concept of "every 5 seconds" or "read sensor,
+show on screen"; both are the brain's composition of two primitive invocations.
 
 **soma-helperbook** -- First real application. Service marketplace with a
 19-table PostgreSQL schema, Redis sessions, Express frontend, and three loaded
 ports. Users, connections, messages, appointments, reviews -- all managed through
 SOMA goals, not application code.
+
+**The brain/body split in action.** The embedded leaf deployment is the
+cleanest demonstration in the codebase of the architecture's central thesis.
+An LLM calls `list_peers` (finds the leaf via mDNS), then `invoke_remote_skill
+thermistor.read_temp` (body reports a number), then `invoke_remote_skill
+display.draw_text` (body renders the number on an OLED). The LLM composes the
+loop, decides the cadence, formats the text, and handles errors. The firmware
+never learns what an application is — it only knows how to execute primitives
+on behalf of a brain. Change the LLM, change the prompt, change the cadence,
+and the "application" changes without any code on the body.
 
 ## The LLM Context Problem Solved
 

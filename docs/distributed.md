@@ -46,9 +46,21 @@ CLI flags:
 --unix-listen <path>  Start Unix socket listener
 --peer <addr>         Register a remote TCP peer
 --unix-peer <path>    Register a remote Unix socket peer
+--discover-lan        Start an mDNS browser for `_soma._tcp.local.` and
+                      auto-register any SOMA peers found on the LAN.
 ```
 
 When TLS config is present and `--listen` is given, the runtime attempts TLS first, falling back to plain TCP on failure.
+
+## LAN Peer Discovery (mDNS)
+
+`--discover-lan` spawns a background `mdns-sd` browser thread that watches the multicast DNS service type `_soma._tcp.local.`. For every `ServiceResolved` event the browser inserts the discovered address into a shared peer-address map and appends a derived peer ID into the MCP server's shared peer list. `ServiceRemoved` events evict the entry. The flag is additive — it coexists with static `--peer` / `--unix-peer` registrations.
+
+**Peer ID derivation.** The mDNS instance name (the left-most label of the fullname, e.g. `soma-esp32-ccdba79df9e8`) is prefixed with `lan-` to produce a stable `peer_id` the MCP layer uses for `invoke_remote_skill`, `transfer_routine`, and `list_peers`. The prefix avoids collision with static peer IDs from the config file. Because the MAC is baked into the instance name, the same physical leaf gets the same ID across reboots.
+
+**Shared state between the MCP server and the listener runtime.** In MCP mode, the runtime spawns a separate listener runtime for incoming connections, independent of the MCP server. Both need visibility into the discovered peer list. The `peer_ids` field on the MCP server is `Arc<Mutex<Vec<String>>>` and the same `Arc` is passed to the discovery thread via `with_remote_shared(executor, peer_ids)`. Discovered peers appear in `list_peers` the instant the mDNS browser resolves them.
+
+**Working against an embedded leaf.** The ESP32 leaf firmware advertises the same service type. After DHCP assigns an IPv4 address, the leaf's `MdnsResponder` (built on `edge-mdns` + a smoltcp UDP socket bound to `224.0.0.251:5353`) emits an unsolicited announcement for `soma-<chip>-<mac>._soma._tcp.local.` pointing at its TCP listener on port 9100. A server SOMA running `--discover-lan` sees the announcement within a few hundred milliseconds, registers the peer, and can invoke skills on the leaf without any static configuration. This is how `soma-project-esp32` drives real hardware from Claude Code or any other MCP client: the LLM calls `list_peers` → finds the leaf → calls `invoke_remote_skill {peer_id, skill_id, input}`.
 
 ## RemoteExecutor Trait
 
@@ -178,8 +190,32 @@ Every `DistributedFailure` variant maps to a recoverability category:
 
 All messages are `TransportMessage` variants (serde JSON, `#[serde(tag = "type")]`):
 
-`InvokeSkill`, `QueryResource`, `SubmitGoal`, `TransferSchema`, `TransferRoutine`, `ChunkedTransferStart`, `ChunkedTransferData`, `ChunkedTransferResume`, `Ping`.
+`InvokeSkill`, `QueryResource`, `SubmitGoal`, `TransferSchema`, `TransferRoutine`, `ChunkedTransferStart`, `ChunkedTransferData`, `ChunkedTransferResume`, `Ping`, `ListCapabilities`, `RemoveRoutine`.
 
-Responses are `TransportResponse` variants: `SkillResult`, `ResourceResult`, `GoalResult`, `SchemaOk`, `RoutineOk`, `ChunkedAck`, `Error`.
+Responses are `TransportResponse` variants: `SkillResult`, `ResourceResult`, `GoalResult`, `SchemaOk`, `RoutineOk`, `ChunkedAck`, `Error`, `Capabilities`, `RoutineStored`, `RoutineRemoved`.
 
-Framing: 4-byte big-endian length prefix followed by JSON payload. Same format across TCP and Unix socket transports. WebSocket uses native text frames.
+`ListCapabilities`, `RemoveRoutine`, `Capabilities`, `RoutineStored`, and `RoutineRemoved` were added to support the embedded leaf use case where the server needs to introspect the leaf's registered primitives and revoke previously-transferred routines. All 1177 soma-next tests pass with the additions; existing peers that don't send these variants are unaffected (backward compatible).
+
+Framing: 4-byte big-endian length prefix followed by JSON payload. Same format across TCP and Unix socket transports. WebSocket uses native text frames. Max frame size is 16 MB on all transports.
+
+### Schema Tolerance for Embedded Leaves
+
+Embedded leaves (soma-project-esp32) sometimes return a `SkillResult` with a subset of the fields soma-next uses internally — the leaf has no `peer_id` concept, no `trace_id`, and constructs the observation envelope by hand rather than going through the full runtime invocation path. To keep the server-side deserializer forgiving, `RemoteSkillResponse` uses:
+
+```rust
+pub struct RemoteSkillResponse {
+    pub skill_id: String,
+    #[serde(default)]
+    pub peer_id: String,
+    pub success: bool,
+    #[serde(alias = "structured_result")]
+    pub observation: serde_json::Value,
+    pub latency_ms: u64,
+    #[serde(default = "default_remote_skill_timestamp")]
+    pub timestamp: DateTime<Utc>,
+    #[serde(default)]
+    pub trace_id: Uuid,
+}
+```
+
+`#[serde(default)]` on `peer_id`, `timestamp`, and `trace_id` lets the server accept responses missing those fields. `#[serde(alias = "structured_result")]` maps the leaf's field name onto the server's `observation` field. `TcpRemoteExecutor` fills in the `peer_id` after deserialization so downstream code sees a fully-populated response regardless of the wire shape.

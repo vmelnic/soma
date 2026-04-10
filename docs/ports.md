@@ -385,3 +385,100 @@ Timer/scheduler with in-memory state machine. No external services.
 8. Place the library in a directory listed in `ports.plugin_path` in `soma.toml`.
 9. Declare the port in a pack manifest's `ports` array.
 10. Optionally, sign the library with Ed25519 and place `.sig` and `.pub` sidecar files alongside it.
+
+---
+
+## Embedded Ports (`no_std`, compile-time composition)
+
+`soma-project-esp32` is a separate port ecosystem for microcontrollers. It does **not** use the `soma-port-sdk` / `cdylib` / dynamic-loading model — microcontrollers can't dynamically load shared libraries, so ports are `rlib` crates composed into the firmware binary at build time via cargo features. The runtime contract is different too: the embedded leaf hosts a `CompositeDispatcher` of `Box<dyn SomaEspPort>` instead of the server's `PortRuntime`, and the wire protocol is a length-prefixed JSON envelope (`TransportMessage` / `TransportResponse`) carried over UART0 or TCP.
+
+### SomaEspPort Trait
+
+```rust
+pub trait SomaEspPort {
+    fn port_id(&self) -> &'static str;
+    fn primitives(&self) -> Vec<CapabilityDescriptor>;
+    fn invoke(&mut self, skill_id: &str, input: &serde_json::Value) -> Result<Value, String>;
+}
+```
+
+Defined in `soma-project-esp32/leaf/src/lib.rs`. Every port crate (`ports/gpio/`, `ports/i2c/`, etc.) implements this trait. The firmware builds a `CompositeDispatcher`, calls `register(Box::new(port))` for each enabled port, and the leaf's wire-protocol handler routes incoming `InvokeSkill` messages to the right port by prefix-matching the skill_id against registered port_ids.
+
+### Embedded Port Catalog
+
+| port_id | Skills | Effect Classes | Notes |
+|---|---|---|---|
+| `gpio` | `gpio.write`, `gpio.read`, `gpio.toggle` | SM / RO / SM | GPIO is claimed at boot via `gpio_port.claim_output_pin(n, Output::new(...))`. Only claimed pins can be driven. |
+| `delay` | `delay.ms`, `delay.us` | RO / RO | Blocking `esp_hal::delay` wrappers. |
+| `uart` | `uart.write`, `uart.read` | EX / RO | UART1. UART0 is reserved for host wire-protocol transport. |
+| `i2c` | `i2c.write`, `i2c.read`, `i2c.write_read`, `i2c.scan` | SM / RO / SM / RO | **Generic over any `embedded_hal::i2c::I2c`** — takes a raw `esp-hal I2c` or an `embedded-hal-bus RefCellDevice` for the shared-bus path. |
+| `spi` | `spi.write`, `spi.read`, `spi.transfer` | SM / RO / SM | SPI3 by default; SPI2 is left free for on-board displays. |
+| `adc` | `adc.read`, `adc.read_voltage` | RO / RO | Takes an `AdcReadFn: Box<dyn FnMut() -> Result<u16, AdcError>>` closure so the port crate never depends on `esp-hal`. The chip module builds the closure against a typed `GpioPin<N>` inside a match over valid ADC1 pins. |
+| `pwm` | `pwm.set_duty`, `pwm.get_status` | SM / RO | LEDC channel 0. Takes a `PwmSetDutyFn` closure the firmware injects after configuring the timer + channel. |
+| `wifi` | `wifi.scan`, `wifi.configure`, `wifi.status`, `wifi.disconnect`, `wifi.forget` | RO / SM / RO / SM / SM | Feature-gated. Pulls in `esp-wifi 0.12` + `smoltcp 0.12`. `wifi.configure` persists credentials to `FlashKvStore` so they survive reboots. |
+| `storage` | `storage.get`, `storage.set`, `storage.delete`, `storage.list`, `storage.clear` | RO / SM / SM / RO / SM | Backed by a `FlashKvStore` over `esp-storage` at flash offset `0x3F_F000`. 4 KB sector rewritten in its entirety on every write. |
+| `thermistor` | `thermistor.read_temp`, `thermistor.read_temp_calibrated` | RO / RO | Example sensor port (currently simulated; swap in a real ADC read via the closure pattern to hook up a physical thermistor). |
+| `board` | `board.chip_info`, `board.pin_map`, `board.configure_pin`, `board.probe_i2c_buses`, `board.reboot` | RO / RO / SM / SM / EX | Diagnostic and runtime pin-configuration skills. Five injected closures (`ChipInfoFn`, `PinMapFn`, `ProbeI2cFn`, `RebootFn`, `ConfigureFn`) capture the chip-specific state. Enables bring-up of new boards without reflashing. |
+| `display` | `display.info`, `display.clear`, `display.draw_text`, `display.draw_text_xy`, `display.fill_rect`, `display.set_contrast`, `display.flush` | RO / SM / SM / SM / SM / SM / SM | SSD1306 OLED via seven injected closures. Shares I²C0 with the `i2c` port through `embedded-hal-bus::RefCellDevice`. The port crate has zero `esp-hal`/`ssd1306`/`embedded-graphics` dependencies — the firmware owns the driver, the port owns the wire-protocol surface. |
+
+Effect class legend: RO = ReadOnly, SM = StateMutation, EX = ExternalEffect.
+
+### Type-Erased Closure Pattern
+
+Ports that need hardware access without taking an `esp-hal` dependency follow a uniform pattern: the port struct stores `Box<dyn FnMut(...)>` closures and calls them when a skill arrives. Example from `ports/board/`:
+
+```rust
+pub type ChipInfoFn = Box<dyn FnMut() -> ChipInfo + Send>;
+pub type ProbeI2cFn = Box<dyn FnMut(&[(u8, u8)]) -> Vec<ProbeResult> + Send>;
+
+pub struct BoardPort {
+    chip_info_fn: ChipInfoFn,
+    probe_i2c_fn: ProbeI2cFn,
+    // ...
+}
+```
+
+The firmware's `register_all_ports` function builds each closure by capturing chip-specific state (peripherals, FlashKvStore handle, driver instances) via a `move` closure:
+
+```rust
+let chip_info_fn: ChipInfoFn = Box::new(move || ChipInfo {
+    chip: NAME,
+    mac: Efuse::read_base_mac_address(),
+    free_heap: esp_alloc::HEAP.free() as u32,
+    // ...
+});
+composite.register(Box::new(BoardPort::new(chip_info_fn, ...)));
+```
+
+This keeps port crates chip-agnostic (the same `BoardPort` works on ESP32 and ESP32-S3) and esp-hal-free (port crates have no heavy dependency chain). Adding a new chip means dropping one chip module and wiring the closures — port crates are untouched.
+
+### Shared I²C Bus via `embedded-hal-bus`
+
+The `i2c` and `display` ports share the same I²C0 peripheral on the same physical SDA/SCL pins. The firmware wraps the `esp-hal I2c` instance in a `Box::leak`ed `&'static RefCell` and hands each consumer its own `embedded_hal_bus::i2c::RefCellDevice`:
+
+```rust
+let bus_static: &'static RefCell<I2c<'static, Blocking>> =
+    Box::leak(Box::new(RefCell::new(i2c)));
+
+let i2c_device = RefCellDevice::new(bus_static);
+composite.register(Box::new(I2cPort::new(i2c_device)));
+
+let display_device = RefCellDevice::new(bus_static);
+let ssd = Ssd1306::new(I2CDisplayInterface::new(display_device), ...)
+    .into_buffered_graphics_mode();
+```
+
+`I2cPort<B>` is generic over any `embedded_hal::i2c::I2c` implementor, so the exact same port type works with a raw bus (`display` feature off) or a `RefCellDevice` (shared-bus path). The leaf's dispatch loop is single-threaded, so `RefCell` is safe — no `critical_section::Mutex` is needed.
+
+### Building an Embedded Port
+
+1. Create an `rlib` crate under `soma-project-esp32/ports/<name>/` with `crate-type = ["rlib"]`.
+2. Depend on `soma-esp32-leaf = { path = "../../leaf" }` and `serde_json = { version = "1", default-features = false, features = ["alloc"] }`.
+3. If the port needs hardware access, define `Box<dyn FnMut(...)>` type aliases for the operations and store them as fields. Do NOT add an `esp-hal` dependency.
+4. Implement `SomaEspPort` with a constant `port_id()`, a static `primitives()` capability list, and an `invoke()` method that dispatches on `skill_id`.
+5. Add the crate to the workspace's `Cargo.toml` members list.
+6. In `firmware/Cargo.toml`, add the crate as `optional = true` and expose a matching feature: `foo = ["dep:soma-esp32-port-foo"]`.
+7. Register the port in each `firmware/src/chip/<chip>.rs` under `#[cfg(feature = "foo")] { ... }`, building the hardware-capture closures from peripherals moved out of `peripherals`.
+8. Add the feature to `scripts/lib.sh::ALL_PORTS` so `./scripts/build.sh <chip>` picks it up.
+
+The port is then invokable over the wire protocol (UART or TCP) using the same `TransportMessage::InvokeSkill { peer_id, skill_id, input }` shape the server runtime uses.
