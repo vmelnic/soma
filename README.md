@@ -10,11 +10,13 @@ SOMA operates in two modes:
 
 Both modes are production-ready. The LLM-driven path is proven with HelperBook (service marketplace, 3 ports, 32 capabilities). The autonomous path is proven with the reference pack (filesystem skills, episode → schema → routine cycle).
 
+The same architecture runs on microcontrollers. `soma-project-esp32` deploys a `no_std` leaf firmware to ESP32-S3 and ESP32 LX6 chips with 12 hardware ports, runtime-configurable pins, mDNS auto-discovery, and an SSD1306 OLED display port. A brain-side loop reading the thermistor and drawing temperature on the OLED every 5 seconds was verified on the physical panel — the leaf has no concept of "every 5 seconds" or "read sensor, show on screen". Both are the brain's composition. Server SOMA reaches the leaf via `invoke_remote_skill` over TCP after discovering it via `_soma._tcp.local.`.
+
 ## Repository
 
 | Component | What | Status |
 |---|---|---|
-| [soma-next](soma-next/) | Rust runtime binary. 1177 tests, zero warnings. | Production |
+| [soma-next](soma-next/) | Rust runtime binary. 1177 tests, zero warnings. Cross-compiles to Android (aarch64-linux-android) and iOS (aarch64-apple-ios). | Production |
 | [soma-ports](soma-ports/) | 11 dynamically loaded port adapters + SDK | Production |
 | [soma-helperbook](soma-helperbook/) | Service marketplace — first real app (postgres + redis + auth) | Production |
 | [soma-project-smtp](soma-project-smtp/) | SMTP email delivery via SOMA MCP | Production |
@@ -23,6 +25,10 @@ Both modes are production-ready. The LLM-driven path is proven with HelperBook (
 | [soma-project-llm](soma-project-llm/) | Ollama LLM + SOMA: natural language → SQL via postgres port | Production |
 | [soma-project-mcp](soma-project-mcp/) | Claude Code MCP integration — SOMA as MCP server for Claude | Production |
 | [soma-project-s2s](soma-project-s2s/) | SOMA-to-SOMA: transport, delegation, schema/routine transfer (42 tests) | Production |
+| [soma-project-multistep](soma-project-multistep/) | End-to-end proof of multi-step autonomous routine learning: episodes → schema → routine → plan-following walks 3 skills against `/tmp` and reaches `Completed`. Five phases, all passing. | Proven |
+| [soma-project-esp32](soma-project-esp32/) | Embedded `no_std` leaf firmware. Dual-chip proven on real hardware (ESP32-S3 Sunton 1732S019 and ESP32 LX6 WROOM-32D, both with and without wifi). 12 hardware ports, runtime-configurable pins via flash, mDNS auto-discovery, SSD1306 OLED display port sharing I²C0 with the i2c port via `embedded-hal-bus`. Brain-side thermistor→display loop verified on physical OLED. | Proven on hardware |
+| [soma-project-android](soma-project-android/) | Native Android app POC (Kotlin + JNI to `libsoma_android.so`). Rust cross-compilation to `aarch64-linux-android` verified. | POC |
+| [soma-project-ios](soma-project-ios/) | Native iOS app POC (Swift + C FFI to `libsoma_ios.a`). Rust cross-compilation to `aarch64-apple-ios` verified. | POC |
 
 Legacy (not active): soma-core/, soma-plugins/, soma-synthesizer/, poc/, pow/
 
