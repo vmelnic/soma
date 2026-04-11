@@ -2,16 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>soma-next in the browser — phase 1a proof</title>
+    <title>soma-next in the browser — phase 1b proof</title>
     <style>
       body {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        max-width: 720px;
+        max-width: 820px;
         margin: 2rem auto;
         padding: 0 1rem;
         color: #111;
       }
-      h1 { color: #c00; }
+      h1, h2, h3, h4, h5, h6 { color: #c00; }
       code, pre {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         background: #f3f3f3;
@@ -24,74 +24,189 @@
         white-space: pre-wrap;
       }
       button {
-        font-size: 1rem;
-        padding: 0.5rem 1rem;
+        font-size: 0.95rem;
+        padding: 0.45rem 0.9rem;
         cursor: pointer;
+        margin: 0.2rem 0.3rem 0.2rem 0;
       }
       .meta { color: #555; font-size: 0.9em; }
       .result { border-left: 3px solid #0a0; padding-left: 0.75rem; }
       .error  { border-left: 3px solid #c00; padding-left: 0.75rem; color: #c00; }
+      .group {
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        padding: 0.75rem 1rem;
+        margin-bottom: 1rem;
+      }
+      .group h3 { margin: 0 0 0.5rem 0; color: #333; }
+      input[type="text"] {
+        padding: 0.4rem;
+        font-size: 0.95rem;
+        width: 14rem;
+      }
+      input[type="number"] { width: 3.5rem; padding: 0.4rem; font-size: 0.95rem; }
+      label { display: inline-block; margin-right: 0.5rem; color: #444; font-size: 0.9em; }
     </style>
   </head>
   <body>
     <header>
-      <h2>soma-next in the browser</h2>
+      <h2>soma-next in the browser — phase 1b</h2>
       <p class="meta">
-        This page loads a ~132 KB WebAssembly build of <code>soma-next</code>
-        directly in the tab, registers a <code>dom</code> port that implements
-        the same <code>Port</code> trait as the native filesystem / HTTP /
-        ESP32 hardware ports, and invokes it to render an <code>&lt;h1&gt;</code>.
-        Everything above this paragraph is the traditional HTML shell — nothing
-        below it is.
+        A ~132 KB WebAssembly build of <code>soma-next</code> loaded in this
+        tab exposes two in-tab ports (<code>dom</code> and <code>audio</code>)
+        that implement the exact same <code>Port</code> trait as every native
+        SOMA port. Every button below calls <code>soma_invoke_port(port_id,
+        capability_id, input_json)</code>, which dispatches through the same
+        Port::invoke path every native proof project uses and returns a
+        fully-populated <code>PortCallRecord</code>. Everything above this
+        paragraph is static HTML — nothing below it is.
       </p>
     </header>
 
-    <section>
-      <label for="text">Text to render:</label>
-      <input id="text" value="hello marcu" style="padding: 0.4rem; width: 14rem; font-size: 1rem;" />
-      <button id="go">Invoke dom.append_heading</button>
+    <section class="group">
+      <h3>dom port</h3>
+
+      <div>
+        <label for="heading-text">Heading text:</label>
+        <input id="heading-text" type="text" value="hello marcu" />
+        <label for="heading-level">level</label>
+        <input id="heading-level" type="number" min="1" max="6" value="1" />
+        <button id="btn-append-heading">append_heading</button>
+      </div>
+
+      <div>
+        <label for="paragraph-text">Paragraph text:</label>
+        <input id="paragraph-text" type="text" value="this paragraph came from the dom port" />
+        <button id="btn-append-paragraph">append_paragraph</button>
+      </div>
+
+      <div>
+        <label for="title-text">Tab title:</label>
+        <input id="title-text" type="text" value="soma is running" />
+        <button id="btn-set-title">set_title</button>
+      </div>
+
+      <div>
+        <button id="btn-clear">clear_soma</button>
+        <span class="meta">(removes every element with <code>data-soma="true"</code>)</span>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>audio port</h3>
+      <div>
+        <label for="say-text">Speak:</label>
+        <input id="say-text" type="text" value="hello marcu" />
+        <button id="btn-say-text">say_text</button>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>composition</h3>
+      <p class="meta">
+        Two invocations in a row — <code>dom.append_heading</code> followed
+        by <code>audio.say_text</code> — both driven from the same JS handler
+        through <code>soma_invoke_port</code>. On the body side the runtime
+        has no idea these two calls are related; the brain (here: the JS
+        handler) composed them.
+      </p>
+      <button id="btn-say-hello">say hello (dom + audio)</button>
     </section>
 
     <section>
-      <h3>PortCallRecord returned by the runtime</h3>
-      <pre id="record">(click the button)</pre>
+      <h3>Last PortCallRecord</h3>
+      <pre id="record">(click a button)</pre>
     </section>
 
     <hr />
     <section id="output">
-      <p class="meta">&#8681; Rendered by soma-next's DomPort &#8681;</p>
+      <p class="meta">&#8681; Below this line is rendered by soma-next's DomPort &#8681;</p>
     </section>
 
     <script type="module">
       import init, {
-        soma_demo_render_heading,
+        soma_invoke_port,
+        soma_list_ports,
       } from "./pkg/soma_next.js";
 
       const recordEl = document.getElementById("record");
-      const textEl = document.getElementById("text");
-      const btn = document.getElementById("go");
 
-      async function boot() {
+      function showResult(json) {
         try {
-          await init();
-          recordEl.className = "result";
-          recordEl.textContent =
-            "soma-next wasm booted. Click the button to invoke the dom port.";
-        } catch (err) {
-          recordEl.className = "error";
-          recordEl.textContent = "init failed: " + err;
-        }
-      }
-
-      btn.addEventListener("click", () => {
-        try {
-          const jsonStr = soma_demo_render_heading(textEl.value || "hello marcu");
-          const parsed = JSON.parse(jsonStr);
+          const parsed = JSON.parse(json);
           recordEl.className = "result";
           recordEl.textContent = JSON.stringify(parsed, null, 2);
         } catch (err) {
           recordEl.className = "error";
-          recordEl.textContent = "invoke failed: " + err;
+          recordEl.textContent = "parse failed: " + err + "\n\nraw: " + json;
+        }
+      }
+
+      function showError(err) {
+        recordEl.className = "error";
+        recordEl.textContent = String(err);
+      }
+
+      function invoke(portId, capabilityId, input) {
+        try {
+          const json = soma_invoke_port(portId, capabilityId, JSON.stringify(input));
+          showResult(json);
+          return JSON.parse(json);
+        } catch (err) {
+          showError(err);
+          return null;
+        }
+      }
+
+      async function boot() {
+        try {
+          await init();
+          const ports = soma_list_ports();
+          recordEl.className = "result";
+          recordEl.textContent =
+            "soma-next wasm booted. Registered ports: " + ports +
+            "\nClick any button to invoke a capability.";
+        } catch (err) {
+          showError("init failed: " + err);
+        }
+      }
+
+      document.getElementById("btn-append-heading").addEventListener("click", () => {
+        const text = document.getElementById("heading-text").value || "hello";
+        const level = parseInt(document.getElementById("heading-level").value, 10) || 1;
+        invoke("dom", "append_heading", { text, level });
+      });
+
+      document.getElementById("btn-append-paragraph").addEventListener("click", () => {
+        const text = document.getElementById("paragraph-text").value || "a paragraph";
+        invoke("dom", "append_paragraph", { text });
+      });
+
+      document.getElementById("btn-set-title").addEventListener("click", () => {
+        const text = document.getElementById("title-text").value || "soma";
+        invoke("dom", "set_title", { text });
+      });
+
+      document.getElementById("btn-clear").addEventListener("click", () => {
+        invoke("dom", "clear_soma", {});
+      });
+
+      document.getElementById("btn-say-text").addEventListener("click", () => {
+        const text = document.getElementById("say-text").value || "hello";
+        invoke("audio", "say_text", { text });
+      });
+
+      document.getElementById("btn-say-hello").addEventListener("click", () => {
+        // Two ports, composed from the JS handler. The runtime does not
+        // know these two invocations are related; the brain composed them.
+        const first = invoke("dom", "append_heading", {
+          text: "hello marcu",
+          level: 1,
+        });
+        if (first && first.success) {
+          // Chain the audio call ONLY if the dom call succeeded — this is
+          // the critic-style behavior a real brain would exhibit.
+          invoke("audio", "say_text", { text: "hello marcu" });
         }
       });
 
