@@ -53,6 +53,16 @@
 // Whisper and returns the extracted text, which the frontend
 // drops into the chat input so the operator can review + submit.
 //
+// Commit 8 adds the backend-port bridge:
+//       POST /api/contexts/:id/port/:portId/:capabilityId
+// A session-authed + context-scoped RPC channel that lets the
+// browser wasm runtime reach backend-hosted ports the wasm doesn't
+// ship natively. The route is allow-list driven — only the pairs
+// registered in BRIDGE_PORTS are callable. Today that's a per-
+// context key/value store backed by postgres; future iterations
+// will grow the list with safer slices of http, smtp, and the
+// other production ports without exposing raw surfaces.
+//
 // Every database read/write goes through postgres.execute / query.
 // Every email goes through smtp.send_plain. Every random token and
 // sha256 hash goes through crypto.random_string / crypto.sha256.
@@ -75,6 +85,7 @@ import { createAuth } from "./auth.mjs";
 import { createContexts } from "./contexts.mjs";
 import { createMessages } from "./messages.mjs";
 import { createMemory } from "./memory.mjs";
+import { createContextKv } from "./contextkv.mjs";
 import {
   chatCompletion,
   generatePackSpec,
@@ -322,6 +333,43 @@ async function main() {
   const contexts = createContexts(soma);
   const messages = createMessages(soma);
   const memory = createMemory(soma);
+  const contextKv = createContextKv(soma);
+
+  // ------------------------------------------------------------------
+  // Backend-port bridge dispatch table.
+  //
+  // Every entry is `portId -> capabilityId -> handler(user, ctxId, input)`.
+  // A call to POST /api/contexts/:ctxId/port/:portId/:capabilityId
+  // looks up the (portId, capabilityId) pair here and invokes the
+  // handler. Anything NOT in this table is rejected 403 — the
+  // bridge never forwards to unknown port/capability pairs.
+  //
+  // Handlers receive the parsed `input` object from the request
+  // body's `input` field and return { ok, result, error? }. The
+  // route wraps that into a PortCallRecord-shaped response so the
+  // browser's JS-side skill executor (commit 9) can treat wasm and
+  // bridge results uniformly.
+  // ------------------------------------------------------------------
+  const BRIDGE_PORTS = {
+    context_kv: {
+      set: async (user, ctxId, input) => {
+        const { key, value } = input ?? {};
+        return contextKv.set(user.id, ctxId, key, value);
+      },
+      get: async (user, ctxId, input) => {
+        const { key } = input ?? {};
+        return contextKv.get(user.id, ctxId, key);
+      },
+      delete: async (user, ctxId, input) => {
+        const { key } = input ?? {};
+        return contextKv.del(user.id, ctxId, key);
+      },
+      list: async (user, ctxId, input) => {
+        const { prefix } = input ?? {};
+        return contextKv.list(user.id, ctxId, prefix);
+      },
+    },
+  };
 
   // Helper — every context route requires a valid session. Returns
   // the user record on success, or sends a 401 and returns null.
@@ -597,6 +645,98 @@ async function main() {
         });
       }
 
+      // /api/contexts/:id/port/:portId/:capabilityId — backend-port
+      // bridge. The browser posts an invocation here instead of
+      // calling soma_invoke_port inside the wasm runtime (which
+      // doesn't host these ports). Allow-listed via BRIDGE_PORTS;
+      // anything not in the table is 403.
+      const bridgeMatch = path.match(
+        /^\/api\/contexts\/([^/]+)\/port\/([^/]+)\/([^/]+)$/,
+      );
+      if (bridgeMatch && method === "POST") {
+        const contextId = bridgeMatch[1];
+        const portId = bridgeMatch[2];
+        const capabilityId = bridgeMatch[3];
+
+        const user = await requireUser(req, res);
+        if (!user) return;
+
+        // Ownership gate — a cross-tenant id probe or an unknown
+        // context both resolve to the same "not found" shape so
+        // the caller can't use the response to enumerate contexts.
+        const ownershipOk = await contextKv.assertOwnership(
+          user.id,
+          contextId,
+        );
+        if (!ownershipOk) {
+          return sendJson(res, 404, {
+            status: "error",
+            error: "not found",
+          });
+        }
+
+        // Allow-list check BEFORE we read the body, so probes for
+        // `postgres.query` or any raw backend port can't even
+        // attempt to ship a payload.
+        const portEntry = BRIDGE_PORTS[portId];
+        if (!portEntry) {
+          return sendJson(res, 403, {
+            status: "error",
+            error: `port "${portId}" is not exposed via the bridge`,
+          });
+        }
+        const handler = portEntry[capabilityId];
+        if (!handler) {
+          return sendJson(res, 403, {
+            status: "error",
+            error: `capability "${capabilityId}" is not exposed for port "${portId}"`,
+          });
+        }
+
+        const body = await readBody(req);
+        const input = body?.input ?? body ?? {};
+
+        let result;
+        try {
+          result = await handler(user, contextId, input);
+        } catch (e) {
+          console.error(
+            `[bridge] ${portId}.${capabilityId} threw:`,
+            e.message,
+          );
+          return sendJson(res, 500, {
+            status: "error",
+            error: `bridge handler failed: ${e.message}`,
+          });
+        }
+
+        if (!result?.ok) {
+          // 400 for input validation failures, 500 for genuine
+          // handler errors. Keeping the distinction flat for now.
+          return sendJson(res, 400, {
+            status: "error",
+            error: result?.error || "bridge handler returned no result",
+          });
+        }
+
+        // Shape the response like a PortCallRecord so the
+        // JS-side skill executor can treat wasm and bridge
+        // results uniformly. `structured_result` is what the
+        // wasm runtime returns from soma_invoke_port.
+        const structured = (() => {
+          const { ok: _ok, error: _err, ...rest } = result;
+          return rest;
+        })();
+        return sendJson(res, 200, {
+          status: "ok",
+          record: {
+            port_id: portId,
+            capability_id: capabilityId,
+            structured_result: structured,
+          },
+        });
+      }
+
       // /api/contexts/:id/pack — PUT stores the compiled PackSpec.
       // Matched before the single-context handler so the /pack
       // suffix doesn't get mis-parsed as part of the context id.
@@ -831,7 +971,7 @@ async function main() {
       if (method === "GET" && path === "/api/health") {
         return sendJson(res, 200, {
           status: "ok",
-          commit: 7,
+          commit: 8,
           soma_mcp_ready: soma.ready,
           brain_fake: String(process.env.BRAIN_FAKE || "") === "1",
         });

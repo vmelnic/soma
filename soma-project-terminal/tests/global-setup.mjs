@@ -43,7 +43,7 @@ function cleanDb() {
         "-d",
         "soma_terminal",
         "-c",
-        "TRUNCATE TABLE episodes, schemas, routines, messages, contexts, sessions, magic_tokens, users RESTART IDENTITY CASCADE;",
+        "TRUNCATE TABLE context_kv, episodes, schemas, routines, messages, contexts, sessions, magic_tokens, users RESTART IDENTITY CASCADE;",
       ],
       { stdio: ["ignore", "pipe", "pipe"] },
     );

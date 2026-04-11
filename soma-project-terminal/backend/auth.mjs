@@ -74,7 +74,7 @@ export function createAuth(soma) {
     const link = `${PUBLIC_BASE_URL}/api/auth/verify?token=${rawToken}`;
     const body = [
       "SOMA TERMINAL v0.1",
-      "RobCo Someco Unified Operating System",
+      "SOMA Unified Operating System",
       "",
       "An authorization link has been issued for this terminal.",
       "",

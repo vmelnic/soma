@@ -49,7 +49,7 @@ test.describe("commit 1 — Fallout terminal + magic-link auth", () => {
     expect(res.ok()).toBe(true);
     const body = await res.json();
     expect(body.status).toBe("ok");
-    expect(body.commit).toBe(7);
+    expect(body.commit).toBe(8);
     expect(body.soma_mcp_ready).toBe(true);
   });
 
@@ -57,12 +57,12 @@ test.describe("commit 1 — Fallout terminal + magic-link auth", () => {
     await page.goto("/");
     await waitForBootView(page);
 
-    // The RobCo header + version line should be in the DOM.
+    // Terminal header + version line should be in the DOM.
     await expect(page.locator(".term-header")).toBeVisible();
     await expect(page.locator(".term-meta")).toContainText(
       "SOMA TERMINAL v0.1",
     );
-    await expect(page.locator(".term-meta")).toContainText("RobCo");
+    await expect(page.locator(".term-meta")).toContainText("SOMA");
 
     // Request-link view should be active, other views hidden.
     await expect(page.locator("#view-request-link")).toBeVisible();

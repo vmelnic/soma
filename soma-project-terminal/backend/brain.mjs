@@ -228,13 +228,33 @@ export async function reasoningCompletion({
 // boilerplate is always identical and gets filled in by
 // `expandToFullPackSpec` below.
 
-// The three ports already live in the browser wasm runtime (from
-// soma-project-web's wasm build). Any skill the generated pack
-// declares must map to one of these (port_id, capability_id) pairs
-// or the wasm runtime rejects the manifest on boot.
+// The ports a generated pack may reference. Two disjoint groups:
+//
+//   scope: "wasm"            — already registered inside the
+//                              soma-next wasm runtime in the browser
+//                              tab. `soma_invoke_port` runs them
+//                              natively. Zero network hops.
+//
+//   scope: "backend_bridge"  — NOT resident in the wasm runtime.
+//                              The browser's JS-side skill executor
+//                              routes these invocations via fetch
+//                              to POST /api/contexts/:id/port/:portId
+//                              /:capabilityId, where the Node gateway
+//                              calls a backend-hosted handler in
+//                              contextkv.mjs (or, later, other
+//                              bridged modules). Still SOMA-native at
+//                              heart — the gateway's own side effects
+//                              flow through soma-ports via MCP — but
+//                              the wasm runtime never sees these
+//                              calls.
+//
+// Both groups are advertised to the chat brain AND the pack brain
+// so generated skills can freely mix them. The JS executor inspects
+// the scope field at dispatch time to pick wasm vs. bridge.
 const BROWSER_PORTS = Object.freeze([
   {
     port_id: "dom",
+    scope: "wasm",
     description: "Renders text into the terminal document body.",
     capabilities: [
       {
@@ -246,6 +266,7 @@ const BROWSER_PORTS = Object.freeze([
   },
   {
     port_id: "audio",
+    scope: "wasm",
     description:
       "Speaks text aloud via the browser's built-in speechSynthesis API.",
     capabilities: [
@@ -257,9 +278,38 @@ const BROWSER_PORTS = Object.freeze([
   },
   {
     port_id: "voice",
+    scope: "wasm",
     description:
-      "Listens to the operator's microphone (browser SpeechRecognition). Output-only capability for commit 6; voice-in is commit 7.",
+      "Listens to the operator's microphone (browser SpeechRecognition). No callable capabilities yet — voice input arrives via the chat form's mic button, not a pack skill.",
     capabilities: [],
+  },
+  {
+    port_id: "context_kv",
+    scope: "backend_bridge",
+    description:
+      "Per-context key/value store backed by postgres. Survives page reloads. Scoped to the current operator's context — reads and writes from other contexts are impossible.",
+    capabilities: [
+      {
+        capability_id: "set",
+        description:
+          "Upsert a key. Input: { key: string, value: string }. Overwrites if the key already exists.",
+      },
+      {
+        capability_id: "get",
+        description:
+          "Fetch a value by key. Input: { key: string }. Returns null if the key doesn't exist.",
+      },
+      {
+        capability_id: "delete",
+        description:
+          "Remove a key. Input: { key: string }. Idempotent — no error if the key wasn't there.",
+      },
+      {
+        capability_id: "list",
+        description:
+          "List keys, optionally filtered by prefix. Input: { prefix?: string }. Returns rows with key + value.",
+      },
+    ],
   },
 ]);
 
@@ -289,16 +339,19 @@ Output a single JSON object with this exact shape:
 
 RULES:
 - Emit ONLY the JSON object. No markdown, no commentary, no code fences.
-- 1 to 3 skills is ideal. Never emit 0 skills.
+- 1 to 4 skills is ideal. Never emit 0 skills.
 - Every skill's (port_id, capability_id) MUST appear in the BROWSER PORTS block below. Do not invent ports.
 - pack_id MUST start with "soma.terminal." and be lowercase-dotted.
 - Each skill's input_schema_text is a JSON Schema object describing the skill's inputs.
 - The output will be expanded into a full PackSpec server-side, so leave observability / cost_prior / remote_exposure etc. out.
 
+PORT SCOPES (both are usable, they just run differently):
+- wasm-scope ports (dom, audio): execute inside the browser wasm runtime via soma_invoke_port. Fast, offline, no server round trip. Effects live only in the current page until reload.
+- backend_bridge-scope ports (context_kv): execute via a POST to the Node gateway, which calls the backend handler and returns a PortCallRecord. Useful for anything that must survive a page reload. Feel free to combine wasm and bridge skills in the same pack — a "todo list" pack naturally has dom.append_heading (render) and context_kv.set / context_kv.list (persist).
+
 GRACEFUL DEGRADATION:
-- If the operator's chat history mentions capabilities beyond the BROWSER PORTS catalog (e.g. Postgres storage, SMTP email, HTTP sharing, filesystem writes), reduce the scope to a BROWSER-ONLY DEMO VERSION that the available ports can actually deliver.
-- NEVER fake an unavailable port with an available one. Do not claim dom.append_heading "persists" anything, or that audio.say_text "sends an email". Honest minimal scope beats ambitious unbuildable scope.
-- A demo pack for a "todo list" might just render new <h1> entries via dom.append_heading and speak them via audio.say_text — persistence, reminders, and sharing are future work and should not appear in the generated skills.`;
+- If the operator's chat history mentions capabilities beyond the BROWSER PORTS catalog (e.g. real SMTP email, outbound HTTP, filesystem writes, S3, push notifications), reduce the scope to a DEMO VERSION that the available ports can actually deliver. context_kv already covers persistence, so "save my todos" is fine; "email me reminders" is not — flag it as future work and skip the skill.
+- NEVER fake an unavailable port with an available one. Do not claim dom.append_heading "emails" anything, or that context_kv.set "sends SMS". Honest minimal scope beats ambitious unbuildable scope.`;
 
 function buildPackUserMessage(context, history) {
   const name = context?.name ?? "unnamed";
@@ -709,13 +762,19 @@ export function buildSystemPrompt(context) {
     "(no description provided yet)";
   // Re-project BROWSER_PORTS into a flat bullet list. Kept in sync
   // with the catalog the pack brain uses in PACK_SYSTEM_PROMPT —
-  // both brains speak the same truth about what's callable.
+  // both brains speak the same truth about what's callable. The
+  // scope tag tells the operator (and the brain) whether a port
+  // runs inside the wasm body or hops through the backend bridge.
   const portBullets = BROWSER_PORTS.flatMap((p) => {
+    const scopeTag =
+      p.scope === "backend_bridge" ? " [backend bridge]" : " [in-tab wasm]";
     if (p.capabilities.length === 0) {
-      return [`  - ${p.port_id}: ${p.description} (no callable capabilities yet)`];
+      return [
+        `  - ${p.port_id}${scopeTag}: ${p.description} (no callable capabilities yet)`,
+      ];
     }
     return [
-      `  - ${p.port_id}: ${p.description}`,
+      `  - ${p.port_id}${scopeTag}: ${p.description}`,
       ...p.capabilities.map(
         (c) => `      * ${c.capability_id} — ${c.description}`,
       ),
@@ -748,15 +807,15 @@ export function buildSystemPrompt(context) {
     "=============================================================",
     "The wider SOMA project has production ports for filesystem,",
     "http, postgres, redis, smtp, crypto, s3, timer, push, image,",
-    "and geo — but the BROWSER runtime cannot call them yet. A",
-    "backend-port bridge (browser → HTTP gateway → native",
-    "soma-next → dylib ports) is planned but not shipped.",
+    "and geo. Most of them are not yet exposed to the browser.",
     "",
-    "This means anything involving persistence across page reloads,",
-    "sending real email, making outbound HTTP calls, writing to",
-    "files, or sharing public links is CURRENTLY NOT BUILDABLE by",
-    "the pack generator. Be honest about this when the operator",
-    "asks for it. Do not pretend a pack will do these things.",
+    "Today the backend-port bridge only exposes context_kv (above).",
+    "That means `persistence across page reloads` IS buildable —",
+    "recommend context_kv when the operator wants their todos,",
+    "notes, or counters to survive a reload. But real SMTP email,",
+    "outbound HTTP fetches, S3, SMS push, and filesystem writes",
+    "are NOT YET buildable — flag them as future work and do not",
+    "promise them in a pack.",
     "",
     "=============================================================",
     "HOW THE OPERATOR ACTUALLY BUILDS THINGS",

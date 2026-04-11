@@ -5,6 +5,8 @@
 -- Commit 3 tables: messages.
 -- Commit 4 columns: contexts.pack_spec (nullable TEXT, JSON-encoded).
 -- Commit 5 tables: episodes, schemas, routines — per-context memory.
+-- Commit 8 tables: context_kv — per-context key/value store exposed
+--                  to the browser via the backend-port bridge.
 --
 -- Tokens are stored as sha256 hashes, never plaintext. The raw token
 -- is what we email to the user and what the browser holds as a cookie;
@@ -155,3 +157,34 @@ CREATE TABLE IF NOT EXISTS routines (
 
 CREATE INDEX IF NOT EXISTS routines_context_created_idx
     ON routines (context_id, created_at);
+
+-- ------------------------------------------------------------------
+-- Commit 8: backend-port bridge — per-context key/value store.
+--
+-- The browser wasm runtime can't persist anything on its own (no
+-- storage port yet). Instead of building a browser-native one, we
+-- expose a tiny KV space backed by postgres and accessible via a
+-- session-authed + context-scoped HTTP bridge. Generated packs
+-- can declare `context_kv.{set,get,delete,list}` capabilities and
+-- the JS-side executor routes those calls via fetch instead of
+-- soma_invoke_port.
+--
+-- UNIQUE (context_id, key) so `set` is an upsert and `get` is a
+-- single row lookup. `value` is plain TEXT — callers serialize
+-- however they want (JSON, base64, free text).
+-- ------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS context_kv (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    context_id  UUID NOT NULL REFERENCES contexts(id) ON DELETE CASCADE,
+    key         TEXT NOT NULL,
+    value       TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (context_id, key)
+);
+
+CREATE INDEX IF NOT EXISTS context_kv_context_idx
+    ON context_kv (context_id);
+CREATE INDEX IF NOT EXISTS context_kv_context_key_idx
+    ON context_kv (context_id, key);
