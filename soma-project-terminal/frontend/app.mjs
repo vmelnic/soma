@@ -14,6 +14,8 @@ import {
   bootForContext,
   getBootError,
   injectRoutine,
+  executeSkill,
+  getCurrentPackSpec,
 } from "./runtime.mjs";
 
 const views = {
@@ -426,8 +428,10 @@ async function loadContextView(contextId) {
     // the memory panel in parallel — none of them depend on each
     // other, and the user can start typing while the wasm is still
     // initializing. Routine injection happens inside the runtime
-    // panel flow (after boot completes).
-    updateRuntimePanel();
+    // panel flow (after boot completes). The skills panel waits
+    // for the wasm to come up before rendering so the runtime
+    // state is accurate when the operator clicks RUN.
+    updateRuntimePanel().then(() => renderSkillsPanel());
     refreshMemoryPanel();
     await refreshTranscript();
     const chatInput = document.getElementById("input-chat");
@@ -646,6 +650,146 @@ async function refreshMemoryPanel() {
   }
 }
 
+// -------------------------------------------------------------------
+// commit 9 — SKILLS panel: render + run
+// -------------------------------------------------------------------
+//
+// Reads the full skill list from the currently-booted pack (the
+// one runtime.mjs stashed in currentPackSpec after bootPack) and
+// renders a card per skill. Each card shows the skill name, its
+// scope tag (wasm / bridge), a JSON textarea pre-filled with a
+// guess at the input schema, and a RUN button that calls
+// runtime.mjs:executeSkill. Results land inline under the card.
+
+function scopeBadge(skill) {
+  const tags = skill?.tags ?? [];
+  if (tags.includes("scope:bridge")) return "bridge";
+  if (tags.includes("scope:wasm")) return "wasm";
+  // Fallback: empty capability_requirements → bridge
+  return (skill?.capability_requirements ?? []).length === 0
+    ? "bridge"
+    : "wasm";
+}
+
+// Generate a sensible default JSON input from the skill's declared
+// input schema so the operator has something to edit instead of an
+// empty textarea.
+function defaultInputForSkill(skill) {
+  const schema = skill?.inputs?.schema;
+  if (!schema || typeof schema !== "object") return {};
+  const props = schema.properties ?? {};
+  const required = schema.required ?? Object.keys(props);
+  const out = {};
+  for (const key of required) {
+    const type = props[key]?.type || "string";
+    if (type === "string") out[key] = "";
+    else if (type === "number" || type === "integer") out[key] = 0;
+    else if (type === "boolean") out[key] = false;
+    else if (type === "array") out[key] = [];
+    else out[key] = null;
+  }
+  return out;
+}
+
+function renderSkillsPanel() {
+  const listEl = document.getElementById("skills-list");
+  if (!listEl) return;
+  clearChildren(listEl);
+
+  const pack = getCurrentPackSpec();
+  const skills = pack?.skills ?? [];
+  if (skills.length === 0) {
+    const p = document.createElement("p");
+    p.className = "meta";
+    p.id = "skills-empty";
+    p.textContent = "(no skills yet — generate a pack first)";
+    listEl.appendChild(p);
+    return;
+  }
+
+  for (const skill of skills) {
+    const card = document.createElement("div");
+    card.className = "skill-entry";
+    card.dataset.skillId = skill.skill_id;
+
+    const head = document.createElement("div");
+    head.className = "skill-head";
+    const name = document.createElement("span");
+    name.className = "skill-name";
+    name.textContent = skill.name || skill.skill_id;
+    const scope = document.createElement("span");
+    const scopeName = scopeBadge(skill);
+    scope.className = `skill-scope ${scopeName}`;
+    scope.textContent = scopeName.toUpperCase();
+    head.appendChild(name);
+    head.appendChild(scope);
+
+    const desc = document.createElement("p");
+    desc.className = "skill-desc";
+    desc.textContent = skill.description || "";
+
+    const textarea = document.createElement("textarea");
+    textarea.className = "skill-input";
+    textarea.spellcheck = false;
+    textarea.value = JSON.stringify(defaultInputForSkill(skill), null, 2);
+
+    const actions = document.createElement("div");
+    actions.className = "skill-actions";
+    const runBtn = document.createElement("button");
+    runBtn.type = "button";
+    runBtn.className = "btn btn-run-skill";
+    runBtn.textContent = "[ RUN ]";
+
+    const resultEl = document.createElement("pre");
+    resultEl.className = "skill-result hidden";
+
+    runBtn.addEventListener("click", async () => {
+      if (!currentContext) return;
+      resultEl.classList.remove("error");
+      resultEl.classList.remove("hidden");
+      resultEl.textContent = "running...";
+      let input;
+      try {
+        const raw = textarea.value.trim();
+        input = raw === "" ? {} : JSON.parse(raw);
+      } catch (err) {
+        resultEl.classList.add("error");
+        resultEl.textContent = `invalid JSON input: ${err.message}`;
+        return;
+      }
+      try {
+        const result = await executeSkill(
+          skill.skill_id,
+          input,
+          currentContext.id,
+        );
+        if (result.status !== "ok") {
+          resultEl.classList.add("error");
+          resultEl.textContent = `error: ${result.error}`;
+          return;
+        }
+        resultEl.textContent = JSON.stringify(result.record, null, 2);
+        // Bridge writes change persistent state — refresh the
+        // memory panel so the UI reflects any new KV rows or
+        // side-effects the operator might have just caused.
+        if (scopeName === "bridge") refreshMemoryPanel();
+      } catch (err) {
+        resultEl.classList.add("error");
+        resultEl.textContent = `error: ${err.message}`;
+      }
+    });
+
+    actions.appendChild(runBtn);
+
+    card.appendChild(head);
+    if (skill.description) card.appendChild(desc);
+    card.appendChild(textarea);
+    card.appendChild(actions);
+    card.appendChild(resultEl);
+    listEl.appendChild(card);
+  }
+}
+
 // Fetch the stored routines for the current context and inject
 // each one into the wasm runtime. Runs after updateRuntimePanel
 // completes so the body is guaranteed booted first. Failures on
@@ -742,8 +886,11 @@ document
         currentContext.updated_at || "—";
       statusEl.textContent = `via ${body.model || "brain"} → ${body.minimal?.pack_id || "pack"}`;
       setStatus("PACK READY");
-      // Reboot the runtime into the freshly-generated pack.
+      // Reboot the runtime into the freshly-generated pack and
+      // re-render the SKILLS panel so the operator can RUN the
+      // new skills immediately.
       await updateRuntimePanel();
+      renderSkillsPanel();
       // Memory panel counts aren't affected but the routine store
       // was just wiped by the wasm reboot — nothing to rehydrate
       // until the operator starts generating episodes, which is

@@ -396,6 +396,11 @@ function fakePack(context) {
   const slug = slugifyForPackId(context?.name);
   const packId = `soma.terminal.${slug}`;
   const title = context?.name || "Unnamed";
+  // The fake pack deliberately mixes wasm + bridge scopes so the
+  // full executor path gets exercised in hermetic tests. Real-
+  // mode gpt-5-mini will usually produce something similar because
+  // the PACK_SYSTEM_PROMPT recommends combining context_kv and dom
+  // for any "remember something and render it" intent.
   return {
     pack_id: packId,
     pack_name: `${title} Pack`,
@@ -415,6 +420,21 @@ function fakePack(context) {
           required: ["text"],
         },
       },
+      {
+        skill_id: `${packId}.remember`,
+        name: `${title} Remember`,
+        description: `Stores a key/value pair in the ${title} context's persistent KV.`,
+        port_id: "context_kv",
+        capability_id: "set",
+        input_schema_text: {
+          type: "object",
+          properties: {
+            key: { type: "string" },
+            value: { type: "string" },
+          },
+          required: ["key", "value"],
+        },
+      },
     ],
   };
 }
@@ -424,16 +444,50 @@ function fakePack(context) {
 // frontend/packs/hello/manifest.json (which is what the browser
 // wasm successfully boots today), only the ids / names / skills
 // differ.
+//
+// Scope-aware routing:
+//   - wasm-scope skills (dom, audio, voice) put their real port+
+//     capability into `capability_requirements` so the wasm
+//     runtime's pack validator can check port registration.
+//   - bridge-scope skills (context_kv, future http/smtp) leave
+//     `capability_requirements` EMPTY — the wasm runtime doesn't
+//     host those ports and would reject the pack otherwise — and
+//     instead encode the port/capability as a `bridge:PORT:CAP`
+//     tag that the JS skill executor parses at invocation time.
+//   - Pack-level `capabilities` block ONLY lists wasm ports. The
+//     `exposure.local_skills` list still includes every skill id
+//     so the pack's public surface is complete.
+function scopeForPort(portId) {
+  return BROWSER_PORTS.find((p) => p.port_id === portId)?.scope || "wasm";
+}
+
 function expandToFullPackSpec(minimal) {
   const packId = minimal.pack_id;
   const packName = minimal.pack_name || packId;
   const description = minimal.description || "";
-  const skills = (minimal.skills ?? []).map((s) => {
+  const minimalSkills = minimal.skills ?? [];
+
+  const skills = minimalSkills.map((s) => {
     const skillId = s.skill_id;
     const inputSchema = s.input_schema_text || {
       type: "object",
       properties: {},
     };
+    const scope = scopeForPort(s.port_id);
+    const isWasm = scope === "wasm";
+    const capRequirements = isWasm
+      ? [`port:${s.port_id}/${s.capability_id}`]
+      : [];
+    // Bridge tag convention: "bridge:<port_id>:<capability_id>".
+    // The JS executor parses this at invocation time. Keep it
+    // even for wasm skills as a breadcrumb (the executor prefers
+    // the tag if present, but falls back to capability_requirements).
+    const tags = [
+      "browser",
+      "generated",
+      isWasm ? `scope:wasm` : `scope:bridge`,
+      `bridge:${s.port_id}:${s.capability_id}`,
+    ];
     return {
       skill_id: skillId,
       namespace: packId,
@@ -465,7 +519,7 @@ function expandToFullPackSpec(minimal) {
         {
           condition_type: "failure",
           expression: { error: "any" },
-          description: `${s.port_id} port error`,
+          description: `${s.port_id} invocation error`,
         },
       ],
       rollback_or_compensation: {
@@ -499,8 +553,8 @@ function expandToFullPackSpec(minimal) {
         delegation_support: false,
         enabled: false,
       },
-      tags: ["browser", "generated"],
-      capability_requirements: [`port:${s.port_id}/${s.capability_id}`],
+      tags,
+      capability_requirements: capRequirements,
       confidence_threshold: null,
       locality: null,
       remote_endpoint: null,
@@ -511,22 +565,29 @@ function expandToFullPackSpec(minimal) {
     };
   });
 
+  // Pack-level capabilities block only lists WASM ports. Bridge
+  // ports aren't registered in the wasm runtime and listing them
+  // here would make soma_boot_runtime reject the pack.
+  const wasmPortIds = Array.from(
+    new Set(
+      minimalSkills
+        .filter((s) => scopeForPort(s.port_id) === "wasm")
+        .map((s) => s.port_id),
+    ),
+  );
+
   return {
     id: packId,
     name: packName,
     version: "0.1.0",
     runtime_compatibility: ">=0.1.0",
     namespace: packId,
-    capabilities: Array.from(
-      new Set(
-        (minimal.skills ?? []).map((s) => s.port_id),
-      ),
-    ).map((portId) => ({
+    capabilities: wasmPortIds.map((portId) => ({
       group_name: portId,
       scope: "local",
       capabilities: Array.from(
         new Set(
-          (minimal.skills ?? [])
+          minimalSkills
             .filter((s) => s.port_id === portId)
             .map((s) => s.capability_id),
         ),
@@ -549,9 +610,7 @@ function expandToFullPackSpec(minimal) {
       version_metadata: { version: "0.1.0" },
       dependency_status: [],
       capability_inventory: Array.from(
-        new Set(
-          (minimal.skills ?? []).map((s) => s.capability_id),
-        ),
+        new Set(minimalSkills.map((s) => s.capability_id)),
       ),
       expected_latency_classes: ["fast"],
       expected_failure_modes: ["validation_error"],
