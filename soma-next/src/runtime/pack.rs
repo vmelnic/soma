@@ -2776,6 +2776,7 @@ mod tests {
             observable_fields: vec![],
             validation_rules: vec![],
             remote_exposure: false,
+            backend: crate::types::port::PortBackend::default(),
         });
         rt.load(spec).unwrap();
         rt.activate("p1").unwrap();
@@ -2928,6 +2929,7 @@ mod tests {
                 observable_fields: vec![],
                 validation_rules: vec![],
                 remote_exposure: false,
+                backend: crate::types::port::PortBackend::default(),
             });
         }
 
@@ -3011,6 +3013,7 @@ mod tests {
             observable_fields: vec![],
             validation_rules: vec![],
             remote_exposure: false,
+            backend: crate::types::port::PortBackend::default(),
         });
         rt.load(spec).unwrap();
 
@@ -3691,6 +3694,7 @@ mod tests {
             observable_fields: vec![],
             validation_rules: vec![],
             remote_exposure: false,
+            backend: crate::types::port::PortBackend::default(),
         });
         rt.load(spec).unwrap();
         rt.activate("p1").unwrap();

@@ -115,7 +115,50 @@ Structured result of every capability invocation. Always produced, even on failu
 
 **SdkPortAdapter**: because `soma_port_sdk::Port` and `soma_next::runtime::port::Port` are separate traits with identical schemas, the adapter bridges between them by serializing `PortSpec` and `PortCallRecord` through JSON. This avoids ABI coupling while maintaining type safety.
 
-**Built-in port routing**: `create_port_adapter` in `soma-next/src/bootstrap.rs` checks the port's `PortKind`. Filesystem and Http kinds are instantiated directly from built-in implementations. All other kinds fall through to the dynamic loader.
+**Built-in port routing**: `create_port_adapter` in `soma-next/src/bootstrap.rs` checks the port's `PortKind`. Filesystem and Http kinds are instantiated directly from built-in implementations. All other kinds dispatch on the port's `backend` field (see below).
+
+## Port Backends
+
+Every `PortSpec` has a `backend` field (defaults to `Dylib` for backward compatibility) that tells the bootstrap layer how to load the implementation. Today there are two backends:
+
+| Backend | How it loads | Use case |
+|---|---|---|
+| `Dylib` | `libloading` opens `libsoma_port_<port_id>.dylib`/`.so`, calls `soma_port_init`, wraps in `SdkPortAdapter`. | Native Rust ports — the 11 in `soma-ports/`. |
+| `McpClient` | Spawns a local subprocess (stdio) or connects to a remote URL (http), runs MCP `initialize` + `tools/list`, wraps in `McpClientPort`. | Ports written in any language with an MCP SDK (Node, Python, Bun, PHP, Go, Ruby, …) **and** consumption of remote MCP servers as ports. |
+
+The two `McpClient` transports share a single implementation (`soma-next/src/runtime/mcp_client_port.rs`) — only the transport layer differs:
+
+```json
+"backend": {
+  "type": "mcp_client",
+  "transport": {
+    "type": "stdio",
+    "command": "python3",
+    "args": ["servers/hello_py/server.py"],
+    "env": {},
+    "working_dir": null
+  }
+}
+```
+
+```json
+"backend": {
+  "type": "mcp_client",
+  "transport": {
+    "type": "http",
+    "url": "https://example.com/mcp",
+    "headers": {"Authorization": "Bearer ..."}
+  }
+}
+```
+
+**Dynamic capability discovery.** The `McpClient` backend runs `tools/list` at load time and merges the returned tools into the port's `PortSpec.capabilities`. The manifest can leave `capabilities: []` and have discovery populate them, or declare capabilities statically (which always win over discovered values — static effect/risk classes are treated as ground truth). Discovered capabilities use safe defaults: `effect_class: ReadOnly`, `risk_class: Low`, `determinism_class: Deterministic`, `idempotence_class: Idempotent`.
+
+**Result shape.** MCP `tools/call` returns `{content: [{type: "text", text: "..."}], isError: false, structuredContent?: ...}`. `McpClientPort::extract_structured` unwraps in this preference order: `structuredContent` → `content[0].text` parsed as JSON → `content[0].text` as a literal string wrapped in `{"text": "..."}`. The full MCP envelope is preserved in `PortCallRecord.raw_result` so the original content is never lost.
+
+**Lifecycle.** Stdio subprocesses are spawned eagerly at bootstrap and reaped on drop: closing stdin lets well-behaved servers exit cleanly, and a 500ms grace period precedes SIGKILL. HTTP transports use a `reqwest::blocking::Client` with a 30s timeout; each invocation POSTs a JSON-RPC request.
+
+**Proven end-to-end** in `soma-project-mcp-bridge/` — a pack manifest points at a ~100-line pure-stdlib Python MCP server exposing `greet` and `reverse` tools. `scripts/test.sh` (smoke test) shows the round trip `mcp-client.mjs → soma-next → McpClientPort → python3 servers/hello_py/server.py → back` producing `{"message": "hello marcu!"}` and `{"reversed": "!ucram olleh"}`. Two chained stdio bridges; no Rust, no FFI, no dylib, no SDK version to match.
 
 ## Manifest Format
 

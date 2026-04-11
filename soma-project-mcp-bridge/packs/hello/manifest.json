@@ -1,0 +1,131 @@
+{
+  "id": "soma.mcpbridge.hello",
+  "name": "MCP Bridge Hello",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.hello",
+  "description": "Loads three MCP servers — one Python, one Node.js, one PHP — as SOMA ports via the McpClient stdio backend. Proves that 'writing a port in any language' is the same as 'writing an MCP server in that language'. Capabilities are discovered at load time via tools/list.",
+  "capabilities": [
+    {
+      "group_name": "mcp",
+      "scope": "local",
+      "capabilities": ["greet", "reverse"]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
+  },
+  "observability": {
+    "health_checks": ["mcp_server_reachable"],
+    "version_metadata": {"version": "0.1.0"},
+    "dependency_status": [],
+    "capability_inventory": ["greet", "reverse"],
+    "expected_latency_classes": ["fast"],
+    "expected_failure_modes": ["external_error", "transport_error"],
+    "trace_categories": ["mcp_bridge"],
+    "metric_names": ["mcp_call_count"],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": ["mcp", "bridge", "python", "node", "php"],
+  "ports": [
+    {
+      "port_id": "hello_py",
+      "name": "hello_py",
+      "version": "0.1.0",
+      "kind": "custom",
+      "description": "Python MCP server exposing greet and reverse.",
+      "namespace": "soma.ports.hello_py",
+      "trust_level": "verified",
+      "capabilities": [],
+      "input_schema": {"schema": {"type": "object"}},
+      "output_schema": {"schema": {"description": "any"}},
+      "failure_modes": ["external_error", "transport_error", "validation_error"],
+      "side_effect_class": "read_only",
+      "latency_profile": {"expected_latency_ms": 50, "p95_latency_ms": 500, "max_latency_ms": 30000},
+      "cost_profile": {"cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "negligible"},
+      "auth_requirements": {"methods": [], "required": false},
+      "sandbox_requirements": {"filesystem_access": false, "network_access": false, "device_access": false, "process_access": false},
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false,
+      "backend": {
+        "type": "mcp_client",
+        "transport": {
+          "type": "stdio",
+          "command": "python3",
+          "args": ["servers/hello_py/server.py"]
+        }
+      }
+    },
+    {
+      "port_id": "hello_node",
+      "name": "hello_node",
+      "version": "0.1.0",
+      "kind": "custom",
+      "description": "Node.js MCP server exposing greet and reverse.",
+      "namespace": "soma.ports.hello_node",
+      "trust_level": "verified",
+      "capabilities": [],
+      "input_schema": {"schema": {"type": "object"}},
+      "output_schema": {"schema": {"description": "any"}},
+      "failure_modes": ["external_error", "transport_error", "validation_error"],
+      "side_effect_class": "read_only",
+      "latency_profile": {"expected_latency_ms": 50, "p95_latency_ms": 500, "max_latency_ms": 30000},
+      "cost_profile": {"cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "negligible"},
+      "auth_requirements": {"methods": [], "required": false},
+      "sandbox_requirements": {"filesystem_access": false, "network_access": false, "device_access": false, "process_access": false},
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false,
+      "backend": {
+        "type": "mcp_client",
+        "transport": {
+          "type": "stdio",
+          "command": "node",
+          "args": ["servers/hello_node/server.mjs"]
+        }
+      }
+    },
+    {
+      "port_id": "hello_php",
+      "name": "hello_php",
+      "version": "0.1.0",
+      "kind": "custom",
+      "description": "PHP MCP server exposing greet and reverse.",
+      "namespace": "soma.ports.hello_php",
+      "trust_level": "verified",
+      "capabilities": [],
+      "input_schema": {"schema": {"type": "object"}},
+      "output_schema": {"schema": {"description": "any"}},
+      "failure_modes": ["external_error", "transport_error", "validation_error"],
+      "side_effect_class": "read_only",
+      "latency_profile": {"expected_latency_ms": 50, "p95_latency_ms": 500, "max_latency_ms": 30000},
+      "cost_profile": {"cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "negligible"},
+      "auth_requirements": {"methods": [], "required": false},
+      "sandbox_requirements": {"filesystem_access": false, "network_access": false, "device_access": false, "process_access": false},
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false,
+      "backend": {
+        "type": "mcp_client",
+        "transport": {
+          "type": "stdio",
+          "command": "php",
+          "args": ["servers/hello_php/server.php"]
+        }
+      }
+    }
+  ],
+  "skills": [],
+  "port_dependencies": []
+}

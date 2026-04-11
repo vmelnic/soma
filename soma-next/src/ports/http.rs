@@ -443,6 +443,7 @@ fn build_http_port_spec() -> PortSpec {
         ],
         validation_rules: vec![],
         remote_exposure: true,
+        backend: crate::types::port::PortBackend::default(),
     }
 }
 

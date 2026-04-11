@@ -560,6 +560,7 @@ fn build_filesystem_port_spec() -> PortSpec {
         ],
         validation_rules: vec![],
         remote_exposure: false,
+        backend: crate::types::port::PortBackend::default(),
     }
 }
 

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use semver::Version;
 use uuid::Uuid;
@@ -60,6 +62,63 @@ pub struct PortSpec {
     pub observable_fields: Vec<String>,
     pub validation_rules: Vec<ValidationRule>,
     pub remote_exposure: bool,
+    /// How this port's implementation is loaded by the bootstrap layer.
+    /// Defaults to `Dylib`, preserving the original naming-convention behavior
+    /// for every manifest authored before the field existed.
+    #[serde(default)]
+    pub backend: PortBackend,
+}
+
+/// How a port's implementation is loaded by the runtime.
+///
+/// Defaults to `Dylib` so existing pack manifests load unchanged. When a
+/// manifest specifies `backend` explicitly, bootstrap dispatches accordingly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PortBackend {
+    /// Native Rust `cdylib` loaded via libloading and the C-ABI SDK vtable.
+    /// `library_name` defaults to `soma_port_{port_id}` when not set.
+    Dylib {
+        #[serde(default)]
+        library_name: Option<String>,
+    },
+    /// Consume an MCP server as a port. Capabilities map onto `tools/call`,
+    /// and are discovered at load time via `tools/list` unless the manifest
+    /// declares them statically.
+    McpClient {
+        transport: McpTransport,
+    },
+}
+
+impl Default for PortBackend {
+    fn default() -> Self {
+        PortBackend::Dylib { library_name: None }
+    }
+}
+
+/// Transport used by `PortBackend::McpClient` to reach the MCP server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum McpTransport {
+    /// Spawn a local subprocess and exchange JSON-RPC 2.0 messages over
+    /// stdin/stdout (newline-delimited per the MCP stdio transport). This is
+    /// how ports written in any language — Node, Python, Bun, PHP, Go,
+    /// Ruby — are loaded: ship an MCP server executable, point at it here.
+    Stdio {
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        env: HashMap<String, String>,
+        #[serde(default)]
+        working_dir: Option<String>,
+    },
+    /// POST JSON-RPC 2.0 requests to a remote MCP server over HTTP.
+    Http {
+        url: String,
+        #[serde(default)]
+        headers: HashMap<String, String>,
+    },
 }
 
 /// Context passed into every port invocation for tracing and auth.

@@ -4,6 +4,7 @@ pub mod resource;
 pub mod skill;
 pub mod port;
 pub mod dynamic_port;
+pub mod mcp_client_port;
 pub mod port_verify;
 pub mod session;
 pub mod selector;

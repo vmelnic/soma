@@ -62,6 +62,7 @@ pub struct RemoteGoalResponse {
 ///   - `observation` also accepts the legacy/leaf field name `structured_result`
 ///   - `timestamp` defaults to `Utc::now()` at deserialize time
 ///   - `trace_id` defaults to `Uuid::nil()`
+///
 /// The ESP32 leaf additionally sends `failure_message` and `steps_executed`
 /// which serde silently ignores (no `deny_unknown_fields`).
 #[derive(Debug, Clone, Serialize, Deserialize)]

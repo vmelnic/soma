@@ -1661,6 +1661,7 @@ mod tests {
             observable_fields: vec![],
             validation_rules: vec![],
             remote_exposure: false,
+            backend: crate::types::port::PortBackend::default(),
         }
     }
 

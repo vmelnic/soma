@@ -39,7 +39,8 @@ use crate::types::policy::{
     PolicyCondition, PolicyEffect, PolicyRule, PolicyRuleType, PolicySpec, PolicyTarget,
     PolicyTargetType,
 };
-use crate::types::port::{PortKind, PortSpec};
+use crate::runtime::mcp_client_port::McpClientPort;
+use crate::types::port::{PortBackend, PortKind, PortSpec};
 
 /// The assembled runtime: session controller plus the goal runtime needed to
 /// parse user input into GoalSpecs.
@@ -131,8 +132,8 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
 
         // Register ports declared in the pack.
         for port_spec in &pack_spec.ports {
-            let adapter = match create_port_adapter(port_spec, &mut dynamic_loader) {
-                Ok(a) => a,
+            let (adapter, effective_spec) = match create_port_adapter(port_spec, &mut dynamic_loader) {
+                Ok(pair) => pair,
                 Err(e) => {
                     tracing::warn!(
                         port_id = %port_spec.port_id,
@@ -144,8 +145,10 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
                 }
             };
 
-            port_runtime.register_port(port_spec.clone(), adapter)?;
-            port_runtime.activate(&port_spec.port_id)?;
+            let spec_to_register = effective_spec.unwrap_or_else(|| port_spec.clone());
+            let port_id = spec_to_register.port_id.clone();
+            port_runtime.register_port(spec_to_register, adapter)?;
+            port_runtime.activate(&port_id)?;
         }
 
         // Register skills declared in the pack.
@@ -284,8 +287,8 @@ pub fn bootstrap_with_remote(
         })?;
 
         for port_spec in &pack_spec.ports {
-            let adapter = match create_port_adapter(port_spec, &mut dynamic_loader) {
-                Ok(a) => a,
+            let (adapter, effective_spec) = match create_port_adapter(port_spec, &mut dynamic_loader) {
+                Ok(pair) => pair,
                 Err(e) => {
                     tracing::warn!(
                         port_id = %port_spec.port_id,
@@ -297,8 +300,10 @@ pub fn bootstrap_with_remote(
                 }
             };
 
-            port_runtime.register_port(port_spec.clone(), adapter)?;
-            port_runtime.activate(&port_spec.port_id)?;
+            let spec_to_register = effective_spec.unwrap_or_else(|| port_spec.clone());
+            let port_id = spec_to_register.port_id.clone();
+            port_runtime.register_port(spec_to_register, adapter)?;
+            port_runtime.activate(&port_id)?;
         }
 
         for skill_spec in &pack_spec.skills {
@@ -475,18 +480,35 @@ fn register_default_safety_policies(
 /// Create a port adapter for a given spec.
 ///
 /// Built-in port kinds (Filesystem, Http) are instantiated directly.
-/// All other kinds fall through to the dynamic loader, which searches
-/// configured directories for a shared library named `libsoma_port_<port_id>`.
+/// All other kinds dispatch on `spec.backend`:
+///   * `Dylib` — load a native `cdylib` through `DynamicPortLoader`.
+///   * `McpClient` — spawn/connect to an MCP server, run initialize +
+///     tools/list discovery, and wrap it in an `McpClientPort`.
+///
+/// Returns the adapter and, when discovery added capabilities to the spec,
+/// a replacement `PortSpec` the caller should register instead of the
+/// original manifest version.
 fn create_port_adapter(
     spec: &PortSpec,
     loader: &mut DynamicPortLoader,
-) -> Result<Box<dyn Port>> {
+) -> Result<(Box<dyn Port>, Option<PortSpec>)> {
     match spec.kind {
-        PortKind::Filesystem => Ok(Box::new(FilesystemPort::new())),
-        PortKind::Http => Ok(Box::new(HttpPort::new())),
-        _ => {
-            let lib_name = format!("soma_port_{}", spec.port_id);
-            loader.load_port(&lib_name)
+        PortKind::Filesystem => return Ok((Box::new(FilesystemPort::new()), None)),
+        PortKind::Http => return Ok((Box::new(HttpPort::new()), None)),
+        _ => {}
+    }
+
+    match spec.backend.clone() {
+        PortBackend::Dylib { library_name } => {
+            let lib_name = library_name
+                .unwrap_or_else(|| format!("soma_port_{}", spec.port_id));
+            let port = loader.load_port(&lib_name)?;
+            Ok((port, None))
+        }
+        PortBackend::McpClient { transport } => {
+            let (port, effective_spec) =
+                McpClientPort::spawn_and_discover(spec.clone(), transport)?;
+            Ok((Box::new(port), Some(effective_spec)))
         }
     }
 }
