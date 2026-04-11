@@ -32,12 +32,11 @@
         </div>
       </header>
 
-      <!-- Each "view" is a section the JS shows/hides. Commit 1 had
-           three: pre-auth request-link, post-request confirmation,
-           and post-login placeholder. Commit 2 adds a contexts list
-           inside view-authenticated and a new view-context-detail
-           for the "loaded" state. Commit 3+ grows the detail view
-           into a chat/wasm runtime. -->
+      <!-- Each "view" is a <section> the JS shows/hides. The
+           context-detail view is a full-width chat — no side
+           panels, no skills grid, no runtime dashboard. The brain
+           handles the operator's requests by calling MCP tools
+           against the backend soma-next subprocess. -->
 
       <section class="view" id="view-loading">
         <p class="prompt">&gt; INITIALIZING TERMINAL<span class="cursor">_</span></p>
@@ -123,9 +122,9 @@
         <p class="status hidden" id="status-create-context"></p>
 
         <p class="meta">
-          (A context is currently just a named row. Commit 3 adds a
-          chat shell inside each context; commit 6 turns your
-          description into a compiled SOMA pack.)
+          (A context is a named conversation scope. Once created,
+          you talk to it — no forms, no buttons, just say what you
+          want done.)
         </p>
 
         <button class="btn" id="btn-logout">[ LOGOUT ]</button>
@@ -136,78 +135,41 @@
         <pre class="lore" id="context-detail-summary">
   NAME:        <span id="ctx-name">—</span>
   DESCRIPTION: <span id="ctx-description">—</span>
-  STATUS:      <span id="ctx-kind">—</span>
   CREATED:     <span id="ctx-created">—</span>
   UPDATED:     <span id="ctx-updated">—</span>
         </pre>
 
-        <div class="ctx-grid">
-          <!-- Left: conversational brain (gpt-4o-mini) -->
-          <div class="ctx-panel ctx-chat">
-            <p class="prompt">&gt; BRAIN CHANNEL — gpt-4o-mini</p>
-            <div class="chat-transcript" id="chat-transcript">
-              <p class="meta" id="chat-empty">
-                (no messages yet — describe what you want to build)
-              </p>
-            </div>
-            <form id="form-chat" autocomplete="off">
-              <label class="field field-block">
-                <span class="field-prefix">[YOU]</span>
-                <input
-                  type="text"
-                  id="input-chat"
-                  name="content"
-                  required
-                  maxlength="8000"
-                  placeholder="i want to track my daily journal entries"
-                />
-              </label>
-              <button type="submit" class="btn" id="btn-chat-send">
-                [ TRANSMIT ]
-              </button>
-              <button
-                type="button"
-                class="btn"
-                id="btn-mic"
-                title="hold to dictate; Whisper transcription via backend"
-              >
-                [ MIC ]
-              </button>
-              <span class="status" id="chat-status"></span>
-            </form>
-          </div>
-
-          <!-- Right: browser-side SOMA runtime (body) -->
-          <div class="ctx-panel ctx-runtime">
-            <p class="prompt">&gt; SOMA RUNTIME — BODY</p>
-            <pre class="lore" id="runtime-summary">
-  STATE:  BOOTING...
-  PORTS:  —
-  SKILLS: —
-            </pre>
-            <button class="btn" id="btn-generate-pack">
-              [ GENERATE PACK ]
-            </button>
-            <span class="status" id="generate-status"></span>
-
-            <p class="prompt">&gt; SKILLS — RUN</p>
-            <div id="skills-list" class="skills-list">
-              <p class="meta" id="skills-empty">
-                (no skills yet — generate a pack first)
-              </p>
-            </div>
-
-            <p class="prompt">&gt; MEMORY — PER CONTEXT</p>
-            <pre class="lore" id="memory-summary">
-  EPISODES: —
-  SCHEMAS:  —
-  ROUTINES: —
-            </pre>
-            <p class="meta">
-              (Memory is isolated per context. Stored routines are
-              hot-injected into the wasm body on open.)
+        <div class="ctx-panel ctx-chat">
+          <div class="chat-transcript" id="chat-transcript">
+            <p class="meta" id="chat-empty">
+              (no messages yet — describe what you want to do)
             </p>
           </div>
+          <form id="form-chat" autocomplete="off">
+            <label class="field field-block">
+              <span class="field-prefix">&gt;</span>
+              <input
+                type="text"
+                id="input-chat"
+                name="content"
+                required
+                maxlength="8000"
+                placeholder="say what you want..."
+              />
+            </label>
+            <button type="submit" class="btn" id="btn-chat-send">
+              [ TRANSMIT ]
+            </button>
+            <button
+              type="button"
+              class="btn"
+              id="btn-mic"
+              title="hold to dictate; Whisper transcription via backend"
+            >
+              [ MIC ]
+            </button>
+            <span class="status" id="chat-status"></span>
+          </form>
         </div>
 
         <div class="ctx-actions">

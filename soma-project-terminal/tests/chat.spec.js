@@ -1,19 +1,34 @@
-// soma-project-terminal — commit 3 chat + brain tests.
+// soma-project-terminal — chat + tool-calling tests.
 //
-// Asserts:
-//   1. Unauthenticated access to /messages is 401.
-//   2. Empty transcript for a brand-new context.
-//   3. POST /messages stores the user turn, calls the brain, stores
-//      the assistant turn, and returns both in one response. The
-//      fake brain is used (BRAIN_FAKE=1 via playwright.config.js)
-//      so the test is hermetic.
-//   4. GET /messages returns the full transcript in insertion order.
-//   5. One operator cannot read another operator's transcript
-//      (404, same shape as unknown context).
-//   6. Posting an empty message is rejected with 400.
-//   7. Posting to a non-existent context is 404.
-//   8. The UI chat shell paints user + brain bubbles end-to-end and
-//      the browser-side wasm runtime boots the hello pack.
+// After the conversation-first pivot, every operator turn flows
+// through the chat brain as a tool-calling loop: the backend runs
+// runChatTurn with tool definitions (list_ports / list_skills /
+// invoke_port), the model may issue tool calls, the backend
+// executes each against soma-next via MCP, and the final assistant
+// text lands in the transcript.
+//
+// Fake mode (BRAIN_FAKE=1 via playwright.config.js) handles the
+// OpenAI side deterministically. To test the tool-calling path we
+// use the ::tool escape trigger baked into fakeMode: if a user
+// message matches `::tool <name> <json-args>`, the fake brain
+// issues exactly that tool call against the REAL SomaMcpClient and
+// embeds the result in its reply. This gives tests a deterministic
+// way to drive the tool-call loop without an actual LLM.
+//
+// Covered:
+//   1. Unauth GET / POST → 401
+//   2. Empty transcript for a fresh context
+//   3. Plain user turn round-trips (no tool calls)
+//   4. Transcript ordering across multiple turns
+//   5. Cross-user isolation on both read and write
+//   6. Empty-content 400
+//   7. Non-existent context 404
+//   8. ::tool trigger runs list_ports against the real soma-next
+//      subprocess and the result comes back in the assistant reply
+//   9. ::tool trigger for invoke_port — the backend executes a real
+//      postgres.query and the result is embedded in the response's
+//      tool_calls trace
+//  10. UI chat round trip (full-width, no right panel)
 
 import { test, expect } from "@playwright/test";
 import { loginAs } from "./helpers.mjs";
@@ -31,9 +46,18 @@ async function createContext(request, authHeader, name = "chat-target") {
   return body.context;
 }
 
-test.describe("commit 3 — chat + brain", () => {
+async function postMessage(request, authHeader, contextId, content) {
+  return request.post(`/api/contexts/${contextId}/messages`, {
+    headers: {
+      Authorization: authHeader,
+      "Content-Type": "application/json",
+    },
+    data: { content },
+  });
+}
+
+test.describe("chat + tool-calling", () => {
   test("unauthenticated GET /messages is 401", async ({ request }) => {
-    // A random UUID — doesn't matter, auth fires before loading.
     const res = await request.get(
       "/api/contexts/00000000-0000-0000-0000-000000000000/messages",
     );
@@ -64,21 +88,17 @@ test.describe("commit 3 — chat + brain", () => {
     expect(body.messages).toEqual([]);
   });
 
-  test("POST /messages stores user + assistant and returns both", async ({
+  test("plain user turn round-trips through fake brain echo", async ({
     request,
   }) => {
     const { authHeader } = await loginAs(request);
     const ctx = await createContext(request, authHeader);
 
-    const res = await request.post(
-      `/api/contexts/${ctx.id}/messages`,
-      {
-        headers: {
-          Authorization: authHeader,
-          "Content-Type": "application/json",
-        },
-        data: { content: "help me design a daily journal" },
-      },
+    const res = await postMessage(
+      request,
+      authHeader,
+      ctx.id,
+      "help me design a daily journal",
     );
     expect(res.status()).toBe(201);
     const body = await res.json();
@@ -86,12 +106,11 @@ test.describe("commit 3 — chat + brain", () => {
     expect(body.user_message.role).toBe("user");
     expect(body.user_message.content).toBe("help me design a daily journal");
     expect(body.assistant_message.role).toBe("assistant");
-    // Fake brain echoes the user's content into the reply, so we
-    // can check the round trip worked without knowing the exact
-    // response shape.
     expect(body.assistant_message.content).toContain("[FAKE BRAIN]");
     expect(body.assistant_message.content).toContain("daily journal");
     expect(body.model).toBe("fake:chat");
+    // No tool calls for a plain echo.
+    expect(body.tool_calls).toEqual([]);
   });
 
   test("GET /messages returns the transcript in order", async ({
@@ -101,16 +120,7 @@ test.describe("commit 3 — chat + brain", () => {
     const ctx = await createContext(request, authHeader);
     const prompts = ["first", "second", "third"];
     for (const p of prompts) {
-      await request.post(`/api/contexts/${ctx.id}/messages`, {
-        headers: {
-          Authorization: authHeader,
-          "Content-Type": "application/json",
-        },
-        data: { content: p },
-      });
-      // Tiny gap so created_at values are monotonic through the
-      // postgres port even if the container clock is millisecond-
-      // resolution.
+      await postMessage(request, authHeader, ctx.id, p);
       await new Promise((r) => setTimeout(r, 20));
     }
 
@@ -118,8 +128,6 @@ test.describe("commit 3 — chat + brain", () => {
       headers: { Authorization: authHeader },
     });
     const body = await res.json();
-    const contents = body.messages.map((m) => m.content);
-    // 3 prompts × 2 turns = 6 messages, alternating user/assistant.
     expect(body.messages).toHaveLength(6);
     expect(body.messages.map((m) => m.role)).toEqual([
       "user",
@@ -129,9 +137,9 @@ test.describe("commit 3 — chat + brain", () => {
       "user",
       "assistant",
     ]);
-    expect(contents[0]).toBe("first");
-    expect(contents[2]).toBe("second");
-    expect(contents[4]).toBe("third");
+    expect(body.messages[0].content).toBe("first");
+    expect(body.messages[2].content).toBe("second");
+    expect(body.messages[4].content).toBe("third");
   });
 
   test("one operator cannot read another's transcript", async ({
@@ -144,35 +152,27 @@ test.describe("commit 3 — chat + brain", () => {
       alice.authHeader,
       "alice-transcript",
     );
-    await request.post(`/api/contexts/${ctx.id}/messages`, {
-      headers: {
-        Authorization: alice.authHeader,
-        "Content-Type": "application/json",
-      },
-      data: { content: "alice private thought" },
-    });
+    await postMessage(
+      request,
+      alice.authHeader,
+      ctx.id,
+      "alice private thought",
+    );
 
-    // Bob tries to read.
     const bobRead = await request.get(
       `/api/contexts/${ctx.id}/messages`,
       { headers: { Authorization: bob.authHeader } },
     );
     expect(bobRead.status()).toBe(404);
 
-    // Bob tries to write.
-    const bobWrite = await request.post(
-      `/api/contexts/${ctx.id}/messages`,
-      {
-        headers: {
-          Authorization: bob.authHeader,
-          "Content-Type": "application/json",
-        },
-        data: { content: "hijack attempt" },
-      },
+    const bobWrite = await postMessage(
+      request,
+      bob.authHeader,
+      ctx.id,
+      "hijack attempt",
     );
     expect(bobWrite.status()).toBe(404);
 
-    // Alice still sees exactly her one turn + her brain reply.
     const aliceRead = await request.get(
       `/api/contexts/${ctx.id}/messages`,
       { headers: { Authorization: alice.authHeader } },
@@ -182,38 +182,80 @@ test.describe("commit 3 — chat + brain", () => {
     expect(body.messages[0].content).toBe("alice private thought");
   });
 
-  test("empty content is rejected with 400", async ({ request }) => {
+  test("empty content is rejected 400", async ({ request }) => {
     const { authHeader } = await loginAs(request);
     const ctx = await createContext(request, authHeader);
-    const res = await request.post(
-      `/api/contexts/${ctx.id}/messages`,
-      {
-        headers: {
-          Authorization: authHeader,
-          "Content-Type": "application/json",
-        },
-        data: { content: "   " },
-      },
-    );
+    const res = await postMessage(request, authHeader, ctx.id, "   ");
     expect(res.status()).toBe(400);
   });
 
   test("posting to a non-existent context is 404", async ({ request }) => {
     const { authHeader } = await loginAs(request);
-    const res = await request.post(
-      "/api/contexts/00000000-0000-0000-0000-000000000000/messages",
-      {
-        headers: {
-          Authorization: authHeader,
-          "Content-Type": "application/json",
-        },
-        data: { content: "hello ghost" },
-      },
+    const res = await postMessage(
+      request,
+      authHeader,
+      "00000000-0000-0000-0000-000000000000",
+      "hello ghost",
     );
     expect(res.status()).toBe(404);
   });
 
-  test("chat UI round trip + wasm runtime boots", async ({
+  test("::tool list_ports runs against the real soma-next runtime", async ({
+    request,
+  }) => {
+    const { authHeader } = await loginAs(request);
+    const ctx = await createContext(request, authHeader, "tool-listports");
+
+    const res = await postMessage(
+      request,
+      authHeader,
+      ctx.id,
+      "::tool list_ports {}",
+    );
+    expect(res.status()).toBe(201);
+    const body = await res.json();
+    expect(body.status).toBe("ok");
+    expect(body.tool_calls).toHaveLength(1);
+    expect(body.tool_calls[0].name).toBe("list_ports");
+    expect(body.tool_calls[0].result.ok).toBe(true);
+    // The assistant reply embeds a snippet of the tool result —
+    // enough to confirm the round trip happened.
+    expect(body.assistant_message.content).toContain("list_ports");
+  });
+
+  test("::tool invoke_port runs a real postgres query via MCP", async ({
+    request,
+  }) => {
+    const { authHeader } = await loginAs(request);
+    const ctx = await createContext(request, authHeader, "tool-invoke");
+
+    // Drive the fake brain to issue an invoke_port tool call. The
+    // backend will execute it against the real soma-next subprocess,
+    // which runs it through the postgres port dylib.
+    const args = {
+      port_id: "postgres",
+      capability_id: "query",
+      input: { sql: "SELECT 1 AS ok" },
+    };
+    const res = await postMessage(
+      request,
+      authHeader,
+      ctx.id,
+      `::tool invoke_port ${JSON.stringify(args)}`,
+    );
+    expect(res.status()).toBe(201);
+    const body = await res.json();
+    expect(body.status).toBe("ok");
+    expect(body.tool_calls).toHaveLength(1);
+    expect(body.tool_calls[0].name).toBe("invoke_port");
+    expect(body.tool_calls[0].result.ok).toBe(true);
+    // The postgres port returned rows — one with column "ok" = 1.
+    const structured = body.tool_calls[0].result.result;
+    expect(Array.isArray(structured.rows)).toBe(true);
+    expect(structured.rows[0].ok).toBe(1);
+  });
+
+  test("UI chat round trip — full-width panel, no right side", async ({
     page,
     context,
     request,
@@ -221,7 +263,6 @@ test.describe("commit 3 — chat + brain", () => {
     const { sessionToken, authHeader } = await loginAs(request);
     const ctx = await createContext(request, authHeader, "ui-chat");
 
-    // Inject the session cookie so the browser treats us as logged in.
     await context.addCookies([
       {
         name: "soma_session",
@@ -238,26 +279,28 @@ test.describe("commit 3 — chat + brain", () => {
       timeout: 10_000,
     });
 
-    // Click the freshly-created context in the list.
     const entry = page.locator(`.context-entry[data-context-id='${ctx.id}']`);
     await expect(entry).toBeVisible();
     await entry.click();
     await expect(page.locator("#view-context-detail")).toBeVisible();
 
-    // Wasm runtime should boot and report the hello pack.
-    await expect(page.locator("#runtime-summary")).toContainText("READY", {
-      timeout: 15_000,
-    });
+    // The runtime panel is gone — no #runtime-summary in the DOM.
+    await expect(page.locator("#runtime-summary")).toHaveCount(0);
+    // The skills grid is gone.
+    await expect(page.locator("#skills-list")).toHaveCount(0);
+    // The memory panel is gone.
+    await expect(page.locator("#memory-summary")).toHaveCount(0);
+    // The generate-pack button is gone.
+    await expect(page.locator("#btn-generate-pack")).toHaveCount(0);
 
-    // Empty transcript marker.
+    // Chat is visible and empty.
     await expect(page.locator("#chat-empty")).toBeVisible();
+    await expect(page.locator("#input-chat")).toBeVisible();
 
-    // Type a message and transmit.
+    // Type a message and submit.
     await page.fill("#input-chat", "hello terminal");
     await page.click("#btn-chat-send");
 
-    // The transcript should now contain a user bubble + an assistant
-    // bubble with the fake brain echo.
     const userBubble = page.locator(".chat-msg.user").first();
     const assistantBubble = page.locator(".chat-msg.assistant").first();
     await expect(userBubble).toContainText("hello terminal", {

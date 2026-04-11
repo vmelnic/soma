@@ -102,8 +102,9 @@ export function createMessages(soma) {
 
   // ---- history fetch for brain ----
   // Returns the last `MAX_HISTORY` messages as `{role, content}`
-  // pairs, oldest first — the exact shape brain.chatCompletion
-  // wants. No timestamps; the brain doesn't care.
+  // pairs, oldest first — the exact shape brain.runChatTurn wants
+  // as its `history` argument. No timestamps; the brain doesn't
+  // care.
   async function historyFor(userId, contextId) {
     const result = await listForContext(userId, contextId);
     if (!result.ok) return result;

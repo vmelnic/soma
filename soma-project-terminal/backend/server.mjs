@@ -1,78 +1,49 @@
 // soma-project-terminal — Node HTTP gateway.
 //
-// Commit 1 responsibilities:
-//   - Spawn soma-next in --mcp mode with the platform pack (crypto
-//     + postgres + smtp ports) and hold the MCP stdio handle.
-//   - Serve static files from ../frontend/ (the Fallout terminal UI).
-//   - Expose auth endpoints backed by SOMA port invocations:
-//       POST /api/auth/request-link
-//       GET  /api/auth/verify
-//       GET  /api/me
-//       POST /api/auth/logout
+// Conversation-first architecture:
 //
-// Commit 2 adds the context registry:
-//       GET    /api/contexts
-//       POST   /api/contexts
-//       GET    /api/contexts/:id
-//       DELETE /api/contexts/:id
+//   Frontend:       streaming-ish chat UI. One <div> for transcript,
+//                   one <input> for composition, one mic button for
+//                   voice input. No per-pack UI, no skills grid, no
+//                   runtime panel, no view DSL.
 //
-// Commit 3 adds the per-context chat brain:
-//       GET  /api/contexts/:id/messages
-//       POST /api/contexts/:id/messages   (append user + call brain)
+//   Backend:        this file. Routes the operator's chat turns to
+//                   the chat brain with OpenAI tool calling bound to
+//                   soma-next's MCP catalog. The brain handles every
+//                   operator request by calling the right port via
+//                   MCP tools — no pack generation, no templates, no
+//                   LLM-produced artifacts we maintain.
 //
-// Commit 4 adds the dynamic pack loader:
-//       PUT  /api/contexts/:id/pack
-// which validates + stores a manifest on the context row so the
-// browser-side wasm runtime boots that pack next time the context
-// is opened (see frontend/runtime.mjs for the hot-swap).
+//   SOMA:           the one master pack
+//                   (packs/platform/manifest.json) the backend loads
+//                   into soma-next as its child process. Every
+//                   context shares this pack; the pack grows when WE
+//                   (humans) add new ports, not when the LLM
+//                   generates anything.
 //
-// Commit 5 adds per-context memory isolation:
-//       GET    /api/contexts/:id/memory
-//       POST   /api/contexts/:id/memory/episodes
-//       POST   /api/contexts/:id/memory/schemas
-//       POST   /api/contexts/:id/memory/routines
-//       DELETE /api/contexts/:id/memory
-// Episodes / schemas / routines each live in their own table with
-// ownership enforced by joining contexts. One context's memory is
-// opaque to every other — a leak here would silently break the
-// whole multi-tenant story, so it's tested explicitly.
+// Routes:
+//   POST /api/auth/request-link
+//   GET  /api/auth/verify
+//   GET  /api/me
+//   POST /api/auth/logout
 //
-// Commit 6 adds LLM-to-PackSpec generation:
-//       POST /api/contexts/:id/pack/generate
-// The reasoning brain (gpt-5-mini) reads the context name +
-// description + chat history and emits a minimal pack shape,
-// which backend/brain.mjs expands into a full PackSpec and
-// persists via contexts.setPackSpec. The next time the operator
-// opens the context, the browser wasm runtime boots that pack
-// instead of the hello fallback.
+//   GET    /api/contexts            — list operator's contexts
+//   POST   /api/contexts            — create a new context
+//   GET    /api/contexts/:id        — load one
+//   DELETE /api/contexts/:id        — delete one
 //
-// Commit 7 adds voice input:
-//       POST /api/transcribe  (raw audio body → JSON { text })
-// The browser records via MediaRecorder + getUserMedia and POSTs
-// the blob directly. This route forwards the bytes to OpenAI
-// Whisper and returns the extracted text, which the frontend
-// drops into the chat input so the operator can review + submit.
+//   GET    /api/contexts/:id/messages — read the transcript
+//   POST   /api/contexts/:id/messages — append a user turn, run the
+//                                       tool-calling chat brain loop,
+//                                       append the assistant reply
 //
-// Commit 8 adds the backend-port bridge:
-//       POST /api/contexts/:id/port/:portId/:capabilityId
-// A session-authed + context-scoped RPC channel that lets the
-// browser wasm runtime reach backend-hosted ports the wasm doesn't
-// ship natively. The route is allow-list driven — only the pairs
-// registered in BRIDGE_PORTS are callable. Today that's a per-
-// context key/value store backed by postgres; future iterations
-// will grow the list with safer slices of http, smtp, and the
-// other production ports without exposing raw surfaces.
+//   POST /api/transcribe            — Whisper voice input
+//   GET  /api/health
 //
-// Every database read/write goes through postgres.execute / query.
-// Every email goes through smtp.send_plain. Every random token and
-// sha256 hash goes through crypto.random_string / crypto.sha256.
-// The only direct Node deps are node:http, node:fs, node:path — no
-// pg, no nodemailer, nothing in node_modules. The OpenAI brain uses
-// the global `fetch` introduced in Node 18+ (zero-dep wrapper in
-// backend/brain.mjs).
-//
-// Commit 4+ adds dynamic pack loading; commit 6 hits
-// brain.reasoningCompletion for LLM-to-PackSpec.
+// Zero runtime node_modules. All side effects route through
+// SomaMcpClient.invokePort (postgres, smtp, crypto). OpenAI is the
+// one network hop that doesn't go through SOMA — for now. Future
+// commit: soma-ports/llm dylib (see docs/terminal-multi-tenancy.md).
 
 import http from "node:http";
 import { readFile, stat } from "node:fs/promises";
@@ -84,14 +55,12 @@ import { SomaMcpClient } from "./soma-mcp.mjs";
 import { createAuth } from "./auth.mjs";
 import { createContexts } from "./contexts.mjs";
 import { createMessages } from "./messages.mjs";
-import { createMemory } from "./memory.mjs";
-import { createContextKv } from "./contextkv.mjs";
 import {
-  chatCompletion,
-  generatePackSpec,
+  runChatTurn,
   transcribeAudio,
   buildSystemPrompt,
 } from "./brain.mjs";
+import { DEFAULT_CHAT_TOOLS, makeInvokeTool } from "./mcp-tools.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const FRONTEND_DIR = resolvePath(__dirname, "..", "frontend");
@@ -99,12 +68,11 @@ const BIN_DIR = resolvePath(__dirname, "..", "bin");
 const PORT = Number(process.env.BACKEND_PORT ?? 8765);
 
 // ------------------------------------------------------------------
-// startup preflight — verify the binaries we need actually exist
+// startup preflight — verify the native binaries exist. wasm assets
+// no longer exist (deleted in this commit).
 // ------------------------------------------------------------------
 
 function preflight() {
-  // Native binaries are HARD requirements — the backend can't start
-  // without them because it spawns soma-next as a child process.
   const nativeRequired = [
     { path: resolvePath(BIN_DIR, "soma"), name: "soma-next binary" },
     {
@@ -120,53 +88,21 @@ function preflight() {
       name: "smtp port dylib",
     },
   ];
-  const missingNative = nativeRequired.filter((r) => !existsSync(r.path));
-  if (missingNative.length > 0) {
-    process.stderr.write(
-      "error: missing required binaries:\n" +
-        missingNative
-          .map((m) => `  - ${m.name}: ${m.path}`)
-          .join("\n") +
-        "\n\n" +
-        "Run ./scripts/copy-binaries.sh to populate bin/ from soma-next\n" +
-        "and soma-ports (both must be built in release mode first).\n",
-    );
-    process.exit(1);
-  }
+  const missing = nativeRequired.filter((r) => !existsSync(r.path));
+  if (missing.length === 0) return;
 
-  // Wasm assets are SOFT requirements — the backend serves HTTP
-  // fine without them, but the context-detail view will fail to
-  // boot the browser runtime. Warn loudly so a fresh clone isn't
-  // silently broken, and let the server keep running so the auth
-  // endpoints still work for quick debugging.
-  const wasmRequired = [
-    {
-      path: resolvePath(FRONTEND_DIR, "pkg", "soma_next_bg.wasm"),
-      name: "wasm bundle",
-    },
-    {
-      path: resolvePath(FRONTEND_DIR, "pkg", "soma_next.js"),
-      name: "wasm JS glue",
-    },
-    {
-      path: resolvePath(FRONTEND_DIR, "packs", "hello", "manifest.json"),
-      name: "hello fallback pack",
-    },
-  ];
-  const missingWasm = wasmRequired.filter((r) => !existsSync(r.path));
-  if (missingWasm.length > 0) {
-    process.stderr.write(
-      "warning: missing frontend wasm assets — browser runtime will NOT boot:\n" +
-        missingWasm.map((m) => `  - ${m.name}: ${m.path}`).join("\n") +
-        "\n\n" +
-        "Run ./scripts/copy-frontend-assets.sh to populate frontend/pkg/\n" +
-        "from soma-project-web (which must be built first).\n\n",
-    );
-  }
+  process.stderr.write(
+    "error: missing required binaries:\n" +
+      missing.map((m) => `  - ${m.name}: ${m.path}`).join("\n") +
+      "\n\n" +
+      "Run ./scripts/copy-binaries.sh to populate bin/ from soma-next\n" +
+      "and soma-ports (both must be built in release mode first).\n",
+  );
+  process.exit(1);
 }
 
 // ------------------------------------------------------------------
-// small helpers
+// helpers
 // ------------------------------------------------------------------
 
 const MIME = {
@@ -180,10 +116,6 @@ const MIME = {
   ".ico": "image/x-icon",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
-  // application/wasm is required — browsers refuse to stream-
-  // instantiate wasm modules served with the wrong Content-Type.
-  ".wasm": "application/wasm",
-  ".ts": "text/plain; charset=utf-8",
 };
 
 function send(res, status, body, headers = {}) {
@@ -231,9 +163,8 @@ async function readBody(req, max = 64 * 1024) {
   }
 }
 
-// Raw-body reader for binary uploads (commit 7 Whisper audio).
-// Returns a Buffer, not a parsed JSON object, and accepts a much
-// larger cap since Whisper happily eats multi-MB files.
+// Raw-body reader for binary uploads (Whisper audio). Returns a
+// Buffer, not a parsed JSON object, with a 10 MB cap.
 async function readRawBody(req, max = 10 * 1024 * 1024) {
   const chunks = [];
   let total = 0;
@@ -281,9 +212,8 @@ function getSessionToken(req) {
   // Authorization header wins over the cookie — an explicit bearer
   // token is the caller saying "use THIS session, not whatever is
   // in the jar." Cookie-first would let a stale browser session
-  // silently override an intentional API call, which is exactly
-  // the kind of confused-deputy failure that breaks multi-tenant
-  // scope isolation.
+  // silently override an intentional API call, which breaks
+  // multi-tenant scope isolation tests in particular.
   const h = req.headers.authorization;
   if (h && h.toLowerCase().startsWith("bearer ")) {
     return h.slice(7).trim();
@@ -332,47 +262,11 @@ async function main() {
   const auth = createAuth(soma);
   const contexts = createContexts(soma);
   const messages = createMessages(soma);
-  const memory = createMemory(soma);
-  const contextKv = createContextKv(soma);
 
-  // ------------------------------------------------------------------
-  // Backend-port bridge dispatch table.
-  //
-  // Every entry is `portId -> capabilityId -> handler(user, ctxId, input)`.
-  // A call to POST /api/contexts/:ctxId/port/:portId/:capabilityId
-  // looks up the (portId, capabilityId) pair here and invokes the
-  // handler. Anything NOT in this table is rejected 403 — the
-  // bridge never forwards to unknown port/capability pairs.
-  //
-  // Handlers receive the parsed `input` object from the request
-  // body's `input` field and return { ok, result, error? }. The
-  // route wraps that into a PortCallRecord-shaped response so the
-  // browser's JS-side skill executor (commit 9) can treat wasm and
-  // bridge results uniformly.
-  // ------------------------------------------------------------------
-  const BRIDGE_PORTS = {
-    context_kv: {
-      set: async (user, ctxId, input) => {
-        const { key, value } = input ?? {};
-        return contextKv.set(user.id, ctxId, key, value);
-      },
-      get: async (user, ctxId, input) => {
-        const { key } = input ?? {};
-        return contextKv.get(user.id, ctxId, key);
-      },
-      delete: async (user, ctxId, input) => {
-        const { key } = input ?? {};
-        return contextKv.del(user.id, ctxId, key);
-      },
-      list: async (user, ctxId, input) => {
-        const { prefix } = input ?? {};
-        return contextKv.list(user.id, ctxId, prefix);
-      },
-    },
-  };
+  // The chat brain's tool bindings — a closure over the live
+  // SomaMcpClient so every tool call hits the same child process.
+  const invokeTool = makeInvokeTool(soma);
 
-  // Helper — every context route requires a valid session. Returns
-  // the user record on success, or sends a 401 and returns null.
   async function requireUser(req, res) {
     const token = getSessionToken(req);
     const user = await auth.currentUser(token);
@@ -389,7 +283,7 @@ async function main() {
     const method = req.method;
 
     try {
-      // ---- auth endpoints ----
+      // ---- auth ----
       if (method === "POST" && path === "/api/auth/request-link") {
         const body = await readBody(req);
         const email = String(body.email ?? "").trim();
@@ -440,11 +334,6 @@ async function main() {
       }
 
       // ---- contexts ----
-      // Listing, creating, loading, and deleting the operator's
-      // contexts. Every route is session-scoped via `requireUser`
-      // and every SQL query filters by `user_id` so one operator's
-      // id lookup for another operator's context returns "not found"
-      // rather than leaking existence across tenants.
       if (method === "GET" && path === "/api/contexts") {
         const user = await requireUser(req, res);
         if (!user) return;
@@ -478,303 +367,7 @@ async function main() {
         });
       }
 
-      // /api/contexts/:id/memory[...] — list all three tiers, append
-      // to one tier, or clear the whole memory for a context. The
-      // ownership check lives in backend/memory.mjs via a contexts
-      // join, so an id probe from another tenant gets "not found".
-      const memoryMatch = path.match(
-        /^\/api\/contexts\/([^/]+)\/memory(?:\/(episodes|schemas|routines))?$/,
-      );
-      if (memoryMatch) {
-        const contextId = memoryMatch[1];
-        const category = memoryMatch[2] || null;
-        const user = await requireUser(req, res);
-        if (!user) return;
-
-        // GET /memory → full snapshot of all three tiers.
-        if (!category && method === "GET") {
-          const result = await memory.listMemory(user.id, contextId);
-          if (!result.ok) {
-            return sendJson(res, 404, {
-              status: "error",
-              error: result.error,
-            });
-          }
-          return sendJson(res, 200, {
-            status: "ok",
-            memory: result.memory,
-          });
-        }
-
-        // DELETE /memory → clear all three tiers.
-        if (!category && method === "DELETE") {
-          const result = await memory.clearMemory(user.id, contextId);
-          if (!result.ok) {
-            return sendJson(res, 404, {
-              status: "error",
-              error: result.error,
-            });
-          }
-          return sendJson(res, 200, { status: "ok" });
-        }
-
-        // POST /memory/<episodes|schemas|routines> → append one row.
-        if (category && method === "POST") {
-          const body = await readBody(req);
-          const payload = body?.payload ?? body;
-          const name = body?.name ?? null;
-
-          let result;
-          if (category === "episodes") {
-            result = await memory.appendEpisode(
-              user.id,
-              contextId,
-              payload,
-            );
-          } else if (category === "schemas") {
-            result = await memory.appendSchema(
-              user.id,
-              contextId,
-              name,
-              payload,
-            );
-          } else {
-            result = await memory.appendRoutine(
-              user.id,
-              contextId,
-              name,
-              payload,
-            );
-          }
-
-          if (!result.ok) {
-            const code = result.error === "not found" ? 404 : 400;
-            return sendJson(res, code, {
-              status: "error",
-              error: result.error,
-            });
-          }
-          return sendJson(res, 201, {
-            status: "ok",
-            category,
-            row: result.row,
-          });
-        }
-
-        return sendJson(res, 405, {
-          status: "error",
-          error: "method not allowed",
-        });
-      }
-
-      // /api/contexts/:id/pack/generate — POST runs the reasoning
-      // brain (gpt-5-mini or fake) against the context + its chat
-      // history, expands the minimal output into a full PackSpec,
-      // and persists it via contexts.setPackSpec. On success the
-      // response includes the updated context row so the client
-      // can refresh the runtime panel without a second fetch.
-      const packGenMatch = path.match(
-        /^\/api\/contexts\/([^/]+)\/pack\/generate$/,
-      );
-      if (packGenMatch && method === "POST") {
-        const contextId = packGenMatch[1];
-        const user = await requireUser(req, res);
-        if (!user) return;
-
-        const ctx = await contexts.loadContext(user.id, contextId);
-        if (!ctx.ok) {
-          return sendJson(res, 404, {
-            status: "error",
-            error: ctx.error,
-          });
-        }
-
-        // Pull the existing transcript so the reasoning brain can
-        // ground its output in what the operator has been asking
-        // for. Fresh contexts with no chat still generate fine —
-        // `buildPackUserMessage` handles the empty-history case.
-        const histResult = await messages.historyFor(user.id, contextId);
-        if (!histResult.ok) {
-          return sendJson(res, 500, {
-            status: "error",
-            error: histResult.error,
-          });
-        }
-
-        let gen;
-        try {
-          gen = await generatePackSpec({
-            context: ctx.context,
-            history: histResult.history,
-          });
-        } catch (e) {
-          console.error(`[brain] generatePackSpec failed:`, e.message);
-          return sendJson(res, 502, {
-            status: "error",
-            error: `brain failed: ${e.message}`,
-          });
-        }
-        if (!gen.ok) {
-          return sendJson(res, 502, {
-            status: "error",
-            error: gen.error,
-          });
-        }
-
-        // Persist the generated PackSpec on the context. This is
-        // the same path commit 4 tests already exercise — the only
-        // new thing in commit 6 is the brain step that produces
-        // the manifest.
-        const stored = await contexts.setPackSpec(
-          user.id,
-          contextId,
-          gen.pack,
-        );
-        if (!stored.ok) {
-          return sendJson(res, 500, {
-            status: "error",
-            error: `failed to store generated pack: ${stored.error}`,
-          });
-        }
-
-        return sendJson(res, 200, {
-          status: "ok",
-          context: stored.context,
-          model: gen.model,
-          minimal: gen.minimal,
-        });
-      }
-
-      // /api/contexts/:id/port/:portId/:capabilityId — backend-port
-      // bridge. The browser posts an invocation here instead of
-      // calling soma_invoke_port inside the wasm runtime (which
-      // doesn't host these ports). Allow-listed via BRIDGE_PORTS;
-      // anything not in the table is 403.
-      const bridgeMatch = path.match(
-        /^\/api\/contexts\/([^/]+)\/port\/([^/]+)\/([^/]+)$/,
-      );
-      if (bridgeMatch && method === "POST") {
-        const contextId = bridgeMatch[1];
-        const portId = bridgeMatch[2];
-        const capabilityId = bridgeMatch[3];
-
-        const user = await requireUser(req, res);
-        if (!user) return;
-
-        // Ownership gate — a cross-tenant id probe or an unknown
-        // context both resolve to the same "not found" shape so
-        // the caller can't use the response to enumerate contexts.
-        const ownershipOk = await contextKv.assertOwnership(
-          user.id,
-          contextId,
-        );
-        if (!ownershipOk) {
-          return sendJson(res, 404, {
-            status: "error",
-            error: "not found",
-          });
-        }
-
-        // Allow-list check BEFORE we read the body, so probes for
-        // `postgres.query` or any raw backend port can't even
-        // attempt to ship a payload.
-        const portEntry = BRIDGE_PORTS[portId];
-        if (!portEntry) {
-          return sendJson(res, 403, {
-            status: "error",
-            error: `port "${portId}" is not exposed via the bridge`,
-          });
-        }
-        const handler = portEntry[capabilityId];
-        if (!handler) {
-          return sendJson(res, 403, {
-            status: "error",
-            error: `capability "${capabilityId}" is not exposed for port "${portId}"`,
-          });
-        }
-
-        const body = await readBody(req);
-        const input = body?.input ?? body ?? {};
-
-        let result;
-        try {
-          result = await handler(user, contextId, input);
-        } catch (e) {
-          console.error(
-            `[bridge] ${portId}.${capabilityId} threw:`,
-            e.message,
-          );
-          return sendJson(res, 500, {
-            status: "error",
-            error: `bridge handler failed: ${e.message}`,
-          });
-        }
-
-        if (!result?.ok) {
-          // 400 for input validation failures, 500 for genuine
-          // handler errors. Keeping the distinction flat for now.
-          return sendJson(res, 400, {
-            status: "error",
-            error: result?.error || "bridge handler returned no result",
-          });
-        }
-
-        // Shape the response like a PortCallRecord so the
-        // JS-side skill executor can treat wasm and bridge
-        // results uniformly. `structured_result` is what the
-        // wasm runtime returns from soma_invoke_port.
-        const structured = (() => {
-          const { ok: _ok, error: _err, ...rest } = result;
-          return rest;
-        })();
-        return sendJson(res, 200, {
-          status: "ok",
-          record: {
-            port_id: portId,
-            capability_id: capabilityId,
-            structured_result: structured,
-          },
-        });
-      }
-
-      // /api/contexts/:id/pack — PUT stores the compiled PackSpec.
-      // Matched before the single-context handler so the /pack
-      // suffix doesn't get mis-parsed as part of the context id.
-      const packMatch = path.match(/^\/api\/contexts\/([^/]+)\/pack$/);
-      if (packMatch && method === "PUT") {
-        const contextId = packMatch[1];
-        const user = await requireUser(req, res);
-        if (!user) return;
-        const body = await readBody(req);
-        // Accept { pack: {...} } (the documented shape) or a bare
-        // manifest object — the latter makes curl debugging easier.
-        const packInput =
-          body && typeof body === "object" && "pack" in body
-            ? body.pack
-            : body;
-        const result = await contexts.setPackSpec(
-          user.id,
-          contextId,
-          packInput,
-        );
-        if (!result.ok) {
-          const code = result.error === "not found" ? 404 : 400;
-          return sendJson(res, code, {
-            status: "error",
-            error: result.error,
-          });
-        }
-        return sendJson(res, 200, {
-          status: "ok",
-          context: result.context,
-        });
-      }
-
-      // /api/contexts/:id/messages — GET lists the transcript, POST
-      // appends a user message, calls the brain, appends the reply,
-      // and returns both in one response. Matched before the single-
-      // context handler so the /messages suffix doesn't get mis-
-      // parsed as part of the context id.
+      // /api/contexts/:id/messages — transcript + chat turn orchestrator
       const msgMatch = path.match(
         /^\/api\/contexts\/([^/]+)\/messages$/,
       );
@@ -801,9 +394,8 @@ async function main() {
         const body = await readBody(req);
         const content = String(body?.content ?? "");
 
-        // The user turn lands first so that a brain failure still
-        // leaves the operator's message on the transcript. Otherwise
-        // a crash mid-brain would swallow what they typed.
+        // Append the user turn first so a brain failure still
+        // leaves the operator's message on the transcript.
         const userAppend = await messages.append(
           user.id,
           contextId,
@@ -818,9 +410,8 @@ async function main() {
           });
         }
 
-        // Pull the full history (which now ends with the user turn
-        // we just appended) and the context record for its system
-        // prompt.
+        // Load the context for its system-prompt fields + full
+        // transcript (including the turn we just appended).
         const ctx = await contexts.loadContext(user.id, contextId);
         if (!ctx.ok) {
           return sendJson(res, 404, {
@@ -836,14 +427,24 @@ async function main() {
           });
         }
 
+        // Run the tool-calling chat turn. The brain may execute
+        // multiple tool calls against soma-next before it emits a
+        // final text reply. Tool results are NOT stored in the
+        // transcript — only the user turn and the assistant's
+        // final content land in `messages`. Tool-call traces are
+        // returned in the response for debugging and can be
+        // surfaced in a future commit (e.g. a "show tools used"
+        // toggle on each message).
         let reply;
         try {
-          reply = await chatCompletion({
+          reply = await runChatTurn({
             systemPrompt: buildSystemPrompt(ctx.context),
-            messages: hist.history,
+            history: hist.history,
+            tools: DEFAULT_CHAT_TOOLS,
+            invokeTool,
           });
         } catch (e) {
-          console.error(`[brain] chatCompletion failed:`, e.message);
+          console.error(`[brain] runChatTurn failed:`, e.message);
           return sendJson(res, 502, {
             status: "error",
             error: `brain failed: ${e.message}`,
@@ -851,11 +452,15 @@ async function main() {
           });
         }
 
+        const assistantContent =
+          reply?.content && reply.content.trim() !== ""
+            ? reply.content
+            : "(the brain returned no content for this turn)";
         const assistantAppend = await messages.append(
           user.id,
           contextId,
           "assistant",
-          reply.content,
+          assistantContent,
         );
         if (!assistantAppend.ok) {
           return sendJson(res, 500, {
@@ -869,13 +474,11 @@ async function main() {
           user_message: userAppend.message,
           assistant_message: assistantAppend.message,
           model: reply.model,
+          tool_calls: reply.tool_calls,
         });
       }
 
-      // /api/contexts/:id — GET loads, DELETE removes. Matching the
-      // path with startsWith rather than a router keeps the gateway
-      // a flat file; commit 3+ will grow an actual router if the
-      // route table gets unwieldy.
+      // /api/contexts/:id — GET loads, DELETE removes.
       if (
         (method === "GET" || method === "DELETE") &&
         path.startsWith("/api/contexts/")
@@ -915,12 +518,7 @@ async function main() {
         return sendJson(res, 200, { status: "ok" });
       }
 
-      // ---- voice transcription (commit 7) ----
-      // Raw audio bytes POSTed directly by the browser's
-      // MediaRecorder. Content-Type carries the codec (webm/opus,
-      // ogg/opus, mp4/aac, etc). We forward the blob to Whisper
-      // and return the transcription text. Session-scoped — voice
-      // input is as privileged as text input.
+      // ---- voice transcription ----
       if (method === "POST" && path === "/api/transcribe") {
         const user = await requireUser(req, res);
         if (!user) return;
@@ -941,8 +539,6 @@ async function main() {
             error: "empty audio body",
           });
         }
-        // Guard against accidental JSON posts — a real audio
-        // upload never has a JSON content-type.
         const rawCt = req.headers["content-type"] || "";
         if (rawCt.startsWith("application/json")) {
           return sendJson(res, 400, {
@@ -971,7 +567,7 @@ async function main() {
       if (method === "GET" && path === "/api/health") {
         return sendJson(res, 200, {
           status: "ok",
-          commit: 8,
+          generation: "conversation-first",
           soma_mcp_ready: soma.ready,
           brain_fake: String(process.env.BRAIN_FAKE || "") === "1",
         });
@@ -1001,7 +597,6 @@ async function main() {
     console.log(`[http] PUBLIC_BASE_URL=${process.env.PUBLIC_BASE_URL}`);
   });
 
-  // Clean shutdown — close the soma-next subprocess before we exit.
   const shutdown = async (signal) => {
     console.log(`\n[http] ${signal} received, shutting down`);
     server.close();

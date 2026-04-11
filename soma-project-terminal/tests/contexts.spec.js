@@ -62,7 +62,7 @@ test.describe("commit 2 — context registry", () => {
     expect(created.status).toBe("ok");
     expect(created.context.name).toBe("daily-journal");
     expect(created.context.description).toBe("a private log of daily entries");
-    expect(created.context.kind).toBe("draft");
+    expect(created.context.kind).toBe("active");
     expect(created.context.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     );
@@ -270,7 +270,8 @@ test.describe("commit 2 — context registry", () => {
     await entry.click();
     await expect(page.locator("#view-context-detail")).toBeVisible();
     await expect(page.locator("#ctx-name")).toHaveText("ui-made-context");
-    await expect(page.locator("#ctx-kind")).toHaveText("DRAFT");
+    // The detail view no longer shows a "kind" line — the
+    // conversation-first architecture has no draft/active split.
 
     // Back button returns to the authenticated view.
     await page.click("#btn-ctx-back");

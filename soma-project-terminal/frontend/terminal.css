@@ -219,30 +219,6 @@ input[type="text"]:focus {
   color: var(--term-bg);
 }
 
-/* GENERATE PACK button — phosphor-green pulse while the reasoning
-   brain is thinking. gpt-5-mini calls routinely take 5-30 seconds,
-   so the operator needs a visible "working" signal the whole time
-   instead of a silently-disabled button. */
-#btn-generate-pack.generating {
-  animation: generate-pulse 1.2s ease-in-out infinite alternate;
-  cursor: wait;
-  pointer-events: none;
-  opacity: 1; /* override the inherited :disabled opacity */
-}
-
-@keyframes generate-pulse {
-  from {
-    box-shadow: 0 0 2px var(--term-fg-bright);
-    background: var(--term-bg);
-    color: var(--term-fg-bright);
-  }
-  to {
-    box-shadow: 0 0 14px var(--term-fg-bright);
-    background: var(--term-bg-lighter);
-    color: #ffffff;
-  }
-}
-
 /* Mic button recording/transcribing states — red while capturing
    audio, dim while waiting on Whisper, normal when idle. */
 #btn-mic {
@@ -333,22 +309,14 @@ input[type="text"]:focus {
   flex-wrap: wrap;
 }
 
-/* Context detail grid — brain channel on the left, body runtime on
-   the right. Both panels carry real weight now: the left has the
-   chat transcript + input, the right has the runtime summary,
-   GENERATE PACK, the SKILLS cards with JSON input, and the memory
-   panel. Equal split at full width, single column on narrow. */
-.ctx-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 1.5rem;
-  margin: 1rem 0 1.5rem 0;
-}
-
+/* Context detail — single full-width chat panel. No grid, no side
+   columns. Chat is the only thing the operator interacts with once
+   they're inside a context. */
 .ctx-panel {
   border: 1px solid var(--term-fg-dim);
   padding: 0.75rem 1rem 1rem;
   background: var(--term-bg);
+  margin: 1rem 0 1.5rem 0;
   min-width: 0;
 }
 
@@ -364,12 +332,6 @@ input[type="text"]:focus {
 
 .ctx-actions .btn-danger {
   margin-left: 0;
-}
-
-@media (max-width: 760px) {
-  .ctx-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* Chat transcript — newest message at the bottom, user and
@@ -425,120 +387,6 @@ input[type="text"]:focus {
   color: var(--term-error);
 }
 
-/* Runtime panel — keep the font small so long port/skill lists fit
-   and break long dotted identifiers (pack ids, skill ids) at any
-   character so the ASCII table labels don't end up on a line by
-   themselves. overflow-wrap: anywhere lets us keep the pre-wrap
-   whitespace semantics while still breaking long tokens. */
-.ctx-runtime .lore {
-  font-size: 18px;
-  margin: 0.5rem 0 1rem 0;
-  padding: 0.5rem 0.75rem;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.ctx-runtime .lore.error {
-  color: var(--term-error);
-  border-left-color: var(--term-error);
-}
-
-/* Skills list — one collapsible card per skill, with a JSON input
-   textarea and a RUN button. Scope badge distinguishes wasm from
-   backend-bridge skills visually. */
-.skills-list {
-  margin: 0.5rem 0 1rem 0;
-  padding: 0;
-}
-
-.skill-entry {
-  border: 1px solid var(--term-fg-dim);
-  background: var(--term-bg);
-  padding: 0.5rem 0.75rem;
-  margin: 0.4rem 0;
-  font-size: 18px;
-}
-
-.skill-entry .skill-head {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.skill-entry .skill-name {
-  color: var(--term-fg-bright);
-  font-weight: normal;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.skill-entry .skill-scope {
-  color: var(--term-fg-dim);
-  font-size: 14px;
-  padding: 0 0.35rem;
-  border: 1px solid var(--term-fg-dim);
-  letter-spacing: 0.05em;
-}
-
-.skill-entry .skill-scope.bridge {
-  color: var(--term-bg);
-  background: var(--term-fg-dim);
-}
-
-.skill-entry .skill-desc {
-  color: var(--term-fg-dim);
-  font-size: 16px;
-  margin: 0.25rem 0;
-}
-
-.skill-entry textarea {
-  display: block;
-  width: 100%;
-  min-height: 3.2em;
-  background: var(--term-bg-lighter);
-  color: var(--term-fg);
-  border: 1px solid var(--term-fg-dim);
-  font-family: inherit;
-  font-size: 16px;
-  padding: 0.35rem 0.5rem;
-  resize: vertical;
-  margin: 0.3rem 0;
-}
-
-.skill-entry textarea:focus {
-  outline: none;
-  border-color: var(--term-fg-bright);
-}
-
-.skill-entry .skill-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.25rem;
-}
-
-.skill-entry .skill-actions .btn {
-  padding: 0.25rem 0.6rem;
-  font-size: 16px;
-}
-
-.skill-entry .skill-result {
-  margin: 0.35rem 0 0;
-  padding: 0.35rem 0.5rem;
-  background: var(--term-bg-lighter);
-  border-left: 2px solid var(--term-fg-dim);
-  white-space: pre-wrap;
-  font-size: 14px;
-  color: var(--term-fg);
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.skill-entry .skill-result.error {
-  color: var(--term-error);
-  border-left-color: var(--term-error);
-}
 
 .status {
   margin-top: 0.75rem;

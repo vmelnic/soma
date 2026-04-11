@@ -1,22 +1,24 @@
-// SOMA TERMINAL — frontend bootstrap + auth + contexts + chat.
+// SOMA TERMINAL — frontend bootstrap.
 //
-// Commit 1 wired the Fallout shell to /api/auth/*. Commit 2 added
-// the contexts registry. Commit 3 adds:
-//   - the per-context chat transcript (brain side)
-//   - the browser-side soma-next runtime panel (body side)
+// Conversation-first architecture. The frontend's entire job is:
 //
-// No framework. Vanilla DOM manipulation — every element is created
-// with `document.createElement` and every value is set via
-// `textContent`, never innerHTML, so a maliciously named context
-// can't break out of the terminal.
-
-import {
-  bootForContext,
-  getBootError,
-  injectRoutine,
-  executeSkill,
-  getCurrentPackSpec,
-} from "./runtime.mjs";
+//   1. Authenticate (magic-link flow)
+//   2. Let the operator see / create / pick / delete contexts
+//   3. Inside a context, show a full-width chat + mic
+//   4. POST each user turn to the backend, render the assistant
+//      reply when it comes back
+//
+// There is no runtime panel, no skills grid, no memory panel, no
+// generate pack button, no skill form builder, no DSL interpreter.
+// All of that was deleted as part of the pivot to conversation-
+// first. The backend's chat brain handles every operator request
+// by calling MCP tools against the SOMA runtime — the frontend
+// doesn't know about tools, doesn't know about ports, doesn't
+// know about packs. It only knows about messages.
+//
+// No framework. Vanilla DOM, plain `fetch`. Every text value
+// reaches the DOM via `textContent`, never `innerHTML`, so
+// untrusted content can't break out of a <span>.
 
 const views = {
   loading: document.getElementById("view-loading"),
@@ -29,8 +31,8 @@ const views = {
 
 const footerStatus = document.getElementById("footer-status");
 
-// The currently open context, if any. Populated by `loadContextView`
-// and cleared on logout / back.
+// The currently open context. Populated by `loadContextView` and
+// cleared on logout / back.
 let currentContext = null;
 
 function showView(name) {
@@ -59,9 +61,6 @@ function clearChildren(el) {
 
 async function boot() {
   setStatus("BOOTING");
-  // Retro boot-print effect: a short pause so it feels like the
-  // terminal is powering on. Kept short so Playwright tests don't
-  // wait forever.
   await new Promise((r) => setTimeout(r, 250));
 
   try {
@@ -250,17 +249,6 @@ document
 // -------------------------------------------------------------------
 // commit 7 — mic button → MediaRecorder → /api/transcribe → input
 // -------------------------------------------------------------------
-//
-// Single-button toggle: idle → recording → transcribing → idle.
-// We hold the active MediaRecorder + stream in closure state so a
-// second click on the same button can stop the recording cleanly.
-// On stop, the accumulated blob is POSTed to /api/transcribe (raw
-// body, audio/* content-type) and the returned text is dropped
-// into #input-chat so the operator can review and hit TRANSMIT.
-//
-// If the browser doesn't support MediaRecorder or getUserMedia,
-// the button is marked `.unsupported` and refuses to start — no
-// SpeechRecognition fallback yet; that's a separate commit.
 
 let voiceRecorder = null;
 let voiceStream = null;
@@ -357,8 +345,6 @@ async function onVoiceRecordingStop() {
       return;
     }
     const inputEl = document.getElementById("input-chat");
-    // Append to any existing draft so hitting mic mid-typing
-    // doesn't clobber what the operator already wrote.
     const existing = (inputEl.value || "").trim();
     inputEl.value = existing ? `${existing} ${body.text}` : body.text;
     inputEl.focus();
@@ -374,9 +360,6 @@ async function onVoiceRecordingStop() {
   }
 }
 
-// Initialise the mic button once at module load. If MediaRecorder
-// isn't available we mark the button unsupported; otherwise the
-// click handler toggles between start and stop.
 (function initMicButton() {
   const btn = document.getElementById("btn-mic");
   if (!btn) return;
@@ -394,7 +377,7 @@ async function onVoiceRecordingStop() {
 })();
 
 // -------------------------------------------------------------------
-// view: context detail
+// view: context detail — full-width chat
 // -------------------------------------------------------------------
 
 async function loadContextView(contextId) {
@@ -414,9 +397,6 @@ async function loadContextView(contextId) {
     document.getElementById("ctx-name").textContent = currentContext.name;
     document.getElementById("ctx-description").textContent =
       currentContext.description || "(none)";
-    document.getElementById("ctx-kind").textContent = (
-      currentContext.kind || "draft"
-    ).toUpperCase();
     document.getElementById("ctx-created").textContent =
       currentContext.created_at || "—";
     document.getElementById("ctx-updated").textContent =
@@ -424,15 +404,6 @@ async function loadContextView(contextId) {
     showView("contextDetail");
     setStatus(`CONTEXT ${currentContext.name}`);
 
-    // Kick off the in-tab wasm runtime, the chat transcript, and
-    // the memory panel in parallel — none of them depend on each
-    // other, and the user can start typing while the wasm is still
-    // initializing. Routine injection happens inside the runtime
-    // panel flow (after boot completes). The skills panel waits
-    // for the wasm to come up before rendering so the runtime
-    // state is accurate when the operator clicks RUN.
-    updateRuntimePanel().then(() => renderSkillsPanel());
-    refreshMemoryPanel();
     await refreshTranscript();
     const chatInput = document.getElementById("input-chat");
     if (chatInput) chatInput.focus();
@@ -450,7 +421,7 @@ function renderEmptyTranscript(listEl) {
   const p = document.createElement("p");
   p.className = "meta";
   p.id = "chat-empty";
-  p.textContent = "(no messages yet — describe what you want to build)";
+  p.textContent = "(no messages yet — describe what you want to do)";
   listEl.appendChild(p);
 }
 
@@ -461,7 +432,7 @@ function appendMessageDom(listEl, msg) {
 
   const role = document.createElement("span");
   role.className = "chat-role";
-  role.textContent = msg.role === "user" ? "[YOU]" : "[BRAIN]";
+  role.textContent = msg.role === "user" ? "[YOU]" : "[SOMA]";
 
   const body = document.createElement("span");
   body.className = "chat-body";
@@ -519,10 +490,6 @@ document
     setStatus("BRAIN WORKING");
     const listEl = document.getElementById("chat-transcript");
 
-    // Optimistically paint the user's message so the transcript
-    // feels responsive while we wait on the brain. Hold a direct
-    // reference to the bubble so the failure path can pop it off
-    // the transcript without a querySelectorAll scan.
     const emptyHint = document.getElementById("chat-empty");
     if (emptyHint) emptyHint.remove();
     appendMessageDom(listEl, { role: "user", content });
@@ -530,10 +497,6 @@ document
     scrollTranscriptToBottom();
     inputEl.value = "";
 
-    // Called on any failure path — remove the optimistic bubble,
-    // restore the operator's draft so they don't have to retype
-    // it, and re-render the empty-hint if the transcript is now
-    // empty. This is the only place that rolls the UI back.
     const rollbackOptimistic = () => {
       if (optimisticBubble && optimisticBubble.parentNode) {
         optimisticBubble.remove();
@@ -562,8 +525,8 @@ document
         setStatus("ERROR");
         return;
       }
-      // Replace the optimistic bubble with the canonical version
-      // so the message id + timestamp match the backend.
+      // Replace the optimistic bubble with the canonical server
+      // version so the message id + timestamp match the backend.
       if (optimisticBubble && optimisticBubble.parentNode) {
         optimisticBubble.remove();
       }
@@ -581,262 +544,9 @@ document
   });
 
 // -------------------------------------------------------------------
-// browser-side soma-next runtime panel
+// back / delete / logout
 // -------------------------------------------------------------------
 
-async function updateRuntimePanel() {
-  if (!currentContext) return;
-  const el = document.getElementById("runtime-summary");
-  el.classList.remove("error");
-  el.textContent =
-    "  STATE:  BOOTING...\n  PORTS:  —\n  SKILLS: —";
-  try {
-    const { summary, packId, fullSkills } = await bootForContext(
-      currentContext,
-    );
-    const portsList = (summary.ports ?? [])
-      .map((p) => p.port_id || p.id || String(p))
-      .join(", ");
-
-    // The wasm runtime's soma_list_skills() only sees wasm-scope
-    // skills — bridge skills are stripped before soma_boot_runtime.
-    // For an honest count we walk the FULL pack and split by scope
-    // tag. Mixed packs show `1 wasm / 4 bridge`; empty is `(none)`.
-    const allSkills = fullSkills ?? [];
-    const isBridge = (s) => (s?.tags ?? []).includes("scope:bridge");
-    const wasmCount = allSkills.filter((s) => !isBridge(s)).length;
-    const bridgeCount = allSkills.filter(isBridge).length;
-    const skillsLine =
-      allSkills.length === 0
-        ? "(none)"
-        : `${wasmCount} wasm / ${bridgeCount} bridge`;
-
-    const source = currentContext.pack_spec ? "context" : "fallback:hello";
-    el.textContent =
-      `  STATE:  READY\n` +
-      `  PACK:   ${packId || "unknown"}\n` +
-      `  SOURCE: ${source}\n` +
-      `  PORTS:  ${portsList || "(none)"}\n` +
-      `  SKILLS: ${skillsLine}`;
-
-    // After the runtime is ready, push any stored routines for
-    // this context back into the wasm body. Fire-and-forget —
-    // malformed routines shouldn't break the rest of the UI.
-    rehydrateRoutines().catch((err) =>
-      console.warn("[terminal] routine rehydrate failed:", err.message),
-    );
-  } catch (err) {
-    el.classList.add("error");
-    const msg = (getBootError() && getBootError().message) || err.message;
-    el.textContent = `  STATE:  FAILED\n  ERROR:  ${msg}`;
-  }
-}
-
-// -------------------------------------------------------------------
-// memory panel + routine rehydration
-// -------------------------------------------------------------------
-
-async function refreshMemoryPanel() {
-  if (!currentContext) return;
-  const el = document.getElementById("memory-summary");
-  el.classList.remove("error");
-  el.textContent = "  EPISODES: —\n  SCHEMAS:  —\n  ROUTINES: —";
-  try {
-    const res = await fetch(
-      `/api/contexts/${encodeURIComponent(currentContext.id)}/memory`,
-      { credentials: "include" },
-    );
-    if (!res.ok) {
-      el.classList.add("error");
-      el.textContent = `  ERROR: ${res.status}`;
-      return;
-    }
-    const body = await res.json();
-    const m = body.memory ?? { episodes: [], schemas: [], routines: [] };
-    el.textContent =
-      `  EPISODES: ${m.episodes.length}\n` +
-      `  SCHEMAS:  ${m.schemas.length}\n` +
-      `  ROUTINES: ${m.routines.length}`;
-  } catch (err) {
-    el.classList.add("error");
-    el.textContent = `  ERROR: ${err.message}`;
-  }
-}
-
-// -------------------------------------------------------------------
-// commit 9 — SKILLS panel: render + run
-// -------------------------------------------------------------------
-//
-// Reads the full skill list from the currently-booted pack (the
-// one runtime.mjs stashed in currentPackSpec after bootPack) and
-// renders a card per skill. Each card shows the skill name, its
-// scope tag (wasm / bridge), a JSON textarea pre-filled with a
-// guess at the input schema, and a RUN button that calls
-// runtime.mjs:executeSkill. Results land inline under the card.
-
-function scopeBadge(skill) {
-  const tags = skill?.tags ?? [];
-  if (tags.includes("scope:bridge")) return "bridge";
-  if (tags.includes("scope:wasm")) return "wasm";
-  // Fallback: empty capability_requirements → bridge
-  return (skill?.capability_requirements ?? []).length === 0
-    ? "bridge"
-    : "wasm";
-}
-
-// Generate a sensible default JSON input from the skill's declared
-// input schema so the operator has something to edit instead of an
-// empty textarea.
-function defaultInputForSkill(skill) {
-  const schema = skill?.inputs?.schema;
-  if (!schema || typeof schema !== "object") return {};
-  const props = schema.properties ?? {};
-  const required = schema.required ?? Object.keys(props);
-  const out = {};
-  for (const key of required) {
-    const type = props[key]?.type || "string";
-    if (type === "string") out[key] = "";
-    else if (type === "number" || type === "integer") out[key] = 0;
-    else if (type === "boolean") out[key] = false;
-    else if (type === "array") out[key] = [];
-    else out[key] = null;
-  }
-  return out;
-}
-
-function renderSkillsPanel() {
-  const listEl = document.getElementById("skills-list");
-  if (!listEl) return;
-  clearChildren(listEl);
-
-  const pack = getCurrentPackSpec();
-  const skills = pack?.skills ?? [];
-  if (skills.length === 0) {
-    const p = document.createElement("p");
-    p.className = "meta";
-    p.id = "skills-empty";
-    p.textContent = "(no skills yet — generate a pack first)";
-    listEl.appendChild(p);
-    return;
-  }
-
-  for (const skill of skills) {
-    const card = document.createElement("div");
-    card.className = "skill-entry";
-    card.dataset.skillId = skill.skill_id;
-
-    const head = document.createElement("div");
-    head.className = "skill-head";
-    const name = document.createElement("span");
-    name.className = "skill-name";
-    name.textContent = skill.name || skill.skill_id;
-    const scope = document.createElement("span");
-    const scopeName = scopeBadge(skill);
-    scope.className = `skill-scope ${scopeName}`;
-    scope.textContent = scopeName.toUpperCase();
-    head.appendChild(name);
-    head.appendChild(scope);
-
-    const desc = document.createElement("p");
-    desc.className = "skill-desc";
-    desc.textContent = skill.description || "";
-
-    const textarea = document.createElement("textarea");
-    textarea.className = "skill-input";
-    textarea.spellcheck = false;
-    textarea.value = JSON.stringify(defaultInputForSkill(skill), null, 2);
-
-    const actions = document.createElement("div");
-    actions.className = "skill-actions";
-    const runBtn = document.createElement("button");
-    runBtn.type = "button";
-    runBtn.className = "btn btn-run-skill";
-    runBtn.textContent = "[ RUN ]";
-
-    const resultEl = document.createElement("pre");
-    resultEl.className = "skill-result hidden";
-
-    runBtn.addEventListener("click", async () => {
-      if (!currentContext) return;
-      resultEl.classList.remove("error");
-      resultEl.classList.remove("hidden");
-      resultEl.textContent = "running...";
-      let input;
-      try {
-        const raw = textarea.value.trim();
-        input = raw === "" ? {} : JSON.parse(raw);
-      } catch (err) {
-        resultEl.classList.add("error");
-        resultEl.textContent = `invalid JSON input: ${err.message}`;
-        return;
-      }
-      try {
-        const result = await executeSkill(
-          skill.skill_id,
-          input,
-          currentContext.id,
-        );
-        if (result.status !== "ok") {
-          resultEl.classList.add("error");
-          resultEl.textContent = `error: ${result.error}`;
-          return;
-        }
-        resultEl.textContent = JSON.stringify(result.record, null, 2);
-        // Bridge writes change persistent state — refresh the
-        // memory panel so the UI reflects any new KV rows or
-        // side-effects the operator might have just caused.
-        if (scopeName === "bridge") refreshMemoryPanel();
-      } catch (err) {
-        resultEl.classList.add("error");
-        resultEl.textContent = `error: ${err.message}`;
-      }
-    });
-
-    actions.appendChild(runBtn);
-
-    card.appendChild(head);
-    if (skill.description) card.appendChild(desc);
-    card.appendChild(textarea);
-    card.appendChild(actions);
-    card.appendChild(resultEl);
-    listEl.appendChild(card);
-  }
-}
-
-// Fetch the stored routines for the current context and inject
-// each one into the wasm runtime. Runs after updateRuntimePanel
-// completes so the body is guaranteed booted first. Failures on
-// individual routines are logged; the panel still reports the
-// count from the store even if injection fails (commit 5 is
-// about isolation, not runtime-level rehydration correctness).
-async function rehydrateRoutines() {
-  if (!currentContext) return;
-  try {
-    const res = await fetch(
-      `/api/contexts/${encodeURIComponent(currentContext.id)}/memory`,
-      { credentials: "include" },
-    );
-    if (!res.ok) return;
-    const body = await res.json();
-    const routines = body.memory?.routines ?? [];
-    for (const row of routines) {
-      try {
-        await injectRoutine(row.payload);
-      } catch (err) {
-        console.warn(
-          `[terminal] soma_inject_routine for ${row.name} failed:`,
-          err.message,
-        );
-      }
-    }
-  } catch (err) {
-    console.warn("[terminal] routine rehydrate fetch failed:", err.message);
-  }
-}
-
-// Navigating back to the authenticated view re-fetches the operator
-// record so we don't need to stash it; /api/me is the same call
-// boot() uses and takes ~1ms.
 async function backToAuthenticated() {
   currentContext = null;
   try {
@@ -858,82 +568,6 @@ document
   .getElementById("btn-ctx-back")
   .addEventListener("click", () => backToAuthenticated());
 
-// -------------------------------------------------------------------
-// generate-pack button — commit 6
-// -------------------------------------------------------------------
-//
-// Posts to /api/contexts/:id/pack/generate, which runs the
-// reasoning brain (gpt-5-mini or fake) and stores the resulting
-// PackSpec on the context row. On success we swap `currentContext`
-// to the updated row and refresh the runtime panel — which reboots
-// the wasm body with the newly-generated pack visible.
-
-document
-  .getElementById("btn-generate-pack")
-  .addEventListener("click", async () => {
-    if (!currentContext) return;
-    const btn = document.getElementById("btn-generate-pack");
-    const statusEl = document.getElementById("generate-status");
-
-    // Visible busy state: pulse the button in phosphor green,
-    // change its label, and announce the stage in the status span.
-    // gpt-5-mini at reasoning_effort=low typically takes 5-30s,
-    // and real-mode first-time runs have been observed up to 60s,
-    // so the UI has to commit to the wait rather than going silent.
-    btn.disabled = true;
-    btn.classList.add("generating");
-    const originalLabel = btn.textContent;
-    btn.textContent = "[ COMPILING... ]";
-    statusEl.classList.remove("error");
-    statusEl.textContent = "calling gpt-5-mini, may take up to 60s...";
-    setStatus("GENERATING PACK");
-
-    const restoreButton = () => {
-      btn.disabled = false;
-      btn.classList.remove("generating");
-      btn.textContent = originalLabel;
-    };
-
-    try {
-      const res = await fetch(
-        `/api/contexts/${encodeURIComponent(currentContext.id)}/pack/generate`,
-        { method: "POST", credentials: "include" },
-      );
-      const body = await res.json();
-      if (!res.ok || body.status !== "ok") {
-        statusEl.classList.add("error");
-        statusEl.textContent = `FAILED: ${body.error || res.status}`;
-        setStatus("ERROR");
-        return;
-      }
-      currentContext = body.context;
-      // Refresh the metadata line (kind flipped draft → active).
-      document.getElementById("ctx-kind").textContent = (
-        currentContext.kind || "draft"
-      ).toUpperCase();
-      document.getElementById("ctx-updated").textContent =
-        currentContext.updated_at || "—";
-      statusEl.textContent = `via ${body.model || "brain"} → ${body.minimal?.pack_id || "pack"}`;
-      setStatus("PACK READY");
-      // Reboot the runtime into the freshly-generated pack and
-      // re-render the SKILLS panel so the operator can RUN the
-      // new skills immediately.
-      await updateRuntimePanel();
-      renderSkillsPanel();
-      // Memory panel counts aren't affected but the routine store
-      // was just wiped by the wasm reboot — nothing to rehydrate
-      // until the operator starts generating episodes, which is
-      // the commit-5-deferred path.
-      await refreshMemoryPanel();
-    } catch (err) {
-      statusEl.classList.add("error");
-      statusEl.textContent = `NETWORK ERROR: ${err.message}`;
-      setStatus("ERROR");
-    } finally {
-      restoreButton();
-    }
-  });
-
 document
   .getElementById("btn-ctx-delete")
   .addEventListener("click", async () => {
@@ -954,10 +588,6 @@ document
       showError(err.message);
     }
   });
-
-// -------------------------------------------------------------------
-// logout / error reset
-// -------------------------------------------------------------------
 
 document
   .getElementById("btn-logout")

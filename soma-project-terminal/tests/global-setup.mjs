@@ -33,6 +33,11 @@ import { execFileSync } from "child_process";
 const MAILCATCHER_URL = "http://127.0.0.1:1080/messages";
 const TEST_EMAIL_PATTERN = "%@somacorp.net";
 
+// NOTE: the TRUNCATE / DELETE cascade now covers only the surviving
+// tables (users, sessions, magic_tokens, contexts, messages). The
+// pre-pivot tables (episodes, schemas, routines, context_kv) were
+// dropped in the conversation-first refactor.
+
 async function clearMailcatcher() {
   try {
     const res = await fetch(MAILCATCHER_URL, { method: "DELETE" });
