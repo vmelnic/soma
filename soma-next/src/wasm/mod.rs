@@ -356,10 +356,24 @@ pub fn soma_run_goal(objective: &str) -> Result<String, JsValue> {
         }
         let elapsed_ms = js_sys::Date::now() - start_ms;
 
+        // Inspect the session trace for evidence plan-following activated.
+        // `WorkingMemory.active_plan` is cleared at the end of the plan's
+        // last step, so polling it after `run_step` always sees `None`
+        // even for sessions that ran entirely in plan-following mode.
+        // The trustworthy signal is `TraceStep.retrieved_routines` — the
+        // list of routine IDs that `RoutineMemoryAdapter::retrieve_matching`
+        // returned during step 5. If any step retrieved a routine, the
+        // session controller's step 6b loaded that routine's compiled
+        // skill path into `active_plan` and the session walked the plan.
+        let plan_following_active = session
+            .trace
+            .steps
+            .iter()
+            .any(|s| !s.retrieved_routines.is_empty());
+
         // On terminal, store episode + fire the learning pipeline.
         // Structural copy of the native MCP handler's terminal block.
         let is_terminal = matches!(status, "completed" | "failed" | "aborted");
-        let plan_following_active = session.working_memory.active_plan.is_some();
 
         if is_terminal {
             let episode = crate::interfaces::cli::build_episode_from_session(
@@ -423,6 +437,58 @@ pub fn soma_run_goal(objective: &str) -> Result<String, JsValue> {
         serde_json::to_string(&summary)
             .map_err(|e| JsValue::from_str(&format!("serialize: {e}")))
     })
+}
+
+/// Inject a compiled `Routine` directly into the routine store.
+///
+/// Takes a JSON-encoded `Routine` (see `soma_next::types::routine::Routine`)
+/// and registers it via `RoutineStore::register`. Subsequent `soma_run_goal`
+/// invocations whose objective matches the routine's `match_conditions`
+/// will enter plan-following mode — the `SessionController` loads the
+/// routine's `compiled_skill_path` into `WorkingMemory.active_plan` and
+/// walks it step-by-step without re-running the selector.
+///
+/// This is the same code path `soma-project-multistep` uses to prove
+/// plan-following works on native. Phase 1f uses it to demonstrate
+/// plan-following end-to-end in the browser without waiting for organic
+/// schema induction (which needs multi-step episodes the single-skill
+/// hello pack doesn't naturally produce).
+#[wasm_bindgen]
+pub fn soma_inject_routine(routine_json: &str) -> Result<String, JsValue> {
+    use crate::types::routine::Routine;
+
+    ensure_booted()?;
+
+    let routine: Routine = serde_json::from_str(routine_json)
+        .map_err(|e| JsValue::from_str(&format!("routine parse failed: {e}")))?;
+
+    let routine_id = routine.routine_id.clone();
+    let skill_path = routine.compiled_skill_path.clone();
+
+    RUNTIME.with(|r| {
+        let slot = r.borrow();
+        let runtime = slot.as_ref().expect("ensured booted above");
+        let mut store = runtime
+            .routine_store
+            .lock()
+            .map_err(|_| JsValue::from_str("routine_store mutex poisoned"))?;
+        store
+            .register(routine)
+            .map_err(|e| JsValue::from_str(&format!("register routine: {e}")))?;
+        Ok::<_, JsValue>(())
+    })?;
+
+    web_sys::console::log_1(&JsValue::from_str(&format!(
+        "[soma-next wasm] injected routine {routine_id} → {skill_path:?}"
+    )));
+
+    let summary = serde_json::json!({
+        "injected": true,
+        "routine_id": routine_id,
+        "compiled_skill_path": skill_path,
+    });
+    serde_json::to_string(&summary)
+        .map_err(|e| JsValue::from_str(&format!("serialize: {e}")))
 }
 
 /// Return the count of registered skills on the currently-booted runtime.
