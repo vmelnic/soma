@@ -1,0 +1,45 @@
+# Local dev stack for soma-project-terminal.
+#
+# Postgres holds users, sessions, magic_tokens, contexts.
+# Redis is pre-provisioned for session caching / rate limits (unused
+#   in commit 1, used from commit 2 onward).
+# Mailcatcher is the dev SMTP sink — magic-link emails land there.
+#   Open http://localhost:1080 in a browser to see incoming mail.
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: soma-terminal-postgres
+    environment:
+      POSTGRES_USER: soma
+      POSTGRES_PASSWORD: soma
+      POSTGRES_DB: soma_terminal
+    ports:
+      - "5433:5432"  # 5433 to avoid clash with soma-helperbook on 5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U soma -d soma_terminal"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - soma-terminal-pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: soma-terminal-redis
+    ports:
+      - "6380:6379"  # 6380 to avoid clash with soma-helperbook on 6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  mailcatcher:
+    image: sj26/mailcatcher:latest
+    container_name: soma-terminal-mailcatcher
+    ports:
+      - "1025:1025"  # SMTP
+      - "1080:1080"  # Web UI — open http://localhost:1080
+
+volumes:
+  soma-terminal-pgdata:

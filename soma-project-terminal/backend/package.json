@@ -1,0 +1,11 @@
+{
+  "name": "soma-project-terminal-backend",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Thin Node HTTP gateway + MCP stdio client. Every side effect (Postgres queries, SMTP sends) goes through soma-next via MCP invoke_port — no direct pg/nodemailer usage. Commit 3+ adds the openai dep for the LLM brain.",
+  "scripts": {
+    "start": "node --env-file=../.env server.mjs"
+  },
+  "dependencies": {}
+}

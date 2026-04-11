@@ -1,0 +1,266 @@
+/* Fallout-style terminal theme. VT323 is the iconic 15-pixel grid font
+   used by RobCo terminals in Fallout 3/NV/4. Share Tech Mono is the
+   fallback for code-ish sections. */
+
+:root {
+  --term-bg: #000800;
+  --term-bg-lighter: #001a00;
+  --term-fg: #33ff66;
+  --term-fg-bright: #88ffaa;
+  --term-fg-dim: #1c9940;
+  --term-glow: 0 0 2px currentColor, 0 0 6px rgba(51, 255, 102, 0.35);
+  --term-error: #ff4433;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: var(--term-bg);
+  color: var(--term-fg);
+  font-family: "VT323", "Share Tech Mono", "Courier New", monospace;
+  font-size: 22px;
+  line-height: 1.35;
+  overflow-x: hidden;
+  text-shadow: var(--term-glow);
+  /* Subtle phosphor flicker. */
+  animation: flicker 4s infinite alternate;
+}
+
+@keyframes flicker {
+  0%,
+  19%,
+  21%,
+  23%,
+  25%,
+  54%,
+  56%,
+  100% {
+    opacity: 1;
+  }
+  20%,
+  24%,
+  55% {
+    opacity: 0.92;
+  }
+}
+
+/* CRT scanline overlay — fine horizontal lines. */
+.crt-scanlines {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0,
+    rgba(0, 0, 0, 0) 2px,
+    rgba(0, 0, 0, 0.35) 3px,
+    rgba(0, 0, 0, 0) 4px
+  );
+  mix-blend-mode: multiply;
+  z-index: 10;
+}
+
+/* Radial vignette darkening the corners. */
+.crt-vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(0, 0, 0, 0) 30%,
+    rgba(0, 0, 0, 0.6) 95%
+  );
+  z-index: 11;
+}
+
+.terminal {
+  position: relative;
+  z-index: 1;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 2.5rem 3rem;
+}
+
+.term-header {
+  margin-bottom: 2rem;
+}
+
+.ascii-logo {
+  color: var(--term-fg-bright);
+  font-size: 16px;
+  line-height: 1.15;
+  margin: 0 0 0.5rem 0;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.term-meta {
+  color: var(--term-fg-dim);
+  font-size: 20px;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--term-fg-dim);
+}
+
+.view {
+  margin-bottom: 2rem;
+}
+
+.view.hidden {
+  display: none;
+}
+
+.prompt {
+  color: var(--term-fg-bright);
+  font-size: 24px;
+  margin: 0.5rem 0;
+}
+
+.prompt.error {
+  color: var(--term-error);
+  text-shadow: 0 0 3px currentColor;
+}
+
+.lore {
+  color: var(--term-fg);
+  font-size: 20px;
+  margin: 0.75rem 0 1rem 0;
+  padding: 0.5rem 1rem;
+  background: var(--term-bg-lighter);
+  border-left: 2px solid var(--term-fg-dim);
+  white-space: pre-wrap;
+}
+
+.lore.error {
+  color: var(--term-error);
+  border-left-color: var(--term-error);
+}
+
+.meta {
+  color: var(--term-fg-dim);
+  font-size: 18px;
+}
+
+form {
+  margin: 1rem 0;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.field-prefix {
+  color: var(--term-fg-dim);
+  font-size: 20px;
+}
+
+input[type="email"],
+input[type="text"] {
+  flex: 1;
+  background: var(--term-bg);
+  color: var(--term-fg-bright);
+  font-family: inherit;
+  font-size: 22px;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--term-fg-dim);
+  outline: none;
+  text-shadow: var(--term-glow);
+  caret-color: var(--term-fg-bright);
+}
+
+input[type="email"]:focus,
+input[type="text"]:focus {
+  border-color: var(--term-fg-bright);
+  box-shadow: 0 0 4px var(--term-fg-bright);
+}
+
+.btn {
+  background: var(--term-bg);
+  color: var(--term-fg-bright);
+  font-family: inherit;
+  font-size: 22px;
+  padding: 0.4rem 1rem;
+  border: 1px solid var(--term-fg-bright);
+  cursor: pointer;
+  text-shadow: var(--term-glow);
+  letter-spacing: 0.05em;
+}
+
+.btn:hover,
+.btn:focus {
+  background: var(--term-fg-bright);
+  color: var(--term-bg);
+  text-shadow: none;
+  outline: none;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.status {
+  margin-top: 0.75rem;
+  font-size: 20px;
+}
+
+.status.error {
+  color: var(--term-error);
+}
+
+.term-footer {
+  margin-top: 3rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--term-fg-dim);
+  color: var(--term-fg-dim);
+  font-size: 18px;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.blink {
+  animation: blink 1s steps(2, start) infinite;
+  color: var(--term-fg-bright);
+}
+
+.cursor {
+  display: inline-block;
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+a {
+  color: var(--term-fg-bright);
+  text-decoration: underline;
+}
+
+a:hover {
+  color: #ffffff;
+}
+
+/* Hide the ASCII logo on narrow viewports — it's decorative. */
+@media (max-width: 640px) {
+  .ascii-logo {
+    display: none;
+  }
+  .terminal {
+    padding: 1.5rem 1rem 2rem;
+  }
+  body {
+    font-size: 20px;
+  }
+}
