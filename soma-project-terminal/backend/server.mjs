@@ -71,7 +71,9 @@ const PORT = Number(process.env.BACKEND_PORT ?? 8765);
 // ------------------------------------------------------------------
 
 function preflight() {
-  const required = [
+  // Native binaries are HARD requirements — the backend can't start
+  // without them because it spawns soma-next as a child process.
+  const nativeRequired = [
     { path: resolvePath(BIN_DIR, "soma"), name: "soma-next binary" },
     {
       path: resolvePath(BIN_DIR, "libsoma_port_crypto.dylib"),
@@ -86,17 +88,49 @@ function preflight() {
       name: "smtp port dylib",
     },
   ];
-  const missing = required.filter((r) => !existsSync(r.path));
-  if (missing.length === 0) return;
+  const missingNative = nativeRequired.filter((r) => !existsSync(r.path));
+  if (missingNative.length > 0) {
+    process.stderr.write(
+      "error: missing required binaries:\n" +
+        missingNative
+          .map((m) => `  - ${m.name}: ${m.path}`)
+          .join("\n") +
+        "\n\n" +
+        "Run ./scripts/copy-binaries.sh to populate bin/ from soma-next\n" +
+        "and soma-ports (both must be built in release mode first).\n",
+    );
+    process.exit(1);
+  }
 
-  process.stderr.write(
-    "error: missing required binaries:\n" +
-      missing.map((m) => `  - ${m.name}: ${m.path}`).join("\n") +
-      "\n\n" +
-      "Run ./scripts/copy-binaries.sh to populate bin/ from soma-next\n" +
-      "and soma-ports (both must be built in release mode first).\n",
-  );
-  process.exit(1);
+  // Wasm assets are SOFT requirements — the backend serves HTTP
+  // fine without them, but the context-detail view will fail to
+  // boot the browser runtime. Warn loudly so a fresh clone isn't
+  // silently broken, and let the server keep running so the auth
+  // endpoints still work for quick debugging.
+  const wasmRequired = [
+    {
+      path: resolvePath(FRONTEND_DIR, "pkg", "soma_next_bg.wasm"),
+      name: "wasm bundle",
+    },
+    {
+      path: resolvePath(FRONTEND_DIR, "pkg", "soma_next.js"),
+      name: "wasm JS glue",
+    },
+    {
+      path: resolvePath(FRONTEND_DIR, "packs", "hello", "manifest.json"),
+      name: "hello fallback pack",
+    },
+  ];
+  const missingWasm = wasmRequired.filter((r) => !existsSync(r.path));
+  if (missingWasm.length > 0) {
+    process.stderr.write(
+      "warning: missing frontend wasm assets — browser runtime will NOT boot:\n" +
+        missingWasm.map((m) => `  - ${m.name}: ${m.path}`).join("\n") +
+        "\n\n" +
+        "Run ./scripts/copy-frontend-assets.sh to populate frontend/pkg/\n" +
+        "from soma-project-web (which must be built first).\n\n",
+    );
+  }
 }
 
 // ------------------------------------------------------------------

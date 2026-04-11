@@ -370,12 +370,29 @@ document
     const listEl = document.getElementById("chat-transcript");
 
     // Optimistically paint the user's message so the transcript
-    // feels responsive while we wait on the brain.
+    // feels responsive while we wait on the brain. Hold a direct
+    // reference to the bubble so the failure path can pop it off
+    // the transcript without a querySelectorAll scan.
     const emptyHint = document.getElementById("chat-empty");
     if (emptyHint) emptyHint.remove();
     appendMessageDom(listEl, { role: "user", content });
+    const optimisticBubble = listEl.lastElementChild;
     scrollTranscriptToBottom();
     inputEl.value = "";
+
+    // Called on any failure path — remove the optimistic bubble,
+    // restore the operator's draft so they don't have to retype
+    // it, and re-render the empty-hint if the transcript is now
+    // empty. This is the only place that rolls the UI back.
+    const rollbackOptimistic = () => {
+      if (optimisticBubble && optimisticBubble.parentNode) {
+        optimisticBubble.remove();
+      }
+      if (!listEl.querySelector(".chat-msg")) {
+        renderEmptyTranscript(listEl);
+      }
+      inputEl.value = content;
+    };
 
     try {
       const res = await fetch(
@@ -389,25 +406,24 @@ document
       );
       const body = await res.json();
       if (!res.ok || body.status !== "ok") {
+        rollbackOptimistic();
         statusEl.classList.add("error");
         statusEl.textContent = `FAILED: ${body.error || res.status}`;
         setStatus("ERROR");
         return;
       }
-      // Replace the optimistic user bubble with the canonical one
+      // Replace the optimistic bubble with the canonical version
       // so the message id + timestamp match the backend.
-      const listElFresh = document.getElementById("chat-transcript");
-      const userBubbles = listElFresh.querySelectorAll(
-        ".chat-msg.user[data-message-id='']",
-      );
-      const lastOptimistic = userBubbles[userBubbles.length - 1];
-      if (lastOptimistic) lastOptimistic.remove();
-      appendMessageDom(listElFresh, body.user_message);
-      appendMessageDom(listElFresh, body.assistant_message);
+      if (optimisticBubble && optimisticBubble.parentNode) {
+        optimisticBubble.remove();
+      }
+      appendMessageDom(listEl, body.user_message);
+      appendMessageDom(listEl, body.assistant_message);
       scrollTranscriptToBottom();
       statusEl.textContent = `via ${body.model || "brain"}`;
       setStatus("AUTHORIZED");
     } catch (err) {
+      rollbackOptimistic();
       statusEl.classList.add("error");
       statusEl.textContent = `NETWORK ERROR: ${err.message}`;
       setStatus("ERROR");
