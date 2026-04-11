@@ -207,6 +207,75 @@ input[type="text"]:focus {
   cursor: not-allowed;
 }
 
+.btn-danger {
+  border-color: var(--term-error);
+  color: var(--term-error);
+  margin-left: 0.5rem;
+}
+
+.btn-danger:hover,
+.btn-danger:focus {
+  background: var(--term-error);
+  color: var(--term-bg);
+}
+
+/* Contexts list — each entry is a [NNN] NAME — DESC row that acts
+   as a button. Kept pure-CSS so there's no framework dependency. */
+.contexts-list {
+  margin: 0.5rem 0 1.5rem 0;
+  padding: 0;
+}
+
+.context-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.35rem 0.5rem;
+  margin: 0.25rem 0;
+  background: var(--term-bg);
+  border: 1px solid var(--term-fg-dim);
+  color: var(--term-fg-bright);
+  font-family: inherit;
+  font-size: 20px;
+  text-align: left;
+  cursor: pointer;
+  text-shadow: var(--term-glow);
+  width: 100%;
+}
+
+.context-entry:hover,
+.context-entry:focus {
+  border-color: var(--term-fg-bright);
+  background: var(--term-bg-lighter);
+  outline: none;
+}
+
+.context-entry .ctx-index {
+  color: var(--term-fg-dim);
+  min-width: 2.5em;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-entry .ctx-title {
+  color: var(--term-fg-bright);
+  font-weight: normal;
+}
+
+.context-entry .ctx-desc {
+  color: var(--term-fg-dim);
+  font-size: 18px;
+  margin-left: auto;
+  max-width: 60%;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.field-block {
+  flex-wrap: wrap;
+}
+
 .status {
   margin-top: 0.75rem;
   font-size: 20px;

@@ -10,13 +10,19 @@
 //       GET  /api/me
 //       POST /api/auth/logout
 //
+// Commit 2 adds the context registry:
+//       GET    /api/contexts
+//       POST   /api/contexts
+//       GET    /api/contexts/:id
+//       DELETE /api/contexts/:id
+//
 // Every database read/write goes through postgres.execute / query.
 // Every email goes through smtp.send_plain. Every random token and
 // sha256 hash goes through crypto.random_string / crypto.sha256.
 // The only direct Node deps are node:http, node:fs, node:path — no
 // pg, no nodemailer, nothing in node_modules.
 //
-// Commit 2+ adds /api/invoke_port, /api/brain, /api/contexts.
+// Commit 3+ adds /api/invoke_port and /api/brain.
 
 import http from "node:http";
 import { readFile, stat } from "node:fs/promises";
@@ -26,6 +32,7 @@ import { fileURLToPath } from "node:url";
 
 import { SomaMcpClient } from "./soma-mcp.mjs";
 import { createAuth } from "./auth.mjs";
+import { createContexts } from "./contexts.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const FRONTEND_DIR = resolvePath(__dirname, "..", "frontend");
@@ -156,12 +163,18 @@ function clearSessionCookie() {
 }
 
 function getSessionToken(req) {
-  const cookie = readCookie(req, "soma_session");
-  if (cookie) return cookie;
+  // Authorization header wins over the cookie — an explicit bearer
+  // token is the caller saying "use THIS session, not whatever is
+  // in the jar." Cookie-first would let a stale browser session
+  // silently override an intentional API call, which is exactly
+  // the kind of confused-deputy failure that breaks multi-tenant
+  // scope isolation.
   const h = req.headers.authorization;
   if (h && h.toLowerCase().startsWith("bearer ")) {
     return h.slice(7).trim();
   }
+  const cookie = readCookie(req, "soma_session");
+  if (cookie) return cookie;
   return null;
 }
 
@@ -202,6 +215,19 @@ async function main() {
   const soma = new SomaMcpClient();
   await soma.start();
   const auth = createAuth(soma);
+  const contexts = createContexts(soma);
+
+  // Helper — every context route requires a valid session. Returns
+  // the user record on success, or sends a 401 and returns null.
+  async function requireUser(req, res) {
+    const token = getSessionToken(req);
+    const user = await auth.currentUser(token);
+    if (!user) {
+      sendJson(res, 401, { status: "unauthenticated" });
+      return null;
+    }
+    return user;
+  }
 
   const handle = async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -259,11 +285,93 @@ async function main() {
         return sendJson(res, 200, { status: "ok" });
       }
 
+      // ---- contexts ----
+      // Listing, creating, loading, and deleting the operator's
+      // contexts. Every route is session-scoped via `requireUser`
+      // and every SQL query filters by `user_id` so one operator's
+      // id lookup for another operator's context returns "not found"
+      // rather than leaking existence across tenants.
+      if (method === "GET" && path === "/api/contexts") {
+        const user = await requireUser(req, res);
+        if (!user) return;
+        const result = await contexts.listForUser(user.id);
+        if (!result.ok) {
+          return sendJson(res, 400, {
+            status: "error",
+            error: result.error,
+          });
+        }
+        return sendJson(res, 200, {
+          status: "ok",
+          contexts: result.contexts,
+        });
+      }
+
+      if (method === "POST" && path === "/api/contexts") {
+        const user = await requireUser(req, res);
+        if (!user) return;
+        const body = await readBody(req);
+        const result = await contexts.createContext(user.id, body);
+        if (!result.ok) {
+          return sendJson(res, 400, {
+            status: "error",
+            error: result.error,
+          });
+        }
+        return sendJson(res, 201, {
+          status: "ok",
+          context: result.context,
+        });
+      }
+
+      // /api/contexts/:id — GET loads, DELETE removes. Matching the
+      // path with startsWith rather than a router keeps the gateway
+      // a flat file; commit 3+ will grow an actual router if the
+      // route table gets unwieldy.
+      if (
+        (method === "GET" || method === "DELETE") &&
+        path.startsWith("/api/contexts/")
+      ) {
+        const contextId = path.slice("/api/contexts/".length);
+        if (!contextId || contextId.includes("/")) {
+          return sendJson(res, 404, {
+            status: "error",
+            error: "not found",
+          });
+        }
+        const user = await requireUser(req, res);
+        if (!user) return;
+
+        if (method === "GET") {
+          const result = await contexts.loadContext(user.id, contextId);
+          if (!result.ok) {
+            return sendJson(res, 404, {
+              status: "error",
+              error: result.error,
+            });
+          }
+          return sendJson(res, 200, {
+            status: "ok",
+            context: result.context,
+          });
+        }
+
+        // DELETE
+        const result = await contexts.deleteContext(user.id, contextId);
+        if (!result.ok) {
+          return sendJson(res, 404, {
+            status: "error",
+            error: result.error,
+          });
+        }
+        return sendJson(res, 200, { status: "ok" });
+      }
+
       // ---- health check ----
       if (method === "GET" && path === "/api/health") {
         return sendJson(res, 200, {
           status: "ok",
-          commit: 1,
+          commit: 2,
           soma_mcp_ready: soma.ready,
         });
       }

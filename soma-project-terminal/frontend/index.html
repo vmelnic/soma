@@ -32,9 +32,12 @@
         </div>
       </header>
 
-      <!-- Each "view" is a section the JS shows/hides. Commit 1 only has
-           three: pre-auth request-link, post-request confirmation, and
-           post-login placeholder. Commits 2+ add contexts/chat. -->
+      <!-- Each "view" is a section the JS shows/hides. Commit 1 had
+           three: pre-auth request-link, post-request confirmation,
+           and post-login placeholder. Commit 2 adds a contexts list
+           inside view-authenticated and a new view-context-detail
+           for the "loaded" state. Commit 3+ grows the detail view
+           into a chat/wasm runtime. -->
 
       <section class="view" id="view-loading">
         <p class="prompt">&gt; INITIALIZING TERMINAL<span class="cursor">_</span></p>
@@ -83,16 +86,67 @@
   OPERATOR:   <span id="user-email">loading...</span>
   STATUS:     AUTHORIZED
   ACCESS:     LEVEL 1 — PERSONAL CONTEXTS
-
-  NO CONTEXTS FOUND ON THIS OPERATOR PROFILE.
         </pre>
-        <p class="prompt">&gt; WOULD YOU LIKE TO BUILD SOMETHING TODAY? [Y/N]</p>
+
+        <p class="prompt">&gt; REGISTERED CONTEXTS:</p>
+        <div id="contexts-list" class="contexts-list">
+          <p class="meta" id="contexts-empty">
+            NO CONTEXTS FOUND ON THIS OPERATOR PROFILE.
+          </p>
+        </div>
+
+        <p class="prompt">&gt; REGISTER A NEW CONTEXT:</p>
+        <form id="form-create-context" autocomplete="off">
+          <label class="field">
+            <span class="field-prefix">[NAME]</span>
+            <input
+              type="text"
+              id="input-context-name"
+              name="name"
+              required
+              maxlength="120"
+              placeholder="daily-journal"
+            />
+          </label>
+          <label class="field field-block">
+            <span class="field-prefix">[DESC]</span>
+            <input
+              type="text"
+              id="input-context-description"
+              name="description"
+              maxlength="2000"
+              placeholder="a private log of daily entries"
+            />
+          </label>
+          <button type="submit" class="btn">[ REGISTER CONTEXT ]</button>
+        </form>
+        <p class="status hidden" id="status-create-context"></p>
+
         <p class="meta">
-          (Context creation lands in commit 2. This terminal is
-          currently a plumbing proof — login works, context CRUD and
-          LLM-composed apps are coming in the next commits.)
+          (A context is currently just a named row. Commit 3 adds a
+          chat shell inside each context; commit 6 turns your
+          description into a compiled SOMA pack.)
         </p>
+
         <button class="btn" id="btn-logout">[ LOGOUT ]</button>
+      </section>
+
+      <section class="view hidden" id="view-context-detail">
+        <p class="prompt">&gt; CONTEXT LOADED</p>
+        <pre class="lore" id="context-detail-summary">
+  NAME:        <span id="ctx-name">—</span>
+  DESCRIPTION: <span id="ctx-description">—</span>
+  STATUS:      <span id="ctx-kind">—</span>
+  CREATED:     <span id="ctx-created">—</span>
+  UPDATED:     <span id="ctx-updated">—</span>
+        </pre>
+        <p class="meta">
+          (Commit 3 opens a chat shell and a browser-side soma-next
+          runtime for this context. For now this view is just a
+          metadata dump.)
+        </p>
+        <button class="btn" id="btn-ctx-back">[ BACK ]</button>
+        <button class="btn btn-danger" id="btn-ctx-delete">[ DELETE ]</button>
       </section>
 
       <section class="view hidden" id="view-error">

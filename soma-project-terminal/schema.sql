@@ -1,6 +1,7 @@
 -- soma-project-terminal schema
 --
--- Commit 1 tables: users, sessions, magic_tokens. Commit 2 adds contexts.
+-- Commit 1 tables: users, sessions, magic_tokens.
+-- Commit 2 tables: contexts.
 --
 -- Tokens are stored as sha256 hashes, never plaintext. The raw token
 -- is what we email to the user and what the browser holds as a cookie;
@@ -47,3 +48,28 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions (user_id);
 CREATE INDEX IF NOT EXISTS sessions_expires_idx ON sessions (expires_at);
+
+-- Contexts — the user's "projects". In commit 2 a context is just a
+-- named row owned by a user. In commit 6 a context grows a PackSpec
+-- column compiled from the user's natural-language description, and
+-- commit 4 loads that pack into a browser-side soma-next runtime.
+--
+-- `kind` is a cheap enum-ish discriminator: 'draft' is the initial
+-- state before a pack has been generated, 'active' means the pack
+-- compiled and the context is usable, 'archived' hides it from the
+-- default listing. Using TEXT rather than a real enum type keeps
+-- schema migrations trivial and matches how the postgres port
+-- serializes all parameters as TEXT anyway.
+CREATE TABLE IF NOT EXISTS contexts (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    description TEXT,
+    kind        TEXT NOT NULL DEFAULT 'draft',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS contexts_user_id_idx ON contexts (user_id);
+CREATE INDEX IF NOT EXISTS contexts_user_updated_idx
+    ON contexts (user_id, updated_at DESC);
