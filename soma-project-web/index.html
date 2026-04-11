@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>soma-next in the browser — phase 1b proof</title>
+    <title>soma-next in the browser — phase 1d proof</title>
     <style>
       body {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -50,18 +50,33 @@
   </head>
   <body>
     <header>
-      <h2>soma-next in the browser — phase 1b</h2>
+      <h2>soma-next in the browser — phase 1d</h2>
       <p class="meta">
-        A ~132 KB WebAssembly build of <code>soma-next</code> loaded in this
-        tab exposes two in-tab ports (<code>dom</code> and <code>audio</code>)
-        that implement the exact same <code>Port</code> trait as every native
-        SOMA port. Every button below calls <code>soma_invoke_port(port_id,
-        capability_id, input_json)</code>, which dispatches through the same
-        Port::invoke path every native proof project uses and returns a
-        fully-populated <code>PortCallRecord</code>. Everything above this
+        A WebAssembly build of <code>soma-next</code> loaded in this tab
+        boots a real <code>Runtime</code> with the full
+        <code>DefaultPortRuntime</code> pipeline — lifecycle gate,
+        sandbox check, policy check, auth check, input schema validation.
+        The three in-tab ports (<code>dom</code>, <code>audio</code>,
+        <code>voice</code>) are registered on top of the bootstrap flow
+        the same way native dylib ports are registered on a server
+        soma-next. <code>soma_invoke_port</code> dispatches through
+        <code>DefaultPortRuntime::invoke</code>, exactly the same code
+        path every native proof project uses. Everything above this
         paragraph is static HTML — nothing below it is.
       </p>
     </header>
+
+    <section class="group">
+      <h3>runtime</h3>
+      <button id="btn-boot">soma_boot_runtime (empty manifest)</button>
+      <button id="btn-summary">soma_runtime_summary</button>
+      <button id="btn-ports">soma_list_ports</button>
+      <p class="meta">
+        The runtime is auto-booted on first <code>invoke_port</code> if
+        nothing else has booted it. These buttons let you exercise the
+        boot path explicitly and inspect the resulting state.
+      </p>
+    </section>
 
     <section class="group">
       <h3>dom port</h3>
@@ -148,8 +163,10 @@
 
     <script type="module">
       import init, {
+        soma_boot_runtime,
         soma_invoke_port,
         soma_list_ports,
+        soma_runtime_summary,
       } from "./pkg/soma_next.js";
 
       const recordEl = document.getElementById("record");
@@ -184,15 +201,41 @@
       async function boot() {
         try {
           await init();
-          const ports = soma_list_ports();
-          recordEl.className = "result";
-          recordEl.textContent =
-            "soma-next wasm booted. Registered ports: " + ports +
-            "\nClick any button to invoke a capability.";
+          // Eagerly boot the Runtime so the summary panel has something
+          // to show before the user clicks anything.
+          const summary = soma_boot_runtime("");
+          showResult(summary);
         } catch (err) {
           showError("init failed: " + err);
         }
       }
+
+      document.getElementById("btn-boot").addEventListener("click", () => {
+        try {
+          const summary = soma_boot_runtime("");
+          showResult(summary);
+        } catch (err) {
+          showError(err);
+        }
+      });
+
+      document.getElementById("btn-summary").addEventListener("click", () => {
+        try {
+          const summary = soma_runtime_summary();
+          showResult(summary);
+        } catch (err) {
+          showError(err);
+        }
+      });
+
+      document.getElementById("btn-ports").addEventListener("click", () => {
+        try {
+          const ports = soma_list_ports();
+          showResult(ports);
+        } catch (err) {
+          showError(err);
+        }
+      });
 
       document.getElementById("btn-append-heading").addEventListener("click", () => {
         const text = document.getElementById("heading-text").value || "hello";

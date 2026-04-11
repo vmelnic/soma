@@ -7,7 +7,7 @@
 #[cfg(feature = "dylib-ports")]
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::adapters::{
     EpisodeMemoryAdapter, PolicyEngineAdapter,
@@ -395,6 +395,150 @@ pub fn bootstrap_with_remote(
         critic: Box::new(SimpleSessionCritic::new()),
         policy_engine: Box::new(policy_engine),
         remote_executor: Some(remote_executor),
+        capability_scope_checker: None,
+    };
+
+    let metrics = Arc::new(RuntimeMetrics::new());
+
+    let session_controller = SessionController::new(deps, Arc::clone(&metrics));
+    let goal_runtime = DefaultGoalRuntime::new();
+
+    Ok(Runtime {
+        session_controller,
+        goal_runtime,
+        skill_runtime,
+        port_runtime,
+        episode_store,
+        schema_store,
+        routine_store,
+        pack_specs,
+        metrics,
+        embedder,
+        start_time: Instant::now(),
+    })
+}
+
+/// Build a Runtime from already-parsed pack specs, skipping all filesystem
+/// I/O. Used by the wasm entry point — the browser has no filesystem to
+/// read manifests from, so the JS harness supplies the pack JSON directly
+/// and we parse it before calling this function.
+///
+/// Structurally equivalent to `bootstrap()` but starts from a `Vec<PackSpec>`
+/// instead of a `&[String]` of file paths. `disk-persistence`-gated code
+/// paths (DiskEpisodeStore / DiskSchemaStore / DiskRoutineStore) cannot run
+/// on wasm, so this function only ever uses the in-memory defaults.
+pub fn bootstrap_from_specs(
+    config: &SomaConfig,
+    pack_specs_input: Vec<PackSpec>,
+) -> Result<Runtime> {
+    let sandbox = crate::runtime::port::RuntimeSandboxProfile {
+        filesystem_access: false,
+        network_access: false,
+        device_access: false,
+        process_access: false,
+        memory_limit_mb: None,
+        cpu_limit_percent: None,
+        time_limit_ms: None,
+        syscall_limit: None,
+    };
+    let mut port_runtime = DefaultPortRuntime::with_sandbox_profile(sandbox);
+    let mut skill_runtime = DefaultSkillRuntime::new();
+    let mut pack_specs: Vec<PackSpec> = Vec::new();
+
+    #[cfg(feature = "dylib-ports")]
+    let mut dynamic_loader = {
+        let search_paths: Vec<PathBuf> = config
+            .ports
+            .plugin_path
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        DynamicPortLoader::with_signature_policy(
+            search_paths,
+            config.ports.require_signatures,
+        )
+    };
+
+    for pack_spec in pack_specs_input.into_iter() {
+        for port_spec in &pack_spec.ports {
+            let (adapter, effective_spec) = match create_port_adapter(
+                port_spec,
+                #[cfg(feature = "dylib-ports")]
+                &mut dynamic_loader,
+            ) {
+                Ok(pair) => pair,
+                Err(e) => {
+                    tracing::warn!(
+                        port_id = %port_spec.port_id,
+                        kind = ?port_spec.kind,
+                        error = %e,
+                        "failed to create port adapter, skipping"
+                    );
+                    continue;
+                }
+            };
+
+            let spec_to_register = effective_spec.unwrap_or_else(|| port_spec.clone());
+            let port_id = spec_to_register.port_id.clone();
+            port_runtime.register_port(spec_to_register, adapter)?;
+            port_runtime.activate(&port_id)?;
+        }
+
+        for skill_spec in &pack_spec.skills {
+            skill_runtime.register_skill(skill_spec.clone())?;
+        }
+
+        pack_specs.push(pack_spec);
+    }
+
+    let port_runtime = Arc::new(Mutex::new(port_runtime));
+
+    // In-memory stores only: disk-persistence is unavailable on wasm
+    // and pointless for bootstrap-from-specs usage anyway (the caller
+    // doesn't want side effects in ~/.soma/data from a browser tab).
+    let episode_store: SharedEpisodeStore = Arc::new(Mutex::new(DefaultEpisodeStore::new()));
+    let schema_store: SharedSchemaStore = Arc::new(Mutex::new(DefaultSchemaStore::new()));
+    let routine_store: SharedRoutineStore = Arc::new(Mutex::new(DefaultRoutineStore::new()));
+
+    let embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync> = Arc::new(
+        crate::memory::embedder::HashEmbedder::new(),
+    );
+
+    let skill_registry = SkillRegistryAdapter::new(&skill_runtime);
+    let skill_executor = PortBackedSkillExecutor::new(Arc::clone(&port_runtime));
+    let episode_memory = EpisodeMemoryAdapter::new(Arc::clone(&episode_store), Arc::clone(&embedder));
+    let schema_memory = SchemaMemoryAdapter::new(Arc::clone(&schema_store));
+    let routine_memory = RoutineMemoryAdapter::new(Arc::clone(&routine_store));
+
+    let policy_runtime = DefaultPolicyRuntime::new();
+    register_default_safety_policies(&policy_runtime, config)?;
+
+    for pack_spec in &pack_specs {
+        for policy_spec in &pack_spec.policies {
+            if let Err(e) = policy_runtime.register_policy(policy_spec.clone()) {
+                tracing::warn!(
+                    policy_id = %policy_spec.policy_id,
+                    pack = %pack_spec.id,
+                    error = %e,
+                    "pack policy rejected (may conflict with host policy), skipping"
+                );
+            }
+        }
+    }
+
+    let policy_engine = PolicyEngineAdapter::new(policy_runtime, config.runtime.max_steps);
+
+    let deps = SessionControllerDeps {
+        belief_source: Box::new(SimpleBeliefSource::new()),
+        episode_memory: Box::new(episode_memory),
+        schema_memory: Box::new(schema_memory),
+        routine_memory: Box::new(routine_memory),
+        skill_registry: Box::new(skill_registry),
+        skill_executor: Box::new(skill_executor),
+        predictor: Box::new(SimpleCandidatePredictor::new()),
+        critic: Box::new(SimpleSessionCritic::new()),
+        policy_engine: Box::new(policy_engine),
+        remote_executor: None,
         capability_scope_checker: None,
     };
 

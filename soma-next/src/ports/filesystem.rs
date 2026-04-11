@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::Path;
-use std::time::Instant;
+use web_time::Instant;
 
 use chrono::Utc;
 use semver::Version;

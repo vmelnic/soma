@@ -1,19 +1,19 @@
 //! Browser / WebAssembly entry point for soma-next.
 //!
-//! This module compiles only on `target_arch = "wasm32"`. It exposes
-//! JavaScript-visible functions through wasm-bindgen, installs a panic
-//! hook that forwards Rust panics to the browser console, registers the
-//! built-in in-tab ports (DOM + audio in phase 1b, voice + keyboard
-//! coming in phase 1c), and dispatches JS-initiated `invoke_port` calls
-//! through the same `Port::invoke` path that every other SOMA body uses.
+//! Compiled only on `target_arch = "wasm32"`. Exposes JavaScript-visible
+//! functions through wasm-bindgen, installs a panic hook that forwards
+//! Rust panics to the browser console, and boots a real
+//! `soma_next::bootstrap::Runtime` inside the browser tab with the
+//! in-tab `dom` / `audio` / `voice` ports registered on its port runtime.
 //!
-//! The mental model: soma-next is the brain/body bridge running inside
-//! the browser tab. JavaScript is the shell that loads the wasm, wires
-//! user events to `soma_invoke_port`, and receives effects through ports
-//! that call back out into `web_sys` / `js_sys`.
+//! Phase 1d: every `invoke_port` call now dispatches through the full
+//! `DefaultPortRuntime` pipeline — lifecycle gate, sandbox check, policy
+//! check, auth check, input schema validation, and the observation
+//! record construction in `runtime/port.rs` — exactly the same code path
+//! every native proof project uses. The thread-local `HashMap` port
+//! registry from phase 1a/b/c is gone.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 use wasm_bindgen::prelude::*;
 
@@ -25,38 +25,24 @@ use audio_port::AudioPort;
 use dom_port::DomPort;
 use voice_port::VoicePort;
 
-use crate::runtime::port::Port;
+use crate::bootstrap::{bootstrap_from_specs, Runtime};
+use crate::config::SomaConfig;
+use crate::runtime::port::{Port, PortRuntime};
+use crate::types::pack::PackSpec;
+use crate::types::port::InvocationContext;
 
-// In-tab port registry. Built lazily on first `soma_invoke_port` call.
-//
-// `thread_local!` + `RefCell` is the idiomatic single-threaded wasm
-// pattern: wasm32-unknown-unknown has no real threads, the runtime lives
-// entirely inside the main JavaScript event loop, and `RefCell` gives
-// interior mutability without the overhead of `Mutex`.
+// A full `Runtime` lives for the lifetime of the tab. `thread_local!` is
+// the idiomatic single-threaded wasm container; Runtime is not `Send`
+// (it holds Box<dyn Trait> adapters with no Send bound), which is fine
+// because wasm32-unknown-unknown has no real threads anyway.
 thread_local! {
-    static PORTS: RefCell<Option<HashMap<String, Box<dyn Port>>>> = const { RefCell::new(None) };
+    static RUNTIME: RefCell<Option<Runtime>> = const { RefCell::new(None) };
 }
 
-fn ensure_ports_initialized() {
-    PORTS.with(|cell| {
-        let mut slot = cell.borrow_mut();
-        if slot.is_none() {
-            let mut map: HashMap<String, Box<dyn Port>> = HashMap::new();
-            map.insert("dom".to_string(), Box::new(DomPort::new()));
-            map.insert("audio".to_string(), Box::new(AudioPort::new()));
-            map.insert("voice".to_string(), Box::new(VoicePort::new()));
-            *slot = Some(map);
-            web_sys::console::log_1(&JsValue::from_str(
-                "[soma-next wasm] port registry initialized: dom, audio, voice",
-            ));
-        }
-    });
-}
-
-/// Called from JavaScript exactly once, before any other soma-next function.
-/// Installs the panic hook so Rust panics end up as `console.error` entries
-/// with full stack traces, and logs a boot banner so the page can confirm
-/// the wasm module actually loaded.
+/// Called from JavaScript exactly once, before any other soma-next
+/// function. Installs the panic hook so Rust panics end up as
+/// `console.error` entries with full stack traces, and logs a boot
+/// banner so the page can confirm the wasm module actually loaded.
 #[wasm_bindgen(start)]
 pub fn soma_start() {
     console_error_panic_hook::set_once();
@@ -65,61 +51,191 @@ pub fn soma_start() {
     ));
 }
 
-/// Return a JSON array of all registered port IDs. Useful for debugging
-/// from the browser dev console.
+/// Boot a SOMA Runtime from a pack manifest JSON string.
+///
+/// The manifest can be empty (`""`) or a full `PackSpec` JSON object.
+/// An empty manifest still produces a valid Runtime — useful for
+/// proving the pipeline works before any brain-side code is written.
+///
+/// Regardless of what the manifest declares, the three in-tab browser
+/// ports (`dom`, `audio`, `voice`) are always registered on top of it,
+/// because a browser SOMA without them cannot produce any observable
+/// side effects.
+///
+/// Safe to call multiple times — each call replaces the previously
+/// booted Runtime. Returns a JSON summary of the booted state.
 #[wasm_bindgen]
-pub fn soma_list_ports() -> String {
-    ensure_ports_initialized();
-    PORTS.with(|cell| {
-        let slot = cell.borrow();
-        let map = slot.as_ref().expect("ports initialized above");
-        let ids: Vec<&String> = map.keys().collect();
-        serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string())
+pub fn soma_boot_runtime(manifest_json: &str) -> Result<String, JsValue> {
+    let pack_specs: Vec<PackSpec> = if manifest_json.trim().is_empty() {
+        Vec::new()
+    } else {
+        let spec: PackSpec = serde_json::from_str(manifest_json)
+            .map_err(|e| JsValue::from_str(&format!("manifest parse failed: {e}")))?;
+        vec![spec]
+    };
+
+    let config = SomaConfig::default();
+    let runtime = bootstrap_from_specs(&config, pack_specs)
+        .map_err(|e| JsValue::from_str(&format!("bootstrap_from_specs: {e}")))?;
+
+    // Register the built-in browser ports on top of whatever the
+    // manifest declared. The `native` meta-feature is off on wasm, so
+    // Dylib- and McpClient-backed ports from the manifest (if any)
+    // would have been skipped with a warning by `create_port_adapter`.
+    {
+        let mut port_runtime = runtime
+            .port_runtime
+            .lock()
+            .map_err(|_| JsValue::from_str("port_runtime mutex poisoned"))?;
+
+        register_wasm_port(&mut *port_runtime, "dom", Box::new(DomPort::new()))?;
+        register_wasm_port(&mut *port_runtime, "audio", Box::new(AudioPort::new()))?;
+        register_wasm_port(&mut *port_runtime, "voice", Box::new(VoicePort::new()))?;
+    }
+
+    let summary = make_summary(&runtime)?;
+    RUNTIME.with(|r| *r.borrow_mut() = Some(runtime));
+
+    web_sys::console::log_1(&JsValue::from_str(
+        "[soma-next wasm] Runtime booted with ports: dom, audio, voice",
+    ));
+
+    Ok(summary)
+}
+
+fn register_wasm_port(
+    port_runtime: &mut crate::runtime::port::DefaultPortRuntime,
+    name: &str,
+    port: Box<dyn Port>,
+) -> Result<(), JsValue> {
+    let spec = port.spec().clone();
+    port_runtime
+        .register_port(spec, port)
+        .map_err(|e| JsValue::from_str(&format!("register {name}: {e}")))?;
+    port_runtime
+        .activate(name)
+        .map_err(|e| JsValue::from_str(&format!("activate {name}: {e}")))?;
+    Ok(())
+}
+
+/// Return a JSON summary of the currently-booted Runtime: pack count,
+/// registered ports, and each port's capabilities.
+#[wasm_bindgen]
+pub fn soma_runtime_summary() -> Result<String, JsValue> {
+    RUNTIME.with(|r| {
+        let slot = r.borrow();
+        let runtime = slot.as_ref().ok_or_else(|| {
+            JsValue::from_str("runtime not booted — call soma_boot_runtime first")
+        })?;
+        make_summary(runtime)
     })
 }
 
-/// Invoke a capability on one of the in-tab ports.
+fn make_summary(runtime: &Runtime) -> Result<String, JsValue> {
+    let port_runtime = runtime
+        .port_runtime
+        .lock()
+        .map_err(|_| JsValue::from_str("port_runtime mutex poisoned"))?;
+
+    let ports: Vec<serde_json::Value> = port_runtime
+        .list_ports(None)
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "port_id": p.port_id,
+                "namespace": p.namespace,
+                "kind": format!("{:?}", p.kind),
+                "capabilities": p
+                    .capabilities
+                    .iter()
+                    .map(|c| c.capability_id.clone())
+                    .collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+
+    let summary = serde_json::json!({
+        "booted": true,
+        "pack_count": runtime.pack_specs.len(),
+        "pack_ids": runtime.pack_specs.iter().map(|p| p.id.clone()).collect::<Vec<_>>(),
+        "ports": ports,
+    });
+
+    serde_json::to_string(&summary)
+        .map_err(|e| JsValue::from_str(&format!("summary serialize: {e}")))
+}
+
+/// Return a JSON array of all registered port IDs. Convenience wrapper
+/// for the browser dev console.
+#[wasm_bindgen]
+pub fn soma_list_ports() -> Result<String, JsValue> {
+    ensure_booted()?;
+    RUNTIME.with(|r| {
+        let slot = r.borrow();
+        let runtime = slot.as_ref().expect("ensured booted above");
+        let port_runtime = runtime
+            .port_runtime
+            .lock()
+            .map_err(|_| JsValue::from_str("port_runtime mutex poisoned"))?;
+        let ids: Vec<String> = port_runtime
+            .list_ports(None)
+            .iter()
+            .map(|p| p.port_id.clone())
+            .collect();
+        serde_json::to_string(&ids)
+            .map_err(|e| JsValue::from_str(&format!("serialize: {e}")))
+    })
+}
+
+/// Invoke a capability on one of the registered ports.
 ///
-/// Parameters:
-///   * `port_id` — `"dom"` or `"audio"` in phase 1b
-///   * `capability_id` — e.g. `"append_heading"`, `"say_text"`
-///   * `input_json` — JSON object as a string, matching the capability's
-///     declared `input_schema`
-///
-/// Returns the resulting `PortCallRecord` serialized as a JSON string.
-/// Throws a JS `Error` containing the failure message when port lookup,
-/// validation, or invocation itself fail at the Rust level. Capability
-/// errors (`success: false`) are returned as a populated record, not
-/// a thrown error — same as every other SOMA call path.
+/// Dispatches through `DefaultPortRuntime::invoke`, the same code path
+/// every native proof project uses. Every gate runs — lifecycle,
+/// remote-exposure, policy, auth, input-schema validation, sandbox —
+/// before the adapter's `invoke` is called. Returns the resulting
+/// `PortCallRecord` as a JSON string.
 #[wasm_bindgen]
 pub fn soma_invoke_port(
     port_id: &str,
     capability_id: &str,
     input_json: &str,
 ) -> Result<String, JsValue> {
-    ensure_ports_initialized();
+    ensure_booted()?;
 
-    let input: serde_json::Value = serde_json::from_str(input_json).map_err(|e| {
-        JsValue::from_str(&format!("input_json is not valid JSON: {e}"))
-    })?;
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| JsValue::from_str(&format!("input_json is not valid JSON: {e}")))?;
 
-    PORTS.with(|cell| {
-        let slot = cell.borrow();
-        let map = slot.as_ref().expect("ports initialized above");
-        let port = map
-            .get(port_id)
-            .ok_or_else(|| JsValue::from_str(&format!("unknown port '{port_id}'")))?;
+    RUNTIME.with(|r| {
+        let slot = r.borrow();
+        let runtime = slot.as_ref().expect("ensured booted above");
+        let port_runtime = runtime
+            .port_runtime
+            .lock()
+            .map_err(|_| JsValue::from_str("port_runtime mutex poisoned"))?;
 
-        port.validate_input(capability_id, &input)
-            .map_err(|e| JsValue::from_str(&format!("validate_input: {e}")))?;
+        let ctx = InvocationContext {
+            caller_identity: Some("wasm".to_string()),
+            ..Default::default()
+        };
 
-        let record = port
-            .invoke(capability_id, input)
+        let record = port_runtime
+            .invoke(port_id, capability_id, input, &ctx)
             .map_err(|e| JsValue::from_str(&format!("invoke: {e}")))?;
 
         serde_json::to_string(&record)
             .map_err(|e| JsValue::from_str(&format!("serialize: {e}")))
     })
+}
+
+/// Ensure a Runtime has been booted. If not, auto-boot with an empty
+/// manifest — this keeps the phase 1a/b/c harnesses working unchanged
+/// even if they never call `soma_boot_runtime` explicitly.
+fn ensure_booted() -> Result<(), JsValue> {
+    let already = RUNTIME.with(|r| r.borrow().is_some());
+    if !already {
+        soma_boot_runtime("")?;
+    }
+    Ok(())
 }
 
 /// Phase 1a compatibility shim. The new generic path is

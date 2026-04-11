@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+
+use web_time::Instant;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

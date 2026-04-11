@@ -5,7 +5,9 @@
 //! and peer connections. Used by the CLI `metrics` command and by the
 //! distributed layer when advertising load to peers.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 /// A point-in-time snapshot of the SOMA instance's self-knowledge.
 ///

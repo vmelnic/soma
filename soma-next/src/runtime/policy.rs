@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
-use std::time::Instant;
+
+use web_time::Instant;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

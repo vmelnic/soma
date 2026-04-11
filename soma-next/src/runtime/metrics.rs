@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::Instant;
+
+use web_time::Instant;
 
 /// Centralized runtime metrics, shared across all subsystems via `Arc<RuntimeMetrics>`.
 ///

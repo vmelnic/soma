@@ -1,0 +1,15 @@
+{
+  "name": "soma-project-web",
+  "version": "1.0.0",
+  "description": "Phase 1a proof that **soma-next runs in the browser**. A ~132 KB wasm build of the core runtime loads in a browser tab, registers a `dom` port that implements the same `Port` trait as every other SOMA port (filesystem, HTTP, ESP32 hardware, Python MCP server, …), and renders an `<h1>` into `document.body` via `web-sys` when a JS handler calls the wasm-exported entry point.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
+  }
+}
