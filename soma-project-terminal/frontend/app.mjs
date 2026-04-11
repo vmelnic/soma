@@ -555,6 +555,63 @@ document
   .getElementById("btn-ctx-back")
   .addEventListener("click", () => backToAuthenticated());
 
+// -------------------------------------------------------------------
+// generate-pack button — commit 6
+// -------------------------------------------------------------------
+//
+// Posts to /api/contexts/:id/pack/generate, which runs the
+// reasoning brain (gpt-5-mini or fake) and stores the resulting
+// PackSpec on the context row. On success we swap `currentContext`
+// to the updated row and refresh the runtime panel — which reboots
+// the wasm body with the newly-generated pack visible.
+
+document
+  .getElementById("btn-generate-pack")
+  .addEventListener("click", async () => {
+    if (!currentContext) return;
+    const btn = document.getElementById("btn-generate-pack");
+    const statusEl = document.getElementById("generate-status");
+    btn.disabled = true;
+    statusEl.classList.remove("error");
+    statusEl.textContent = "COMPILING PACK...";
+    setStatus("GENERATING PACK");
+    try {
+      const res = await fetch(
+        `/api/contexts/${encodeURIComponent(currentContext.id)}/pack/generate`,
+        { method: "POST", credentials: "include" },
+      );
+      const body = await res.json();
+      if (!res.ok || body.status !== "ok") {
+        statusEl.classList.add("error");
+        statusEl.textContent = `FAILED: ${body.error || res.status}`;
+        setStatus("ERROR");
+        return;
+      }
+      currentContext = body.context;
+      // Refresh the metadata line (kind flipped draft → active).
+      document.getElementById("ctx-kind").textContent = (
+        currentContext.kind || "draft"
+      ).toUpperCase();
+      document.getElementById("ctx-updated").textContent =
+        currentContext.updated_at || "—";
+      statusEl.textContent = `via ${body.model || "brain"} → ${body.minimal?.pack_id || "pack"}`;
+      setStatus("PACK READY");
+      // Reboot the runtime into the freshly-generated pack.
+      await updateRuntimePanel();
+      // Memory panel counts aren't affected but the routine store
+      // was just wiped by the wasm reboot — nothing to rehydrate
+      // until the operator starts generating episodes, which is
+      // the commit-5-deferred path.
+      await refreshMemoryPanel();
+    } catch (err) {
+      statusEl.classList.add("error");
+      statusEl.textContent = `NETWORK ERROR: ${err.message}`;
+      setStatus("ERROR");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
 document
   .getElementById("btn-ctx-delete")
   .addEventListener("click", async () => {

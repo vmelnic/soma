@@ -37,6 +37,15 @@
 // opaque to every other — a leak here would silently break the
 // whole multi-tenant story, so it's tested explicitly.
 //
+// Commit 6 adds LLM-to-PackSpec generation:
+//       POST /api/contexts/:id/pack/generate
+// The reasoning brain (gpt-5-mini) reads the context name +
+// description + chat history and emits a minimal pack shape,
+// which backend/brain.mjs expands into a full PackSpec and
+// persists via contexts.setPackSpec. The next time the operator
+// opens the context, the browser wasm runtime boots that pack
+// instead of the hello fallback.
+//
 // Every database read/write goes through postgres.execute / query.
 // Every email goes through smtp.send_plain. Every random token and
 // sha256 hash goes through crypto.random_string / crypto.sha256.
@@ -59,7 +68,11 @@ import { createAuth } from "./auth.mjs";
 import { createContexts } from "./contexts.mjs";
 import { createMessages } from "./messages.mjs";
 import { createMemory } from "./memory.mjs";
-import { chatCompletion, buildSystemPrompt } from "./brain.mjs";
+import {
+  chatCompletion,
+  generatePackSpec,
+  buildSystemPrompt,
+} from "./brain.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const FRONTEND_DIR = resolvePath(__dirname, "..", "frontend");
@@ -480,6 +493,84 @@ async function main() {
         });
       }
 
+      // /api/contexts/:id/pack/generate — POST runs the reasoning
+      // brain (gpt-5-mini or fake) against the context + its chat
+      // history, expands the minimal output into a full PackSpec,
+      // and persists it via contexts.setPackSpec. On success the
+      // response includes the updated context row so the client
+      // can refresh the runtime panel without a second fetch.
+      const packGenMatch = path.match(
+        /^\/api\/contexts\/([^/]+)\/pack\/generate$/,
+      );
+      if (packGenMatch && method === "POST") {
+        const contextId = packGenMatch[1];
+        const user = await requireUser(req, res);
+        if (!user) return;
+
+        const ctx = await contexts.loadContext(user.id, contextId);
+        if (!ctx.ok) {
+          return sendJson(res, 404, {
+            status: "error",
+            error: ctx.error,
+          });
+        }
+
+        // Pull the existing transcript so the reasoning brain can
+        // ground its output in what the operator has been asking
+        // for. Fresh contexts with no chat still generate fine —
+        // `buildPackUserMessage` handles the empty-history case.
+        const histResult = await messages.historyFor(user.id, contextId);
+        if (!histResult.ok) {
+          return sendJson(res, 500, {
+            status: "error",
+            error: histResult.error,
+          });
+        }
+
+        let gen;
+        try {
+          gen = await generatePackSpec({
+            context: ctx.context,
+            history: histResult.history,
+          });
+        } catch (e) {
+          console.error(`[brain] generatePackSpec failed:`, e.message);
+          return sendJson(res, 502, {
+            status: "error",
+            error: `brain failed: ${e.message}`,
+          });
+        }
+        if (!gen.ok) {
+          return sendJson(res, 502, {
+            status: "error",
+            error: gen.error,
+          });
+        }
+
+        // Persist the generated PackSpec on the context. This is
+        // the same path commit 4 tests already exercise — the only
+        // new thing in commit 6 is the brain step that produces
+        // the manifest.
+        const stored = await contexts.setPackSpec(
+          user.id,
+          contextId,
+          gen.pack,
+        );
+        if (!stored.ok) {
+          return sendJson(res, 500, {
+            status: "error",
+            error: `failed to store generated pack: ${stored.error}`,
+          });
+        }
+
+        return sendJson(res, 200, {
+          status: "ok",
+          context: stored.context,
+          model: gen.model,
+          minimal: gen.minimal,
+        });
+      }
+
       // /api/contexts/:id/pack — PUT stores the compiled PackSpec.
       // Matched before the single-context handler so the /pack
       // suffix doesn't get mis-parsed as part of the context id.
@@ -662,7 +753,7 @@ async function main() {
       if (method === "GET" && path === "/api/health") {
         return sendJson(res, 200, {
           status: "ok",
-          commit: 5,
+          commit: 6,
           soma_mcp_ready: soma.ready,
           brain_fake: String(process.env.BRAIN_FAKE || "") === "1",
         });
