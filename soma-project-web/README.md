@@ -126,39 +126,139 @@ port, audio port, voice port, composition. Every button dispatches
 through the real runtime pipeline — the `PortCallRecord` pane shows
 the full observation envelope after each click.
 
-## Running the brain proxy against real OpenAI
+## Testing the LLM end-to-end
+
+Two paths: the **fake proxy** (no API key, proves every link in the
+chain works) and the **real OpenAI proxy** (real `gpt-5-mini`
+composition against your live port catalog). Do the fake path first
+so you know the DOM/audio/voice surface is fine before spending any
+API credits on a debugging round.
+
+### Step 0 — build the wasm bundle
 
 ```bash
-export OPENAI_API_KEY=sk-...
-node scripts/brain-proxy.mjs                  # listens on 127.0.0.1:8787
+./scripts/build.sh
 ```
 
-Then in the browser:
+### Path A — fake mode (no API key)
 
-1. Paste `http://localhost:8787/api/brain` into the "Brain endpoint"
-   field under the **LLM brain** section, press Tab (persists to
-   `localStorage.soma.brain.endpoint`).
-2. Type a natural-language prompt — e.g. *"say hello to marcu in
-   three different ways"*.
-3. Click **compose & run**.
+Three terminals.
 
-The proxy posts your prompt + the current port catalog to
-`gpt-5-mini` with `reasoning_effort: "low"` and
-`response_format: { type: "json_object" }`, parses the returned
-`{plan, explanation}`, and sends it back. The browser then walks the
-plan by calling `soma_invoke_port` for each step; you see the DOM
-mutate and hear the audio play.
+**Terminal 1 — brain proxy (fake):**
+```bash
+./scripts/run-brain.sh --fake
+# [run-brain] no .env found — using current environment.
+# [brain-proxy] listening on http://127.0.0.1:8787/api/brain
+# [brain-proxy] mode: FAKE (no LLM)
+```
 
-Brain-proxy flags:
+**Terminal 2 — web server:**
+```bash
+./scripts/serve.sh
+# [serve] http://localhost:8080/index.html
+```
+
+(The port shown is 8080 — `serve.sh` uses the `PORT` env var, default 8080.
+Playwright uses 8765 internally; either works for the demo.)
+
+**Browser:**
+1. Open the URL printed by `serve.sh`.
+2. Scroll to the **LLM brain (phase 1g)** section.
+3. In **Brain endpoint**, replace the default `/api/brain` with
+   `http://localhost:8787/api/brain`. Press Tab — the value is
+   persisted to `localStorage.soma.brain.endpoint` so you don't have
+   to retype it on the next page load.
+4. Type any prompt in **Prompt**. Click **compose & run**.
+
+Expected result:
+- Brain log pane fills with `→ POST http://localhost:8787/api/brain`,
+  `explanation: Fake brain: echoed…`, `[1] dom.append_heading ✓`,
+  `[2] audio.say_text ✓`.
+- A red `<h1>(fake brain) <your prompt></h1>` renders below the
+  horizontal rule.
+- Your system speakers say the prompt via the Web Speech API.
+- The **Last PortCallRecord** pane shows the full plan + last record.
+
+If any of those don't happen, the chain is broken somewhere *other*
+than the LLM — fix that before moving to path B.
+
+### Path B — real OpenAI `gpt-5-mini`
+
+You need an OpenAI API key (https://platform.openai.com/api-keys).
+
+**One-time setup — copy the example env file and fill it in:**
+```bash
+cp .env.example .env
+$EDITOR .env     # replace `sk-your-key-here` with your actual sk-... key
+```
+
+`.env` is gitignored (repo root `**/.env`) so your key never lands
+in the working tree.
+
+**Terminal 1 — brain proxy (real OpenAI):**
+```bash
+./scripts/run-brain.sh
+# [run-brain] using .env
+# [brain-proxy] listening on http://127.0.0.1:8787/api/brain
+# [brain-proxy] mode: OpenAI gpt-5-mini (reasoning_effort=low)
+```
+
+The script uses Node's built-in `--env-file=.env` flag (Node 20.6+)
+to load your key without installing any dotenv package.
+
+**Terminal 2 / Browser — same as path A.**
+
+Test prompts to try:
+
+| Prompt | Expected plan |
+|---|---|
+| `say hello to marcu` | 1-2 steps: dom.append_heading + audio.say_text |
+| `render three headings counting down from three` | 3 × dom.append_heading |
+| `write a welcome message and speak it aloud` | dom.append_heading + audio.say_text |
+| `set the page title to soma demo and add a greeting` | dom.set_title + dom.append_heading |
+| `show me my calendar` | `plan: []` — no calendar port, model should refuse |
+
+For each click, watch:
+- **Terminal 1** logs the request body size and the returned plan.
+- **Brain log pane** in the browser shows the plan step-by-step.
+- **Actual DOM mutations** below the horizontal rule.
+- **Audio playback** through speakers (browsers may block the first
+  `speechSynthesis.speak` until a user gesture — clicking the button
+  counts).
+- **Last PortCallRecord pane** shows the final observation envelope.
+
+### Brain-proxy flags
 
 ```
-node scripts/brain-proxy.mjs [options]
+./scripts/run-brain.sh [options]          # with .env
+node scripts/brain-proxy.mjs [options]    # without .env, reads process env
+
   --port N        listen on localhost:N (default 8787)
   --model M       OpenAI model id (default gpt-5-mini)
   --fake          return a canned plan without calling OpenAI —
                   useful for testing the full browser → proxy →
                   browser HTTP round trip without an API key.
 ```
+
+### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Browser: `brain call failed: Failed to fetch` | Proxy not running, wrong endpoint URL, or CORS | Verify Terminal 1 is up; confirm the endpoint is exactly `http://localhost:8787/api/brain` |
+| Proxy logs `error: OPENAI_API_KEY not set` | `.env` missing or `run-brain.sh` not used | `cp .env.example .env`, fill in the key, re-run |
+| Proxy logs `401 Unauthorized` from OpenAI | Invalid or revoked key | Check key on platform.openai.com; regenerate if needed |
+| Proxy logs `OpenAI returned non-JSON output` | Model didn't follow the system prompt (rare with `response_format: json_object`) | Try a simpler prompt or `--model gpt-5` |
+| Plan includes a made-up `port_id` / `capability_id` | Model hallucinated | Either the prompt is too vague or the model is too small — try `--model gpt-5` |
+| `success: false` in PortCallRecord but plan shape looks right | The model's `input` didn't match the capability's input schema | Read `structured_result.error` in the Last PortCallRecord pane |
+| No audio | Browser audio autoplay block | Click any button first to satisfy the user-gesture requirement |
+
+### Cost estimate
+
+`gpt-5-mini` with `reasoning_effort: "low"` and JSON-mode output is
+cheap. A typical round trip is ~500 input tokens (system prompt +
+user prompt + port catalog) and ~200 output tokens. At gpt-5-mini
+pricing that's **fractions of a cent per click**. 100 debugging
+clicks cost well under a dollar. Don't leave it on autoplay.
 
 ### Wire contract
 

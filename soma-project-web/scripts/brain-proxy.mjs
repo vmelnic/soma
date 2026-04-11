@@ -255,9 +255,17 @@ function main() {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       process.stderr.write(
-        "error: OPENAI_API_KEY not set.\n" +
-          "  export OPENAI_API_KEY=sk-...\n" +
-          "or pass --fake to run without an LLM.\n",
+        "error: OPENAI_API_KEY not set. Three ways to fix:\n" +
+          "\n" +
+          "  1) Copy .env.example to .env and fill in your key, then run:\n" +
+          "       ./scripts/run-brain.sh\n" +
+          "     (uses Node's built-in --env-file loader — no extra deps)\n" +
+          "\n" +
+          "  2) Export the key in your shell:\n" +
+          "       export OPENAI_API_KEY=sk-...\n" +
+          "       node scripts/brain-proxy.mjs\n" +
+          "\n" +
+          "  3) Pass --fake to run with a canned plan (no API key needed).\n",
       );
       process.exit(1);
     }
