@@ -148,18 +148,18 @@ export function createAuth(soma) {
       if (!user) {
         return { ok: false, error: "failed to create user" };
       }
-    } else {
-      // The postgres port serializes every parameter as TEXT. Postgres'
-      // parameter-type inference would see `$1::uuid` and infer UUID for
-      // $1 directly (no cast needed), so the prepared statement would
-      // tell tokio-postgres "param 0 is uuid" and our `&str` bind would
-      // error. Forcing `$1::text::uuid` makes $1's inferred type TEXT —
-      // the string is parsed as UUID server-side, which is what we want.
-      await soma.invokePort("postgres", "execute", {
-        sql: "UPDATE users SET last_login = NOW() WHERE id = $1::text::uuid",
-        params: [user.id],
-      });
     }
+
+    // Always bump last_login — new users get the timestamp set on
+    // their first login too, not just on subsequent ones.
+    // The postgres port serializes every parameter as TEXT, so
+    // `$1::text::uuid` forces TEXT inference and lets Postgres
+    // parse the UUID server-side. See commit 1 notes for the
+    // broader serialization quirk.
+    await soma.invokePort("postgres", "execute", {
+      sql: "UPDATE users SET last_login = NOW() WHERE id = $1::text::uuid",
+      params: [user.id],
+    });
 
     // Issue a long-lived session token. Raw goes to the browser,
     // hash goes to the database.
