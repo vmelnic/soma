@@ -4,6 +4,7 @@
 -- Commit 2 tables: contexts.
 -- Commit 3 tables: messages.
 -- Commit 4 columns: contexts.pack_spec (nullable TEXT, JSON-encoded).
+-- Commit 5 tables: episodes, schemas, routines — per-context memory.
 --
 -- Tokens are stored as sha256 hashes, never plaintext. The raw token
 -- is what we email to the user and what the browser holds as a cookie;
@@ -106,3 +107,51 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS messages_context_created_idx
     ON messages (context_id, created_at);
+
+-- ------------------------------------------------------------------
+-- Commit 5: per-context memory (episodes / schemas / routines).
+--
+-- These are the three consolidation tiers from docs/architecture.md:
+--   episodes → schemas (via PrefixSpan) → routines (compiled).
+-- Each tier has its own table, each row is scoped to one context,
+-- and `payload` holds the raw JSON blob shaped by the runtime layer.
+-- Storing as TEXT (not JSONB) keeps us schema-free so the runtime
+-- can evolve its episode/schema/routine shapes without ALTERs.
+--
+-- Ownership travels exclusively via context_id → contexts.user_id.
+-- Every SELECT joins contexts so another operator's probe resolves
+-- to zero rows, same "not found" shape as an unknown context.
+-- ON DELETE CASCADE drops the rows with their parent context.
+-- ------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS episodes (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    context_id  UUID NOT NULL REFERENCES contexts(id) ON DELETE CASCADE,
+    payload     TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS episodes_context_created_idx
+    ON episodes (context_id, created_at);
+
+CREATE TABLE IF NOT EXISTS schemas (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    context_id  UUID NOT NULL REFERENCES contexts(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    payload     TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS schemas_context_created_idx
+    ON schemas (context_id, created_at);
+
+CREATE TABLE IF NOT EXISTS routines (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    context_id  UUID NOT NULL REFERENCES contexts(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    payload     TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS routines_context_created_idx
+    ON routines (context_id, created_at);

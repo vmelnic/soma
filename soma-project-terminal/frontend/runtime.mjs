@@ -160,3 +160,21 @@ export async function invokePort(portId, capabilityId, input) {
   );
   return JSON.parse(json);
 }
+
+// Inject a routine JSON string into the current wasm runtime. The
+// routine is keyed by name in the runtime's routine store and
+// subsequent plan-following dispatch can walk it. Commit 5 uses
+// this on context open to push every stored routine back into the
+// body after the pack has booted. Best-effort: malformed routines
+// are silently swallowed (error surfaces in the memory panel).
+export async function injectRoutine(routinePayload) {
+  const { mod } = await awaitCurrentBoot();
+  if (typeof mod.soma_inject_routine !== "function") {
+    throw new Error("soma_inject_routine export not available");
+  }
+  const text =
+    typeof routinePayload === "string"
+      ? routinePayload
+      : JSON.stringify(routinePayload);
+  return mod.soma_inject_routine(text);
+}

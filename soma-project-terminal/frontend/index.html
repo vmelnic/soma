@@ -177,10 +177,15 @@
   PORTS:  —
   SKILLS: —
             </pre>
+            <p class="prompt">&gt; MEMORY — PER CONTEXT</p>
+            <pre class="lore" id="memory-summary">
+  EPISODES: —
+  SCHEMAS:  —
+  ROUTINES: —
+            </pre>
             <p class="meta">
-              (Commit 4 will load a per-context pack here; for now
-              every context boots the shared `hello` pack — the
-              wasm body is proof the runtime lives in the tab.)
+              (Memory is isolated per context. Stored routines are
+              hot-injected into the wasm body on open.)
             </p>
           </div>
         </div>

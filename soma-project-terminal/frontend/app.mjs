@@ -13,6 +13,7 @@
 import {
   bootForContext,
   getBootError,
+  injectRoutine,
 } from "./runtime.mjs";
 
 const views = {
@@ -275,10 +276,13 @@ async function loadContextView(contextId) {
     showView("contextDetail");
     setStatus(`CONTEXT ${currentContext.name}`);
 
-    // Kick off the in-tab wasm runtime and the chat transcript in
-    // parallel — neither depends on the other, and the user can
-    // start typing while the wasm is still initializing.
+    // Kick off the in-tab wasm runtime, the chat transcript, and
+    // the memory panel in parallel — none of them depend on each
+    // other, and the user can start typing while the wasm is still
+    // initializing. Routine injection happens inside the runtime
+    // panel flow (after boot completes).
     updateRuntimePanel();
+    refreshMemoryPanel();
     await refreshTranscript();
     const chatInput = document.getElementById("input-chat");
     if (chatInput) chatInput.focus();
@@ -435,10 +439,79 @@ async function updateRuntimePanel() {
       `  SOURCE: ${source}\n` +
       `  PORTS:  ${portsList || "(none)"}\n` +
       `  SKILLS: ${skillsList || "(none)"}`;
+
+    // After the runtime is ready, push any stored routines for
+    // this context back into the wasm body. Fire-and-forget —
+    // malformed routines shouldn't break the rest of the UI.
+    rehydrateRoutines().catch((err) =>
+      console.warn("[terminal] routine rehydrate failed:", err.message),
+    );
   } catch (err) {
     el.classList.add("error");
     const msg = (getBootError() && getBootError().message) || err.message;
     el.textContent = `  STATE:  FAILED\n  ERROR:  ${msg}`;
+  }
+}
+
+// -------------------------------------------------------------------
+// memory panel + routine rehydration
+// -------------------------------------------------------------------
+
+async function refreshMemoryPanel() {
+  if (!currentContext) return;
+  const el = document.getElementById("memory-summary");
+  el.classList.remove("error");
+  el.textContent = "  EPISODES: —\n  SCHEMAS:  —\n  ROUTINES: —";
+  try {
+    const res = await fetch(
+      `/api/contexts/${encodeURIComponent(currentContext.id)}/memory`,
+      { credentials: "include" },
+    );
+    if (!res.ok) {
+      el.classList.add("error");
+      el.textContent = `  ERROR: ${res.status}`;
+      return;
+    }
+    const body = await res.json();
+    const m = body.memory ?? { episodes: [], schemas: [], routines: [] };
+    el.textContent =
+      `  EPISODES: ${m.episodes.length}\n` +
+      `  SCHEMAS:  ${m.schemas.length}\n` +
+      `  ROUTINES: ${m.routines.length}`;
+  } catch (err) {
+    el.classList.add("error");
+    el.textContent = `  ERROR: ${err.message}`;
+  }
+}
+
+// Fetch the stored routines for the current context and inject
+// each one into the wasm runtime. Runs after updateRuntimePanel
+// completes so the body is guaranteed booted first. Failures on
+// individual routines are logged; the panel still reports the
+// count from the store even if injection fails (commit 5 is
+// about isolation, not runtime-level rehydration correctness).
+async function rehydrateRoutines() {
+  if (!currentContext) return;
+  try {
+    const res = await fetch(
+      `/api/contexts/${encodeURIComponent(currentContext.id)}/memory`,
+      { credentials: "include" },
+    );
+    if (!res.ok) return;
+    const body = await res.json();
+    const routines = body.memory?.routines ?? [];
+    for (const row of routines) {
+      try {
+        await injectRoutine(row.payload);
+      } catch (err) {
+        console.warn(
+          `[terminal] soma_inject_routine for ${row.name} failed:`,
+          err.message,
+        );
+      }
+    }
+  } catch (err) {
+    console.warn("[terminal] routine rehydrate fetch failed:", err.message);
   }
 }
 
