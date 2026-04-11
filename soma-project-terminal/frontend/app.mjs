@@ -1,14 +1,19 @@
-// SOMA TERMINAL — frontend bootstrap + auth + contexts.
+// SOMA TERMINAL — frontend bootstrap + auth + contexts + chat.
 //
-// Commit 1 wired the Fallout shell to /api/auth/*. Commit 2 adds:
-//   - the contexts list inside the authenticated view
-//   - the create-context form
-//   - the view-context-detail "loaded" state
+// Commit 1 wired the Fallout shell to /api/auth/*. Commit 2 added
+// the contexts registry. Commit 3 adds:
+//   - the per-context chat transcript (brain side)
+//   - the browser-side soma-next runtime panel (body side)
 //
 // No framework. Vanilla DOM manipulation — every element is created
 // with `document.createElement` and every value is set via
 // `textContent`, never innerHTML, so a maliciously named context
 // can't break out of the terminal.
+
+import {
+  bootBrowserRuntime,
+  getBootError,
+} from "./runtime.mjs";
 
 const views = {
   loading: document.getElementById("view-loading"),
@@ -269,8 +274,168 @@ async function loadContextView(contextId) {
       currentContext.updated_at || "—";
     showView("contextDetail");
     setStatus(`CONTEXT ${currentContext.name}`);
+
+    // Kick off the in-tab wasm runtime and the chat transcript in
+    // parallel — neither depends on the other, and the user can
+    // start typing while the wasm is still initializing.
+    updateRuntimePanel();
+    await refreshTranscript();
+    const chatInput = document.getElementById("input-chat");
+    if (chatInput) chatInput.focus();
   } catch (err) {
     showError(err.message);
+  }
+}
+
+// -------------------------------------------------------------------
+// chat transcript
+// -------------------------------------------------------------------
+
+function renderEmptyTranscript(listEl) {
+  clearChildren(listEl);
+  const p = document.createElement("p");
+  p.className = "meta";
+  p.id = "chat-empty";
+  p.textContent = "(no messages yet — describe what you want to build)";
+  listEl.appendChild(p);
+}
+
+function appendMessageDom(listEl, msg) {
+  const wrapper = document.createElement("div");
+  wrapper.className = `chat-msg ${msg.role}`;
+  wrapper.dataset.messageId = msg.id ?? "";
+
+  const role = document.createElement("span");
+  role.className = "chat-role";
+  role.textContent = msg.role === "user" ? "[YOU]" : "[BRAIN]";
+
+  const body = document.createElement("span");
+  body.className = "chat-body";
+  body.textContent = msg.content;
+
+  wrapper.appendChild(role);
+  wrapper.appendChild(body);
+  listEl.appendChild(wrapper);
+}
+
+function scrollTranscriptToBottom() {
+  const listEl = document.getElementById("chat-transcript");
+  if (listEl) listEl.scrollTop = listEl.scrollHeight;
+}
+
+async function refreshTranscript() {
+  if (!currentContext) return;
+  const listEl = document.getElementById("chat-transcript");
+  try {
+    const res = await fetch(
+      `/api/contexts/${encodeURIComponent(currentContext.id)}/messages`,
+      { credentials: "include" },
+    );
+    if (!res.ok) {
+      renderEmptyTranscript(listEl);
+      return;
+    }
+    const body = await res.json();
+    const rows = body.messages ?? [];
+    clearChildren(listEl);
+    if (rows.length === 0) {
+      renderEmptyTranscript(listEl);
+      return;
+    }
+    rows.forEach((m) => appendMessageDom(listEl, m));
+    scrollTranscriptToBottom();
+  } catch (err) {
+    renderEmptyTranscript(listEl);
+    console.warn("[terminal] transcript load failed:", err.message);
+  }
+}
+
+document
+  .getElementById("form-chat")
+  .addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    if (!currentContext) return;
+    const inputEl = document.getElementById("input-chat");
+    const statusEl = document.getElementById("chat-status");
+    const content = inputEl.value.trim();
+    if (!content) return;
+
+    statusEl.classList.remove("error");
+    statusEl.textContent = "TRANSMITTING...";
+    setStatus("BRAIN WORKING");
+    const listEl = document.getElementById("chat-transcript");
+
+    // Optimistically paint the user's message so the transcript
+    // feels responsive while we wait on the brain.
+    const emptyHint = document.getElementById("chat-empty");
+    if (emptyHint) emptyHint.remove();
+    appendMessageDom(listEl, { role: "user", content });
+    scrollTranscriptToBottom();
+    inputEl.value = "";
+
+    try {
+      const res = await fetch(
+        `/api/contexts/${encodeURIComponent(currentContext.id)}/messages`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content }),
+        },
+      );
+      const body = await res.json();
+      if (!res.ok || body.status !== "ok") {
+        statusEl.classList.add("error");
+        statusEl.textContent = `FAILED: ${body.error || res.status}`;
+        setStatus("ERROR");
+        return;
+      }
+      // Replace the optimistic user bubble with the canonical one
+      // so the message id + timestamp match the backend.
+      const listElFresh = document.getElementById("chat-transcript");
+      const userBubbles = listElFresh.querySelectorAll(
+        ".chat-msg.user[data-message-id='']",
+      );
+      const lastOptimistic = userBubbles[userBubbles.length - 1];
+      if (lastOptimistic) lastOptimistic.remove();
+      appendMessageDom(listElFresh, body.user_message);
+      appendMessageDom(listElFresh, body.assistant_message);
+      scrollTranscriptToBottom();
+      statusEl.textContent = `via ${body.model || "brain"}`;
+      setStatus("AUTHORIZED");
+    } catch (err) {
+      statusEl.classList.add("error");
+      statusEl.textContent = `NETWORK ERROR: ${err.message}`;
+      setStatus("ERROR");
+    }
+  });
+
+// -------------------------------------------------------------------
+// browser-side soma-next runtime panel
+// -------------------------------------------------------------------
+
+async function updateRuntimePanel() {
+  const el = document.getElementById("runtime-summary");
+  el.classList.remove("error");
+  el.textContent =
+    "  STATE:  BOOTING...\n  PORTS:  —\n  SKILLS: —";
+  try {
+    const { summary } = await bootBrowserRuntime();
+    const portsList = (summary.ports ?? [])
+      .map((p) => p.port_id || p.id || String(p))
+      .join(", ");
+    const skillsList = (summary.skills ?? [])
+      .map((s) => s.skill_id || s.id || String(s))
+      .join(", ");
+    el.textContent =
+      `  STATE:  READY\n` +
+      `  PACK:   ${summary.pack_id || summary.pack || "hello"}\n` +
+      `  PORTS:  ${portsList || "(none)"}\n` +
+      `  SKILLS: ${skillsList || "(none)"}`;
+  } catch (err) {
+    el.classList.add("error");
+    const msg = (getBootError() && getBootError().message) || err.message;
+    el.textContent = `  STATE:  FAILED\n  ERROR:  ${msg}`;
   }
 }
 

@@ -46,5 +46,13 @@ export default defineConfig({
     timeout: 30_000,
     stdout: "pipe",
     stderr: "pipe",
+    env: {
+      // Tests run against a fake brain so they stay hermetic and
+      // never burn real OpenAI quota. The fake wrapper still
+      // exercises the full message-append → brain-call → reply-
+      // append wire, only the model itself is stubbed. Real mode
+      // kicks in when this env var is removed from .env.
+      BRAIN_FAKE: "1",
+    },
   },
 });

@@ -2,6 +2,7 @@
 --
 -- Commit 1 tables: users, sessions, magic_tokens.
 -- Commit 2 tables: contexts.
+-- Commit 3 tables: messages.
 --
 -- Tokens are stored as sha256 hashes, never plaintext. The raw token
 -- is what we email to the user and what the browser holds as a cookie;
@@ -73,3 +74,25 @@ CREATE TABLE IF NOT EXISTS contexts (
 CREATE INDEX IF NOT EXISTS contexts_user_id_idx ON contexts (user_id);
 CREATE INDEX IF NOT EXISTS contexts_user_updated_idx
     ON contexts (user_id, updated_at DESC);
+
+-- Chat history per context. Each turn is one row — user prompts and
+-- assistant replies are both stored here in insertion order. Commit 6
+-- will add a second role `brain` for structured pack-generation
+-- turns (same table, different role value) so all context-local
+-- reasoning ends up on a single timeline.
+--
+-- `role` is TEXT rather than a CHECK constraint so adding new roles
+-- (brain, tool, system-note) in later commits is a pure data change.
+--
+-- ON DELETE CASCADE: deleting a context wipes its transcript with it.
+-- No orphan messages, no leak of deleted context content.
+CREATE TABLE IF NOT EXISTS messages (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    context_id  UUID NOT NULL REFERENCES contexts(id) ON DELETE CASCADE,
+    role        TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS messages_context_created_idx
+    ON messages (context_id, created_at);

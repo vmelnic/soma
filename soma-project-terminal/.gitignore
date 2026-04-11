@@ -2,4 +2,8 @@ node_modules/
 test-results/
 playwright-report/
 bin/
+# wasm build output — populated by scripts/copy-frontend-assets.sh
+# from soma-project-web/pkg/. Not committed; each dev has a fresh
+# copy from their local build.
+frontend/pkg/
 *.log

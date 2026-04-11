@@ -276,6 +276,107 @@ input[type="text"]:focus {
   flex-wrap: wrap;
 }
 
+/* Context detail grid — brain channel on the left, body runtime on
+   the right. Collapses to a single column on narrow viewports. */
+.ctx-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 1.5rem;
+  margin: 1rem 0 1.5rem 0;
+}
+
+.ctx-panel {
+  border: 1px solid var(--term-fg-dim);
+  padding: 0.75rem 1rem 1rem;
+  background: var(--term-bg);
+  min-width: 0;
+}
+
+.ctx-panel .prompt {
+  margin-top: 0;
+}
+
+.ctx-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.ctx-actions .btn-danger {
+  margin-left: 0;
+}
+
+@media (max-width: 760px) {
+  .ctx-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Chat transcript — newest message at the bottom, user and
+   assistant bubbles visually distinct by border color. */
+.chat-transcript {
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 0.5rem 0.25rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--term-fg-dim);
+  background: var(--term-bg-lighter);
+}
+
+.chat-msg {
+  padding: 0.5rem 0.75rem;
+  margin: 0.35rem 0;
+  border-left: 2px solid var(--term-fg-dim);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-size: 20px;
+  color: var(--term-fg);
+}
+
+.chat-msg.user {
+  border-left-color: var(--term-fg-bright);
+  color: var(--term-fg-bright);
+}
+
+.chat-msg.assistant {
+  border-left-color: var(--term-fg-dim);
+  color: var(--term-fg);
+}
+
+.chat-msg .chat-role {
+  display: block;
+  color: var(--term-fg-dim);
+  font-size: 16px;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.15rem;
+}
+
+.chat-msg.user .chat-role {
+  color: var(--term-fg-bright);
+}
+
+.chat-status {
+  margin-left: 0.75rem;
+  color: var(--term-fg-dim);
+  font-size: 18px;
+}
+
+.chat-status.error {
+  color: var(--term-error);
+}
+
+/* Runtime panel — keep the font small so long port/skill lists fit. */
+.ctx-runtime .lore {
+  font-size: 18px;
+  margin: 0.5rem 0 1rem 0;
+  padding: 0.5rem 0.75rem;
+}
+
+.ctx-runtime .lore.error {
+  color: var(--term-error);
+  border-left-color: var(--term-error);
+}
+
 .status {
   margin-top: 0.75rem;
   font-size: 20px;

@@ -140,13 +140,55 @@
   CREATED:     <span id="ctx-created">—</span>
   UPDATED:     <span id="ctx-updated">—</span>
         </pre>
-        <p class="meta">
-          (Commit 3 opens a chat shell and a browser-side soma-next
-          runtime for this context. For now this view is just a
-          metadata dump.)
-        </p>
-        <button class="btn" id="btn-ctx-back">[ BACK ]</button>
-        <button class="btn btn-danger" id="btn-ctx-delete">[ DELETE ]</button>
+
+        <div class="ctx-grid">
+          <!-- Left: conversational brain (gpt-4o-mini) -->
+          <div class="ctx-panel ctx-chat">
+            <p class="prompt">&gt; BRAIN CHANNEL — gpt-4o-mini</p>
+            <div class="chat-transcript" id="chat-transcript">
+              <p class="meta" id="chat-empty">
+                (no messages yet — describe what you want to build)
+              </p>
+            </div>
+            <form id="form-chat" autocomplete="off">
+              <label class="field field-block">
+                <span class="field-prefix">[YOU]</span>
+                <input
+                  type="text"
+                  id="input-chat"
+                  name="content"
+                  required
+                  maxlength="8000"
+                  placeholder="i want to track my daily journal entries"
+                />
+              </label>
+              <button type="submit" class="btn" id="btn-chat-send">
+                [ TRANSMIT ]
+              </button>
+              <span class="status" id="chat-status"></span>
+            </form>
+          </div>
+
+          <!-- Right: browser-side SOMA runtime (body) -->
+          <div class="ctx-panel ctx-runtime">
+            <p class="prompt">&gt; SOMA RUNTIME — BODY</p>
+            <pre class="lore" id="runtime-summary">
+  STATE:  BOOTING...
+  PORTS:  —
+  SKILLS: —
+            </pre>
+            <p class="meta">
+              (Commit 4 will load a per-context pack here; for now
+              every context boots the shared `hello` pack — the
+              wasm body is proof the runtime lives in the tab.)
+            </p>
+          </div>
+        </div>
+
+        <div class="ctx-actions">
+          <button class="btn" id="btn-ctx-back">[ BACK ]</button>
+          <button class="btn btn-danger" id="btn-ctx-delete">[ DELETE ]</button>
+        </div>
       </section>
 
       <section class="view hidden" id="view-error">

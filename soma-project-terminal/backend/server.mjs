@@ -16,13 +16,20 @@
 //       GET    /api/contexts/:id
 //       DELETE /api/contexts/:id
 //
+// Commit 3 adds the per-context chat brain:
+//       GET  /api/contexts/:id/messages
+//       POST /api/contexts/:id/messages   (append user + call brain)
+//
 // Every database read/write goes through postgres.execute / query.
 // Every email goes through smtp.send_plain. Every random token and
 // sha256 hash goes through crypto.random_string / crypto.sha256.
 // The only direct Node deps are node:http, node:fs, node:path — no
-// pg, no nodemailer, nothing in node_modules.
+// pg, no nodemailer, nothing in node_modules. The OpenAI brain uses
+// the global `fetch` introduced in Node 18+ (zero-dep wrapper in
+// backend/brain.mjs).
 //
-// Commit 3+ adds /api/invoke_port and /api/brain.
+// Commit 4+ adds dynamic pack loading; commit 6 hits
+// brain.reasoningCompletion for LLM-to-PackSpec.
 
 import http from "node:http";
 import { readFile, stat } from "node:fs/promises";
@@ -33,6 +40,8 @@ import { fileURLToPath } from "node:url";
 import { SomaMcpClient } from "./soma-mcp.mjs";
 import { createAuth } from "./auth.mjs";
 import { createContexts } from "./contexts.mjs";
+import { createMessages } from "./messages.mjs";
+import { chatCompletion, buildSystemPrompt } from "./brain.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const FRONTEND_DIR = resolvePath(__dirname, "..", "frontend");
@@ -87,6 +96,10 @@ const MIME = {
   ".ico": "image/x-icon",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
+  // application/wasm is required — browsers refuse to stream-
+  // instantiate wasm modules served with the wrong Content-Type.
+  ".wasm": "application/wasm",
+  ".ts": "text/plain; charset=utf-8",
 };
 
 function send(res, status, body, headers = {}) {
@@ -216,6 +229,7 @@ async function main() {
   await soma.start();
   const auth = createAuth(soma);
   const contexts = createContexts(soma);
+  const messages = createMessages(soma);
 
   // Helper — every context route requires a valid session. Returns
   // the user record on success, or sends a 401 and returns null.
@@ -324,6 +338,108 @@ async function main() {
         });
       }
 
+      // /api/contexts/:id/messages — GET lists the transcript, POST
+      // appends a user message, calls the brain, appends the reply,
+      // and returns both in one response. Matched before the single-
+      // context handler so the /messages suffix doesn't get mis-
+      // parsed as part of the context id.
+      const msgMatch = path.match(
+        /^\/api\/contexts\/([^/]+)\/messages$/,
+      );
+      if (msgMatch && (method === "GET" || method === "POST")) {
+        const contextId = msgMatch[1];
+        const user = await requireUser(req, res);
+        if (!user) return;
+
+        if (method === "GET") {
+          const result = await messages.listForContext(user.id, contextId);
+          if (!result.ok) {
+            return sendJson(res, 404, {
+              status: "error",
+              error: result.error,
+            });
+          }
+          return sendJson(res, 200, {
+            status: "ok",
+            messages: result.messages,
+          });
+        }
+
+        // POST — body: { content: "..." }
+        const body = await readBody(req);
+        const content = String(body?.content ?? "");
+
+        // The user turn lands first so that a brain failure still
+        // leaves the operator's message on the transcript. Otherwise
+        // a crash mid-brain would swallow what they typed.
+        const userAppend = await messages.append(
+          user.id,
+          contextId,
+          "user",
+          content,
+        );
+        if (!userAppend.ok) {
+          const code = userAppend.error === "not found" ? 404 : 400;
+          return sendJson(res, code, {
+            status: "error",
+            error: userAppend.error,
+          });
+        }
+
+        // Pull the full history (which now ends with the user turn
+        // we just appended) and the context record for its system
+        // prompt.
+        const ctx = await contexts.loadContext(user.id, contextId);
+        if (!ctx.ok) {
+          return sendJson(res, 404, {
+            status: "error",
+            error: "context vanished mid-request",
+          });
+        }
+        const hist = await messages.historyFor(user.id, contextId);
+        if (!hist.ok) {
+          return sendJson(res, 500, {
+            status: "error",
+            error: hist.error,
+          });
+        }
+
+        let reply;
+        try {
+          reply = await chatCompletion({
+            systemPrompt: buildSystemPrompt(ctx.context),
+            messages: hist.history,
+          });
+        } catch (e) {
+          console.error(`[brain] chatCompletion failed:`, e.message);
+          return sendJson(res, 502, {
+            status: "error",
+            error: `brain failed: ${e.message}`,
+            user_message: userAppend.message,
+          });
+        }
+
+        const assistantAppend = await messages.append(
+          user.id,
+          contextId,
+          "assistant",
+          reply.content,
+        );
+        if (!assistantAppend.ok) {
+          return sendJson(res, 500, {
+            status: "error",
+            error: assistantAppend.error,
+            user_message: userAppend.message,
+          });
+        }
+        return sendJson(res, 201, {
+          status: "ok",
+          user_message: userAppend.message,
+          assistant_message: assistantAppend.message,
+          model: reply.model,
+        });
+      }
+
       // /api/contexts/:id — GET loads, DELETE removes. Matching the
       // path with startsWith rather than a router keeps the gateway
       // a flat file; commit 3+ will grow an actual router if the
@@ -371,8 +487,9 @@ async function main() {
       if (method === "GET" && path === "/api/health") {
         return sendJson(res, 200, {
           status: "ok",
-          commit: 2,
+          commit: 3,
           soma_mcp_ready: soma.ready,
+          brain_fake: String(process.env.BRAIN_FAKE || "") === "1",
         });
       }
 
