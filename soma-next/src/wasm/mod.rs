@@ -27,9 +27,14 @@ use voice_port::VoicePort;
 
 use crate::bootstrap::{bootstrap_from_specs, Runtime};
 use crate::config::SomaConfig;
+use crate::runtime::goal::{GoalInput, GoalRuntime};
 use crate::runtime::port::{Port, PortRuntime};
+use crate::runtime::session::{SessionRuntime, StepResult};
+use crate::runtime::skill::SkillRuntime;
+use crate::types::goal::{GoalSource, GoalSourceType};
 use crate::types::pack::PackSpec;
 use crate::types::port::InvocationContext;
+use crate::types::session::{BindingSource, WorkingBinding};
 
 // A full `Runtime` lives for the lifetime of the tab. `thread_local!` is
 // the idiomatic single-threaded wasm container; Runtime is not `Send`
@@ -246,4 +251,201 @@ pub fn soma_demo_render_heading(text: &str) -> Result<JsValue, JsValue> {
     let input = serde_json::json!({ "text": text }).to_string();
     let json = soma_invoke_port("dom", "append_heading", &input)?;
     Ok(JsValue::from_str(&json))
+}
+
+/// Run a natural-language goal through the booted `SessionController`.
+///
+/// Parses the objective via `DefaultGoalRuntime`, creates a session,
+/// injects a `"text"` binding into working memory (set to the full
+/// objective string so any skill that needs text-to-render picks it
+/// up), then loops `run_step` until the session reaches a terminal
+/// state. On termination the episode is stored and the multistep
+/// learning pipeline is triggered so repeated runs of the same goal
+/// eventually compile a routine and start walking it without the
+/// selector.
+///
+/// Returns a JSON object describing the final session state including
+/// step count, elapsed milliseconds, whether plan-following was
+/// active, and the total number of schemas/routines in memory — the
+/// JS harness uses these to demonstrate that repeat invocations get
+/// faster as the runtime learns.
+#[wasm_bindgen]
+pub fn soma_run_goal(objective: &str) -> Result<String, JsValue> {
+    ensure_booted()?;
+
+    RUNTIME.with(|r| {
+        let mut slot = r.borrow_mut();
+        let runtime = slot.as_mut().expect("ensured booted above");
+
+        // Parse, normalize, validate.
+        let source = GoalSource {
+            source_type: GoalSourceType::Api,
+            identity: Some("wasm".to_string()),
+            session_id: None,
+            peer_id: None,
+        };
+        let input = GoalInput::NaturalLanguage {
+            text: objective.to_string(),
+            source,
+        };
+        let mut goal = runtime
+            .goal_runtime
+            .parse_goal(input)
+            .map_err(|e| JsValue::from_str(&format!("goal parse: {e}")))?;
+        runtime.goal_runtime.normalize_goal(&mut goal);
+        runtime
+            .goal_runtime
+            .validate_goal(&goal)
+            .map_err(|e| JsValue::from_str(&format!("goal validation: {e}")))?;
+
+        let goal_id = goal.goal_id;
+
+        // Create the session via the real SessionController.
+        let mut session = runtime
+            .session_controller
+            .create_session(goal)
+            .map_err(|e| JsValue::from_str(&format!("create_session: {e}")))?;
+        let session_id = session.session_id;
+
+        // `SimpleBeliefSource::build_initial_belief` ignores the goal
+        // entirely (same as every native proof project that isn't
+        // soma-project-multistep). Inject the objective string as a
+        // working-memory binding named "text" so the say_hello skill's
+        // input schema finds it during bind_inputs. This is the same
+        // workaround `soma-project-multistep` uses.
+        session.working_memory.active_bindings.push(WorkingBinding {
+            name: "text".to_string(),
+            value: serde_json::json!(objective),
+            source: BindingSource::GoalField,
+        });
+
+        // Run the control loop until terminal.
+        let start_ms = js_sys::Date::now();
+        let status: &'static str;
+        let mut error_detail: Option<String> = None;
+        loop {
+            match runtime.session_controller.run_step(&mut session) {
+                Ok(StepResult::Continue) => continue,
+                Ok(StepResult::Completed) => {
+                    status = "completed";
+                    break;
+                }
+                Ok(StepResult::Failed(reason)) => {
+                    status = "failed";
+                    error_detail = Some(reason);
+                    break;
+                }
+                Ok(StepResult::Aborted) => {
+                    status = "aborted";
+                    break;
+                }
+                Ok(StepResult::WaitingForInput(msg)) => {
+                    status = "waiting_for_input";
+                    error_detail = Some(msg);
+                    break;
+                }
+                Ok(StepResult::WaitingForRemote(msg)) => {
+                    status = "waiting_for_remote";
+                    error_detail = Some(msg);
+                    break;
+                }
+                Err(e) => {
+                    return Err(JsValue::from_str(&format!("run_step: {e}")));
+                }
+            }
+        }
+        let elapsed_ms = js_sys::Date::now() - start_ms;
+
+        // On terminal, store episode + fire the learning pipeline.
+        // Structural copy of the native MCP handler's terminal block.
+        let is_terminal = matches!(status, "completed" | "failed" | "aborted");
+        let plan_following_active = session.working_memory.active_plan.is_some();
+
+        if is_terminal {
+            let episode = crate::interfaces::cli::build_episode_from_session(
+                &session,
+                Some(&*runtime.embedder),
+            );
+            let fingerprint = episode.goal_fingerprint.clone();
+            let adapter = crate::adapters::EpisodeMemoryAdapter::new(
+                std::sync::Arc::clone(&runtime.episode_store),
+                std::sync::Arc::clone(&runtime.embedder),
+            );
+            let _ = adapter.store(episode);
+            crate::interfaces::cli::attempt_learning(
+                &runtime.episode_store,
+                &runtime.schema_store,
+                &runtime.routine_store,
+                &fingerprint,
+                &*runtime.embedder,
+            );
+        }
+
+        // Query memory-store sizes so the JS side can watch the pipeline
+        // learn over repeated invocations.
+        let episode_count = runtime
+            .episode_store
+            .lock()
+            .map(|s| s.count())
+            .unwrap_or(0);
+        let schema_count = runtime
+            .schema_store
+            .lock()
+            .map(|s| s.list_all().len())
+            .unwrap_or(0);
+        let routine_count = runtime
+            .routine_store
+            .lock()
+            .map(|s| s.list_all().len())
+            .unwrap_or(0);
+
+        let last_skill = session
+            .trace
+            .steps
+            .last()
+            .map(|s| s.selected_skill.clone());
+
+        let summary = serde_json::json!({
+            "session_id": session_id.to_string(),
+            "goal_id": goal_id.to_string(),
+            "objective": objective,
+            "status": status,
+            "error_detail": error_detail,
+            "steps": session.trace.steps.len(),
+            "last_skill": last_skill,
+            "elapsed_ms": elapsed_ms,
+            "plan_following": plan_following_active,
+            "episode_count": episode_count,
+            "schema_count": schema_count,
+            "routine_count": routine_count,
+        });
+
+        serde_json::to_string(&summary)
+            .map_err(|e| JsValue::from_str(&format!("serialize: {e}")))
+    })
+}
+
+/// Return the count of registered skills on the currently-booted runtime.
+#[wasm_bindgen]
+pub fn soma_list_skills() -> Result<String, JsValue> {
+    ensure_booted()?;
+    RUNTIME.with(|r| {
+        let slot = r.borrow();
+        let runtime = slot.as_ref().expect("ensured booted above");
+        let skills: Vec<serde_json::Value> = runtime
+            .skill_runtime
+            .list_skills(None)
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "skill_id": s.skill_id,
+                    "namespace": s.namespace,
+                    "description": s.description,
+                    "capability_requirements": s.capability_requirements,
+                })
+            })
+            .collect();
+        serde_json::to_string(&skills)
+            .map_err(|e| JsValue::from_str(&format!("serialize: {e}")))
+    })
 }

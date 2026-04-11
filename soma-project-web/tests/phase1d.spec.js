@@ -55,6 +55,17 @@ test.describe("phase 1d — Runtime in the browser", () => {
           ?.textContent?.includes('"booted": true'),
       { timeout: 10_000 },
     );
+    // The harness auto-boots with the phase-1e hello pack, so the first
+    // summary has pack_count 1. Re-boot with an empty manifest to test
+    // the zero-pack case explicitly.
+    await page.click("#btn-boot-empty");
+    await page.waitForFunction(
+      () =>
+        document
+          .getElementById("record")
+          ?.textContent?.includes('"pack_count": 0'),
+      { timeout: 5_000 },
+    );
     const record = await page.locator("#record").textContent();
     const summary = JSON.parse(record);
     expect(summary.booted).toBe(true);

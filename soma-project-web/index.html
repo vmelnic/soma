@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>soma-next in the browser — phase 1d proof</title>
+    <title>soma-next in the browser — phase 1e proof</title>
     <style>
       body {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -68,14 +68,39 @@
 
     <section class="group">
       <h3>runtime</h3>
-      <button id="btn-boot">soma_boot_runtime (empty manifest)</button>
+      <button id="btn-boot-empty">boot (empty)</button>
+      <button id="btn-boot-hello">boot with hello pack</button>
       <button id="btn-summary">soma_runtime_summary</button>
       <button id="btn-ports">soma_list_ports</button>
+      <button id="btn-skills">soma_list_skills</button>
       <p class="meta">
-        The runtime is auto-booted on first <code>invoke_port</code> if
-        nothing else has booted it. These buttons let you exercise the
-        boot path explicitly and inspect the resulting state.
+        The harness boots the hello pack automatically on first load. The
+        boot buttons let you re-boot with different manifests and inspect
+        the resulting state.
       </p>
+    </section>
+
+    <section class="group">
+      <h3>autonomous goal execution (phase 1e)</h3>
+      <p class="meta">
+        Submits a natural-language goal to the runtime's
+        <code>SessionController</code>. The selector picks the
+        <code>say_hello</code> skill from the hello pack, the executor
+        binds the <code>text</code> input from the working-memory binding
+        injected from the goal string, and the skill invokes
+        <code>dom.append_heading</code> through the real
+        <code>DefaultPortRuntime</code>. Repeated invocations feed the
+        multistep learning pipeline — after ~5 runs the schema induction
+        + routine compilation kicks in and future runs enter
+        plan-following mode.
+      </p>
+      <div>
+        <label for="goal-text">Goal objective:</label>
+        <input id="goal-text" type="text" value="hello marcu" />
+        <button id="btn-run-goal">soma_run_goal</button>
+        <button id="btn-run-goal-5x">run 5×</button>
+      </div>
+      <pre id="goal-log" class="meta" style="max-height: 12rem; overflow-y: auto;">(no goals run yet)</pre>
     </section>
 
     <section class="group">
@@ -166,6 +191,8 @@
         soma_boot_runtime,
         soma_invoke_port,
         soma_list_ports,
+        soma_list_skills,
+        soma_run_goal,
         soma_runtime_summary,
       } from "./pkg/soma_next.js";
 
@@ -198,19 +225,35 @@
         }
       }
 
+      let helloManifest = null;
+
+      async function loadHelloManifest() {
+        if (helloManifest !== null) return helloManifest;
+        const response = await fetch("./packs/hello/manifest.json");
+        if (!response.ok) {
+          throw new Error(
+            `failed to fetch hello manifest: ${response.status} ${response.statusText}`,
+          );
+        }
+        helloManifest = await response.text();
+        return helloManifest;
+      }
+
       async function boot() {
         try {
           await init();
-          // Eagerly boot the Runtime so the summary panel has something
-          // to show before the user clicks anything.
-          const summary = soma_boot_runtime("");
+          // Eagerly boot the Runtime with the hello pack so the
+          // session-running panel has a skill to invoke without needing
+          // the user to click the "boot with hello pack" button first.
+          const manifest = await loadHelloManifest();
+          const summary = soma_boot_runtime(manifest);
           showResult(summary);
         } catch (err) {
           showError("init failed: " + err);
         }
       }
 
-      document.getElementById("btn-boot").addEventListener("click", () => {
+      document.getElementById("btn-boot-empty").addEventListener("click", () => {
         try {
           const summary = soma_boot_runtime("");
           showResult(summary);
@@ -218,6 +261,18 @@
           showError(err);
         }
       });
+
+      document
+        .getElementById("btn-boot-hello")
+        .addEventListener("click", async () => {
+          try {
+            const manifest = await loadHelloManifest();
+            const summary = soma_boot_runtime(manifest);
+            showResult(summary);
+          } catch (err) {
+            showError(err);
+          }
+        });
 
       document.getElementById("btn-summary").addEventListener("click", () => {
         try {
@@ -236,6 +291,62 @@
           showError(err);
         }
       });
+
+      document.getElementById("btn-skills").addEventListener("click", () => {
+        try {
+          const skills = soma_list_skills();
+          showResult(skills);
+        } catch (err) {
+          showError(err);
+        }
+      });
+
+      // ---- phase 1e: autonomous goal execution ----
+      const goalLog = document.getElementById("goal-log");
+      const goalRuns = [];
+
+      function logGoalRun(summary) {
+        goalRuns.push(summary);
+        const lines = goalRuns.map((r, i) => {
+          const mode = r.plan_following ? "PLAN" : "delib";
+          const status = r.status;
+          const steps = r.steps;
+          const ms = Math.round(r.elapsed_ms);
+          const schemas = r.schema_count;
+          const routines = r.routine_count;
+          return (
+            `#${i + 1}  ${mode}  ${status}  ` +
+            `steps=${steps}  ${ms}ms  ` +
+            `schemas=${schemas}  routines=${routines}`
+          );
+        });
+        goalLog.textContent = lines.join("\n");
+      }
+
+      function runGoal() {
+        const objective =
+          document.getElementById("goal-text").value || "hello marcu";
+        try {
+          const json = soma_run_goal(objective);
+          const summary = JSON.parse(json);
+          showResult(json);
+          logGoalRun(summary);
+          return summary;
+        } catch (err) {
+          showError(err);
+          return null;
+        }
+      }
+
+      document
+        .getElementById("btn-run-goal")
+        .addEventListener("click", () => runGoal());
+
+      document
+        .getElementById("btn-run-goal-5x")
+        .addEventListener("click", () => {
+          for (let i = 0; i < 5; i += 1) runGoal();
+        });
 
       document.getElementById("btn-append-heading").addEventListener("click", () => {
         const text = document.getElementById("heading-text").value || "hello";
