@@ -102,6 +102,23 @@
     </section>
 
     <section class="group">
+      <h3>voice port</h3>
+      <p class="meta">
+        Click <code>start_listening</code>, allow the microphone prompt,
+        then speak. Transcripts arrive asynchronously through JS event
+        handlers and accumulate in a thread-local buffer. Poll them with
+        <code>get_last_transcript</code> or <code>get_all_transcripts</code>.
+      </p>
+      <div>
+        <button id="btn-voice-start">start_listening</button>
+        <button id="btn-voice-stop">stop_listening</button>
+        <button id="btn-voice-last">get_last_transcript</button>
+        <button id="btn-voice-all">get_all_transcripts</button>
+        <button id="btn-voice-clear">clear_transcripts</button>
+      </div>
+    </section>
+
+    <section class="group">
       <h3>composition</h3>
       <p class="meta">
         Two invocations in a row — <code>dom.append_heading</code> followed
@@ -111,6 +128,12 @@
         handler) composed them.
       </p>
       <button id="btn-say-hello">say hello (dom + audio)</button>
+      <br />
+      <button id="btn-echo">echo what I just said (voice → dom → audio)</button>
+      <span class="meta">
+        (takes the last transcript from the voice port, renders it in an
+        <code>&lt;h2&gt;</code>, speaks it back)
+      </span>
     </section>
 
     <section>
@@ -207,6 +230,47 @@
           // Chain the audio call ONLY if the dom call succeeded — this is
           // the critic-style behavior a real brain would exhibit.
           invoke("audio", "say_text", { text: "hello marcu" });
+        }
+      });
+
+      // Voice port bindings
+      document.getElementById("btn-voice-start").addEventListener("click", () => {
+        invoke("voice", "start_listening", {});
+      });
+      document.getElementById("btn-voice-stop").addEventListener("click", () => {
+        invoke("voice", "stop_listening", {});
+      });
+      document.getElementById("btn-voice-last").addEventListener("click", () => {
+        invoke("voice", "get_last_transcript", {});
+      });
+      document.getElementById("btn-voice-all").addEventListener("click", () => {
+        invoke("voice", "get_all_transcripts", {});
+      });
+      document.getElementById("btn-voice-clear").addEventListener("click", () => {
+        invoke("voice", "clear_transcripts", {});
+      });
+
+      // Three-port composition: pull the latest transcript from the voice
+      // port, render it via the dom port, speak it via the audio port.
+      // The runtime has no idea these three ports are related; the JS
+      // handler (standing in for a brain here) composes them.
+      document.getElementById("btn-echo").addEventListener("click", () => {
+        const voiceRec = invoke("voice", "get_last_transcript", {});
+        if (!voiceRec || !voiceRec.success) return;
+
+        const text = voiceRec.structured_result?.text;
+        if (!text) {
+          recordEl.className = "error";
+          recordEl.textContent =
+            "voice.get_last_transcript returned no text yet.\n" +
+            "Click start_listening, speak, wait for the transcript to arrive, then try again.\n\n" +
+            JSON.stringify(voiceRec, null, 2);
+          return;
+        }
+
+        const dom = invoke("dom", "append_heading", { text, level: 2 });
+        if (dom && dom.success) {
+          invoke("audio", "say_text", { text });
         }
       });
 

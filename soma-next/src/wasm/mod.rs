@@ -19,9 +19,11 @@ use wasm_bindgen::prelude::*;
 
 pub mod audio_port;
 pub mod dom_port;
+pub mod voice_port;
 
 use audio_port::AudioPort;
 use dom_port::DomPort;
+use voice_port::VoicePort;
 
 use crate::runtime::port::Port;
 
@@ -42,9 +44,10 @@ fn ensure_ports_initialized() {
             let mut map: HashMap<String, Box<dyn Port>> = HashMap::new();
             map.insert("dom".to_string(), Box::new(DomPort::new()));
             map.insert("audio".to_string(), Box::new(AudioPort::new()));
+            map.insert("voice".to_string(), Box::new(VoicePort::new()));
             *slot = Some(map);
             web_sys::console::log_1(&JsValue::from_str(
-                "[soma-next wasm] port registry initialized: dom, audio",
+                "[soma-next wasm] port registry initialized: dom, audio, voice",
             ));
         }
     });
