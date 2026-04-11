@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>soma-next in the browser — phase 1a proof</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        max-width: 720px;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        color: #111;
+      }
+      h1 { color: #c00; }
+      code, pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: #f3f3f3;
+        padding: 0.2rem 0.4rem;
+        border-radius: 3px;
+      }
+      pre {
+        padding: 0.75rem 1rem;
+        overflow-x: auto;
+        white-space: pre-wrap;
+      }
+      button {
+        font-size: 1rem;
+        padding: 0.5rem 1rem;
+        cursor: pointer;
+      }
+      .meta { color: #555; font-size: 0.9em; }
+      .result { border-left: 3px solid #0a0; padding-left: 0.75rem; }
+      .error  { border-left: 3px solid #c00; padding-left: 0.75rem; color: #c00; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h2>soma-next in the browser</h2>
+      <p class="meta">
+        This page loads a ~132 KB WebAssembly build of <code>soma-next</code>
+        directly in the tab, registers a <code>dom</code> port that implements
+        the same <code>Port</code> trait as the native filesystem / HTTP /
+        ESP32 hardware ports, and invokes it to render an <code>&lt;h1&gt;</code>.
+        Everything above this paragraph is the traditional HTML shell — nothing
+        below it is.
+      </p>
+    </header>
+
+    <section>
+      <label for="text">Text to render:</label>
+      <input id="text" value="hello marcu" style="padding: 0.4rem; width: 14rem; font-size: 1rem;" />
+      <button id="go">Invoke dom.append_heading</button>
+    </section>
+
+    <section>
+      <h3>PortCallRecord returned by the runtime</h3>
+      <pre id="record">(click the button)</pre>
+    </section>
+
+    <hr />
+    <section id="output">
+      <p class="meta">&#8681; Rendered by soma-next's DomPort &#8681;</p>
+    </section>
+
+    <script type="module">
+      import init, {
+        soma_demo_render_heading,
+      } from "./pkg/soma_next.js";
+
+      const recordEl = document.getElementById("record");
+      const textEl = document.getElementById("text");
+      const btn = document.getElementById("go");
+
+      async function boot() {
+        try {
+          await init();
+          recordEl.className = "result";
+          recordEl.textContent =
+            "soma-next wasm booted. Click the button to invoke the dom port.";
+        } catch (err) {
+          recordEl.className = "error";
+          recordEl.textContent = "init failed: " + err;
+        }
+      }
+
+      btn.addEventListener("click", () => {
+        try {
+          const jsonStr = soma_demo_render_heading(textEl.value || "hello marcu");
+          const parsed = JSON.parse(jsonStr);
+          recordEl.className = "result";
+          recordEl.textContent = JSON.stringify(parsed, null, 2);
+        } catch (err) {
+          recordEl.className = "error";
+          recordEl.textContent = "invoke failed: " + err;
+        }
+      });
+
+      boot();
+    </script>
+  </body>
+</html>

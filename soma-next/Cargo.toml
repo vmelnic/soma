@@ -3,6 +3,13 @@ name = "soma-next"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+# `rlib` keeps the native library path working for the `soma` bin and for
+# integration tests. `cdylib` lets wasm-bindgen produce a `.wasm` artifact
+# that JavaScript can import directly. Both artifacts are produced from the
+# same source tree; feature flags decide which one is viable on each target.
+crate-type = ["rlib", "cdylib"]
+
 [[bin]]
 name = "soma"
 path = "src/main.rs"
@@ -118,5 +125,22 @@ hostname = { version = "0.4", optional = true }
 # When targeting wasm32, force getrandom to use the JavaScript crypto API.
 # This is what uuid::v4, rand, etc. transitively rely on. On native builds
 # getrandom uses the OS RNG and this line is a no-op.
+#
+# wasm-bindgen provides the FFI bridge between Rust and JavaScript.
+# web-sys / js-sys give typed access to DOM APIs and the JS standard library.
+# console_error_panic_hook forwards panics to the browser console so they're
+# actually debuggable when something goes wrong.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "Node",
+    "Text",
+    "console",
+] }
