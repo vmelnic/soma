@@ -16,7 +16,7 @@ The same architecture runs on microcontrollers. `soma-project-esp32` deploys a `
 
 | Component | What | Status |
 |---|---|---|
-| [soma-next](soma-next/) | Rust runtime binary. 1177 tests, zero warnings. Cross-compiles to Android (aarch64-linux-android) and iOS (aarch64-apple-ios). | Production |
+| [soma-next](soma-next/) | Rust runtime binary. 1188 tests, zero warnings. Cross-compiles to Android (aarch64-linux-android), iOS (aarch64-apple-ios), and browser (wasm32-unknown-unknown). | Production |
 | [soma-ports](soma-ports/) | 11 dynamically loaded port adapters + SDK | Production |
 | [soma-helperbook](soma-helperbook/) | Service marketplace — first real app (postgres + redis + auth) | Production |
 | [soma-project-smtp](soma-project-smtp/) | SMTP email delivery via SOMA MCP | Production |
@@ -29,6 +29,8 @@ The same architecture runs on microcontrollers. `soma-project-esp32` deploys a `
 | [soma-project-esp32](soma-project-esp32/) | Embedded `no_std` leaf firmware. Dual-chip proven on real hardware (ESP32-S3 Sunton 1732S019 and ESP32 LX6 WROOM-32D, both with and without wifi). 12 hardware ports, runtime-configurable pins via flash, mDNS auto-discovery, SSD1306 OLED display port sharing I²C0 with the i2c port via `embedded-hal-bus`. Brain-side thermistor→display loop verified on physical OLED. | Proven on hardware |
 | [soma-project-android](soma-project-android/) | Native Android app POC (Kotlin + JNI to `libsoma_android.so`). Rust cross-compilation to `aarch64-linux-android` verified. | POC |
 | [soma-project-ios](soma-project-ios/) | Native iOS app POC (Swift + C FFI to `libsoma_ios.a`). Rust cross-compilation to `aarch64-apple-ios` verified. | POC |
+| [soma-project-mcp-bridge](soma-project-mcp-bridge/) | `PortBackend::McpClient` proof. Three ports — Python, Node.js, PHP — each a pure-stdlib MCP server running as a SOMA port. Writing a port in any language is now "write an MCP server in that language". | Proven |
+| [soma-project-web](soma-project-web/) | **soma-next runs in a browser tab.** ~1.3 MB wasm core runtime with in-tab `dom` / `audio` / `voice` ports, autonomous goal execution through the real `SessionController`, plan-following dispatch, and an LLM brain over HTTP (OpenAI `gpt-5-mini` via `scripts/brain-proxy.mjs`). 18 Playwright tests verifying every phase 1a-1g. | Proven |
 
 Legacy (not active): soma-core/, soma-plugins/, soma-synthesizer/, poc/, pow/
 
