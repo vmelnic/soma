@@ -109,21 +109,24 @@ impl SelfModel {
 /// On Linux, reads `/proc/self/statm` (second field * page size).
 /// Returns 0 on unsupported platforms or on failure.
 pub fn current_rss_bytes() -> u64 {
-    #[cfg(target_os = "macos")]
+    #[cfg(all(feature = "native-hostname", target_os = "macos"))]
     {
         macos_rss_bytes()
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(all(feature = "native-hostname", target_os = "linux"))]
     {
         linux_rss_bytes()
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(all(
+        feature = "native-hostname",
+        any(target_os = "macos", target_os = "linux")
+    )))]
     {
         0
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(feature = "native-hostname", target_os = "macos"))]
 fn macos_rss_bytes() -> u64 {
     // Use MACH_TASK_BASIC_INFO to get current RSS (not peak).
     // SAFETY: mach_task_self() is always valid for the current task.
@@ -149,7 +152,7 @@ fn macos_rss_bytes() -> u64 {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(feature = "native-hostname", target_os = "linux"))]
 fn linux_rss_bytes() -> u64 {
     // /proc/self/statm fields: size resident shared text lib data dt (in pages).
     // We want the second field (resident) multiplied by page size.
@@ -197,28 +200,42 @@ pub fn cpu_percent_since(reference_time: Instant) -> f64 {
 
 /// Total user + system CPU time consumed by this process.
 fn process_cpu_time() -> Duration {
-    // SAFETY: zeroed rusage is valid, RUSAGE_SELF is always a valid argument.
-    let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
-    let rc = unsafe { libc::getrusage(libc::RUSAGE_SELF, &raw mut usage) };
-    if rc != 0 {
-        return Duration::ZERO;
-    }
+    #[cfg(feature = "native-hostname")]
+    {
+        // SAFETY: zeroed rusage is valid, RUSAGE_SELF is always a valid argument.
+        let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+        let rc = unsafe { libc::getrusage(libc::RUSAGE_SELF, &raw mut usage) };
+        if rc != 0 {
+            return Duration::ZERO;
+        }
 
-    let user = Duration::new(
-        usage.ru_utime.tv_sec as u64,
-        usage.ru_utime.tv_usec as u32 * 1000,
-    );
-    let system = Duration::new(
-        usage.ru_stime.tv_sec as u64,
-        usage.ru_stime.tv_usec as u32 * 1000,
-    );
-    user + system
+        let user = Duration::new(
+            usage.ru_utime.tv_sec as u64,
+            usage.ru_utime.tv_usec as u32 * 1000,
+        );
+        let system = Duration::new(
+            usage.ru_stime.tv_sec as u64,
+            usage.ru_stime.tv_usec as u32 * 1000,
+        );
+        user + system
+    }
+    #[cfg(not(feature = "native-hostname"))]
+    {
+        Duration::ZERO
+    }
 }
 
 /// Number of logical CPUs (for clamping CPU percentage).
 fn num_cpus() -> f64 {
-    let n = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
-    if n > 0 { n as f64 } else { 1.0 }
+    #[cfg(feature = "native-hostname")]
+    {
+        let n = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
+        if n > 0 { n as f64 } else { 1.0 }
+    }
+    #[cfg(not(feature = "native-hostname"))]
+    {
+        1.0
+    }
 }
 
 // ---------------------------------------------------------------------------

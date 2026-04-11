@@ -3,8 +3,12 @@ pub mod belief;
 pub mod resource;
 pub mod skill;
 pub mod port;
+#[cfg(feature = "dylib-ports")]
 pub mod dynamic_port;
+#[cfg(feature = "native-http")]
 pub mod mcp_client_port;
+pub mod remote;
+#[cfg(feature = "dylib-ports")]
 pub mod port_verify;
 pub mod session;
 pub mod selector;

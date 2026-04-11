@@ -703,8 +703,18 @@ impl DefaultCliRunner {
     }
 
     fn execute_verify_port(&self, path: &str) -> Result<String> {
-        let dylib_path = std::path::Path::new(path);
-        Ok(crate::runtime::port_verify::verify_port_report(dylib_path))
+        #[cfg(feature = "dylib-ports")]
+        {
+            let dylib_path = std::path::Path::new(path);
+            Ok(crate::runtime::port_verify::verify_port_report(dylib_path))
+        }
+        #[cfg(not(feature = "dylib-ports"))]
+        {
+            let _ = path;
+            Err(crate::errors::SomaError::Port(
+                "verify_port requires the `dylib-ports` feature".to_string(),
+            ))
+        }
     }
 
     fn execute_repl(&self) -> Result<String> {

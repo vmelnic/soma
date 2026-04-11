@@ -6,33 +6,117 @@ edition = "2024"
 [[bin]]
 name = "soma"
 path = "src/main.rs"
+required-features = ["native-cli"]
+
+# ---------------------------------------------------------------------------
+# Feature structure
+#
+# default = ["native"] preserves the pre-phase-0 build byte-for-byte. Every
+# cargo command that worked before phase 0 continues to work unchanged.
+#
+# For wasm (and any other minimal-surface target), use:
+#     cargo check --target wasm32-unknown-unknown --no-default-features --lib
+# which strips every native-only dependency and leaves only the pure-compute
+# runtime core.
+# ---------------------------------------------------------------------------
+[features]
+default = ["native"]
+
+# Meta-feature: everything a native build has historically shipped.
+native = [
+    "distributed",
+    "dylib-ports",
+    "native-http",
+    "disk-persistence",
+    "native-cli",
+    "native-hostname",
+    "native-filesystem",
+    "tokio/rt-multi-thread",
+    "tokio/net",
+    "tokio/fs",
+    "tokio/signal",
+]
+
+# Distributed transport layer: TCP/TLS, WebSocket, Unix sockets, mDNS
+# discovery, rate limiting, chunked transfer, delegation, heartbeat.
+distributed = [
+    "dep:tokio-tungstenite",
+    "dep:tokio-rustls",
+    "dep:rustls",
+    "dep:rustls-pemfile",
+    "dep:mdns-sd",
+    "dep:flume",
+    "dep:libc",
+]
+
+# Dynamic port loading via libloading (.dylib / .so files through the SDK vtable).
+dylib-ports = ["dep:libloading", "dep:soma-port-sdk", "dep:ed25519-dalek"]
+
+# Reqwest-based HTTP: the built-in HTTP port AND the McpClient port's HTTP
+# transport variant. On wasm the browser's own fetch() replaces this.
+native-http = ["dep:reqwest"]
+
+# Disk-backed episode / schema / routine stores. Off on wasm; the in-memory
+# DefaultEpisodeStore etc. continue to work.
+disk-persistence = []
+
+# CLI binary: clap-style arg parsing, signal handlers, long-running REPL,
+# MCP server stdio loop. The bin target gates on this via required-features.
+native-cli = []
+
+# Proprioception hostname lookup + native syscalls (libc getrusage, sysconf,
+# mach_task_info for RSS measurement). All of it is Unix-only syscall
+# machinery; on wasm it's stubbed out to return zeros.
+native-hostname = ["dep:hostname", "dep:libc"]
+
+# Built-in filesystem port (std::fs read/write/stat). Off on wasm.
+native-filesystem = []
 
 [dependencies]
+# ---------------------------------------------------------------------------
+# Pure-compute deps — safe on every target including wasm32-unknown-unknown.
+# ---------------------------------------------------------------------------
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "serde", "js"] }
 chrono = { version = "0.4", features = ["serde"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal", "net", "io-util", "time", "fs"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 thiserror = "2"
 semver = { version = "1", features = ["serde"] }
 sha2 = "0.10"
 dashmap = "6"
 toml = "0.8"
-hostname = "0.4"
-reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
-libloading = "0.8"
-soma-port-sdk = { path = "../soma-ports/sdk" }
-tokio-tungstenite = "0.24"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 futures-util = "0.3"
-ed25519-dalek = { version = "2", features = ["std"] }
-rustls = { version = "0.23", features = ["ring"] }
-tokio-rustls = "0.26"
-rustls-pemfile = "2"
-libc = "0.2"
+
+# Tokio with ONLY the wasm-compatible feature set. The `native` meta-feature
+# adds rt-multi-thread / net / fs / signal on native targets.
+tokio = { version = "1", default-features = false, features = ["rt", "macros", "sync", "io-util", "time"] }
+
+# ---------------------------------------------------------------------------
+# Native-only deps — all optional, activated by the corresponding feature.
+# ---------------------------------------------------------------------------
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"], optional = true }
+libloading = { version = "0.8", optional = true }
+soma-port-sdk = { path = "../soma-ports/sdk", optional = true }
+ed25519-dalek = { version = "2", features = ["std"], optional = true }
+tokio-tungstenite = { version = "0.24", optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
+tokio-rustls = { version = "0.26", optional = true }
+rustls-pemfile = { version = "2", optional = true }
+libc = { version = "0.2", optional = true }
 # mDNS / zeroconf peer discovery on the LAN. Pure-Rust, no Bonjour/Avahi
 # C deps. Runs its own mio-based thread, exposes flume channels that are
 # awaitable from tokio via recv_async().
-mdns-sd = "0.19"
-flume = "0.11"
+mdns-sd = { version = "0.19", optional = true }
+flume = { version = "0.11", optional = true }
+hostname = { version = "0.4", optional = true }
+
+# ---------------------------------------------------------------------------
+# Target-specific deps
+# ---------------------------------------------------------------------------
+# When targeting wasm32, force getrandom to use the JavaScript crypto API.
+# This is what uuid::v4, rand, etc. transitively rely on. On native builds
+# getrandom uses the OS RNG and this line is a no-op.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }

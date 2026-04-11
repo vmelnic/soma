@@ -4,6 +4,7 @@
 //! declared PortKind, registers skills, and wires everything into a
 //! SessionController via the adapter layer.
 
+#[cfg(feature = "dylib-ports")]
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -14,13 +15,14 @@ use crate::adapters::{
     SimpleCandidatePredictor, SimpleBeliefSource, SimpleSessionCritic,
     SkillRegistryAdapter,
 };
-use crate::distributed::remote::RemoteExecutor;
+use crate::runtime::remote::RemoteExecutor;
 use crate::config::SomaConfig;
 use crate::errors::{Result, SomaError};
 use crate::memory::episodes::{DefaultEpisodeStore, EpisodeStore};
 use crate::memory::persistence::{resolve_data_dir, DiskEpisodeStore, DiskSchemaStore, DiskRoutineStore};
 use crate::memory::routines::{DefaultRoutineStore, RoutineStore};
 use crate::memory::schemas::{DefaultSchemaStore, SchemaStore};
+#[cfg(feature = "dylib-ports")]
 use crate::runtime::dynamic_port::DynamicPortLoader;
 use crate::runtime::goal::DefaultGoalRuntime;
 use crate::runtime::policy::{DefaultPolicyRuntime, PolicyRuntime};
@@ -32,15 +34,20 @@ use crate::runtime::skill::{DefaultSkillRuntime, SkillRuntime};
 type SharedEpisodeStore = Arc<Mutex<dyn EpisodeStore + Send>>;
 type SharedSchemaStore = Arc<Mutex<dyn SchemaStore + Send>>;
 type SharedRoutineStore = Arc<Mutex<dyn RoutineStore + Send>>;
+#[cfg(feature = "native-filesystem")]
 use crate::ports::filesystem::FilesystemPort;
+#[cfg(feature = "native-http")]
 use crate::ports::http::HttpPort;
 use crate::types::pack::PackSpec;
 use crate::types::policy::{
     PolicyCondition, PolicyEffect, PolicyRule, PolicyRuleType, PolicySpec, PolicyTarget,
     PolicyTargetType,
 };
+#[cfg(feature = "native-http")]
 use crate::runtime::mcp_client_port::McpClientPort;
-use crate::types::port::{PortBackend, PortKind, PortSpec};
+#[cfg(any(feature = "native-filesystem", feature = "native-http"))]
+use crate::types::port::PortKind;
+use crate::types::port::{PortBackend, PortSpec};
 
 /// The assembled runtime: session controller plus the goal runtime needed to
 /// parse user input into GoalSpecs.
@@ -110,16 +117,19 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
     let mut skill_runtime = DefaultSkillRuntime::new();
     let mut pack_specs: Vec<PackSpec> = Vec::new();
 
-    let search_paths: Vec<PathBuf> = config
-        .ports
-        .plugin_path
-        .iter()
-        .map(PathBuf::from)
-        .collect();
-    let mut dynamic_loader = DynamicPortLoader::with_signature_policy(
-        search_paths,
-        config.ports.require_signatures,
-    );
+    #[cfg(feature = "dylib-ports")]
+    let mut dynamic_loader = {
+        let search_paths: Vec<PathBuf> = config
+            .ports
+            .plugin_path
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        DynamicPortLoader::with_signature_policy(
+            search_paths,
+            config.ports.require_signatures,
+        )
+    };
 
     for path in pack_paths {
         let manifest_content = std::fs::read_to_string(path).map_err(|e| {
@@ -132,7 +142,11 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
 
         // Register ports declared in the pack.
         for port_spec in &pack_spec.ports {
-            let (adapter, effective_spec) = match create_port_adapter(port_spec, &mut dynamic_loader) {
+            let (adapter, effective_spec) = match create_port_adapter(
+                port_spec,
+                #[cfg(feature = "dylib-ports")]
+                &mut dynamic_loader,
+            ) {
                 Ok(pair) => pair,
                 Err(e) => {
                     tracing::warn!(
@@ -266,16 +280,19 @@ pub fn bootstrap_with_remote(
     let mut skill_runtime = DefaultSkillRuntime::new();
     let mut pack_specs: Vec<PackSpec> = Vec::new();
 
-    let search_paths: Vec<PathBuf> = config
-        .ports
-        .plugin_path
-        .iter()
-        .map(PathBuf::from)
-        .collect();
-    let mut dynamic_loader = DynamicPortLoader::with_signature_policy(
-        search_paths,
-        config.ports.require_signatures,
-    );
+    #[cfg(feature = "dylib-ports")]
+    let mut dynamic_loader = {
+        let search_paths: Vec<PathBuf> = config
+            .ports
+            .plugin_path
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        DynamicPortLoader::with_signature_policy(
+            search_paths,
+            config.ports.require_signatures,
+        )
+    };
 
     for path in pack_paths {
         let manifest_content = std::fs::read_to_string(path).map_err(|e| {
@@ -287,7 +304,11 @@ pub fn bootstrap_with_remote(
         })?;
 
         for port_spec in &pack_spec.ports {
-            let (adapter, effective_spec) = match create_port_adapter(port_spec, &mut dynamic_loader) {
+            let (adapter, effective_spec) = match create_port_adapter(
+                port_spec,
+                #[cfg(feature = "dylib-ports")]
+                &mut dynamic_loader,
+            ) {
                 Ok(pair) => pair,
                 Err(e) => {
                     tracing::warn!(
@@ -479,36 +500,69 @@ fn register_default_safety_policies(
 
 /// Create a port adapter for a given spec.
 ///
-/// Built-in port kinds (Filesystem, Http) are instantiated directly.
-/// All other kinds dispatch on `spec.backend`:
-///   * `Dylib` — load a native `cdylib` through `DynamicPortLoader`.
+/// Built-in port kinds (Filesystem, Http) are instantiated directly when the
+/// corresponding feature is enabled. Everything else dispatches on
+/// `spec.backend`:
+///   * `Dylib` — load a native `cdylib` through `DynamicPortLoader` (requires
+///     the `dylib-ports` feature).
 ///   * `McpClient` — spawn/connect to an MCP server, run initialize +
-///     tools/list discovery, and wrap it in an `McpClientPort`.
+///     tools/list discovery, and wrap it in an `McpClientPort` (requires the
+///     `native-http` feature for its blocking HTTP + subprocess paths).
 ///
 /// Returns the adapter and, when discovery added capabilities to the spec,
 /// a replacement `PortSpec` the caller should register instead of the
 /// original manifest version.
+///
+/// When a backend-specific feature is disabled (e.g. on wasm, where
+/// `dylib-ports` and `native-http` are off), declarations of that kind are
+/// returned as a `SomaError::Port` and the caller logs + skips them. This
+/// keeps pack loading going for any remaining ports that *can* be loaded.
+#[allow(unused_variables)]
 fn create_port_adapter(
     spec: &PortSpec,
-    loader: &mut DynamicPortLoader,
+    #[cfg(feature = "dylib-ports")] loader: &mut DynamicPortLoader,
 ) -> Result<(Box<dyn Port>, Option<PortSpec>)> {
     match spec.kind {
+        #[cfg(feature = "native-filesystem")]
         PortKind::Filesystem => return Ok((Box::new(FilesystemPort::new()), None)),
+        #[cfg(feature = "native-http")]
         PortKind::Http => return Ok((Box::new(HttpPort::new()), None)),
         _ => {}
     }
 
     match spec.backend.clone() {
         PortBackend::Dylib { library_name } => {
-            let lib_name = library_name
-                .unwrap_or_else(|| format!("soma_port_{}", spec.port_id));
-            let port = loader.load_port(&lib_name)?;
-            Ok((port, None))
+            #[cfg(feature = "dylib-ports")]
+            {
+                let lib_name = library_name
+                    .unwrap_or_else(|| format!("soma_port_{}", spec.port_id));
+                let port = loader.load_port(&lib_name)?;
+                Ok((port, None))
+            }
+            #[cfg(not(feature = "dylib-ports"))]
+            {
+                let _ = library_name;
+                Err(SomaError::Port(format!(
+                    "port '{}' requests Dylib backend but the runtime was built without the `dylib-ports` feature",
+                    spec.port_id
+                )))
+            }
         }
         PortBackend::McpClient { transport } => {
-            let (port, effective_spec) =
-                McpClientPort::spawn_and_discover(spec.clone(), transport)?;
-            Ok((Box::new(port), Some(effective_spec)))
+            #[cfg(feature = "native-http")]
+            {
+                let (port, effective_spec) =
+                    McpClientPort::spawn_and_discover(spec.clone(), transport)?;
+                Ok((Box::new(port), Some(effective_spec)))
+            }
+            #[cfg(not(feature = "native-http"))]
+            {
+                let _ = transport;
+                Err(SomaError::Port(format!(
+                    "port '{}' requests McpClient backend but the runtime was built without the `native-http` feature",
+                    spec.port_id
+                )))
+            }
         }
     }
 }

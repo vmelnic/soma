@@ -21,7 +21,7 @@ use crate::types::session::{
     WorkingMemory,
 };
 use crate::types::skill::{SkillKind, SkillSpec};
-use crate::distributed::remote::RemoteExecutor;
+use crate::runtime::remote::RemoteExecutor;
 
 // ---------------------------------------------------------------------------
 // StepResult — outcome of a single control-loop iteration

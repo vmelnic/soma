@@ -13,9 +13,16 @@ use crate::errors::{Result, SomaError};
 // ---------------------------------------------------------------------------
 
 fn default_id() -> String {
-    hostname::get()
-        .map(|h| h.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "unknown".to_string())
+    #[cfg(feature = "native-hostname")]
+    {
+        hostname::get()
+            .map(|h| h.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "unknown".to_string())
+    }
+    #[cfg(not(feature = "native-hostname"))]
+    {
+        "unknown".to_string()
+    }
 }
 
 fn default_log_level() -> String {
@@ -225,6 +232,7 @@ impl Default for DistributedSection {
 
 impl DistributedSection {
     /// Build a `RateLimitConfig` from the distributed section settings.
+    #[cfg(feature = "distributed")]
     pub fn rate_limit_config(&self) -> crate::distributed::rate_limit::RateLimitConfig {
         crate::distributed::rate_limit::RateLimitConfig {
             max_requests_per_second: self.rate_limit_rps,

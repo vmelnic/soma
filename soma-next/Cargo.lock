@@ -1480,6 +1480,7 @@ dependencies = [
  "ed25519-dalek",
  "flume",
  "futures-util",
+ "getrandom 0.2.17",
  "hostname",
  "libc",
  "libloading",

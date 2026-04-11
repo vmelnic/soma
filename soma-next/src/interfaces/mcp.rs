@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::distributed::remote::RemoteExecutor;
+use crate::runtime::remote::RemoteExecutor;
 use crate::errors::Result;
 use crate::memory::episodes::EpisodeStore;
 use crate::memory::routines::RoutineStore;
