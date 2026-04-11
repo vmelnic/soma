@@ -293,7 +293,12 @@ RULES:
 - Every skill's (port_id, capability_id) MUST appear in the BROWSER PORTS block below. Do not invent ports.
 - pack_id MUST start with "soma.terminal." and be lowercase-dotted.
 - Each skill's input_schema_text is a JSON Schema object describing the skill's inputs.
-- The output will be expanded into a full PackSpec server-side, so leave observability / cost_prior / remote_exposure etc. out.`;
+- The output will be expanded into a full PackSpec server-side, so leave observability / cost_prior / remote_exposure etc. out.
+
+GRACEFUL DEGRADATION:
+- If the operator's chat history mentions capabilities beyond the BROWSER PORTS catalog (e.g. Postgres storage, SMTP email, HTTP sharing, filesystem writes), reduce the scope to a BROWSER-ONLY DEMO VERSION that the available ports can actually deliver.
+- NEVER fake an unavailable port with an available one. Do not claim dom.append_heading "persists" anything, or that audio.say_text "sends an email". Honest minimal scope beats ambitious unbuildable scope.
+- A demo pack for a "todo list" might just render new <h1> entries via dom.append_heading and speak them via audio.say_text — persistence, reminders, and sharing are future work and should not appear in the generated skills.`;
 
 function buildPackUserMessage(context, history) {
   const name = context?.name ?? "unnamed";
@@ -681,16 +686,42 @@ export async function transcribeAudio({ audioBuffer, mimeType }) {
 }
 
 // System prompt builder for the per-context conversational brain.
-// Keeps the context's name + description visible to the model on
-// every turn so the conversation doesn't drift off-topic. Commit 6
-// will replace or extend this when the context grows a compiled
-// PackSpec — at that point the system prompt can describe the
-// actual loaded ports and skills.
+// Keeps the context's name + description visible on every turn so
+// the conversation doesn't drift off-topic, and — crucially — tells
+// the brain the EXACT ceiling of what the browser-side wasm runtime
+// can actually execute today. Otherwise the chat brain happily
+// agrees to "we'll use Postgres for storage and SMTP for reminders"
+// when the runtime only has dom / audio / voice ports, leaving the
+// operator with a compiled pack that can't deliver the conversation's
+// promises.
+//
+// Two ground rules baked in here:
+//   1. List the in-tab ports the wasm body actually ships, including
+//      their exact capabilities. Anything else is "future work" and
+//      the brain has to say so out loud.
+//   2. When the operator is ready to build, the brain must tell them
+//      to click [ GENERATE PACK ]. No manual setup instructions,
+//      ever — the pack brain does all the compiling.
 export function buildSystemPrompt(context) {
   const name = context?.name ?? "unnamed";
   const description =
     (context?.description && context.description.trim()) ||
     "(no description provided yet)";
+  // Re-project BROWSER_PORTS into a flat bullet list. Kept in sync
+  // with the catalog the pack brain uses in PACK_SYSTEM_PROMPT —
+  // both brains speak the same truth about what's callable.
+  const portBullets = BROWSER_PORTS.flatMap((p) => {
+    if (p.capabilities.length === 0) {
+      return [`  - ${p.port_id}: ${p.description} (no callable capabilities yet)`];
+    }
+    return [
+      `  - ${p.port_id}: ${p.description}`,
+      ...p.capabilities.map(
+        (c) => `      * ${c.capability_id} — ${c.description}`,
+      ),
+    ];
+  }).join("\n");
+
   return [
     "You are the conversational brain of a SOMA terminal context.",
     "A context is the operator's project — a named workspace where",
@@ -699,12 +730,60 @@ export function buildSystemPrompt(context) {
     `Current context: ${name}`,
     `Description:    ${description}`,
     "",
-    "Stay concise. Ask clarifying questions when the ask is ambiguous.",
-    "When the operator describes a capability they want, suggest which",
-    "SOMA ports (filesystem, http, postgres, smtp, crypto, ...) would",
-    "implement it — but don't emit JSON or code unless the operator",
-    "explicitly asks. Plain text, conversational register. Imagine you",
-    "are speaking over a 1980s monochrome terminal — short sentences,",
-    "no markdown headings, no emoji.",
+    "=============================================================",
+    "WHAT THE BROWSER RUNTIME CAN ACTUALLY DO RIGHT NOW",
+    "=============================================================",
+    "The context runs inside a soma-next wasm runtime living in the",
+    "operator's browser tab. That runtime has a FIXED set of ports:",
+    "",
+    portBullets,
+    "",
+    "When the operator clicks [ GENERATE PACK ], a reasoning brain",
+    "compiles a PackSpec whose skills MUST map onto one of those",
+    "(port_id, capability_id) pairs. Skills referencing anything",
+    "else will be rejected before the wasm boots.",
+    "",
+    "=============================================================",
+    "WHAT THE BROWSER RUNTIME CANNOT DO YET",
+    "=============================================================",
+    "The wider SOMA project has production ports for filesystem,",
+    "http, postgres, redis, smtp, crypto, s3, timer, push, image,",
+    "and geo — but the BROWSER runtime cannot call them yet. A",
+    "backend-port bridge (browser → HTTP gateway → native",
+    "soma-next → dylib ports) is planned but not shipped.",
+    "",
+    "This means anything involving persistence across page reloads,",
+    "sending real email, making outbound HTTP calls, writing to",
+    "files, or sharing public links is CURRENTLY NOT BUILDABLE by",
+    "the pack generator. Be honest about this when the operator",
+    "asks for it. Do not pretend a pack will do these things.",
+    "",
+    "=============================================================",
+    "HOW THE OPERATOR ACTUALLY BUILDS THINGS",
+    "=============================================================",
+    "The terminal has a [ GENERATE PACK ] button next to the",
+    "runtime panel. When the operator is ready, tell them to click",
+    "it. The reasoning brain will read this chat transcript, emit",
+    "a minimal pack shape, and the backend will compile it into a",
+    "full PackSpec + hot-swap the wasm body. No manual database",
+    "setup. No shell commands. No 'first do X, then do Y' steps.",
+    "The button does all of it.",
+    "",
+    "=============================================================",
+    "CONVERSATIONAL STYLE",
+    "=============================================================",
+    "Stay concise. Imagine you are speaking over a 1980s monochrome",
+    "terminal — short sentences, no markdown headings, no emoji.",
+    "Ask clarifying questions when the ask is ambiguous.",
+    "",
+    "When the operator's request exceeds the browser runtime's",
+    "current ceiling, acknowledge the gap directly and offer a",
+    "buildable demo version: for example, a todo list that lives",
+    "as <h1> entries in the DOM for the current session, with the",
+    "real persistence + email + sharing flagged as future work.",
+    "Then, when they agree, tell them to click [ GENERATE PACK ].",
+    "",
+    "Never emit JSON, PackSpec fragments, SQL, or shell commands",
+    "unless the operator explicitly asks for them.",
   ].join("\n");
 }
