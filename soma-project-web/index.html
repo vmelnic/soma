@@ -81,6 +81,42 @@
     </section>
 
     <section class="group">
+      <h3>LLM brain (phase 1g)</h3>
+      <p class="meta">
+        The brain lives outside the wasm tab. JavaScript POSTs a prompt
+        plus the runtime's port catalog to a configurable endpoint (a
+        thin proxy in front of Claude / GPT / local model, or a fixture
+        for tests). The endpoint returns a <code>plan</code> — an
+        ordered list of <code>{port_id, capability_id, input}</code>
+        steps. This harness then invokes each step via
+        <code>soma_invoke_port</code>, producing the same
+        <code>PortCallRecord</code> chain an autonomous SOMA run would
+        produce. The <em>runtime</em> is universal; the <em>brain</em>
+        is swappable by changing one URL.
+      </p>
+      <div>
+        <label for="brain-endpoint">Brain endpoint:</label>
+        <input
+          id="brain-endpoint"
+          type="text"
+          value="/api/brain"
+          style="width: 22rem"
+        />
+      </div>
+      <div>
+        <label for="brain-prompt">Prompt:</label>
+        <input
+          id="brain-prompt"
+          type="text"
+          value="say hello to marcu"
+          style="width: 22rem"
+        />
+        <button id="btn-brain-run">compose &amp; run</button>
+      </div>
+      <pre id="brain-log" class="meta" style="max-height: 12rem; overflow-y: auto;">(no brain calls yet)</pre>
+    </section>
+
+    <section class="group">
       <h3>autonomous goal execution (phase 1e)</h3>
       <p class="meta">
         Submits a natural-language goal to the runtime's
@@ -427,6 +463,137 @@
           invoke("audio", "say_text", { text });
         }
       });
+
+      // ---- phase 1g: LLM brain via fetch ----
+      const brainLog = document.getElementById("brain-log");
+
+      function appendBrainLog(text) {
+        const existing =
+          brainLog.textContent === "(no brain calls yet)"
+            ? ""
+            : brainLog.textContent + "\n";
+        brainLog.textContent = existing + text;
+        brainLog.scrollTop = brainLog.scrollHeight;
+      }
+
+      // Persist the endpoint override in localStorage so a developer who
+      // points the brain at a real LLM proxy once doesn't have to retype
+      // the URL on every page load.
+      const endpointInput = document.getElementById("brain-endpoint");
+      const savedEndpoint = localStorage.getItem("soma.brain.endpoint");
+      if (savedEndpoint) {
+        endpointInput.value = savedEndpoint;
+      }
+      endpointInput.addEventListener("change", () => {
+        localStorage.setItem("soma.brain.endpoint", endpointInput.value);
+      });
+
+      function buildPortCatalog() {
+        // Surface the currently-booted runtime's ports + capabilities as
+        // a compact catalog the brain can reason about.
+        const summaryJson = soma_runtime_summary();
+        const summary = JSON.parse(summaryJson);
+        return summary.ports.map((p) => ({
+          port_id: p.port_id,
+          namespace: p.namespace,
+          kind: p.kind,
+          capabilities: p.capabilities,
+        }));
+      }
+
+      async function composeAndRun() {
+        const endpoint = endpointInput.value || "/api/brain";
+        const prompt =
+          document.getElementById("brain-prompt").value ||
+          "say hello to marcu";
+        appendBrainLog(`→ POST ${endpoint}  "${prompt}"`);
+
+        let planResponse;
+        try {
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              prompt,
+              port_catalog: buildPortCatalog(),
+            }),
+          });
+          if (!res.ok) {
+            throw new Error(`brain endpoint returned ${res.status}`);
+          }
+          planResponse = await res.json();
+        } catch (err) {
+          appendBrainLog(`✗ brain call failed: ${err.message}`);
+          showError("brain call failed: " + err.message);
+          return;
+        }
+
+        if (!planResponse || !Array.isArray(planResponse.plan)) {
+          appendBrainLog(`✗ malformed brain response: missing plan array`);
+          showError(
+            "malformed brain response: " + JSON.stringify(planResponse),
+          );
+          return;
+        }
+
+        if (planResponse.explanation) {
+          appendBrainLog(`  explanation: ${planResponse.explanation}`);
+        }
+        appendBrainLog(`  plan (${planResponse.plan.length} steps):`);
+
+        const results = [];
+        for (const [i, step] of planResponse.plan.entries()) {
+          const { port_id, capability_id, input } = step;
+          appendBrainLog(
+            `  [${i + 1}] ${port_id}.${capability_id}  input=${JSON.stringify(
+              input,
+            )}`,
+          );
+          try {
+            const recordJson = soma_invoke_port(
+              port_id,
+              capability_id,
+              JSON.stringify(input || {}),
+            );
+            const record = JSON.parse(recordJson);
+            results.push(record);
+            if (!record.success) {
+              appendBrainLog(
+                `       ✗ failed: ${JSON.stringify(record.structured_result)}`,
+              );
+              break;
+            } else {
+              appendBrainLog(
+                `       ✓ ${record.side_effect_summary}  ${record.latency_ms}ms`,
+              );
+            }
+          } catch (err) {
+            appendBrainLog(`       ✗ invoke threw: ${err.message || err}`);
+            break;
+          }
+        }
+
+        showResult(
+          JSON.stringify(
+            {
+              prompt,
+              explanation: planResponse.explanation,
+              steps: results.length,
+              plan: planResponse.plan,
+              last_record:
+                results.length > 0 ? results[results.length - 1] : null,
+            },
+            null,
+            2,
+          ),
+        );
+      }
+
+      document
+        .getElementById("btn-brain-run")
+        .addEventListener("click", () => {
+          composeAndRun();
+        });
 
       boot();
     </script>
