@@ -219,6 +219,30 @@ input[type="text"]:focus {
   color: var(--term-bg);
 }
 
+/* GENERATE PACK button — phosphor-green pulse while the reasoning
+   brain is thinking. gpt-5-mini calls routinely take 5-30 seconds,
+   so the operator needs a visible "working" signal the whole time
+   instead of a silently-disabled button. */
+#btn-generate-pack.generating {
+  animation: generate-pulse 1.2s ease-in-out infinite alternate;
+  cursor: wait;
+  pointer-events: none;
+  opacity: 1; /* override the inherited :disabled opacity */
+}
+
+@keyframes generate-pulse {
+  from {
+    box-shadow: 0 0 2px var(--term-fg-bright);
+    background: var(--term-bg);
+    color: var(--term-fg-bright);
+  }
+  to {
+    box-shadow: 0 0 14px var(--term-fg-bright);
+    background: var(--term-bg-lighter);
+    color: #ffffff;
+  }
+}
+
 /* Mic button recording/transcribing states — red while capturing
    audio, dim while waiting on Whisper, normal when idle. */
 #btn-mic {
@@ -310,10 +334,13 @@ input[type="text"]:focus {
 }
 
 /* Context detail grid — brain channel on the left, body runtime on
-   the right. Collapses to a single column on narrow viewports. */
+   the right. Both panels carry real weight now: the left has the
+   chat transcript + input, the right has the runtime summary,
+   GENERATE PACK, the SKILLS cards with JSON input, and the memory
+   panel. Equal split at full width, single column on narrow. */
 .ctx-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1.5rem;
   margin: 1rem 0 1.5rem 0;
 }
@@ -398,11 +425,17 @@ input[type="text"]:focus {
   color: var(--term-error);
 }
 
-/* Runtime panel — keep the font small so long port/skill lists fit. */
+/* Runtime panel — keep the font small so long port/skill lists fit
+   and break long dotted identifiers (pack ids, skill ids) at any
+   character so the ASCII table labels don't end up on a line by
+   themselves. overflow-wrap: anywhere lets us keep the pre-wrap
+   whitespace semantics while still breaking long tokens. */
 .ctx-runtime .lore {
   font-size: 18px;
   margin: 0.5rem 0 1rem 0;
   padding: 0.5rem 0.75rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .ctx-runtime .lore.error {

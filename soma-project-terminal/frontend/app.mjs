@@ -591,20 +591,33 @@ async function updateRuntimePanel() {
   el.textContent =
     "  STATE:  BOOTING...\n  PORTS:  —\n  SKILLS: —";
   try {
-    const { summary, packId, skills } = await bootForContext(currentContext);
+    const { summary, packId, fullSkills } = await bootForContext(
+      currentContext,
+    );
     const portsList = (summary.ports ?? [])
       .map((p) => p.port_id || p.id || String(p))
       .join(", ");
-    const skillsList = (skills ?? [])
-      .map((s) => s.skill_id || s.id || String(s))
-      .join(", ");
+
+    // The wasm runtime's soma_list_skills() only sees wasm-scope
+    // skills — bridge skills are stripped before soma_boot_runtime.
+    // For an honest count we walk the FULL pack and split by scope
+    // tag. Mixed packs show `1 wasm / 4 bridge`; empty is `(none)`.
+    const allSkills = fullSkills ?? [];
+    const isBridge = (s) => (s?.tags ?? []).includes("scope:bridge");
+    const wasmCount = allSkills.filter((s) => !isBridge(s)).length;
+    const bridgeCount = allSkills.filter(isBridge).length;
+    const skillsLine =
+      allSkills.length === 0
+        ? "(none)"
+        : `${wasmCount} wasm / ${bridgeCount} bridge`;
+
     const source = currentContext.pack_spec ? "context" : "fallback:hello";
     el.textContent =
       `  STATE:  READY\n` +
       `  PACK:   ${packId || "unknown"}\n` +
       `  SOURCE: ${source}\n` +
       `  PORTS:  ${portsList || "(none)"}\n` +
-      `  SKILLS: ${skillsList || "(none)"}`;
+      `  SKILLS: ${skillsLine}`;
 
     // After the runtime is ready, push any stored routines for
     // this context back into the wasm body. Fire-and-forget —
@@ -861,10 +874,26 @@ document
     if (!currentContext) return;
     const btn = document.getElementById("btn-generate-pack");
     const statusEl = document.getElementById("generate-status");
+
+    // Visible busy state: pulse the button in phosphor green,
+    // change its label, and announce the stage in the status span.
+    // gpt-5-mini at reasoning_effort=low typically takes 5-30s,
+    // and real-mode first-time runs have been observed up to 60s,
+    // so the UI has to commit to the wait rather than going silent.
     btn.disabled = true;
+    btn.classList.add("generating");
+    const originalLabel = btn.textContent;
+    btn.textContent = "[ COMPILING... ]";
     statusEl.classList.remove("error");
-    statusEl.textContent = "COMPILING PACK...";
+    statusEl.textContent = "calling gpt-5-mini, may take up to 60s...";
     setStatus("GENERATING PACK");
+
+    const restoreButton = () => {
+      btn.disabled = false;
+      btn.classList.remove("generating");
+      btn.textContent = originalLabel;
+    };
+
     try {
       const res = await fetch(
         `/api/contexts/${encodeURIComponent(currentContext.id)}/pack/generate`,
@@ -901,7 +930,7 @@ document
       statusEl.textContent = `NETWORK ERROR: ${err.message}`;
       setStatus("ERROR");
     } finally {
-      btn.disabled = false;
+      restoreButton();
     }
   });
 
