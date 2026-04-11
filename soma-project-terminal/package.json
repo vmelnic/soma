@@ -1,0 +1,14 @@
+{
+  "name": "soma-project-terminal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SOMA-native multi-user web platform with Fallout terminal UI. Users create contexts (pack manifests), LLM composes behavior inside each context. See README.md.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
+  }
+}
