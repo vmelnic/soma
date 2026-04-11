@@ -246,6 +246,152 @@ document
   });
 
 // -------------------------------------------------------------------
+// commit 7 — mic button → MediaRecorder → /api/transcribe → input
+// -------------------------------------------------------------------
+//
+// Single-button toggle: idle → recording → transcribing → idle.
+// We hold the active MediaRecorder + stream in closure state so a
+// second click on the same button can stop the recording cleanly.
+// On stop, the accumulated blob is POSTed to /api/transcribe (raw
+// body, audio/* content-type) and the returned text is dropped
+// into #input-chat so the operator can review and hit TRANSMIT.
+//
+// If the browser doesn't support MediaRecorder or getUserMedia,
+// the button is marked `.unsupported` and refuses to start — no
+// SpeechRecognition fallback yet; that's a separate commit.
+
+let voiceRecorder = null;
+let voiceStream = null;
+let voiceChunks = [];
+
+function setMicState(state) {
+  const btn = document.getElementById("btn-mic");
+  if (!btn) return;
+  btn.classList.remove("recording", "transcribing", "unsupported");
+  if (state === "recording") {
+    btn.classList.add("recording");
+    btn.textContent = "[ STOP ]";
+  } else if (state === "transcribing") {
+    btn.classList.add("transcribing");
+    btn.textContent = "[ TRANSCRIBING... ]";
+  } else if (state === "unsupported") {
+    btn.classList.add("unsupported");
+    btn.textContent = "[ MIC UNSUPPORTED ]";
+    btn.disabled = true;
+  } else {
+    btn.textContent = "[ MIC ]";
+  }
+}
+
+function micSupported() {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.MediaRecorder !== "undefined" &&
+    typeof navigator !== "undefined" &&
+    navigator.mediaDevices &&
+    typeof navigator.mediaDevices.getUserMedia === "function"
+  );
+}
+
+async function startVoiceRecording() {
+  if (!micSupported()) {
+    setMicState("unsupported");
+    return;
+  }
+  voiceChunks = [];
+  try {
+    voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    const statusEl = document.getElementById("chat-status");
+    statusEl.classList.add("error");
+    statusEl.textContent = `MIC BLOCKED: ${err.message}`;
+    return;
+  }
+  voiceRecorder = new MediaRecorder(voiceStream);
+  voiceRecorder.ondataavailable = (ev) => {
+    if (ev.data && ev.data.size > 0) voiceChunks.push(ev.data);
+  };
+  voiceRecorder.onstop = onVoiceRecordingStop;
+  voiceRecorder.start();
+  setMicState("recording");
+  setStatus("DICTATING");
+}
+
+function stopVoiceRecording() {
+  if (voiceRecorder && voiceRecorder.state !== "inactive") {
+    voiceRecorder.stop();
+  }
+  if (voiceStream) {
+    for (const track of voiceStream.getTracks()) track.stop();
+    voiceStream = null;
+  }
+}
+
+async function onVoiceRecordingStop() {
+  setMicState("transcribing");
+  setStatus("TRANSCRIBING");
+  const mimeType = voiceRecorder?.mimeType || "audio/webm";
+  const blob = new Blob(voiceChunks, { type: mimeType });
+  voiceRecorder = null;
+  voiceChunks = [];
+  if (voiceStream) {
+    for (const track of voiceStream.getTracks()) track.stop();
+    voiceStream = null;
+  }
+  const statusEl = document.getElementById("chat-status");
+  try {
+    const res = await fetch("/api/transcribe", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": mimeType },
+      body: blob,
+    });
+    const body = await res.json();
+    if (!res.ok || body.status !== "ok") {
+      statusEl.classList.add("error");
+      statusEl.textContent = `TRANSCRIBE FAILED: ${body.error || res.status}`;
+      setStatus("ERROR");
+      setMicState("idle");
+      return;
+    }
+    const inputEl = document.getElementById("input-chat");
+    // Append to any existing draft so hitting mic mid-typing
+    // doesn't clobber what the operator already wrote.
+    const existing = (inputEl.value || "").trim();
+    inputEl.value = existing ? `${existing} ${body.text}` : body.text;
+    inputEl.focus();
+    statusEl.classList.remove("error");
+    statusEl.textContent = `dictated via ${body.model || "whisper"}`;
+    setStatus("AUTHORIZED");
+  } catch (err) {
+    statusEl.classList.add("error");
+    statusEl.textContent = `TRANSCRIBE NETWORK ERROR: ${err.message}`;
+    setStatus("ERROR");
+  } finally {
+    setMicState("idle");
+  }
+}
+
+// Initialise the mic button once at module load. If MediaRecorder
+// isn't available we mark the button unsupported; otherwise the
+// click handler toggles between start and stop.
+(function initMicButton() {
+  const btn = document.getElementById("btn-mic");
+  if (!btn) return;
+  if (!micSupported()) {
+    setMicState("unsupported");
+    return;
+  }
+  btn.addEventListener("click", async () => {
+    if (voiceRecorder && voiceRecorder.state === "recording") {
+      stopVoiceRecording();
+    } else {
+      await startVoiceRecording();
+    }
+  });
+})();
+
+// -------------------------------------------------------------------
 // view: context detail
 // -------------------------------------------------------------------
 

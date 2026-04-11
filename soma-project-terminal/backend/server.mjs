@@ -46,6 +46,13 @@
 // opens the context, the browser wasm runtime boots that pack
 // instead of the hello fallback.
 //
+// Commit 7 adds voice input:
+//       POST /api/transcribe  (raw audio body → JSON { text })
+// The browser records via MediaRecorder + getUserMedia and POSTs
+// the blob directly. This route forwards the bytes to OpenAI
+// Whisper and returns the extracted text, which the frontend
+// drops into the chat input so the operator can review + submit.
+//
 // Every database read/write goes through postgres.execute / query.
 // Every email goes through smtp.send_plain. Every random token and
 // sha256 hash goes through crypto.random_string / crypto.sha256.
@@ -71,6 +78,7 @@ import { createMemory } from "./memory.mjs";
 import {
   chatCompletion,
   generatePackSpec,
+  transcribeAudio,
   buildSystemPrompt,
 } from "./brain.mjs";
 
@@ -210,6 +218,24 @@ async function readBody(req, max = 64 * 1024) {
     err.statusCode = 400;
     throw err;
   }
+}
+
+// Raw-body reader for binary uploads (commit 7 Whisper audio).
+// Returns a Buffer, not a parsed JSON object, and accepts a much
+// larger cap since Whisper happily eats multi-MB files.
+async function readRawBody(req, max = 10 * 1024 * 1024) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > max) {
+      const err = new Error("request body too large");
+      err.statusCode = 413;
+      throw err;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 function readCookie(req, name) {
@@ -749,11 +775,63 @@ async function main() {
         return sendJson(res, 200, { status: "ok" });
       }
 
+      // ---- voice transcription (commit 7) ----
+      // Raw audio bytes POSTed directly by the browser's
+      // MediaRecorder. Content-Type carries the codec (webm/opus,
+      // ogg/opus, mp4/aac, etc). We forward the blob to Whisper
+      // and return the transcription text. Session-scoped — voice
+      // input is as privileged as text input.
+      if (method === "POST" && path === "/api/transcribe") {
+        const user = await requireUser(req, res);
+        if (!user) return;
+
+        let audio;
+        try {
+          audio = await readRawBody(req);
+        } catch (e) {
+          const code = e.statusCode ?? 400;
+          return sendJson(res, code, {
+            status: "error",
+            error: e.message,
+          });
+        }
+        if (!audio || audio.length === 0) {
+          return sendJson(res, 400, {
+            status: "error",
+            error: "empty audio body",
+          });
+        }
+        // Guard against accidental JSON posts — a real audio
+        // upload never has a JSON content-type.
+        const rawCt = req.headers["content-type"] || "";
+        if (rawCt.startsWith("application/json")) {
+          return sendJson(res, 400, {
+            status: "error",
+            error: "content-type must be audio/*",
+          });
+        }
+        const result = await transcribeAudio({
+          audioBuffer: audio,
+          mimeType: rawCt || "audio/webm",
+        });
+        if (!result.ok) {
+          return sendJson(res, 502, {
+            status: "error",
+            error: result.error,
+          });
+        }
+        return sendJson(res, 200, {
+          status: "ok",
+          text: result.text,
+          model: result.model,
+        });
+      }
+
       // ---- health check ----
       if (method === "GET" && path === "/api/health") {
         return sendJson(res, 200, {
           status: "ok",
-          commit: 6,
+          commit: 7,
           soma_mcp_ready: soma.ready,
           brain_fake: String(process.env.BRAIN_FAKE || "") === "1",
         });

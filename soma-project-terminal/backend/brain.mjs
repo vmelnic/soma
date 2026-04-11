@@ -26,6 +26,8 @@
 // request/response wire — only the model call is stubbed.
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+const OPENAI_AUDIO_URL = "https://api.openai.com/v1/audio/transcriptions";
+const WHISPER_MODEL = "whisper-1";
 
 function fake() {
   return String(process.env.BRAIN_FAKE || "").trim() === "1";
@@ -600,6 +602,81 @@ export async function generatePackSpec({ context, history }) {
     pack: expandToFullPackSpec(minimal),
     model: reply.model,
     minimal,
+  };
+}
+
+// -------------------------------------------------------------------
+// commit 7 — Whisper voice input
+// -------------------------------------------------------------------
+//
+// `transcribeAudio({audioBuffer, mimeType})` forwards a raw audio
+// blob to OpenAI's Whisper endpoint via multipart/form-data and
+// returns the extracted text. The frontend records via
+// MediaRecorder and posts the bytes to /api/transcribe, which
+// calls this function. Fake mode bypasses OpenAI with a
+// deterministic echo string — the Playwright suite runs with
+// BRAIN_FAKE=1 so tests never hit real quota.
+//
+// Node 20+ ships global FormData / Blob, so we don't need any
+// form-data dep — the wrapper stays zero-dep like the rest of
+// backend/brain.mjs.
+
+export async function transcribeAudio({ audioBuffer, mimeType }) {
+  if (!audioBuffer || audioBuffer.length === 0) {
+    return { ok: false, error: "empty audio" };
+  }
+  if (fake() || !apiKey()) {
+    return {
+      ok: true,
+      text: `[FAKE TRANSCRIBE] ${audioBuffer.length} bytes received (${mimeType || "unknown"})`,
+      model: "fake:whisper",
+    };
+  }
+
+  const blob = new Blob([audioBuffer], {
+    type: mimeType || "audio/webm",
+  });
+  // File extension is mostly cosmetic — OpenAI sniffs the content
+  // type from the blob. The extension matching the actual codec
+  // makes log output friendlier. MediaRecorder defaults to webm/
+  // opus in Chromium, so that's our default.
+  const extMap = {
+    "audio/webm": "webm",
+    "audio/ogg": "ogg",
+    "audio/mp4": "mp4",
+    "audio/mpeg": "mp3",
+    "audio/wav": "wav",
+  };
+  const baseMime = String(mimeType || "audio/webm").split(";")[0].trim();
+  const ext = extMap[baseMime] || "webm";
+
+  const form = new FormData();
+  form.append("file", blob, `audio.${ext}`);
+  form.append("model", WHISPER_MODEL);
+
+  const res = await fetch(OPENAI_AUDIO_URL, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey()}` },
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    return {
+      ok: false,
+      error: `OpenAI whisper ${res.status}: ${body.slice(0, 400)}`,
+    };
+  }
+  const data = await res.json();
+  if (typeof data.text !== "string") {
+    return {
+      ok: false,
+      error: `whisper response missing text: ${JSON.stringify(data).slice(0, 400)}`,
+    };
+  }
+  return {
+    ok: true,
+    text: data.text,
+    model: WHISPER_MODEL,
   };
 }
 

@@ -219,6 +219,39 @@ input[type="text"]:focus {
   color: var(--term-bg);
 }
 
+/* Mic button recording/transcribing states — red while capturing
+   audio, dim while waiting on Whisper, normal when idle. */
+#btn-mic {
+  margin-left: 0.5rem;
+}
+
+#btn-mic.recording {
+  border-color: var(--term-error);
+  color: var(--term-error);
+  animation: mic-pulse 1s ease-in-out infinite alternate;
+}
+
+#btn-mic.transcribing {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+#btn-mic.unsupported {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: var(--term-fg-dim);
+  color: var(--term-fg-dim);
+}
+
+@keyframes mic-pulse {
+  from {
+    box-shadow: 0 0 2px var(--term-error);
+  }
+  to {
+    box-shadow: 0 0 10px var(--term-error);
+  }
+}
+
 /* Contexts list — each entry is a [NNN] NAME — DESC row that acts
    as a button. Kept pure-CSS so there's no framework dependency. */
 .contexts-list {
