@@ -1,48 +1,86 @@
 // Browser-side soma-next runtime.
 //
-// Commit 3 goal: prove that the terminal app has a real SOMA runtime
-// inside the browser tab, not just a chat shell over HTTP. The body
-// lives here; the brain lives on the backend (gpt-4o-mini via
-// /api/contexts/:id/messages). The two halves of the "two-brain"
-// architecture run side-by-side in the same page.
+// Commit 3 booted a single shared hello pack for every context.
+// Commit 4 makes boot-with-manifest reusable so switching contexts
+// hot-swaps the runtime to that context's own PackSpec. The wasm
+// module itself loads exactly once — it's the large download — and
+// `soma_boot_runtime` is called afresh for every pack.
 //
-// Commit 3 scope is intentionally small — it boots the hello pack
-// shipped in frontend/packs/hello/manifest.json and exposes a
-// summary of the loaded ports and skills. Dynamic per-context pack
-// loading arrives in commit 4, LLM-to-PackSpec in commit 6.
+// Contract with callers:
+//   bootPack(manifestJsonString)  → { summary }
+//     Reboots the runtime with the given manifest, returns the
+//     parsed runtime summary. Safe to call repeatedly; each call
+//     wipes the previous runtime state.
 //
-// The wasm bundle comes from soma-project-web's build — copied into
-// frontend/pkg/ by scripts/copy-frontend-assets.sh. Zero build steps
-// in this repo.
+//   getCurrentPackId()             → string | null
+//     Returns the id of the currently loaded pack so the UI can
+//     avoid a needless hot-swap when a context opens with the same
+//     manifest already loaded.
+//
+//   listPorts(), listSkills(), invokePort(port, cap, input)
+//     Thin wrappers over the corresponding wasm exports. They
+//     implicitly await the most recent boot via `bootPromise`.
+//
+// The hello pack is the fallback — if a context has no pack_spec
+// yet, the caller is expected to pass the raw text of
+// frontend/packs/hello/manifest.json into bootPack.
 
+let wasmPromise = null;
 let bootPromise = null;
 let bootSummary = null;
 let bootError = null;
+let currentPackId = null;
 
-async function loadManifest(url) {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(
-      `failed to fetch ${url}: ${res.status} ${res.statusText}`,
-    );
+async function ensureWasm() {
+  if (!wasmPromise) {
+    wasmPromise = (async () => {
+      const mod = await import("./pkg/soma_next.js");
+      await mod.default();
+      return mod;
+    })();
   }
-  return res.text();
+  return wasmPromise;
 }
 
-// Single-shot boot — first caller triggers the wasm init, every
-// subsequent caller awaits the same promise. Makes it safe to call
-// from multiple entry points (chat panel opening, runtime button,
-// Playwright test) without racing.
-export function bootBrowserRuntime() {
-  if (bootPromise) return bootPromise;
+// Parse the incoming manifest just far enough to extract the pack
+// id. The wasm `soma_runtime_summary()` export only reports ports
+// (not the pack id), so we track the id ourselves from the input
+// the caller hands us — that way the UI can show which pack is
+// loaded without a second export.
+function extractPackId(manifestJsonString) {
+  try {
+    const parsed = JSON.parse(manifestJsonString);
+    if (typeof parsed?.id === "string") return parsed.id;
+  } catch {
+    /* fall through — we still try to boot and surface the failure */
+  }
+  return null;
+}
+
+// Boot or re-boot the runtime with a given manifest. The wasm
+// module only loads once; subsequent calls call soma_boot_runtime
+// again with the new manifest, which re-initializes the runtime
+// in-place (ports, skills, memory — all replaced).
+//
+// Returns { summary, packId, skills } — skills is the result of
+// `soma_list_skills()` run immediately after boot, since the
+// runtime summary export doesn't include skills.
+export function bootPack(manifestJsonString) {
+  const packId = extractPackId(manifestJsonString);
   bootPromise = (async () => {
-    const mod = await import("./pkg/soma_next.js");
-    await mod.default();
-    const manifest = await loadManifest("./packs/hello/manifest.json");
-    const summaryJson = mod.soma_boot_runtime(manifest);
+    const mod = await ensureWasm();
+    const summaryJson = mod.soma_boot_runtime(manifestJsonString);
     const summary = JSON.parse(summaryJson);
+    let skills = [];
+    try {
+      skills = JSON.parse(mod.soma_list_skills());
+    } catch {
+      skills = [];
+    }
     bootSummary = summary;
-    return { mod, summary };
+    bootError = null;
+    currentPackId = packId;
+    return { mod, summary, packId, skills };
   })().catch((err) => {
     bootError = err;
     throw err;
@@ -50,8 +88,6 @@ export function bootBrowserRuntime() {
   return bootPromise;
 }
 
-// Cheap accessors so callers don't have to await again if the boot
-// already finished. Returns null until the runtime is ready.
 export function getSummary() {
   return bootSummary;
 }
@@ -60,24 +96,63 @@ export function getBootError() {
   return bootError;
 }
 
-// List the loaded ports (port_id, kind, capabilities) as a JS array.
-// Returns null if the runtime hasn't booted yet.
+export function getCurrentPackId() {
+  return currentPackId;
+}
+
+// Fetch the bundled hello manifest — used as the fallback when a
+// context has no pack_spec yet. Cached after first load so opening
+// many "draft" contexts doesn't re-hit the network.
+let helloManifestPromise = null;
+export function loadHelloManifest() {
+  if (!helloManifestPromise) {
+    helloManifestPromise = fetch("./packs/hello/manifest.json").then(
+      (res) => {
+        if (!res.ok) {
+          throw new Error(
+            `failed to fetch hello manifest: ${res.status}`,
+          );
+        }
+        return res.text();
+      },
+    );
+  }
+  return helloManifestPromise;
+}
+
+// Convenience entry: pass the context row verbatim and the runtime
+// does the right thing — boot the context's pack_spec if set,
+// otherwise fall back to the shared hello manifest.
+export async function bootForContext(context) {
+  const spec = context?.pack_spec;
+  if (typeof spec === "string" && spec.trim() !== "") {
+    return bootPack(spec);
+  }
+  const hello = await loadHelloManifest();
+  return bootPack(hello);
+}
+
+// ---- listing + invocation ------------------------------------------
+
+async function awaitCurrentBoot() {
+  if (!bootPromise) {
+    throw new Error("runtime not booted — call bootPack first");
+  }
+  return bootPromise;
+}
+
 export async function listPorts() {
-  const { mod } = await bootBrowserRuntime();
+  const { mod } = await awaitCurrentBoot();
   return JSON.parse(mod.soma_list_ports());
 }
 
-// List the loaded skills (skill_id, namespace, pack, description).
 export async function listSkills() {
-  const { mod } = await bootBrowserRuntime();
+  const { mod } = await awaitCurrentBoot();
   return JSON.parse(mod.soma_list_skills());
 }
 
-// Invoke a port capability directly and return the PortCallRecord.
-// Thin wrapper over soma_invoke_port so the chat UI can eventually
-// offer "run this" buttons next to plan fragments.
 export async function invokePort(portId, capabilityId, input) {
-  const { mod } = await bootBrowserRuntime();
+  const { mod } = await awaitCurrentBoot();
   const json = mod.soma_invoke_port(
     portId,
     capabilityId,

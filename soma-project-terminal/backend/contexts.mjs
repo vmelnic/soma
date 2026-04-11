@@ -82,6 +82,10 @@ export function createContexts(soma) {
     // tiebreaker when two rows share the same updated_at — UUIDs
     // aren't time-monotonic but they ARE stable, which is all we
     // need to keep the listing deterministic.
+    //
+    // The listing intentionally omits `pack_spec` — manifests can
+    // be multi-kilobyte and the sidebar only needs name + metadata.
+    // Callers fetch the pack via loadContext.
     const result = await soma.invokePort("postgres", "query", {
       sql:
         `SELECT id, name, description, kind, ` +
@@ -99,13 +103,18 @@ export function createContexts(soma) {
   // Timestamps are formatted server-side via to_char() to work around
   // the postgres port's timestamptz-to-json gap (see commit 1 notes
   // in auth.mjs for the same workaround on session expires_at).
+  //
+  // Commit 4: also returns `pack_spec` (the JSON-encoded manifest
+  // the browser boots into the wasm runtime). NULL until a pack
+  // has been stored — callers should fall back to the shared hello
+  // pack in that case.
   async function loadContext(userId, contextId) {
     if (!looksLikeUuid(userId) || !looksLikeUuid(contextId)) {
       return { ok: false, error: "not found" };
     }
     const result = await soma.invokePort("postgres", "query", {
       sql:
-        `SELECT id, name, description, kind, ` +
+        `SELECT id, name, description, kind, pack_spec, ` +
         `       to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at, ` +
         `       to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at ` +
         `FROM contexts ` +
@@ -115,6 +124,76 @@ export function createContexts(soma) {
     const row = result.rows?.[0];
     if (!row) return { ok: false, error: "not found" };
     return { ok: true, context: row };
+  }
+
+  // ---- set pack ----
+  // Stores a JSON-encoded PackSpec on the context and flips `kind`
+  // to 'active'. Commit 6 will call this from the LLM-generated
+  // output; for now tests exercise it directly with a hand-crafted
+  // manifest.
+  //
+  // Validation happens in two places:
+  //   1. The caller passed a parsed object OR a JSON string; we
+  //      canonicalise to a string before storing.
+  //   2. JSON.parse(packJson) must succeed (so we don't store
+  //      malformed text that the browser would trip over later).
+  //
+  // Ownership is enforced on the UPDATE itself — the WHERE clause
+  // includes `user_id` so an id probe from another tenant is a
+  // no-op and returns "not found", same shape as an unknown
+  // context.
+  async function setPackSpec(userId, contextId, packInput) {
+    if (!looksLikeUuid(userId) || !looksLikeUuid(contextId)) {
+      return { ok: false, error: "not found" };
+    }
+
+    // Accept either a string or an object — the API layer sends
+    // JSON, and JS callers can hand us a parsed object directly.
+    let packString;
+    if (typeof packInput === "string") {
+      packString = packInput;
+    } else if (packInput && typeof packInput === "object") {
+      packString = JSON.stringify(packInput);
+    } else {
+      return { ok: false, error: "pack must be an object or JSON string" };
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(packString);
+    } catch (e) {
+      return { ok: false, error: `invalid JSON: ${e.message}` };
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { ok: false, error: "pack must be a JSON object" };
+    }
+    // Lightweight shape check — the wasm runtime does its own full
+    // validation, but rejecting obvious typos here surfaces a 400
+    // instead of a browser-side boot error later.
+    if (typeof parsed.id !== "string" || parsed.id.trim() === "") {
+      return { ok: false, error: "pack.id is required" };
+    }
+    if (!Array.isArray(parsed.skills)) {
+      return { ok: false, error: "pack.skills must be an array" };
+    }
+
+    // Ownership check + update in one statement via RETURNING so we
+    // can tell the "not found" path from a successful UPDATE without
+    // trusting the postgres port's execute-result shape. `updated_at`
+    // is bumped server-side so the sidebar floats this context to the
+    // top of the list.
+    const updated = await soma.invokePort("postgres", "query", {
+      sql:
+        `UPDATE contexts ` +
+        `SET pack_spec = $1, kind = 'active', updated_at = NOW() ` +
+        `WHERE id = $2::text::uuid AND user_id = $3::text::uuid ` +
+        `RETURNING id`,
+      params: [packString, contextId, userId],
+    });
+    if (!updated.rows?.[0]) {
+      return { ok: false, error: "not found" };
+    }
+    return await loadContext(userId, contextId);
   }
 
   // ---- delete ----
@@ -138,5 +217,11 @@ export function createContexts(soma) {
     return { ok: true };
   }
 
-  return { createContext, listForUser, loadContext, deleteContext };
+  return {
+    createContext,
+    listForUser,
+    loadContext,
+    deleteContext,
+    setPackSpec,
+  };
 }

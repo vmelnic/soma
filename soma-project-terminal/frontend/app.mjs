@@ -11,7 +11,7 @@
 // can't break out of the terminal.
 
 import {
-  bootBrowserRuntime,
+  bootForContext,
   getBootError,
 } from "./runtime.mjs";
 
@@ -415,21 +415,24 @@ document
 // -------------------------------------------------------------------
 
 async function updateRuntimePanel() {
+  if (!currentContext) return;
   const el = document.getElementById("runtime-summary");
   el.classList.remove("error");
   el.textContent =
     "  STATE:  BOOTING...\n  PORTS:  —\n  SKILLS: —";
   try {
-    const { summary } = await bootBrowserRuntime();
+    const { summary, packId, skills } = await bootForContext(currentContext);
     const portsList = (summary.ports ?? [])
       .map((p) => p.port_id || p.id || String(p))
       .join(", ");
-    const skillsList = (summary.skills ?? [])
+    const skillsList = (skills ?? [])
       .map((s) => s.skill_id || s.id || String(s))
       .join(", ");
+    const source = currentContext.pack_spec ? "context" : "fallback:hello";
     el.textContent =
       `  STATE:  READY\n` +
-      `  PACK:   ${summary.pack_id || summary.pack || "hello"}\n` +
+      `  PACK:   ${packId || "unknown"}\n` +
+      `  SOURCE: ${source}\n` +
       `  PORTS:  ${portsList || "(none)"}\n` +
       `  SKILLS: ${skillsList || "(none)"}`;
   } catch (err) {

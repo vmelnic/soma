@@ -49,7 +49,7 @@ test.describe("commit 1 — Fallout terminal + magic-link auth", () => {
     expect(res.ok()).toBe(true);
     const body = await res.json();
     expect(body.status).toBe("ok");
-    expect(body.commit).toBe(3);
+    expect(body.commit).toBe(4);
     expect(body.soma_mcp_ready).toBe(true);
   });
 

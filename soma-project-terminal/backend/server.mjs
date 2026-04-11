@@ -20,6 +20,12 @@
 //       GET  /api/contexts/:id/messages
 //       POST /api/contexts/:id/messages   (append user + call brain)
 //
+// Commit 4 adds the dynamic pack loader:
+//       PUT  /api/contexts/:id/pack
+// which validates + stores a manifest on the context row so the
+// browser-side wasm runtime boots that pack next time the context
+// is opened (see frontend/runtime.mjs for the hot-swap).
+//
 // Every database read/write goes through postgres.execute / query.
 // Every email goes through smtp.send_plain. Every random token and
 // sha256 hash goes through crypto.random_string / crypto.sha256.
@@ -338,6 +344,39 @@ async function main() {
         });
       }
 
+      // /api/contexts/:id/pack — PUT stores the compiled PackSpec.
+      // Matched before the single-context handler so the /pack
+      // suffix doesn't get mis-parsed as part of the context id.
+      const packMatch = path.match(/^\/api\/contexts\/([^/]+)\/pack$/);
+      if (packMatch && method === "PUT") {
+        const contextId = packMatch[1];
+        const user = await requireUser(req, res);
+        if (!user) return;
+        const body = await readBody(req);
+        // Accept { pack: {...} } (the documented shape) or a bare
+        // manifest object — the latter makes curl debugging easier.
+        const packInput =
+          body && typeof body === "object" && "pack" in body
+            ? body.pack
+            : body;
+        const result = await contexts.setPackSpec(
+          user.id,
+          contextId,
+          packInput,
+        );
+        if (!result.ok) {
+          const code = result.error === "not found" ? 404 : 400;
+          return sendJson(res, code, {
+            status: "error",
+            error: result.error,
+          });
+        }
+        return sendJson(res, 200, {
+          status: "ok",
+          context: result.context,
+        });
+      }
+
       // /api/contexts/:id/messages — GET lists the transcript, POST
       // appends a user message, calls the brain, appends the reply,
       // and returns both in one response. Matched before the single-
@@ -487,7 +526,7 @@ async function main() {
       if (method === "GET" && path === "/api/health") {
         return sendJson(res, 200, {
           status: "ok",
-          commit: 3,
+          commit: 4,
           soma_mcp_ready: soma.ready,
           brain_fake: String(process.env.BRAIN_FAKE || "") === "1",
         });

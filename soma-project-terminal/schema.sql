@@ -3,6 +3,7 @@
 -- Commit 1 tables: users, sessions, magic_tokens.
 -- Commit 2 tables: contexts.
 -- Commit 3 tables: messages.
+-- Commit 4 columns: contexts.pack_spec (nullable TEXT, JSON-encoded).
 --
 -- Tokens are stored as sha256 hashes, never plaintext. The raw token
 -- is what we email to the user and what the browser holds as a cookie;
@@ -74,6 +75,15 @@ CREATE TABLE IF NOT EXISTS contexts (
 CREATE INDEX IF NOT EXISTS contexts_user_id_idx ON contexts (user_id);
 CREATE INDEX IF NOT EXISTS contexts_user_updated_idx
     ON contexts (user_id, updated_at DESC);
+
+-- Commit 4: pack_spec holds the context's compiled PackSpec as a
+-- JSON-encoded string. NULL means "no pack yet" — the browser boots
+-- the shared hello pack as a fallback. Commit 6 will populate this
+-- column from the reasoning-brain's output. Stored as TEXT (rather
+-- than JSONB) because the wasm entry point wants the raw string
+-- back out; re-parsing a JSONB round trip would lose nothing but
+-- burn an extra JSON encode per boot.
+ALTER TABLE contexts ADD COLUMN IF NOT EXISTS pack_spec TEXT;
 
 -- Chat history per context. Each turn is one row — user prompts and
 -- assistant replies are both stored here in insertion order. Commit 6
