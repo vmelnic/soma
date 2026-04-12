@@ -128,17 +128,59 @@ body {
 
 .lore {
   color: var(--term-fg);
-  font-size: 20px;
+  /* Match the body text rhythm (22px) instead of sitting a step
+     below it. This is the default phosphor-box style and is used
+     for the context-detail summary, link-sent lore, error lore
+     and a few other places — they should all read at the body
+     default so nothing feels undersized. */
+  font-size: 22px;
+  line-height: 1.35;
   margin: 0.75rem 0 1rem 0;
   padding: 0.5rem 1rem;
   background: var(--term-bg-lighter);
   border-left: 2px solid var(--term-fg-dim);
-  white-space: pre-wrap;
+  /* `pre` preserves whitespace by default. We explicitly keep
+     `pre` (not `pre-wrap`) so ASCII label/value alignment stays
+     intact even when a value is long — the box gets a horizontal
+     scrollbar instead of breaking the column grid. `overflow-wrap:
+     anywhere` is the last-resort fallback for pathologically long
+     unbroken tokens. */
+  white-space: pre;
+  overflow-x: auto;
+  overflow-wrap: anywhere;
 }
 
 .lore.error {
   color: var(--term-error);
   border-left-color: var(--term-error);
+}
+
+/* Every <span> inside a .lore block inherits its font-size so the
+   value text lines up with the label text on the same monospace
+   grid. Browsers usually do this automatically, but we pin it
+   explicitly here because the body rule sets a 22px default that
+   some browsers re-compute for nested inline elements. */
+.lore span {
+  font-size: inherit;
+  font-family: inherit;
+  color: var(--term-fg-bright);
+}
+
+/* Context-detail metadata card specifically — the labels stay in
+   the dim phosphor, the values pop in the bright phosphor. Same
+   font size as the rest of .lore so the NAME/DESCRIPTION/CREATED/
+   UPDATED column alignment is visually stable. */
+#context-detail-summary {
+  font-size: 22px;
+  line-height: 1.4;
+  /* a little breathing room inside the box since the card carries
+     four labeled rows instead of free prose */
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+
+#context-detail-summary span {
+  color: var(--term-fg-bright);
 }
 
 .meta {
