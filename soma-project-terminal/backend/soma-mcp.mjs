@@ -113,10 +113,22 @@ export class SomaMcpClient {
   }
 
   // Return a compact text catalog of the loaded ports + their
-  // capabilities, suitable for embedding in a system prompt. Tries
-  // to extract a useful summary regardless of whether the raw
-  // catalog is shaped as `{ports: [...]}` or a bare array, since
-  // that has varied across soma-next builds.
+  // capabilities, suitable for embedding in a system prompt.
+  //
+  // For each capability we surface:
+  //   - capability_id
+  //   - a risk tag (read / write / destructive) derived from
+  //     effect_class + risk_class, so the brain can tell which
+  //     calls are safe to issue freely and which need operator
+  //     confirmation
+  //   - the `purpose` string from the port metadata — this is the
+  //     one-line human description the port author wrote, and
+  //     it's the closest thing to real documentation the brain
+  //     gets (input_schema from list_ports is generic
+  //     {type: "object"} and carries no field info)
+  //
+  // Tries to handle varied catalog shapes: {ports: [...]} or a
+  // bare array, capability entries as strings or objects, etc.
   getPortCatalogSummary() {
     const cat = this.portCatalog;
     if (!cat) return "(port catalog unavailable)";
@@ -127,8 +139,6 @@ export class SomaMcpClient {
         ? cat.ports
         : null;
     if (!portArray) {
-      // Unknown shape — fall back to a size-capped JSON dump so
-      // the model at least has the raw info to parse.
       return JSON.stringify(cat).slice(0, 3000);
     }
 
@@ -137,23 +147,58 @@ export class SomaMcpClient {
       if (!p || typeof p !== "object") continue;
       const id = p.port_id || p.id || p.name || "(unknown)";
       const desc = p.description ? ` — ${p.description}` : "";
+      lines.push(`${id}${desc}`);
+
       const caps = Array.isArray(p.capabilities)
         ? p.capabilities
         : Array.isArray(p.skills)
           ? p.skills
           : [];
-      const capNames = caps
-        .map((c) => {
-          if (typeof c === "string") return c;
-          return c?.capability_id || c?.id || c?.name || null;
-        })
-        .filter((x) => typeof x === "string" && x !== "");
-      lines.push(`- ${id}${desc}`);
-      if (capNames.length > 0) {
-        lines.push(`    capabilities: ${capNames.join(", ")}`);
+
+      // First pass: compute the max capability id width so the
+      // rendered table aligns visually (helps the model parse).
+      let maxId = 0;
+      for (const c of caps) {
+        const capId =
+          typeof c === "string"
+            ? c
+            : c?.capability_id || c?.id || c?.name || null;
+        if (typeof capId === "string" && capId.length > maxId) {
+          maxId = capId.length;
+        }
       }
+
+      for (const c of caps) {
+        if (typeof c === "string") {
+          lines.push(`  ${c.padEnd(maxId)}`);
+          continue;
+        }
+        const capId = c?.capability_id || c?.id || c?.name;
+        if (!capId) continue;
+
+        // Map (effect_class, risk_class) → a short tag the model
+        // can reason about at a glance.
+        const eff = String(c?.effect_class || "").toLowerCase();
+        const risk = String(c?.risk_class || "").toLowerCase();
+        let tag = "read";
+        if (eff === "destructive" || risk === "critical") {
+          tag = "destructive";
+        } else if (eff.includes("mutation") || eff.includes("external")) {
+          tag = "write";
+        } else if (eff === "readonly" || eff === "none") {
+          tag = "read";
+        }
+
+        const purpose = c?.purpose ? ` — ${c.purpose}` : "";
+        lines.push(
+          `  ${capId.padEnd(maxId)}  [${tag}]${purpose}`,
+        );
+      }
+      lines.push("");
     }
-    return lines.length > 0 ? lines.join("\n") : "(no ports loaded)";
+    return lines.length > 0
+      ? lines.join("\n").trimEnd()
+      : "(no ports loaded)";
   }
 
   request(method, params) {
