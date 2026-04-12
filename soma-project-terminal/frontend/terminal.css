@@ -203,7 +203,7 @@ input[type="text"]:focus {
   background: var(--term-bg);
   color: var(--term-fg-bright);
   font-family: inherit;
-  font-size: 24px;
+  font-size: 18px;
   padding: 0.4rem 0.9rem;
   border: 1px solid var(--term-fg-bright);
   cursor: pointer;
