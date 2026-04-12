@@ -92,7 +92,68 @@ export class SomaMcpClient {
     // MCP spec: client must send `initialize` before any tools/call.
     await this.request("initialize", {});
     this.ready = true;
+
+    // Cache the port catalog once, right after init. The chat
+    // brain's system prompt embeds a compact summary of this so
+    // it doesn't need to call list_ports every turn just to know
+    // what's available. Ports don't change between turns for the
+    // life of the backend — they're baked into packs/platform at
+    // startup — so a one-shot snapshot is correct.
+    try {
+      const raw = await this.callTool("list_ports", {});
+      this.portCatalog = this.unwrap(raw);
+    } catch (err) {
+      console.warn(
+        `[soma-mcp] list_ports at startup failed: ${err.message}`,
+      );
+      this.portCatalog = null;
+    }
+
     console.log("[soma-mcp] soma-next MCP server ready");
+  }
+
+  // Return a compact text catalog of the loaded ports + their
+  // capabilities, suitable for embedding in a system prompt. Tries
+  // to extract a useful summary regardless of whether the raw
+  // catalog is shaped as `{ports: [...]}` or a bare array, since
+  // that has varied across soma-next builds.
+  getPortCatalogSummary() {
+    const cat = this.portCatalog;
+    if (!cat) return "(port catalog unavailable)";
+
+    const portArray = Array.isArray(cat)
+      ? cat
+      : Array.isArray(cat?.ports)
+        ? cat.ports
+        : null;
+    if (!portArray) {
+      // Unknown shape — fall back to a size-capped JSON dump so
+      // the model at least has the raw info to parse.
+      return JSON.stringify(cat).slice(0, 3000);
+    }
+
+    const lines = [];
+    for (const p of portArray) {
+      if (!p || typeof p !== "object") continue;
+      const id = p.port_id || p.id || p.name || "(unknown)";
+      const desc = p.description ? ` — ${p.description}` : "";
+      const caps = Array.isArray(p.capabilities)
+        ? p.capabilities
+        : Array.isArray(p.skills)
+          ? p.skills
+          : [];
+      const capNames = caps
+        .map((c) => {
+          if (typeof c === "string") return c;
+          return c?.capability_id || c?.id || c?.name || null;
+        })
+        .filter((x) => typeof x === "string" && x !== "");
+      lines.push(`- ${id}${desc}`);
+      if (capNames.length > 0) {
+        lines.push(`    capabilities: ${capNames.join(", ")}`);
+      }
+    }
+    return lines.length > 0 ? lines.join("\n") : "(no ports loaded)";
   }
 
   request(method, params) {

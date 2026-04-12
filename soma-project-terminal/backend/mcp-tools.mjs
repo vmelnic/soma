@@ -1,76 +1,47 @@
 // OpenAI function-tool definitions exposed to the chat brain.
 //
-// Commit "conversation-first" deliberately keeps this set tiny.
-// Instead of generating one OpenAI tool per (port, capability) pair
-// — which would require us to maintain a static catalog that drifts
-// from what soma-next actually has loaded — we expose three
-// introspection-friendly tools and let the model discover the live
-// runtime through them:
+// The chat brain has ONE tool: `invoke_port`. Every port capability
+// in the SOMA runtime is reachable through it. The brain doesn't
+// need separate `list_ports` / `list_skills` tools because the port
+// catalog is embedded directly in the system prompt
+// (see SomaMcpClient.getPortCatalogSummary() → buildSystemPrompt).
 //
-//   list_ports   — returns the currently loaded port catalog with
-//                  per-port capability lists and input/output schemas
-//   list_skills  — returns the skill catalog for the active pack
-//   invoke_port  — invokes any (port_id, capability_id) with input
+// Why one tool instead of many:
 //
-// The chat brain's system prompt tells it to call list_ports /
-// list_skills first when it doesn't know what's available, then
-// invoke_port to actually run things. This is the same pattern
-// HelperBook uses via raw MCP, just wrapped as OpenAI function
-// tools so gpt-4o-mini's tool-calling mechanism can drive it.
+// - gpt-4o-mini on a fresh context was running list_ports +
+//   list_skills + invoke_port repeatedly, burning the MAX_TOOL_LOOPS
+//   budget on rediscovery every turn and never producing a final
+//   reply. Removing the discovery tools forces it to use what's
+//   already in the prompt instead of looping on introspection.
+// - ports don't change between turns — they're baked into the
+//   platform pack at startup. A dynamic discovery tool for static
+//   data is cargo-cult tool design.
+// - a single tool with a clear structured input is the minimum
+//   surface area the model has to get right.
 //
-// If the tool set grows later, it grows HERE, once, as code we own.
-// The model's behavior is the same either way — it discovers tools
-// through list_ports / list_skills, never through a hardcoded
-// catalog in the prompt.
+// If the tool set grows later (e.g. a `search_memory` convenience
+// tool), it grows HERE, as code WE own, not by exposing more MCP
+// introspection endpoints to the LLM.
 
-// Static OpenAI function-tool definitions. Shape matches
-// https://platform.openai.com/docs/api-reference/chat/create
-// tools[] → { type: "function", function: {...} }
 export const DEFAULT_CHAT_TOOLS = Object.freeze([
-  {
-    type: "function",
-    function: {
-      name: "list_ports",
-      description:
-        "List the ports currently loaded in the SOMA runtime, with each port's capabilities and their input/output schemas. Call this first when you don't know what's available. Takes no arguments.",
-      parameters: {
-        type: "object",
-        properties: {},
-        additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "list_skills",
-      description:
-        "List the skills currently registered in the active pack, with their ids, namespaces, and descriptions. Call this to discover higher-level operations composed over ports. Takes no arguments.",
-      parameters: {
-        type: "object",
-        properties: {},
-        additionalProperties: false,
-      },
-    },
-  },
   {
     type: "function",
     function: {
       name: "invoke_port",
       description:
-        "Invoke a specific port capability and return its result. Use list_ports first to discover which (port_id, capability_id) pairs exist and what input each takes. The `input` field is the capability-specific JSON input (e.g. {sql, params} for postgres.query).",
+        "Invoke a specific port capability and return its result. The port catalog is listed in your system prompt — use those exact (port_id, capability_id) pairs. The `input` field is the capability-specific JSON input (e.g. {sql, params} for postgres.query, {data} for crypto.sha256, {to, subject, body} for smtp.send_plain).",
       parameters: {
         type: "object",
         properties: {
           port_id: {
             type: "string",
             description:
-              "The id of the port to invoke, from the list_ports catalog (e.g. 'postgres', 'smtp', 'crypto').",
+              "Port id from the catalog in your system prompt (e.g. 'postgres', 'smtp', 'crypto').",
           },
           capability_id: {
             type: "string",
             description:
-              "The capability id under that port (e.g. 'query', 'execute', 'send_plain', 'sha256').",
+              "Capability id under that port (e.g. 'query', 'execute', 'send_plain', 'sha256', 'random_string').",
           },
           input: {
             type: "object",
@@ -87,27 +58,17 @@ export const DEFAULT_CHAT_TOOLS = Object.freeze([
 ]);
 
 // Build an `invokeTool(name, args)` handler closed over a
-// SomaMcpClient instance. The handler dispatches the three
-// introspection tools to the right MCP method and wraps the
-// response in a uniform shape the chat brain loop understands:
+// SomaMcpClient instance. The only supported tool is `invoke_port`
+// — list_ports / list_skills were removed because the catalog is
+// already in the system prompt.
 //
-//   { ok: true,  result: <any> }     // success
-//   { ok: false, error: "..." }      // failure (tool-level, not network)
-//
-// Callers should catch network/transport errors themselves — those
-// propagate out as thrown exceptions from the underlying
-// SomaMcpClient.
+// Returns { ok: true, result: <any> } on success or
+// { ok: false, error: "..." } on failure. Callers should catch
+// network/transport errors themselves — those propagate out as
+// thrown exceptions from the underlying SomaMcpClient.
 export function makeInvokeTool(soma) {
   return async function invokeTool(name, args) {
     try {
-      if (name === "list_ports") {
-        const raw = await soma.callTool("list_ports", {});
-        return { ok: true, result: soma.unwrap(raw) };
-      }
-      if (name === "list_skills") {
-        const raw = await soma.callTool("list_skills", {});
-        return { ok: true, result: soma.unwrap(raw) };
-      }
       if (name === "invoke_port") {
         const portId = args?.port_id;
         const capabilityId = args?.capability_id;

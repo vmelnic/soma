@@ -200,12 +200,50 @@ test.describe("chat + tool-calling", () => {
     expect(res.status()).toBe(404);
   });
 
-  test("::tool list_ports runs against the real soma-next runtime", async ({
+  test("::tool invoke_port crypto.random_string runs via MCP", async ({
     request,
   }) => {
     const { authHeader } = await loginAs(request);
-    const ctx = await createContext(request, authHeader, "tool-listports");
+    const ctx = await createContext(request, authHeader, "tool-crypto");
 
+    // Drive the fake brain to invoke a real port capability via
+    // the one tool we expose (invoke_port). The crypto port is
+    // stateless so the result is deterministic in shape (a
+    // `value` string), which is easy to assert on.
+    const args = {
+      port_id: "crypto",
+      capability_id: "random_string",
+      input: { length: 16 },
+    };
+    const res = await postMessage(
+      request,
+      authHeader,
+      ctx.id,
+      `::tool invoke_port ${JSON.stringify(args)}`,
+    );
+    expect(res.status()).toBe(201);
+    const body = await res.json();
+    expect(body.status).toBe("ok");
+    expect(body.tool_calls).toHaveLength(1);
+    expect(body.tool_calls[0].name).toBe("invoke_port");
+    expect(body.tool_calls[0].result.ok).toBe(true);
+    // crypto.random_string returns { value: "<N chars>" }
+    expect(
+      typeof body.tool_calls[0].result.result.value,
+    ).toBe("string");
+    expect(body.tool_calls[0].result.result.value.length).toBe(16);
+  });
+
+  test("unknown tool name is rejected at the dispatch layer", async ({
+    request,
+  }) => {
+    const { authHeader } = await loginAs(request);
+    const ctx = await createContext(request, authHeader, "tool-bogus");
+
+    // list_ports was removed from the exposed tool catalog in the
+    // conversation-first tightening — only invoke_port is callable
+    // now. Driving ::tool list_ports through the fake brain should
+    // surface an "unknown tool" error in the trace, not a success.
     const res = await postMessage(
       request,
       authHeader,
@@ -214,13 +252,10 @@ test.describe("chat + tool-calling", () => {
     );
     expect(res.status()).toBe(201);
     const body = await res.json();
-    expect(body.status).toBe("ok");
     expect(body.tool_calls).toHaveLength(1);
     expect(body.tool_calls[0].name).toBe("list_ports");
-    expect(body.tool_calls[0].result.ok).toBe(true);
-    // The assistant reply embeds a snippet of the tool result —
-    // enough to confirm the round trip happened.
-    expect(body.assistant_message.content).toContain("list_ports");
+    expect(body.tool_calls[0].result.ok).toBe(false);
+    expect(body.tool_calls[0].result.error).toMatch(/unknown tool/i);
   });
 
   test("::tool invoke_port runs a real postgres query via MCP", async ({

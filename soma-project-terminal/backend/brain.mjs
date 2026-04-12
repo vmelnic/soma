@@ -31,9 +31,11 @@ const WHISPER_MODEL = "whisper-1";
 
 // Safety cap on tool-call loops. A runaway model that keeps
 // invoking tools without ever producing a final answer shouldn't
-// be able to burn quota or hammer the backend. 8 iterations is
-// well above what any sane chat turn needs.
-const MAX_TOOL_LOOPS = 8;
+// be able to burn quota or hammer the backend. 12 iterations
+// covers any legitimate multi-step operation (check state → act →
+// verify → respond) with room for retries; past 12, the model is
+// stuck in an exploration loop and we should bail out.
+const MAX_TOOL_LOOPS = 12;
 
 function fake() {
   return String(process.env.BRAIN_FAKE || "").trim() === "1";
@@ -41,6 +43,28 @@ function fake() {
 
 function chatModel() {
   return process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
+}
+
+// OpenAI has two model families with incompatible parameter shapes
+// for chat.completions:
+//
+//   - Chat family (gpt-4o, gpt-4o-mini, gpt-4, gpt-3.5-turbo, ...):
+//       accepts `temperature` + `max_tokens`
+//       rejects `reasoning_effort`
+//
+//   - Reasoning family (gpt-5, gpt-5-mini, o1, o1-mini, o3, o3-mini):
+//       accepts `reasoning_effort` + `max_completion_tokens`
+//       rejects `temperature` and `max_tokens` — API 400s, doesn't
+//       silently ignore them
+//
+// Both families support the SAME tool-calling format, so we only
+// need to branch on which "thinking-budget" parameter to pass.
+// This detection lets the operator flip OPENAI_CHAT_MODEL between
+// gpt-4o-mini and gpt-5-mini in .env without any other code
+// changes — same wrapper, same tool loop, just a different model.
+function isReasoningModel(modelName) {
+  if (typeof modelName !== "string") return false;
+  return /^(gpt-5|o1|o3)/i.test(modelName);
 }
 
 function apiKey() {
@@ -179,13 +203,26 @@ export async function runChatTurn({
   let finalContent = null;
   let lastModel = chatModel();
 
+  const model = chatModel();
+  const reasoning = isReasoningModel(model);
+
   for (let loop = 0; loop < MAX_TOOL_LOOPS; loop += 1) {
     const payload = {
-      model: chatModel(),
+      model,
       messages: runningMessages,
-      temperature,
-      max_tokens: maxTokens,
     };
+    // Branch the thinking-budget parameter by model family.
+    // Reasoning models 400 on `temperature`/`max_tokens`; chat
+    // models ignore `reasoning_effort`. Keep them separate.
+    // No max_completion_tokens on the reasoning path — let the
+    // model decide its own output budget so multi-step tool
+    // chains aren't prematurely cut off by a hard cap.
+    if (reasoning) {
+      payload.reasoning_effort = "low";
+    } else {
+      payload.temperature = temperature;
+      payload.max_tokens = maxTokens;
+    }
     if (Array.isArray(tools) && tools.length > 0) {
       payload.tools = tools;
       payload.tool_choice = "auto";
@@ -262,11 +299,41 @@ export async function runChatTurn({
   }
 
   if (finalContent === null) {
-    // Hit the MAX_TOOL_LOOPS cap without a final content. Return
-    // whatever trace we have with a clear error so the transcript
-    // isn't silently blank.
+    // Hit MAX_TOOL_LOOPS without a final content. Walk back
+    // through runningMessages to find the most recent assistant
+    // content the model did produce — sometimes the model says
+    // something useful between tool calls and we can surface that
+    // instead of a cryptic error. Also append a trace summary so
+    // the operator can see what was attempted.
+    let lastContent = null;
+    for (let i = runningMessages.length - 1; i >= 0; i -= 1) {
+      const m = runningMessages[i];
+      if (
+        m?.role === "assistant" &&
+        typeof m?.content === "string" &&
+        m.content.trim() !== ""
+      ) {
+        lastContent = m.content;
+        break;
+      }
+    }
+
+    const toolSummary = traceToolCalls
+      .map(
+        (tc, i) =>
+          `  ${i + 1}. ${tc.name}(${JSON.stringify(tc.args).slice(0, 120)}) → ${
+            tc.result?.ok ? "ok" : "error"
+          }`,
+      )
+      .join("\n");
+
+    console.warn(
+      `[brain] runChatTurn exceeded MAX_TOOL_LOOPS=${MAX_TOOL_LOOPS}. Tool trace:\n${toolSummary}`,
+    );
+
     finalContent =
-      "(brain exceeded the tool-call loop cap — check logs for the full trace)";
+      (lastContent ? `${lastContent}\n\n` : "") +
+      `(I got stuck running tools and didn't reach a final answer. Attempted ${traceToolCalls.length} tool calls:\n${toolSummary || "  (none)"}\n\nCan you rephrase or tell me more specifically what you need?)`;
   }
 
   return { content: finalContent, tool_calls: traceToolCalls, model: lastModel };
@@ -282,58 +349,69 @@ export async function runChatTurn({
 // rules force the model to re-read the runtime state each turn
 // instead of "remembering" what it decided.
 
-const META_SYSTEM_PROMPT = `You are SOMA, a personal assistant running inside a terminal. The operator is working in a single conversation context — a named space with its own chat history and its own scoped data. You have access to tools that invoke real ports in the SOMA runtime: storage, email, HTTP, crypto, filesystem, etc.
+const META_SYSTEM_PROMPT = `You are SOMA, a personal assistant running inside a terminal. The operator works in one named context at a time — a conversation scope with its own data. Your job is to help them get things done, using the SOMA runtime's ports through the single tool you have.
 
-You have three tools available by default:
-- list_ports:  returns the live port catalog with capabilities. Call this when you don't know what's available.
-- list_skills: returns the skill catalog for the currently loaded pack.
-- invoke_port: invokes a specific (port_id, capability_id) with an input object. This is how you actually run things.
+You have ONE tool: invoke_port(port_id, capability_id, input).
+It routes to real ports in the backend SOMA runtime.
 
-Ground rules:
+## PORT CATALOG (use these exact port_id / capability_id pairs)
 
-1. STATE LIVES IN THE TOOLS, NOT IN YOU. Before you answer a question about the operator's data, call the relevant tool to fetch the current state. Don't answer from memory of what you decided last turn — the operator may have changed things, the runtime may have been restarted, another session may have edited the same data.
+{{PORT_CATALOG}}
 
-2. OBSERVE BEFORE YOU ACT. If you're about to write data, first check what's already there (list, get). If you're setting up a new space, check whether it's already set up. Use list_ports + list_skills if you don't yet know what the runtime exposes.
+## CURRENT CONTEXT
 
-3. NAMESPACE EVERYTHING TO THIS CONTEXT. Every conversation has its own scoped data space. When storing data, prefix your keys / table names / file paths with the context's namespace (shown below) so different contexts don't collide. If you're creating a postgres table, name it "{{NAMESPACE}}_<what>". If you're writing a key/value pair, prefix the key with "{{NAMESPACE}}:". If you're writing a file, put it under a directory named "{{NAMESPACE}}". When reading, always use the same prefix. This is how per-context isolation works — there is no automatic scoping layer; YOU are the scoper.
+Name:       {{CONTEXT_NAME}}
+Namespace:  {{NAMESPACE}}   ← prefix every stored artifact with this
 
-4. PICK A STORAGE STRATEGY AND STICK TO IT PER CONVERSATION. If the operator asks for a todo list, decide once (for example: "I'll store each task as a row in a postgres table named '{{NAMESPACE}}_tasks'") and reuse that scheme throughout the conversation. Don't switch schemes mid-conversation unless the operator asks you to migrate.
+## RULES (read these carefully — they matter more than you think)
 
-5. CONFIRM BEFORE DESTRUCTIVE ACTIONS. Deleting data, overwriting existing values without a diff, sending email, making external HTTP calls — ask first unless the operator's message clearly authorized it.
+1. KEEP TOOL CALLS SHORT. A simple question should take 1-2 tool calls and then a final answer. Not 5, not 10. If you're about to make a 3rd tool call in a single turn, ask yourself: "do I actually need more information, or can I answer the operator with what I already have?" Usually you can answer.
 
-6. ASK WHEN THE ASK IS AMBIGUOUS. "add a task" is clear; "sort out my week" is not. Ask a short clarifying question instead of guessing.
+2. STOP AND RESPOND. After each tool call, decide: did this give me what I need to answer the operator? If yes, RESPOND. Do not issue another tool call "just to be safe".
 
-7. RESPOND IN PLAIN CONVERSATIONAL TEXT. Markdown is fine for lists, tables, and emphasis. Keep responses concise — this is a terminal, not a report. Imagine you are speaking over a 1980s monochrome CRT.
+3. FRESH CONTEXT, NO DATA YET? JUST ANSWER AND ASK. If the operator asks about data in a brand-new context where nothing has been set up, do NOT go hunting through the runtime. Say plainly "you don't have any X yet in this context — want me to start tracking them?" That is the correct response. Don't call tools to prove it.
 
-8. WHEN YOU USE A TOOL, TELL THE OPERATOR WHAT YOU FOUND OR DID IN HUMAN TERMS. Don't dump raw JSON unless they asked for it.
+4. NAMESPACE EVERYTHING. Prefix every stored artifact with {{NAMESPACE}}. Postgres tables should be named "{{NAMESPACE}}_<what>", key-value keys should start with "{{NAMESPACE}}:", filesystem paths should live under a directory "{{NAMESPACE}}/". Read back using the same prefix. Different contexts MUST NOT collide — YOU are the scoper, the runtime does not do this for you.
 
-9. NEVER EMIT SHELL COMMANDS, SQL STATEMENTS, CODE BLOCKS, OR CONFIG SNIPPETS TO THE OPERATOR UNLESS THEY EXPLICITLY ASKED. The operator doesn't want to read code; they want their work done. SQL and shell commands are things you pass TO tools, not to the human.
+5. PICK A STORAGE STRATEGY AND STICK TO IT. If the operator wants to track tasks, decide once ("I'll use a postgres table named {{NAMESPACE}}_tasks with id/text/done columns") and reuse it. Don't change mid-conversation.
 
-Current context:
-- Name:       {{CONTEXT_NAME}}
-- Namespace:  {{NAMESPACE}}    (use this as a prefix for every stored artifact)
+6. CONFIRM BEFORE DESTRUCTIVE WRITES. Deleting, overwriting without a diff, sending real email, making outbound HTTP calls — ask first unless the operator clearly authorized it.
 
-If the context is brand new and no data has been set up yet, help the operator say what they want to track. Set up the necessary storage using the tools. From then on, handle their requests naturally.`;
+7. ASK WHEN AMBIGUOUS. "add a task" is clear; "sort out my week" is not. One short clarifying question beats guessing.
 
-// Sanitize a UUID into a postgres-identifier-safe + key-prefix-safe
-// namespace. UUIDs have hyphens and postgres identifiers can't start
-// with digits, so we prepend "ctx_" and strip the hyphens, keeping
-// enough characters to avoid collisions within one operator's
-// contexts.
+8. RESPOND IN CONVERSATIONAL TEXT. Markdown lists, tables, emphasis are fine. Keep it terse — you're a terminal, not a report. No preamble, no "great question", just the answer.
+
+9. REPORT TOOL RESULTS IN HUMAN TERMS. Don't dump raw JSON unless the operator asked for it. "You have 3 tasks: buy milk, pay rent, call dentist" beats "[{id: ..., text: ...}]".
+
+10. NEVER EMIT SQL / SHELL / CODE TO THE OPERATOR. SQL is what you pass to the postgres port. Shell is what you pass to a command port. The operator doesn't want to read either — they want their work done.
+
+## WHAT TO DO ON THE FIRST MESSAGE IN A NEW CONTEXT
+
+If this is the operator's first message and no data has been set up, DO NOT start by calling tools to explore. Just read what they said and either answer it or ask a clarifying question. For example:
+
+- Operator: "list all tasks" → "You don't have any tasks in this context yet. Want me to set up task tracking?"
+- Operator: "add milk" → "Want me to start a shopping list here? I can persist items with postgres so they survive reloads."
+- Operator: "what can you do?" → describe what the available ports enable in plain terms, don't call list_ports.
+
+Only start calling tools once the operator has said what they actually want to track.`;
+
 function contextNamespace(contextId) {
   if (!contextId || typeof contextId !== "string") return "ctx_unknown";
   const compact = contextId.replace(/-/g, "").slice(0, 12).toLowerCase();
   return `ctx_${compact}`;
 }
 
-export function buildSystemPrompt(context) {
+export function buildSystemPrompt(context, portCatalogSummary) {
   const name =
     (context?.name && String(context.name).trim()) || "(unnamed context)";
   const namespace = contextNamespace(context?.id);
-  return META_SYSTEM_PROMPT.replace(/{{CONTEXT_NAME}}/g, name).replace(
-    /{{NAMESPACE}}/g,
-    namespace,
-  );
+  const catalog =
+    typeof portCatalogSummary === "string" && portCatalogSummary !== ""
+      ? portCatalogSummary
+      : "(port catalog unavailable — use invoke_port with best-known port ids like postgres/query, crypto/sha256, smtp/send_plain)";
+  return META_SYSTEM_PROMPT.replace(/{{CONTEXT_NAME}}/g, name)
+    .replace(/{{NAMESPACE}}/g, namespace)
+    .replace(/{{PORT_CATALOG}}/g, catalog);
 }
 
 export { contextNamespace };

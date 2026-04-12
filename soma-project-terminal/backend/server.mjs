@@ -438,7 +438,10 @@ async function main() {
         let reply;
         try {
           reply = await runChatTurn({
-            systemPrompt: buildSystemPrompt(ctx.context),
+            systemPrompt: buildSystemPrompt(
+              ctx.context,
+              soma.getPortCatalogSummary(),
+            ),
             history: hist.history,
             tools: DEFAULT_CHAT_TOOLS,
             invokeTool,
