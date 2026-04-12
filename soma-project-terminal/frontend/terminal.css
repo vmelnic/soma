@@ -17,6 +17,12 @@
 }
 
 html,
+/* ONE font size — every element inherits this unless it has an
+   extremely good reason not to (today: nothing does). Visual
+   hierarchy comes from color (--term-fg / --term-fg-bright /
+   --term-fg-dim), not from font-size variation. If a rule below
+   sets its own font-size, it's almost certainly wrong and should
+   be deleted. */
 body {
   margin: 0;
   padding: 0;
@@ -24,7 +30,7 @@ body {
   background: var(--term-bg);
   color: var(--term-fg);
   font-family: "VT323", "Share Tech Mono", "Courier New", monospace;
-  font-size: 22px;
+  font-size: 16px;
   line-height: 1.35;
   overflow-x: hidden;
   text-shadow: var(--term-glow);
@@ -93,7 +99,6 @@ body {
 
 .ascii-logo {
   color: var(--term-fg-bright);
-  font-size: 16px;
   line-height: 1.15;
   margin: 0 0 0.5rem 0;
   white-space: pre;
@@ -102,7 +107,6 @@ body {
 
 .term-meta {
   color: var(--term-fg-dim);
-  font-size: 20px;
   padding-top: 0.5rem;
   border-top: 1px solid var(--term-fg-dim);
 }
@@ -117,7 +121,6 @@ body {
 
 .prompt {
   color: var(--term-fg-bright);
-  font-size: 24px;
   margin: 0.5rem 0;
 }
 
@@ -128,23 +131,16 @@ body {
 
 .lore {
   color: var(--term-fg);
-  /* Match the body text rhythm (22px) instead of sitting a step
-     below it. This is the default phosphor-box style and is used
-     for the context-detail summary, link-sent lore, error lore
-     and a few other places — they should all read at the body
-     default so nothing feels undersized. */
-  font-size: 22px;
-  line-height: 1.35;
   margin: 0.75rem 0 1rem 0;
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 0.75rem;
   background: var(--term-bg-lighter);
   border-left: 2px solid var(--term-fg-dim);
-  /* `pre` preserves whitespace by default. We explicitly keep
-     `pre` (not `pre-wrap`) so ASCII label/value alignment stays
-     intact even when a value is long — the box gets a horizontal
-     scrollbar instead of breaking the column grid. `overflow-wrap:
-     anywhere` is the last-resort fallback for pathologically long
-     unbroken tokens. */
+  /* `pre` preserves whitespace. We use `pre` (not `pre-wrap`) so
+     ASCII label/value alignment stays intact even when a value is
+     long — the box gets a horizontal scrollbar instead of
+     breaking the column grid. overflow-wrap: anywhere is the
+     last-resort fallback for pathologically long unbroken
+     tokens. */
   white-space: pre;
   overflow-x: auto;
   overflow-wrap: anywhere;
@@ -155,37 +151,17 @@ body {
   border-left-color: var(--term-error);
 }
 
-/* Every <span> inside a .lore block inherits its font-size so the
-   value text lines up with the label text on the same monospace
-   grid. Browsers usually do this automatically, but we pin it
-   explicitly here because the body rule sets a 22px default that
-   some browsers re-compute for nested inline elements. */
+/* Values inside a .lore block (<span> children) take the bright
+   phosphor color so they pop against the normal-phosphor labels.
+   No font-size override — inherit the body default like
+   everything else. */
 .lore span {
-  font-size: inherit;
   font-family: inherit;
-  color: var(--term-fg-bright);
-}
-
-/* Context-detail metadata card specifically — the labels stay in
-   the dim phosphor, the values pop in the bright phosphor. Same
-   font size as the rest of .lore so the NAME/DESCRIPTION/CREATED/
-   UPDATED column alignment is visually stable. */
-#context-detail-summary {
-  font-size: 22px;
-  line-height: 1.4;
-  /* a little breathing room inside the box since the card carries
-     four labeled rows instead of free prose */
-  padding: 0.75rem 1rem;
-  margin-bottom: 1rem;
-}
-
-#context-detail-summary span {
   color: var(--term-fg-bright);
 }
 
 .meta {
   color: var(--term-fg-dim);
-  font-size: 18px;
 }
 
 form {
@@ -201,7 +177,6 @@ form {
 
 .field-prefix {
   color: var(--term-fg-dim);
-  font-size: 20px;
 }
 
 input[type="email"],
@@ -210,8 +185,8 @@ input[type="text"] {
   background: var(--term-bg);
   color: var(--term-fg-bright);
   font-family: inherit;
-  font-size: 22px;
-  padding: 0.35rem 0.5rem;
+  font-size: inherit;
+  padding: 0.4rem 0.6rem;
   border: 1px solid var(--term-fg-dim);
   outline: none;
   text-shadow: var(--term-glow);
@@ -228,8 +203,8 @@ input[type="text"]:focus {
   background: var(--term-bg);
   color: var(--term-fg-bright);
   font-family: inherit;
-  font-size: 22px;
-  padding: 0.4rem 1rem;
+  font-size: 24px;
+  padding: 0.4rem 0.9rem;
   border: 1px solid var(--term-fg-bright);
   cursor: pointer;
   text-shadow: var(--term-glow);
@@ -311,7 +286,7 @@ input[type="text"]:focus {
   border: 1px solid var(--term-fg-dim);
   color: var(--term-fg-bright);
   font-family: inherit;
-  font-size: 20px;
+  font-size: inherit;
   text-align: left;
   cursor: pointer;
   text-shadow: var(--term-glow);
@@ -338,7 +313,6 @@ input[type="text"]:focus {
 
 .context-entry .ctx-desc {
   color: var(--term-fg-dim);
-  font-size: 18px;
   margin-left: auto;
   max-width: 60%;
   text-align: right;
@@ -393,7 +367,6 @@ input[type="text"]:focus {
   border-left: 2px solid var(--term-fg-dim);
   white-space: pre-wrap;
   word-wrap: break-word;
-  font-size: 20px;
   color: var(--term-fg);
 }
 
@@ -410,7 +383,6 @@ input[type="text"]:focus {
 .chat-msg .chat-role {
   display: block;
   color: var(--term-fg-dim);
-  font-size: 16px;
   letter-spacing: 0.05em;
   margin-bottom: 0.15rem;
 }
@@ -422,17 +394,14 @@ input[type="text"]:focus {
 .chat-status {
   margin-left: 0.75rem;
   color: var(--term-fg-dim);
-  font-size: 18px;
 }
 
 .chat-status.error {
   color: var(--term-error);
 }
 
-
 .status {
   margin-top: 0.75rem;
-  font-size: 20px;
 }
 
 .status.error {
@@ -444,7 +413,6 @@ input[type="text"]:focus {
   padding-top: 0.75rem;
   border-top: 1px solid var(--term-fg-dim);
   color: var(--term-fg-dim);
-  font-size: 18px;
   display: flex;
   gap: 0.5rem;
   align-items: center;
@@ -482,8 +450,5 @@ a:hover {
   }
   .terminal {
     padding: 1.5rem 1rem 2rem;
-  }
-  body {
-    font-size: 20px;
   }
 }
