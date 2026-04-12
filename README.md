@@ -2,6 +2,11 @@
 
 **A neural architecture that IS the program.**
 
+> [!IMPORTANT]
+> **Start here →** [**SOMA Whitepaper (v1.0)**](SOMA_Whitepaper.md)
+>
+> The complete technical specification: architecture, 16-step control loop, episodic learning pipeline, policy engine, distributed transport, embedded leaf deployment, historical validation, and the design rationale behind every major decision. 773 lines, one read.
+
 No application source code. A goal-driven runtime receives intents, selects skills, invokes ports (external system adapters), and orchestrates execution through a typed belief-state control loop. Like a brain is to walking — the neural architecture IS the program.
 
 SOMA operates in two modes:
@@ -31,6 +36,7 @@ The same architecture runs on microcontrollers. `soma-project-esp32` deploys a `
 | [soma-project-ios](soma-project-ios/) | Native iOS app POC (Swift + C FFI to `libsoma_ios.a`). Rust cross-compilation to `aarch64-apple-ios` verified. | POC |
 | [soma-project-mcp-bridge](soma-project-mcp-bridge/) | `PortBackend::McpClient` proof. Three ports — Python, Node.js, PHP — each a pure-stdlib MCP server running as a SOMA port. Writing a port in any language is now "write an MCP server in that language". | Proven |
 | [soma-project-web](soma-project-web/) | **soma-next runs in a browser tab.** ~1.3 MB wasm core runtime with in-tab `dom` / `audio` / `voice` ports, autonomous goal execution through the real `SessionController`, plan-following dispatch, and an LLM brain over HTTP (OpenAI `gpt-5-mini` via `scripts/brain-proxy.mjs`). 18 Playwright tests verifying every phase 1a-1g. | Proven |
+| [soma-project-terminal](soma-project-terminal/) | **Multi-user SOMA-native web platform.** Fallout-inspired terminal UI, conversation-first architecture. Operator logs in via magic link, creates named contexts, talks to a tool-calling chat brain (`gpt-4o-mini` or `gpt-5-mini` — wrapper auto-detects family) that invokes real SOMA ports (crypto / postgres / smtp) via `invoke_port` over MCP. One master pack loads into a spawned `soma-next --mcp` child; every context is a scoped conversation against that single runtime. Zero per-context pack generation, zero client-side framework, zero LLM-produced artifacts. Voice input via Whisper. 34 Playwright tests. | Production |
 
 Legacy (not active): soma-core/, soma-plugins/, soma-synthesizer/, poc/, pow/
 
