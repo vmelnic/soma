@@ -1,8 +1,9 @@
 // Thin MCP stdio client against a long-lived soma-next subprocess.
 //
-// We spawn one `soma --mcp --pack packs/platform/manifest.json`
-// per backend process on startup, keep it alive for the life of the
-// server, and send tools/call messages for every `invoke_port`.
+// We spawn `soma --mcp --pack auto` per backend process on startup,
+// keep it alive for the life of the server, and send tools/call
+// messages for every `invoke_port`. Auto mode discovers all port
+// dylibs from SOMA_PORTS_PLUGIN_PATH without needing a manifest.
 // Line-delimited JSON-RPC 2.0 — same wire format the phase 1g
 // brain-proxy uses, same format soma-project-postgres/mcp-client.mjs
 // uses against the postgres pack.
@@ -26,9 +27,6 @@ export class SomaMcpClient {
     this.projectRoot = opts.projectRoot || PROJECT_ROOT;
     this.binPath = opts.binPath || resolvePath(this.projectRoot, "bin", "soma");
     this.binDir = dirname(this.binPath);
-    this.manifestPath =
-      opts.manifestPath ||
-      resolvePath(this.projectRoot, "packs", "platform", "manifest.json");
     this.nextId = 1;
     this.pending = new Map();
     this.child = null;
@@ -36,13 +34,12 @@ export class SomaMcpClient {
   }
 
   async start() {
-    this.child = spawn(this.binPath, ["--mcp", "--pack", this.manifestPath], {
+    this.child = spawn(this.binPath, ["--mcp", "--pack", "auto"], {
       cwd: this.projectRoot,
       env: {
         ...process.env,
-        // Plugin search path — soma-next looks here for
-        // libsoma_port_<id>.dylib / .so for every port declared in
-        // the pack manifest that isn't a built-in (filesystem / http).
+        // Plugin search path — soma-next auto-discovers all
+        // libsoma_port_*.dylib / .so in these directories.
         SOMA_PORTS_PLUGIN_PATH: this.binDir,
         SOMA_PORTS_REQUIRE_SIGNATURES: "false",
       },
@@ -107,6 +104,34 @@ export class SomaMcpClient {
         `[soma-mcp] list_ports at startup failed: ${err.message}`,
       );
       this.portCatalog = null;
+    }
+
+    // Build a short-name → full port_id map so callers can use simple
+    // names ("postgres", "smtp", "crypto") regardless of the port's
+    // internal namespaced ID ("soma.ports.postgres", "soma.smtp").
+    // For each port, register: exact port_id, last dotted segment,
+    // and name (lowercased). First match wins on collisions.
+    this.portAliases = new Map();
+    if (this.portCatalog) {
+      const ports = Array.isArray(this.portCatalog)
+        ? this.portCatalog
+        : this.portCatalog?.ports || [];
+      for (const p of ports) {
+        const id = p.port_id;
+        if (!id) continue;
+        // Exact match always wins.
+        if (!this.portAliases.has(id)) this.portAliases.set(id, id);
+        // Short name: last segment after the last dot.
+        const short = id.includes(".") ? id.split(".").pop() : null;
+        if (short && !this.portAliases.has(short)) {
+          this.portAliases.set(short, id);
+        }
+        // Name (lowercased) as fallback alias.
+        const name = (p.name || "").toLowerCase();
+        if (name && !this.portAliases.has(name)) {
+          this.portAliases.set(name, id);
+        }
+      }
     }
 
     console.log("[soma-mcp] soma-next MCP server ready");
@@ -244,7 +269,14 @@ export class SomaMcpClient {
   // On success returns the parsed `structured_result` (the port's
   // payload), not the full PortCallRecord — callers almost always
   // want the data, not the tracing envelope.
+  // Resolve a short port name ("postgres") to the full port_id
+  // ("soma.ports.postgres") as reported by the runtime.
+  resolvePortId(shortName) {
+    return this.portAliases?.get(shortName) ?? shortName;
+  }
+
   async invokePort(portId, capabilityId, input) {
+    portId = this.resolvePortId(portId);
     if (process.env.SOMA_MCP_DEBUG === "1") {
       const sql = input?.sql ? ` sql=${input.sql.slice(0, 100)}` : "";
       const params = input?.params

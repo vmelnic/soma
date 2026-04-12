@@ -562,6 +562,164 @@ pub fn bootstrap_from_specs(
     })
 }
 
+/// Build a Runtime by auto-discovering all port libraries in the search paths.
+///
+/// No pack manifest required. Scans `SOMA_PORTS_PLUGIN_PATH` directories for
+/// all `libsoma_port_*.{dylib,so,dll}` files, loads each one, and registers
+/// ports whose initialization succeeds (i.e. whose backend is reachable).
+/// Built-in ports (filesystem, http) are always registered when their features
+/// are enabled. Skills, schemas, routines, and policies are empty — the
+/// LLM-driven path uses `invoke_port` directly.
+///
+/// This is the `--pack auto` entry point.
+pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
+    let sandbox = crate::runtime::port::RuntimeSandboxProfile {
+        filesystem_access: true,
+        network_access: true,
+        device_access: false,
+        process_access: false,
+        memory_limit_mb: None,
+        cpu_limit_percent: None,
+        time_limit_ms: None,
+        syscall_limit: None,
+    };
+    let mut port_runtime = DefaultPortRuntime::with_sandbox_profile(sandbox);
+    let skill_runtime = DefaultSkillRuntime::new();
+
+    // Register built-in ports.
+    #[cfg(feature = "native-filesystem")]
+    {
+        let fs_port = FilesystemPort::new();
+        let spec = fs_port.spec().clone();
+        let port_id = spec.port_id.clone();
+        port_runtime.register_port(spec, Box::new(fs_port))?;
+        port_runtime.activate(&port_id)?;
+        tracing::info!(port_id = %port_id, "auto: built-in port registered");
+    }
+    #[cfg(feature = "native-http")]
+    {
+        let http_port = HttpPort::new();
+        let spec = http_port.spec().clone();
+        let port_id = spec.port_id.clone();
+        port_runtime.register_port(spec, Box::new(http_port))?;
+        port_runtime.activate(&port_id)?;
+        tracing::info!(port_id = %port_id, "auto: built-in port registered");
+    }
+
+    // Discover and load all dynamic ports from the search paths.
+    #[cfg(feature = "dylib-ports")]
+    {
+        let search_paths: Vec<PathBuf> = config
+            .ports
+            .plugin_path
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        let mut loader = DynamicPortLoader::with_signature_policy(
+            search_paths,
+            config.ports.require_signatures,
+        );
+
+        for (_lib_name, adapter) in loader.discover_all() {
+            // The adapter already called spec() during load — get the real
+            // PortSpec from the loaded library, not from any manifest.
+            // Clear observable_fields: they're a manifest/skill concern,
+            // not relevant in auto mode (no skills, LLM drives invoke_port
+            // directly), and many SDK specs declare fields that don't match
+            // the actual output, causing invoke-time validation failures.
+            let mut spec = adapter.spec().clone();
+            spec.observable_fields.clear();
+            let port_id = spec.port_id.clone();
+            match port_runtime.register_port_unvalidated(spec, adapter) {
+                Ok(()) => match port_runtime.activate(&port_id) {
+                    Ok(()) => {
+                        eprintln!("auto: activated port {port_id}");
+                    }
+                    Err(e) => {
+                        eprintln!("auto: port {port_id} registered but failed to activate: {e}");
+                    }
+                },
+                Err(e) => {
+                    eprintln!("auto: port {port_id} failed to register: {e}");
+                }
+            }
+        }
+
+        // Keep the loader alive so loaded libraries stay mapped.
+        std::mem::forget(loader);
+    }
+
+    let port_runtime = Arc::new(Mutex::new(port_runtime));
+
+    let data_dir = resolve_data_dir(&config.soma.data_dir);
+    let (episode_store, schema_store, routine_store): (
+        SharedEpisodeStore,
+        SharedSchemaStore,
+        SharedRoutineStore,
+    ) = if data_dir.as_os_str().is_empty() {
+        (
+            Arc::new(Mutex::new(DefaultEpisodeStore::new())),
+            Arc::new(Mutex::new(DefaultSchemaStore::new())),
+            Arc::new(Mutex::new(DefaultRoutineStore::new())),
+        )
+    } else {
+        tracing::info!(data_dir = %data_dir.display(), "auto: using disk-backed memory stores");
+        (
+            Arc::new(Mutex::new(DiskEpisodeStore::new(&data_dir)?)),
+            Arc::new(Mutex::new(DiskSchemaStore::new(&data_dir)?)),
+            Arc::new(Mutex::new(DiskRoutineStore::new(&data_dir)?)),
+        )
+    };
+
+    let embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync> = Arc::new(
+        crate::memory::embedder::HashEmbedder::new(),
+    );
+
+    let skill_registry = SkillRegistryAdapter::new(&skill_runtime);
+    let skill_executor = PortBackedSkillExecutor::new(Arc::clone(&port_runtime));
+    let episode_memory = EpisodeMemoryAdapter::new(Arc::clone(&episode_store), Arc::clone(&embedder));
+    let schema_memory = SchemaMemoryAdapter::new(Arc::clone(&schema_store));
+    let routine_memory = RoutineMemoryAdapter::new(Arc::clone(&routine_store));
+
+    let policy_runtime = DefaultPolicyRuntime::new();
+    register_default_safety_policies(&policy_runtime, config)?;
+
+    let policy_engine = PolicyEngineAdapter::new(policy_runtime, config.runtime.max_steps);
+
+    let deps = SessionControllerDeps {
+        belief_source: Box::new(SimpleBeliefSource::new()),
+        episode_memory: Box::new(episode_memory),
+        schema_memory: Box::new(schema_memory),
+        routine_memory: Box::new(routine_memory),
+        skill_registry: Box::new(skill_registry),
+        skill_executor: Box::new(skill_executor),
+        predictor: Box::new(SimpleCandidatePredictor::new()),
+        critic: Box::new(SimpleSessionCritic::new()),
+        policy_engine: Box::new(policy_engine),
+        remote_executor: None,
+        capability_scope_checker: None,
+    };
+
+    let metrics = Arc::new(RuntimeMetrics::new());
+
+    let session_controller = SessionController::new(deps, Arc::clone(&metrics));
+    let goal_runtime = DefaultGoalRuntime::new();
+
+    Ok(Runtime {
+        session_controller,
+        goal_runtime,
+        skill_runtime,
+        port_runtime,
+        episode_store,
+        schema_store,
+        routine_store,
+        pack_specs: vec![],
+        metrics,
+        embedder,
+        start_time: Instant::now(),
+    })
+}
+
 /// Register host-level safety policies that enforce fundamental runtime constraints.
 ///
 /// These rules are registered under the "host" namespace, giving them the highest

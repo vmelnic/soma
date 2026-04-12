@@ -184,6 +184,14 @@ pub trait PortRuntime: Send + Sync {
     /// collisions are rejected.
     fn register_port(&mut self, spec: PortSpec, adapter: Box<dyn Port>) -> Result<()>;
 
+    /// Register a port without running spec validation.
+    ///
+    /// Used by `--pack auto` where port specs come directly from the loaded
+    /// library's `spec()` call rather than from a manifest. The port is
+    /// placed in `Validated` state, ready for `activate()`. Namespace
+    /// collision checks still apply.
+    fn register_port_unvalidated(&mut self, spec: PortSpec, adapter: Box<dyn Port>) -> Result<()>;
+
     /// Look up a port by its `port_id`.
     fn get_port(&self, port_id: &str) -> Option<&dyn Port>;
 
@@ -782,6 +790,16 @@ impl PortRuntime for DefaultPortRuntime {
         self.declare_port(spec, adapter)?;
         self.load_port(&port_id)?;
         debug!(port_id = %port_id, "port registered");
+        Ok(())
+    }
+
+    fn register_port_unvalidated(&mut self, spec: PortSpec, adapter: Box<dyn Port>) -> Result<()> {
+        let port_id = spec.port_id.clone();
+        self.declare_port(spec, adapter)?;
+        // Skip validate_port — advance directly to Validated.
+        let entry = self.ports.get_mut(&port_id).unwrap();
+        entry.state = PortLifecycleState::Validated;
+        debug!(port_id = %port_id, "port registered (unvalidated)");
         Ok(())
     }
 

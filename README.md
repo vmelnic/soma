@@ -10,7 +10,7 @@
 No application source code. A goal-driven runtime receives intents, selects skills, invokes ports (external system adapters), and orchestrates execution through a typed belief-state control loop. Like a brain is to walking — the neural architecture IS the program.
 
 SOMA operates in two modes:
-- **LLM-driven** — An LLM calls `invoke_port` via MCP to directly execute operations (database queries, email, S3, auth). SOMA is the body, the LLM is the brain.
+- **LLM-driven** — An LLM calls `invoke_port` via MCP to directly execute operations (database queries, email, S3, auth). SOMA is the body, the LLM is the brain. `--pack auto` discovers all available ports from dylib search paths without any manifest.
 - **Autonomous** — SOMA executes goals through its own control loop: skill selection, port invocation, observation, belief update, repeat. Learned routines bypass deliberation (plan-following mode).
 
 Both modes are production-ready. The LLM-driven path is proven with HelperBook (service marketplace, 3 ports, 32 capabilities). The autonomous path is proven with the reference pack (filesystem skills, episode → schema → routine cycle).
@@ -36,7 +36,7 @@ The same architecture runs on microcontrollers. `soma-project-esp32` deploys a `
 | [soma-project-ios](soma-project-ios/) | Native iOS app POC (Swift + C FFI to `libsoma_ios.a`). Rust cross-compilation to `aarch64-apple-ios` verified. | POC |
 | [soma-project-mcp-bridge](soma-project-mcp-bridge/) | `PortBackend::McpClient` proof. Three ports — Python, Node.js, PHP — each a pure-stdlib MCP server running as a SOMA port. Writing a port in any language is now "write an MCP server in that language". | Proven |
 | [soma-project-web](soma-project-web/) | **soma-next runs in a browser tab.** ~1.3 MB wasm core runtime with in-tab `dom` / `audio` / `voice` ports, autonomous goal execution through the real `SessionController`, plan-following dispatch, and an LLM brain over HTTP (OpenAI `gpt-5-mini` via `scripts/brain-proxy.mjs`). 18 Playwright tests verifying every phase 1a-1g. | Proven |
-| [soma-project-terminal](soma-project-terminal/) | **Multi-user SOMA-native web platform.** Fallout-inspired terminal UI, conversation-first architecture. Operator logs in via magic link, creates named contexts, talks to a tool-calling chat brain (`gpt-4o-mini` or `gpt-5-mini` — wrapper auto-detects family) that invokes real SOMA ports (crypto / postgres / smtp) via `invoke_port` over MCP. One master pack loads into a spawned `soma-next --mcp` child; every context is a scoped conversation against that single runtime. Zero per-context pack generation, zero client-side framework, zero LLM-produced artifacts. Voice input via Whisper. 34 Playwright tests. | Production |
+| [soma-project-terminal](soma-project-terminal/) | **Multi-user SOMA-native web platform.** Fallout-inspired terminal UI, conversation-first architecture. Operator logs in via magic link, creates named contexts, talks to a tool-calling chat brain (`gpt-4o-mini` or `gpt-5-mini` — wrapper auto-detects family) that invokes real SOMA ports (crypto / postgres / smtp) via `invoke_port` over MCP. Uses `--pack auto` — no manifest, ports auto-discovered from dylib search path. Zero per-context pack generation, zero client-side framework, zero LLM-produced artifacts. Voice input via Whisper. 34 Playwright tests. | Production |
 
 Legacy (not active): soma-core/, soma-plugins/, soma-synthesizer/, poc/, pow/
 
@@ -47,17 +47,22 @@ Legacy (not active): soma-core/, soma-plugins/, soma-synthesizer/, poc/, pow/
 cd soma-next && cargo build --release && cargo test
 cd ../soma-ports && cargo build --workspace --release
 
-# Run HelperBook (LLM-driven path)
+# Auto-discover ports (LLM-driven path, no manifest needed)
+cd ../soma-next
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_ports","arguments":{}}}' \
+| SOMA_PORTS_PLUGIN_PATH=../soma-ports/target/release cargo run --release -- --mcp --pack auto
+
+# Run autonomous goal (autonomous path)
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_goal","arguments":{"objective":"list files in /tmp"}}}' \
+| cargo run --release -- --mcp --pack packs/reference/manifest.json
+
+# Run HelperBook (LLM-driven path with manifest)
 cd ../soma-helperbook
 docker compose up -d --wait
 scripts/setup-db.sh && scripts/seed-db.sh
 cd frontend && npm install && node server.js  # http://localhost:8080
-
-# Run autonomous goal (autonomous path)
-cd ../soma-next
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
-{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_goal","arguments":{"objective":"list files in /tmp"}}}' \
-| cargo run --release -- --mcp --pack packs/reference/manifest.json
 ```
 
 ## Architecture

@@ -233,7 +233,12 @@ fn main() {
         }
     };
 
-    let bootstrap_result = if pack_paths.is_empty() {
+    let is_auto = pack_paths.len() == 1 && pack_paths[0] == "auto";
+
+    let bootstrap_result = if is_auto {
+        eprintln!("auto: discovering ports from plugin search paths");
+        bootstrap::bootstrap_auto(&config)
+    } else if pack_paths.is_empty() {
         let default_manifest = "packs/reference/manifest.json";
         let effective_packs: Vec<String> = if Path::new(default_manifest).exists() {
             vec![default_manifest.to_string()]
@@ -524,7 +529,32 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
         }
     };
 
-    let server = if pack_paths.is_empty() {
+    let mcp_is_auto = pack_paths.len() == 1 && pack_paths[0] == "auto";
+
+    let make_server = |runtime: crate::bootstrap::Runtime| -> McpServer {
+        let handle = RuntimeHandle::from_runtime(runtime);
+        let handle = if has_peers {
+            if let Some(exec) = make_executor() {
+                handle.with_remote_shared(exec, Arc::clone(&shared_peer_ids))
+            } else {
+                handle
+            }
+        } else {
+            handle
+        };
+        McpServer::new(handle)
+    };
+
+    let server = if mcp_is_auto {
+        eprintln!("MCP: auto-discovering ports from plugin search paths");
+        match bootstrap::bootstrap_auto(&config) {
+            Ok(runtime) => make_server(runtime),
+            Err(e) => {
+                eprintln!("error: failed to auto-bootstrap runtime: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else if pack_paths.is_empty() {
         let default_manifest = "packs/reference/manifest.json";
         let packs = if Path::new(default_manifest).exists() {
             vec![default_manifest.to_string()]
@@ -532,19 +562,7 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             vec![]
         };
         match bootstrap_runtime(&packs) {
-            Ok(runtime) => {
-                let handle = RuntimeHandle::from_runtime(runtime);
-                let handle = if has_peers {
-                    if let Some(exec) = make_executor() {
-                        handle.with_remote_shared(exec, Arc::clone(&shared_peer_ids))
-                    } else {
-                        handle
-                    }
-                } else {
-                    handle
-                };
-                McpServer::new(handle)
-            }
+            Ok(runtime) => make_server(runtime),
             Err(e) => {
                 eprintln!("warning: failed to bootstrap runtime: {e}");
                 McpServer::new_stub()
@@ -552,19 +570,7 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
         }
     } else {
         match bootstrap_runtime(pack_paths) {
-            Ok(runtime) => {
-                let handle = RuntimeHandle::from_runtime(runtime);
-                let handle = if has_peers {
-                    if let Some(exec) = make_executor() {
-                        handle.with_remote_shared(exec, Arc::clone(&shared_peer_ids))
-                    } else {
-                        handle
-                    }
-                } else {
-                    handle
-                };
-                McpServer::new(handle)
-            }
+            Ok(runtime) => make_server(runtime),
             Err(e) => {
                 eprintln!("error: failed to bootstrap runtime: {e}");
                 std::process::exit(1);

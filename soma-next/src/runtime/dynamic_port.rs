@@ -149,6 +149,71 @@ impl DynamicPortLoader {
     pub fn search_paths(&self) -> &[PathBuf] {
         &self.search_paths
     }
+
+    /// Discover and load all port libraries found in the search paths.
+    ///
+    /// Scans every directory in `search_paths` for files matching the platform
+    /// naming convention `libsoma_port_*.{dylib,so,dll}`. For each library
+    /// found, attempts to load it via `load_port`. Libraries that fail to load
+    /// (missing symbol, init error, signature failure) are skipped with a
+    /// warning — the runtime never hardcodes which ports should exist.
+    ///
+    /// Returns a vec of `(library_name, Box<dyn Port>)` pairs for each
+    /// successfully loaded port.
+    pub fn discover_all(&mut self) -> Vec<(String, Box<dyn Port>)> {
+        let ext = if cfg!(target_os = "macos") {
+            "dylib"
+        } else if cfg!(target_os = "windows") {
+            "dll"
+        } else {
+            "so"
+        };
+
+        let prefix = "libsoma_port_";
+        let suffix = format!(".{ext}");
+
+        // Collect unique library names across all search paths.
+        let mut seen = std::collections::HashSet::new();
+        let mut candidates: Vec<String> = Vec::new();
+
+        for dir in &self.search_paths {
+            let entries = match std::fs::read_dir(dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.starts_with(prefix) && name.ends_with(&suffix) {
+                    // Extract the library name: libsoma_port_postgres.dylib → soma_port_postgres
+                    let lib_name = name
+                        .strip_prefix("lib")
+                        .unwrap_or(&name)
+                        .strip_suffix(&suffix)
+                        .unwrap_or(&name)
+                        .to_string();
+                    if seen.insert(lib_name.clone()) {
+                        candidates.push(lib_name);
+                    }
+                }
+            }
+        }
+
+        let mut loaded = Vec::new();
+        for lib_name in candidates {
+            match self.load_port(&lib_name) {
+                Ok(port) => {
+                    eprintln!("auto: loaded {}", lib_name);
+                    loaded.push((lib_name, port));
+                }
+                Err(e) => {
+                    eprintln!("auto: skipped {} ({})", lib_name, e);
+                }
+            }
+        }
+
+        loaded
+    }
 }
 
 // ---------------------------------------------------------------------------

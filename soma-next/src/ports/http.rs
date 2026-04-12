@@ -442,7 +442,7 @@ fn build_http_port_spec() -> PortSpec {
             "headers".to_string(),
         ],
         validation_rules: vec![],
-        remote_exposure: true,
+        remote_exposure: false,
         backend: crate::types::port::PortBackend::default(),
     }
 }

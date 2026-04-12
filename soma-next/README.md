@@ -3,7 +3,7 @@
 `soma-next` is the current SOMA runtime. It is both a Rust library and a `soma`
 binary that:
 
-- bootstraps a runtime from JSON pack manifests
+- bootstraps a runtime from JSON pack manifests or auto-discovers ports (`--pack auto`)
 - runs goal-driven control sessions
 - executes skills through built-in and dynamically loaded ports
 - persists episodes, schemas, routines, and session checkpoints
@@ -40,8 +40,8 @@ Two ports are built into the binary:
   `rm`
 - `http`: `get`, `post`, `put`, `delete`
 
-Everything else is expected to come from pack manifests and external shared
-libraries.
+Everything else is expected to come from pack manifests, external shared
+libraries, or auto-discovery (`--pack auto`).
 
 When the default reference pack is loaded, the runtime also exposes these local
 primitive skills:
@@ -65,7 +65,7 @@ target named `soma` from [`src/main.rs`](src/main.rs).
 cd soma-next
 
 cargo build                              # debug binary → target/debug/soma (~32 MB)
-cargo test                               # 1177+ tests, all must pass
+cargo test                               # 1188+ tests, all must pass
 cargo clippy --all-targets --all-features # must be zero warnings
 ```
 
@@ -116,11 +116,28 @@ cargo build 2>&1 | head -50
 
 ## Running the binary
 
-The binary accepts `--pack <manifest.json>` zero or more times. If no pack is
-provided, startup falls back to [`packs/reference/manifest.json`](packs/reference/manifest.json)
-when that file exists. Otherwise it starts with an empty runtime.
+The binary accepts `--pack <manifest.json>` zero or more times, or `--pack auto`
+to skip manifests entirely and auto-discover all port libraries from the search
+path. If no pack is provided, startup falls back to
+[`packs/reference/manifest.json`](packs/reference/manifest.json) when that file
+exists. Otherwise it starts with an empty runtime.
 
-Common commands:
+### Auto-discovery mode
+
+`--pack auto` scans every directory in `SOMA_PORTS_PLUGIN_PATH` for files
+matching `libsoma_port_*.{dylib,so,dll}`, loads each one, and registers the port
+using the library's own `spec()`. No manifest is needed. Built-in ports
+(filesystem, http) are always included.
+
+```bash
+SOMA_PORTS_PLUGIN_PATH=../soma-ports/target/release cargo run --release -- --mcp --pack auto
+```
+
+This is the fastest path for the LLM-driven mode: the LLM calls `list_ports` to
+discover capabilities and `invoke_port` to use them. No skills, schemas,
+routines, or policies are registered — the LLM drives port invocations directly.
+
+### Common commands
 
 ```bash
 # List loaded packs
@@ -172,7 +189,11 @@ prove that the library can be loaded and invoked successfully by the runtime.
 MCP mode runs JSON-RPC 2.0 over stdin/stdout:
 
 ```bash
-cargo run -- --mcp
+# With a manifest
+cargo run -- --mcp --pack packs/reference/manifest.json
+
+# With auto-discovery (no manifest)
+SOMA_PORTS_PLUGIN_PATH=../soma-ports/target/release cargo run -- --mcp --pack auto
 ```
 
 The server exposes these runtime tools:
