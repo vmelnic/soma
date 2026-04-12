@@ -12,7 +12,22 @@
 
 const ROLES = new Set(["user", "assistant"]);
 const CONTENT_MAX = 8000; // ~2000 tokens of plain text
-const MAX_HISTORY = 200;
+
+// How many recent messages to include as conversation history on
+// each chat turn. This is the sliding-window size the chat brain
+// sees — NOT the size of the stored transcript. Older messages
+// stay in the `messages` table and render in the UI transcript
+// like normal; they just don't get fed back into the model on
+// every turn. 50 gives ~25 user+assistant pairs of short-term
+// memory, which covers every realistic conversation pattern
+// while keeping per-turn input token cost bounded (~20-25k tokens
+// at a typical ~400 tokens per message average).
+//
+// If we ever need to remember older context across the window
+// boundary, the right move is a rolling-summary system-prompt
+// block, not a bigger window — bumping this number just burns
+// tokens on turns that never needed them.
+const MAX_HISTORY = 50;
 
 function looksLikeUuid(s) {
   return (
