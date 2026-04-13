@@ -18,16 +18,17 @@ const CONTENT_MAX = 8000; // ~2000 tokens of plain text
 // sees — NOT the size of the stored transcript. Older messages
 // stay in the `messages` table and render in the UI transcript
 // like normal; they just don't get fed back into the model on
-// every turn. 50 gives ~25 user+assistant pairs of short-term
-// memory, which covers every realistic conversation pattern
-// while keeping per-turn input token cost bounded (~20-25k tokens
-// at a typical ~400 tokens per message average).
+// every turn. 10 gives ~5 user+assistant pairs of conversational
+// continuity. The runtime briefing (schedules, schemas, routines)
+// injected into the system prompt replaces the need for deep
+// history — the brain gets structured pointers into the runtime's
+// actual state instead of re-reading 25 turns of raw transcript.
 //
 // If we ever need to remember older context across the window
 // boundary, the right move is a rolling-summary system-prompt
 // block, not a bigger window — bumping this number just burns
 // tokens on turns that never needed them.
-const MAX_HISTORY = 50;
+const MAX_HISTORY = 10;
 
 function looksLikeUuid(s) {
   return (

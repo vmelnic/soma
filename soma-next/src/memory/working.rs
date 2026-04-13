@@ -53,6 +53,7 @@ impl WorkingMemoryStore for DefaultWorkingMemoryStore {
             output_bindings: Vec::new(),
             active_plan: None,
             plan_step: 0,
+            used_plan_following: false,
         }
     }
 

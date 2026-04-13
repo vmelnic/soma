@@ -49,6 +49,10 @@ const fn default_resource_budget() -> f64 {
     100.0
 }
 
+const fn default_consolidation_interval_secs() -> u64 {
+    300
+}
+
 fn default_mcp_transport() -> String {
     "stdio".to_string()
 }
@@ -137,6 +141,11 @@ pub struct RuntimeSection {
     /// Default resource budget (abstract units consumed by port calls).
     #[serde(default = "default_resource_budget")]
     pub default_resource_budget: f64,
+
+    /// Interval in seconds between background consolidation cycles.
+    /// Set to 0 to disable background consolidation.
+    #[serde(default = "default_consolidation_interval_secs")]
+    pub consolidation_interval_secs: u64,
 }
 
 impl Default for RuntimeSection {
@@ -146,6 +155,7 @@ impl Default for RuntimeSection {
             default_risk_budget: default_risk_budget(),
             default_latency_budget_ms: default_latency_budget_ms(),
             default_resource_budget: default_resource_budget(),
+            consolidation_interval_secs: default_consolidation_interval_secs(),
         }
     }
 }
@@ -393,6 +403,10 @@ impl SomaConfig {
         if let Ok(v) = std::env::var("SOMA_RUNTIME_LATENCY_BUDGET_MS")
             && let Ok(n) = v.parse::<u64>() {
                 self.runtime.default_latency_budget_ms = n;
+            }
+        if let Ok(v) = std::env::var("SOMA_RUNTIME_CONSOLIDATION_INTERVAL_SECS")
+            && let Ok(n) = v.parse::<u64>() {
+                self.runtime.consolidation_interval_secs = n;
             }
         if let Ok(v) = std::env::var("SOMA_MCP_TRANSPORT") {
             self.mcp.transport = v;

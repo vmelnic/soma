@@ -13,42 +13,61 @@ pub struct FrequentSequence {
 /// `min_support` is a ratio in [0.0, 1.0] representing the fraction of sequences that must
 /// contain a pattern for it to be considered frequent.
 ///
+/// `weights` is an optional per-sequence salience weight. When provided, weighted counts are
+/// used instead of uniform counting to determine whether a pattern meets the minimum support
+/// threshold. When `None`, behavior is identical to uniform (weight-1.0) counting.
+///
 /// Returns all frequent subsequences sorted by pattern (alphabetically, then by length).
-pub fn prefix_span(sequences: &[Vec<String>], min_support: f64) -> Vec<FrequentSequence> {
+pub fn prefix_span(
+    sequences: &[Vec<String>],
+    min_support: f64,
+    weights: Option<&[f64]>,
+) -> Vec<FrequentSequence> {
     if sequences.is_empty() {
         return Vec::new();
     }
 
-    let min_count = (min_support * sequences.len() as f64).ceil() as usize;
-    if min_count == 0 {
+    let total_weight: f64 = weights.map_or(sequences.len() as f64, |ws| ws.iter().sum());
+    let min_weighted_count = min_support * total_weight;
+    if min_weighted_count <= 0.0 {
         return Vec::new();
     }
 
     let total = sequences.len();
     let mut results = Vec::new();
 
-    // Count length-1 item frequencies (deduplicated per sequence)
-    let mut item_counts: HashMap<String, usize> = HashMap::new();
-    for seq in sequences {
+    // Build weighted sequence list: each entry is (sequence, weight)
+    let weighted_seqs: Vec<(&[String], f64)> = sequences
+        .iter()
+        .enumerate()
+        .map(|(i, seq)| (seq.as_slice(), weights.map_or(1.0, |ws| ws[i])))
+        .collect();
+
+    // Count length-1 item frequencies (deduplicated per sequence, weighted)
+    let mut item_counts: HashMap<String, (f64, usize)> = HashMap::new();
+    for (seq, w) in &weighted_seqs {
         let mut seen = std::collections::HashSet::new();
-        for item in seq {
+        for item in *seq {
             if seen.insert(item.clone()) {
-                *item_counts.entry(item.clone()).or_insert(0) += 1;
+                let entry = item_counts.entry(item.clone()).or_insert((0.0, 0));
+                entry.0 += w;
+                entry.1 += 1;
             }
         }
     }
 
     // Collect frequent items, sorted alphabetically for determinism
-    let mut frequent_items: Vec<(String, usize)> = item_counts
+    let mut frequent_items: Vec<(String, f64, usize)> = item_counts
         .into_iter()
-        .filter(|(_, count)| *count >= min_count)
+        .filter(|(_, (wc, _))| *wc >= min_weighted_count)
+        .map(|(item, (wc, count))| (item, wc, count))
         .collect();
     frequent_items.sort_by(|a, b| a.0.cmp(&b.0));
 
     let max_pattern_len: usize = 20;
     let max_results: usize = 1000;
 
-    for (item, support) in &frequent_items {
+    for (item, _weighted_count, support) in &frequent_items {
         if results.len() >= max_results {
             break;
         }
@@ -60,13 +79,14 @@ pub fn prefix_span(sequences: &[Vec<String>], min_support: f64) -> Vec<FrequentS
             support_ratio: *support as f64 / total as f64,
         });
 
-        // Build projected database: suffix after first occurrence of item in each sequence
-        let projected_db = build_projected_db(sequences, item);
+        // Build projected database: suffix after first occurrence of item in each sequence,
+        // carrying the original weight forward.
+        let projected_db = build_weighted_projected_db(&weighted_seqs, item);
 
         mine_recursive(
             &prefix,
             &projected_db,
-            min_count,
+            min_weighted_count,
             total,
             &mut results,
             max_pattern_len,
@@ -81,8 +101,9 @@ pub fn prefix_span(sequences: &[Vec<String>], min_support: f64) -> Vec<FrequentS
 pub fn longest_frequent_subsequence(
     sequences: &[Vec<String>],
     min_support: f64,
+    weights: Option<&[f64]>,
 ) -> Option<FrequentSequence> {
-    let results = prefix_span(sequences, min_support);
+    let results = prefix_span(sequences, min_support, weights);
     results.into_iter().max_by(|a, b| {
         a.pattern
             .len()
@@ -91,15 +112,18 @@ pub fn longest_frequent_subsequence(
     })
 }
 
-/// Build the projected database for a given item: for each sequence containing the item,
-/// take the suffix strictly after the first occurrence.
-fn build_projected_db(sequences: &[Vec<String>], item: &str) -> Vec<Vec<String>> {
+/// Build the projected database for a given item: for each weighted sequence containing the item,
+/// take the suffix strictly after the first occurrence, preserving the weight.
+fn build_weighted_projected_db(
+    sequences: &[(&[String], f64)],
+    item: &str,
+) -> Vec<(Vec<String>, f64)> {
     let mut projected = Vec::new();
-    for seq in sequences {
+    for (seq, w) in sequences {
         if let Some(pos) = seq.iter().position(|s| s == item) {
             let suffix = seq[pos + 1..].to_vec();
             if !suffix.is_empty() {
-                projected.push(suffix);
+                projected.push((suffix, *w));
             }
         }
     }
@@ -109,8 +133,8 @@ fn build_projected_db(sequences: &[Vec<String>], item: &str) -> Vec<Vec<String>>
 /// Recursively extend the prefix by mining the projected database.
 fn mine_recursive(
     prefix: &[String],
-    projected_db: &[Vec<String>],
-    min_count: usize,
+    projected_db: &[(Vec<String>, f64)],
+    min_weighted_count: f64,
     total: usize,
     results: &mut Vec<FrequentSequence>,
     max_pattern_len: usize,
@@ -120,25 +144,28 @@ fn mine_recursive(
         return;
     }
 
-    // Count item frequencies in the projected database (deduplicated per sequence)
-    let mut item_counts: HashMap<String, usize> = HashMap::new();
-    for seq in projected_db {
+    // Count item frequencies in the projected database (deduplicated per sequence, weighted)
+    let mut item_counts: HashMap<String, (f64, usize)> = HashMap::new();
+    for (seq, w) in projected_db {
         let mut seen = std::collections::HashSet::new();
         for item in seq {
             if seen.insert(item.clone()) {
-                *item_counts.entry(item.clone()).or_insert(0) += 1;
+                let entry = item_counts.entry(item.clone()).or_insert((0.0, 0));
+                entry.0 += w;
+                entry.1 += 1;
             }
         }
     }
 
     // Frequent items sorted alphabetically
-    let mut frequent_items: Vec<(String, usize)> = item_counts
+    let mut frequent_items: Vec<(String, f64, usize)> = item_counts
         .into_iter()
-        .filter(|(_, count)| *count >= min_count)
+        .filter(|(_, (wc, _))| *wc >= min_weighted_count)
+        .map(|(item, (wc, count))| (item, wc, count))
         .collect();
     frequent_items.sort_by(|a, b| a.0.cmp(&b.0));
 
-    for (item, support) in &frequent_items {
+    for (item, _weighted_count, support) in &frequent_items {
         if results.len() >= max_results {
             return;
         }
@@ -152,13 +179,17 @@ fn mine_recursive(
             support_ratio: *support as f64 / total as f64,
         });
 
-        // Project further
-        let new_projected = build_projected_db(projected_db, item);
+        // Project further: convert projected_db entries into slice-weight pairs for reuse
+        let as_slices: Vec<(&[String], f64)> = projected_db
+            .iter()
+            .map(|(seq, w)| (seq.as_slice(), *w))
+            .collect();
+        let new_projected = build_weighted_projected_db(&as_slices, item);
 
         mine_recursive(
             &new_prefix,
             &new_projected,
-            min_count,
+            min_weighted_count,
             total,
             results,
             max_pattern_len,
@@ -182,7 +213,7 @@ mod tests {
     #[test]
     fn basic_frequent_patterns() {
         let sequences = vec![s(&["a", "b", "c"]), s(&["a", "b"]), s(&["a", "c", "b"])];
-        let results = prefix_span(&sequences, 0.66);
+        let results = prefix_span(&sequences, 0.66, None);
 
         let patterns: Vec<Vec<&str>> = results.iter().map(|r| pattern_strs(r)).collect();
 
@@ -199,7 +230,7 @@ mod tests {
             s(&["x", "y", "z"]),
             s(&["x", "y", "z"]),
         ];
-        let results = prefix_span(&sequences, 1.0);
+        let results = prefix_span(&sequences, 1.0, None);
 
         let patterns: Vec<Vec<&str>> = results.iter().map(|r| pattern_strs(r)).collect();
 
@@ -217,14 +248,14 @@ mod tests {
 
     #[test]
     fn empty_input() {
-        let results = prefix_span(&[], 0.5);
+        let results = prefix_span(&[], 0.5, None);
         assert!(results.is_empty());
     }
 
     #[test]
     fn single_element_sequences() {
         let sequences = vec![s(&["a"]), s(&["a"]), s(&["b"])];
-        let results = prefix_span(&sequences, 0.66);
+        let results = prefix_span(&sequences, 0.66, None);
 
         let patterns: Vec<Vec<&str>> = results.iter().map(|r| pattern_strs(r)).collect();
 
@@ -243,7 +274,7 @@ mod tests {
             s(&["a", "b"]),
             s(&["a", "c", "b"]),
         ];
-        let results = prefix_span(&sequences, 1.0);
+        let results = prefix_span(&sequences, 1.0, None);
 
         // Only patterns present in ALL 3 sequences should appear
         for r in &results {
@@ -258,7 +289,7 @@ mod tests {
     #[test]
     fn support_counts_correct() {
         let sequences = vec![s(&["a", "b", "c"]), s(&["a", "b"]), s(&["a", "c", "b"])];
-        let results = prefix_span(&sequences, 0.5);
+        let results = prefix_span(&sequences, 0.5, None);
 
         for r in &results {
             // support_ratio must equal support / total
@@ -288,7 +319,7 @@ mod tests {
             s(&["a", "b", "c"]),
             s(&["a", "b", "c"]),
         ];
-        let longest = longest_frequent_subsequence(&sequences, 1.0);
+        let longest = longest_frequent_subsequence(&sequences, 1.0, None);
         assert!(longest.is_some());
         let longest = longest.unwrap();
         assert_eq!(pattern_strs(&longest), vec!["a", "b", "c"]);
@@ -300,7 +331,7 @@ mod tests {
         // Create sequences of length 30 with repeating elements across all sequences
         let long_seq: Vec<String> = (0..30).map(|i| format!("item{:02}", i)).collect();
         let sequences = vec![long_seq.clone(), long_seq.clone(), long_seq.clone()];
-        let results = prefix_span(&sequences, 1.0);
+        let results = prefix_span(&sequences, 1.0, None);
 
         // No pattern should exceed length 20
         for r in &results {
@@ -318,7 +349,7 @@ mod tests {
     fn no_frequent_items() {
         // All unique items, each appears in only 1 of 4 sequences
         let sequences = vec![s(&["a"]), s(&["b"]), s(&["c"]), s(&["d"])];
-        let results = prefix_span(&sequences, 0.5);
+        let results = prefix_span(&sequences, 0.5, None);
         assert!(results.is_empty());
     }
 
@@ -334,11 +365,109 @@ mod tests {
             })
             .collect();
 
-        let results = prefix_span(&sequences, 0.3);
+        let results = prefix_span(&sequences, 0.3, None);
         // Should complete without hanging and produce some results
         assert!(
             !results.is_empty(),
             "expected results from 50 sequences with small vocabulary"
         );
+    }
+
+    // --- Weighted PrefixSpan tests ---
+
+    #[test]
+    fn none_weights_identical_to_unweighted() {
+        // Verify that passing None weights produces the exact same results as if
+        // every sequence had weight 1.0.
+        let sequences = vec![
+            s(&["a", "b", "c"]),
+            s(&["a", "b"]),
+            s(&["a", "c", "b"]),
+            s(&["b", "c"]),
+        ];
+
+        let results_none = prefix_span(&sequences, 0.5, None);
+        let uniform_weights: Vec<f64> = vec![1.0; sequences.len()];
+        let results_uniform = prefix_span(&sequences, 0.5, Some(&uniform_weights));
+
+        assert_eq!(
+            results_none.len(),
+            results_uniform.len(),
+            "None and uniform-1.0 weights should produce the same number of patterns"
+        );
+        for (a, b) in results_none.iter().zip(results_uniform.iter()) {
+            assert_eq!(a.pattern, b.pattern);
+            assert_eq!(a.support, b.support);
+            assert!(
+                (a.support_ratio - b.support_ratio).abs() < f64::EPSILON,
+                "support_ratio mismatch for {:?}",
+                a.pattern
+            );
+        }
+    }
+
+    #[test]
+    fn high_weight_promotes_patterns() {
+        // Two sequences with "a","b" (high weight) and two with "c","d" (low weight).
+        // At min_support 0.5, the high-weight pattern should be frequent but the
+        // low-weight one should not.
+        let sequences = vec![
+            s(&["a", "b"]),
+            s(&["a", "b"]),
+            s(&["c", "d"]),
+            s(&["c", "d"]),
+        ];
+        // With uniform weights at 0.5, both ["a","b"] and ["c","d"] should be frequent
+        let results_uniform = prefix_span(&sequences, 0.5, None);
+        let ab_uniform = results_uniform.iter().any(|r| r.pattern == s(&["a", "b"]));
+        let cd_uniform = results_uniform.iter().any(|r| r.pattern == s(&["c", "d"]));
+        assert!(ab_uniform, "uniform: a,b should be frequent");
+        assert!(cd_uniform, "uniform: c,d should be frequent");
+
+        // With weights [3.0, 3.0, 0.1, 0.1], total = 6.2, min_count = 3.1.
+        // "a" weighted count = 6.0 >= 3.1 (frequent), "c" weighted count = 0.2 < 3.1 (not frequent)
+        let weights = vec![3.0, 3.0, 0.1, 0.1];
+        let results_weighted = prefix_span(&sequences, 0.5, Some(&weights));
+        let ab_weighted = results_weighted.iter().any(|r| r.pattern == s(&["a", "b"]));
+        let cd_weighted = results_weighted.iter().any(|r| r.pattern == s(&["c", "d"]));
+        assert!(ab_weighted, "weighted: a,b should be frequent (high salience)");
+        assert!(!cd_weighted, "weighted: c,d should NOT be frequent (low salience)");
+    }
+
+    #[test]
+    fn zero_weight_sequences_excluded() {
+        // Sequences with weight 0.0 should not contribute to any pattern's count.
+        let sequences = vec![
+            s(&["a", "b"]),
+            s(&["a", "b"]),
+            s(&["a", "b"]),
+        ];
+        // All weight 0.0: total_weight = 0.0, min_weighted_count = 0.0 -> empty
+        let weights = vec![0.0, 0.0, 0.0];
+        let results = prefix_span(&sequences, 0.5, Some(&weights));
+        assert!(results.is_empty(), "all-zero weights should yield no patterns");
+    }
+
+    #[test]
+    fn weighted_longest_frequent_subsequence() {
+        // Pattern "a","b","c" appears in sequences 0-2 (high weight).
+        // Pattern "x","y","z","w" appears in sequences 3-5 (low weight).
+        // Without weights, the longer pattern wins. With weights, the shorter
+        // high-salience pattern should be the only frequent one at high min_support.
+        let sequences = vec![
+            s(&["a", "b", "c"]),
+            s(&["a", "b", "c"]),
+            s(&["a", "b", "c"]),
+            s(&["x", "y", "z", "w"]),
+            s(&["x", "y", "z", "w"]),
+            s(&["x", "y", "z", "w"]),
+        ];
+        let weights = vec![5.0, 5.0, 5.0, 0.1, 0.1, 0.1];
+        // total = 15.3, min_count at 0.5 = 7.65
+        // "a" weighted = 15.0 >= 7.65, "x" weighted = 0.3 < 7.65
+        let longest = longest_frequent_subsequence(&sequences, 0.5, Some(&weights));
+        assert!(longest.is_some());
+        let longest = longest.unwrap();
+        assert_eq!(pattern_strs(&longest), vec!["a", "b", "c"]);
     }
 }

@@ -93,6 +93,7 @@ pub struct RuntimeHandle {
     pub schema_store: Arc<Mutex<dyn SchemaStore + Send>>,
     pub routine_store: Arc<Mutex<dyn RoutineStore + Send>>,
     pub embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>,
+    pub schedule_store: Arc<Mutex<dyn crate::runtime::scheduler::ScheduleStore + Send>>,
     pub start_time: Instant,
     pub remote_executor: Option<Arc<dyn RemoteExecutor>>,
     /// Live list of peer IDs known to the runtime. Static peers from
@@ -117,6 +118,7 @@ impl RuntimeHandle {
             schema_store: runtime.schema_store,
             routine_store: runtime.routine_store,
             embedder: runtime.embedder,
+            schedule_store: runtime.schedule_store,
             start_time: runtime.start_time,
             remote_executor: None,
             peer_ids: Arc::new(Mutex::new(Vec::new())),
@@ -223,6 +225,11 @@ impl McpServer {
             "list_peers" => self.handle_list_peers(request.id, request.params),
             "invoke_remote_skill" => self.handle_invoke_remote_skill(request.id, request.params),
             "transfer_routine" => self.handle_transfer_routine(request.id, request.params),
+            "schedule" => self.handle_schedule(request.id, request.params),
+            "list_schedules" => self.handle_list_schedules(request.id, request.params),
+            "cancel_schedule" => self.handle_cancel_schedule(request.id, request.params),
+            "trigger_consolidation" => self.handle_trigger_consolidation(request.id, request.params),
+            "execute_routine" => self.handle_execute_routine(request.id, request.params),
 
             _ => Ok(Self::error_response(
                 request.id,
@@ -305,6 +312,11 @@ impl McpServer {
             "list_peers" => self.handle_list_peers(inner_id, arguments),
             "invoke_remote_skill" => self.handle_invoke_remote_skill(inner_id, arguments),
             "transfer_routine" => self.handle_transfer_routine(inner_id, arguments),
+            "schedule" => self.handle_schedule(inner_id, arguments),
+            "list_schedules" => self.handle_list_schedules(inner_id, arguments),
+            "cancel_schedule" => self.handle_cancel_schedule(inner_id, arguments),
+            "trigger_consolidation" => self.handle_trigger_consolidation(inner_id, arguments),
+            "execute_routine" => self.handle_execute_routine(inner_id, arguments),
             _ => {
                 return Ok(Self::error_response(
                     id,
@@ -484,11 +496,16 @@ impl McpServer {
         }
 
         // Store episode and attempt learning if the session reached a terminal state.
+        // Skip storage when the session used plan-following and succeeded —
+        // the routine already captures this behavior, so the episode is noise.
         let is_terminal = matches!(
             final_status.as_str(),
             "completed" | "failed" | "aborted" | "error"
         );
-        if is_terminal {
+        let used_routine = session.working_memory.used_plan_following;
+        let succeeded = final_status == "completed";
+        let should_store = !used_routine || !succeeded;
+        if is_terminal && should_store {
             let episode = crate::interfaces::cli::build_episode_from_session(
                 &session,
                 Some(&*rt.embedder),
@@ -1735,6 +1752,452 @@ impl McpServer {
         }
     }
 
+    fn handle_execute_routine(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: routine_id (string)".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let routine_id = params
+            .get("routine_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if routine_id.is_empty() {
+            return Ok(Self::error_response(
+                id,
+                INVALID_PARAMS,
+                "routine_id must be a non-empty string".to_string(),
+                None,
+            ));
+        }
+
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => {
+                // Stub mode: return placeholder response.
+                let session_id = Uuid::new_v4();
+                return Ok(Self::success_response(
+                    id,
+                    serde_json::json!({
+                        "session_id": session_id.to_string(),
+                        "routine_id": routine_id,
+                        "status": "completed",
+                        "result": { "note": "stub mode" }
+                    }),
+                ));
+            }
+        };
+
+        // Look up the routine.
+        let routine = {
+            let rs = rt.routine_store.lock().unwrap();
+            match rs.get(&routine_id) {
+                Some(r) => r.clone(),
+                None => {
+                    return Ok(Self::error_response(
+                        id,
+                        INVALID_PARAMS,
+                        format!("routine not found: {routine_id}"),
+                        None,
+                    ));
+                }
+            }
+        };
+
+        // Build a GoalSpec using the routine_id as objective.
+        let objective = format!("execute routine: {routine_id}");
+        let source = GoalSource {
+            source_type: crate::types::goal::GoalSourceType::Mcp,
+            identity: None,
+            session_id: None,
+            peer_id: None,
+        };
+        let input = GoalInput::NaturalLanguage {
+            text: objective.clone(),
+            source,
+        };
+
+        let goal = {
+            let goal_rt = rt.goal_runtime.lock().unwrap();
+            match goal_rt.parse_goal(input) {
+                Ok(g) => g,
+                Err(e) => {
+                    return Ok(Self::error_response(
+                        id,
+                        INTERNAL_ERROR,
+                        format!("goal parse failed: {e}"),
+                        None,
+                    ));
+                }
+            }
+        };
+
+        let goal_id = goal.goal_id;
+
+        // Create a session and pre-load the routine's plan.
+        let mut ctrl = rt.session_controller.lock().unwrap();
+        let mut session = match ctrl.create_session(goal) {
+            Ok(s) => s,
+            Err(e) => {
+                return Ok(Self::error_response(
+                    id,
+                    INTERNAL_ERROR,
+                    format!("session creation failed: {e}"),
+                    None,
+                ));
+            }
+        };
+
+        let session_id = session.session_id;
+
+        // Inject optional input bindings into active_bindings.
+        if let Some(input_obj) = params.get("input").and_then(|v| v.as_object()) {
+            for (key, value) in input_obj {
+                session.belief.active_bindings.push(
+                    crate::types::belief::Binding {
+                        name: key.clone(),
+                        value: value.clone(),
+                        source: "goal".to_string(),
+                        confidence: 1.0,
+                    },
+                );
+            }
+        }
+
+        // Pre-load the routine's compiled skill path as the session's active plan.
+        session.working_memory.active_plan = Some(routine.compiled_skill_path.clone());
+        session.working_memory.plan_step = 0;
+        session.working_memory.used_plan_following = true;
+
+        // Run the control loop until it reaches a non-Continue state.
+        let final_status;
+        let mut result_data = serde_json::Value::Null;
+        loop {
+            match ctrl.run_step(&mut session) {
+                Ok(StepResult::Continue) => continue,
+                Ok(StepResult::Completed) => {
+                    final_status = "completed".to_string();
+                    if let Some(last_step) = session.trace.steps.last() {
+                        result_data = serde_json::json!({
+                            "steps": session.trace.steps.len(),
+                            "last_skill": last_step.selected_skill,
+                        });
+                    }
+                    break;
+                }
+                Ok(StepResult::Failed(reason)) => {
+                    final_status = "failed".to_string();
+                    result_data = serde_json::json!({ "reason": reason });
+                    break;
+                }
+                Ok(StepResult::Aborted) => {
+                    final_status = "aborted".to_string();
+                    break;
+                }
+                Ok(StepResult::WaitingForInput(msg)) => {
+                    final_status = "waiting_for_input".to_string();
+                    result_data = serde_json::json!({ "waiting_for": msg });
+                    break;
+                }
+                Ok(StepResult::WaitingForRemote(msg)) => {
+                    final_status = "waiting_for_remote".to_string();
+                    result_data = serde_json::json!({ "waiting_for": msg });
+                    break;
+                }
+                Err(e) => {
+                    final_status = "error".to_string();
+                    result_data = serde_json::json!({ "error": e.to_string() });
+                    break;
+                }
+            }
+        }
+
+        // Routine executions that succeed don't need episode storage —
+        // the routine already captures the behavior.
+        let is_terminal = matches!(
+            final_status.as_str(),
+            "completed" | "failed" | "aborted" | "error"
+        );
+        let succeeded = final_status == "completed";
+        if is_terminal && !succeeded {
+            let episode = crate::interfaces::cli::build_episode_from_session(
+                &session,
+                Some(&*rt.embedder),
+            );
+            let fingerprint = episode.goal_fingerprint.clone();
+            let adapter = crate::adapters::EpisodeMemoryAdapter::new(
+                Arc::clone(&rt.episode_store),
+                Arc::clone(&rt.embedder),
+            );
+            if let Err(e) = adapter.store(episode) {
+                tracing::warn!(error = %e, "failed to store episode from execute_routine");
+            } else {
+                crate::interfaces::cli::attempt_learning(
+                    &rt.episode_store,
+                    &rt.schema_store,
+                    &rt.routine_store,
+                    &fingerprint,
+                    &*rt.embedder,
+                );
+            }
+        }
+
+        Ok(Self::success_response(
+            id,
+            serde_json::json!({
+                "session_id": session_id.to_string(),
+                "goal_id": goal_id.to_string(),
+                "routine_id": routine_id,
+                "status": final_status,
+                "result": result_data
+            }),
+        ))
+    }
+
+    fn handle_schedule(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: label (string)".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let label = match params.get("label").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "label is required".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let port_id = params.get("port_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let capability_id = params.get("capability_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let input = params.get("input").cloned().unwrap_or(serde_json::json!({}));
+        let interval_ms = params.get("interval_ms").and_then(|v| v.as_u64());
+        let delay_ms = params.get("delay_ms").and_then(|v| v.as_u64());
+        let cron_expr = params.get("cron_expr").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let message = params.get("message").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let max_fires = params.get("max_fires").and_then(|v| v.as_u64());
+        let brain = params.get("brain").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        // At least one timing mode must be present.
+        if interval_ms.is_none() && delay_ms.is_none() && cron_expr.is_none() {
+            return Ok(Self::error_response(
+                id,
+                INVALID_PARAMS,
+                "at least one of interval_ms, delay_ms, or cron_expr must be provided".to_string(),
+                None,
+            ));
+        }
+
+        // Build action if port_id and capability_id are both present.
+        let action = match (port_id.as_deref(), capability_id.as_deref()) {
+            (Some(p), Some(c)) if !p.is_empty() && !c.is_empty() => {
+                Some(crate::runtime::scheduler::ScheduleAction {
+                    port_id: p.to_string(),
+                    capability_id: c.to_string(),
+                    input: input.clone(),
+                })
+            }
+            _ => None,
+        };
+
+        // Must have either an action or a message.
+        if action.is_none() && message.is_none() {
+            return Ok(Self::error_response(
+                id,
+                INVALID_PARAMS,
+                "either port_id+capability_id or message must be provided".to_string(),
+                None,
+            ));
+        }
+
+        let now = crate::runtime::scheduler::now_epoch_ms();
+        let next_fire_epoch_ms = if let Some(delay) = delay_ms {
+            now + delay
+        } else if let Some(interval) = interval_ms {
+            now + interval
+        } else {
+            // cron_expr present — store but don't compute next fire (deferred).
+            now
+        };
+
+        let schedule_id = Uuid::new_v4();
+        let schedule = crate::runtime::scheduler::Schedule {
+            id: schedule_id,
+            label: label.clone(),
+            delay_ms,
+            interval_ms,
+            cron_expr,
+            action,
+            message,
+            max_fires,
+            fire_count: 0,
+            brain,
+            next_fire_epoch_ms,
+            created_at_epoch_ms: now,
+            enabled: true,
+        };
+
+        if let Some(rt) = &self.runtime {
+            let mut store = rt.schedule_store.lock().unwrap();
+            store.add(schedule)?;
+        }
+
+        Ok(Self::success_response(
+            id,
+            serde_json::json!({
+                "created": true,
+                "schedule_id": schedule_id.to_string(),
+                "label": label
+            }),
+        ))
+    }
+
+    fn handle_list_schedules(
+        &self,
+        id: Value,
+        _params: Option<Value>,
+    ) -> Result<McpResponse> {
+        if let Some(rt) = &self.runtime {
+            let store = rt.schedule_store.lock().unwrap();
+            let all = store.list_all();
+            let schedules: Vec<Value> = all
+                .iter()
+                .map(|s| serde_json::to_value(s).unwrap_or(Value::Null))
+                .collect();
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({
+                    "count": schedules.len(),
+                    "schedules": schedules
+                }),
+            ))
+        } else {
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({
+                    "count": 0,
+                    "schedules": []
+                }),
+            ))
+        }
+    }
+
+    fn handle_cancel_schedule(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: schedule_id (string)".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let schedule_id_str = match params.get("schedule_id").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "schedule_id is required".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let schedule_uuid = match Uuid::parse_str(&schedule_id_str) {
+            Ok(u) => u,
+            Err(_) => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    format!("invalid UUID: {}", schedule_id_str),
+                    None,
+                ));
+            }
+        };
+
+        if let Some(rt) = &self.runtime {
+            let mut store = rt.schedule_store.lock().unwrap();
+            let cancelled = store.remove(&schedule_uuid)?;
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({ "cancelled": cancelled }),
+            ))
+        } else {
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({ "cancelled": false }),
+            ))
+        }
+    }
+
+    fn handle_trigger_consolidation(
+        &self,
+        id: Value,
+        _params: Option<Value>,
+    ) -> Result<McpResponse> {
+        if let Some(rt) = &self.runtime {
+            let (schemas_induced, routines_compiled) =
+                crate::memory::schemas::run_consolidation_cycle(
+                    &rt.episode_store,
+                    &rt.schema_store,
+                    &rt.routine_store,
+                    &*rt.embedder,
+                );
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({
+                    "schemas_induced": schemas_induced,
+                    "routines_compiled": routines_compiled,
+                }),
+            ))
+        } else {
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({
+                    "schemas_induced": 0,
+                    "routines_compiled": 0,
+                    "note": "stub mode — no runtime available"
+                }),
+            ))
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
@@ -2113,6 +2576,104 @@ impl McpServer {
                     "required": ["peer_id", "routine_id"]
                 }),
             },
+            McpTool {
+                name: "schedule".to_string(),
+                description: "Create a scheduled task. Either a one-shot delay, a recurring interval, or a cron expression. The task can invoke a port capability, emit a plain message, or both.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "label": {
+                            "type": "string",
+                            "description": "Human-readable label"
+                        },
+                        "delay_ms": {
+                            "type": "integer",
+                            "description": "Fire once after N milliseconds (one-shot)"
+                        },
+                        "interval_ms": {
+                            "type": "integer",
+                            "description": "Fire every N milliseconds (recurring)"
+                        },
+                        "cron_expr": {
+                            "type": "string",
+                            "description": "Cron expression (stored for future support)"
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "Plain text message to show in chat (no port call needed)"
+                        },
+                        "port_id": {
+                            "type": "string",
+                            "description": "Port to invoke (for port-call mode)"
+                        },
+                        "capability_id": {
+                            "type": "string",
+                            "description": "Capability on the port"
+                        },
+                        "input": {
+                            "type": "object",
+                            "description": "Payload for the port call"
+                        },
+                        "max_fires": {
+                            "type": "integer",
+                            "description": "Stop after this many fires (omit for unlimited)"
+                        },
+                        "brain": {
+                            "type": "boolean",
+                            "description": "Route result through LLM brain for interpretation"
+                        }
+                    },
+                    "required": ["label"]
+                }),
+            },
+            McpTool {
+                name: "list_schedules".to_string(),
+                description: "List all active schedules.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {}
+                }),
+            },
+            McpTool {
+                name: "cancel_schedule".to_string(),
+                description: "Cancel a scheduled task by ID.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "schedule_id": {
+                            "type": "string",
+                            "description": "The schedule UUID to cancel"
+                        }
+                    },
+                    "required": ["schedule_id"]
+                }),
+            },
+            McpTool {
+                name: "trigger_consolidation".to_string(),
+                description: "Trigger a consolidation cycle (the 'sleep' equivalent). Replays all stored episodes, induces schemas via PrefixSpan, and compiles routines from high-confidence schemas. Returns the number of schemas induced and routines compiled.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {}
+                }),
+            },
+            McpTool {
+                name: "execute_routine".to_string(),
+                description: "Execute a compiled routine by ID. Runs the routine's pre-learned skill sequence to completion without full deliberation.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "routine_id": {
+                            "type": "string",
+                            "description": "The routine ID to execute"
+                        },
+                        "input": {
+                            "type": "object",
+                            "description": "Optional input bindings for the routine's skills"
+                        }
+                    },
+                    "required": ["routine_id"]
+                }),
+            },
         ]
     }
 }
@@ -2156,7 +2717,7 @@ mod tests {
     fn test_list_tools_count() {
         let server = McpServer::new_stub();
         let tools = server.list_tools();
-        assert_eq!(tools.len(), 19);
+        assert_eq!(tools.len(), 24);
     }
 
     #[test]
@@ -2179,6 +2740,8 @@ mod tests {
         assert!(names.contains(&"dump_state".to_string()));
         assert!(names.contains(&"invoke_port".to_string()));
         assert!(names.contains(&"list_ports".to_string()));
+        assert!(names.contains(&"trigger_consolidation".to_string()));
+        assert!(names.contains(&"execute_routine".to_string()));
     }
 
     #[test]
@@ -2245,6 +2808,39 @@ mod tests {
     fn test_create_goal_no_params() {
         let server = McpServer::new_stub();
         let req = make_request("create_goal", None);
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_execute_routine_stub() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "execute_routine",
+            Some(serde_json::json!({ "routine_id": "test-routine-1" })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["routine_id"], "test-routine-1");
+        assert_eq!(result["status"], "completed");
+        assert!(result["session_id"].as_str().is_some());
+    }
+
+    #[test]
+    fn test_execute_routine_missing_id() {
+        let server = McpServer::new_stub();
+        let req = make_request("execute_routine", Some(serde_json::json!({})));
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_execute_routine_no_params() {
+        let server = McpServer::new_stub();
+        let req = make_request("execute_routine", None);
         let resp = server.handle_request(req).unwrap();
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
@@ -2546,7 +3142,7 @@ mod tests {
     #[test]
     fn test_default_impl() {
         let server = McpServer::default();
-        assert_eq!(server.list_tools().len(), 19);
+        assert_eq!(server.list_tools().len(), 24);
     }
 
     /// Build a real RuntimeHandle from a bootstrapped runtime (no packs).

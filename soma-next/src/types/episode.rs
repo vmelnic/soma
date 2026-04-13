@@ -19,6 +19,14 @@ pub struct Episode {
     pub tags: Vec<String>,
     pub embedding: Option<Vec<f32>>,
     pub created_at: DateTime<Utc>,
+    /// Salience score for consolidation weighting. Higher = more valuable for
+    /// pattern extraction. Computed from outcome quality and efficiency.
+    #[serde(default = "default_salience")]
+    pub salience: f64,
+}
+
+fn default_salience() -> f64 {
+    1.0
 }
 
 /// A single step within an episode trace.

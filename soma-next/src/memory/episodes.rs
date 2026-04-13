@@ -235,6 +235,7 @@ mod tests {
             tags: tags.into_iter().map(String::from).collect(),
             embedding: None,
             created_at: Utc::now(),
+            salience: 1.0,
         }
     }
 

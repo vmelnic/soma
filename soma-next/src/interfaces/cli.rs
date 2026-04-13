@@ -372,11 +372,16 @@ impl DefaultCliRunner {
         }
 
         // Store episode after session completion, then attempt learning.
+        // Skip storage when the session used plan-following and succeeded —
+        // the routine already captures this behavior, so the episode is noise.
         let is_terminal = matches!(
             session.status,
             SessionStatus::Completed | SessionStatus::Failed | SessionStatus::Aborted
         );
-        if is_terminal {
+        let used_routine = session.working_memory.used_plan_following;
+        let succeeded = session.status == SessionStatus::Completed;
+        let should_store = !used_routine || !succeeded;
+        if is_terminal && should_store {
             let episode = build_episode_from_session(&session, Some(rt.embedder.as_ref()));
             let fingerprint = episode.goal_fingerprint.clone();
             let adapter = EpisodeMemoryAdapter::new(
@@ -802,7 +807,7 @@ pub fn build_episode_from_session(
         .map(|s| s.observation.clone())
         .collect();
 
-    let total_cost = session
+    let total_cost: f64 = session
         .working_memory
         .budget_deltas
         .iter()
@@ -811,6 +816,24 @@ pub fn build_episode_from_session(
 
     let fingerprint = session.goal.objective.description.clone();
     let embedding = embedder.map(|e| e.embed(&fingerprint));
+
+    let salience = {
+        let outcome_weight = match outcome {
+            EpisodeOutcome::Success => 1.0_f64,
+            EpisodeOutcome::PartialSuccess => 0.5,
+            EpisodeOutcome::Failure => 0.2,
+            EpisodeOutcome::Aborted
+            | EpisodeOutcome::Timeout
+            | EpisodeOutcome::BudgetExhausted => 0.1,
+        };
+        // Efficiency: lower cost relative to starting budget = higher salience
+        let efficiency = if total_cost > 0.0 {
+            (1.0 - (total_cost / 100.0).min(1.0)).max(0.0)
+        } else {
+            0.5
+        };
+        (outcome_weight * 0.7 + efficiency * 0.3).clamp(0.0, 1.0)
+    };
 
     Episode {
         episode_id: Uuid::new_v4(),
@@ -824,6 +847,7 @@ pub fn build_episode_from_session(
         tags: vec![],
         embedding,
         created_at: Utc::now(),
+        salience,
     }
 }
 
@@ -1823,6 +1847,7 @@ mod tests {
             tags: Vec::new(),
             embedding: None,
             created_at: Utc::now(),
+            salience: 1.0,
         }
     }
 }

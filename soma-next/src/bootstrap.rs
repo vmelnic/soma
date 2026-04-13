@@ -31,9 +31,12 @@ use crate::runtime::metrics::RuntimeMetrics;
 use crate::runtime::session::{SessionController, SessionControllerDeps};
 use crate::runtime::skill::{DefaultSkillRuntime, SkillRuntime};
 
+use crate::runtime::scheduler::{DefaultScheduleStore, ScheduleStore};
+
 type SharedEpisodeStore = Arc<Mutex<dyn EpisodeStore + Send>>;
 type SharedSchemaStore = Arc<Mutex<dyn SchemaStore + Send>>;
 type SharedRoutineStore = Arc<Mutex<dyn RoutineStore + Send>>;
+type SharedScheduleStore = Arc<Mutex<dyn ScheduleStore + Send>>;
 #[cfg(feature = "native-filesystem")]
 use crate::ports::filesystem::FilesystemPort;
 #[cfg(feature = "native-http")]
@@ -64,6 +67,8 @@ pub struct Runtime {
     pub metrics: Arc<RuntimeMetrics>,
     /// Goal embedder used for embedding-based episode retrieval and schema induction.
     pub embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>,
+    /// Schedule store for the scheduler subsystem.
+    pub schedule_store: SharedScheduleStore,
     /// Instant when the runtime was created, used for uptime and CPU tracking.
     pub start_time: Instant,
 }
@@ -237,6 +242,7 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
         policy_engine: Box::new(policy_engine),
         remote_executor: None,
         capability_scope_checker: None,
+        brain_fallback: None,
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());
@@ -255,6 +261,7 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
         pack_specs,
         metrics,
         embedder,
+        schedule_store: Arc::new(Mutex::new(DefaultScheduleStore::new())),
         start_time: Instant::now(),
     })
 }
@@ -396,6 +403,7 @@ pub fn bootstrap_with_remote(
         policy_engine: Box::new(policy_engine),
         remote_executor: Some(remote_executor),
         capability_scope_checker: None,
+        brain_fallback: None,
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());
@@ -414,6 +422,7 @@ pub fn bootstrap_with_remote(
         pack_specs,
         metrics,
         embedder,
+        schedule_store: Arc::new(Mutex::new(DefaultScheduleStore::new())),
         start_time: Instant::now(),
     })
 }
@@ -540,6 +549,7 @@ pub fn bootstrap_from_specs(
         policy_engine: Box::new(policy_engine),
         remote_executor: None,
         capability_scope_checker: None,
+        brain_fallback: None,
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());
@@ -558,6 +568,7 @@ pub fn bootstrap_from_specs(
         pack_specs,
         metrics,
         embedder,
+        schedule_store: Arc::new(Mutex::new(DefaultScheduleStore::new())),
         start_time: Instant::now(),
     })
 }
@@ -698,6 +709,7 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
         policy_engine: Box::new(policy_engine),
         remote_executor: None,
         capability_scope_checker: None,
+        brain_fallback: None,
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());
@@ -716,6 +728,7 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
         pack_specs: vec![],
         metrics,
         embedder,
+        schedule_store: Arc::new(Mutex::new(DefaultScheduleStore::new())),
         start_time: Instant::now(),
     })
 }

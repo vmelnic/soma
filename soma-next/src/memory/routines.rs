@@ -382,6 +382,7 @@ mod tests {
             tags: Vec::new(),
             embedding: None,
             created_at: Utc::now(),
+            salience: 1.0,
         }
     }
 

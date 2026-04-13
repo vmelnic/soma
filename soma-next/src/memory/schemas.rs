@@ -176,7 +176,7 @@ impl SchemaStore for DefaultSchemaStore {
                 continue;
             }
 
-            // Extract skill sequences from successful episodes.
+            // Extract skill sequences and salience weights from successful episodes.
             let skill_sequences: Vec<Vec<String>> = successful_indices
                 .iter()
                 .map(|&i| {
@@ -188,9 +188,19 @@ impl SchemaStore for DefaultSchemaStore {
                 })
                 .collect();
 
-            // Use PrefixSpan to find the longest frequent subsequence.
+            let weights: Vec<f64> = successful_indices
+                .iter()
+                .map(|&i| episodes[i].salience)
+                .collect();
+
+            // Use PrefixSpan to find the longest frequent subsequence,
+            // weighted by episode salience.
             if let Some(freq) =
-                crate::memory::sequence_mining::longest_frequent_subsequence(&skill_sequences, 0.7)
+                crate::memory::sequence_mining::longest_frequent_subsequence(
+                    &skill_sequences,
+                    0.7,
+                    Some(&weights),
+                )
             {
                 let candidate_ordering = freq.pattern;
                 if candidate_ordering.is_empty() {
@@ -372,6 +382,95 @@ fn extract_common_ordering(sequences: &[Vec<String>]) -> Vec<String> {
         .collect()
 }
 
+/// Run a full consolidation cycle over all stored episodes.
+///
+/// This is the "sleep" equivalent: replays episodes, induces schemas,
+/// compiles routines, and reports what was created. Called periodically
+/// by the background consolidation thread or on-demand via MCP.
+pub fn run_consolidation_cycle(
+    episode_store: &std::sync::Arc<std::sync::Mutex<dyn crate::memory::episodes::EpisodeStore + Send>>,
+    schema_store: &std::sync::Arc<std::sync::Mutex<dyn SchemaStore + Send>>,
+    routine_store: &std::sync::Arc<std::sync::Mutex<dyn crate::memory::routines::RoutineStore + Send>>,
+    embedder: &dyn crate::memory::embedder::GoalEmbedder,
+) -> (usize, usize) {
+    // 1. Lock episode store, list all episodes, release lock.
+    let all_episodes: Vec<crate::types::episode::Episode> = {
+        let es = match episode_store.lock() {
+            Ok(es) => es,
+            Err(_) => return (0, 0),
+        };
+        let count = es.count();
+        es.list(count, 0).into_iter().cloned().collect()
+    };
+
+    // 2. Need at least 3 episodes to attempt any induction.
+    if all_episodes.len() < 3 {
+        return (0, 0);
+    }
+
+    // 3. Induce schemas from all episodes using the embedding-aware path.
+    let episode_refs: Vec<&crate::types::episode::Episode> = all_episodes.iter().collect();
+    let induced_schemas = {
+        let ss = match schema_store.lock() {
+            Ok(ss) => ss,
+            Err(_) => return (0, 0),
+        };
+        ss.induce_from_episodes_with_embedder(&episode_refs, embedder)
+    };
+
+    let mut schemas_count = 0usize;
+    let mut routines_count = 0usize;
+
+    for schema in &induced_schemas {
+        // 4. Register each induced schema (skip duplicates — register replaces).
+        {
+            let mut ss = match schema_store.lock() {
+                Ok(ss) => ss,
+                Err(_) => continue,
+            };
+            if let Err(e) = ss.register(schema.clone()) {
+                eprintln!("[consolidation] failed to register schema: {e}");
+                continue;
+            }
+        }
+        schemas_count += 1;
+
+        // 5. Only attempt routine compilation for high-confidence schemas.
+        if schema.confidence < 0.7 {
+            continue;
+        }
+
+        let compiled_routine = {
+            let rs = match routine_store.lock() {
+                Ok(rs) => rs,
+                Err(_) => continue,
+            };
+            rs.compile_from_schema(schema, &episode_refs)
+        };
+
+        // 6. Register each compiled routine.
+        if let Some(routine) = compiled_routine {
+            let mut rs = match routine_store.lock() {
+                Ok(rs) => rs,
+                Err(_) => continue,
+            };
+            if let Err(e) = rs.register(routine) {
+                eprintln!("[consolidation] failed to register routine: {e}");
+            } else {
+                routines_count += 1;
+            }
+        }
+    }
+
+    // 7. Log summary.
+    eprintln!(
+        "[consolidation] induced {} schemas, compiled {} routines",
+        schemas_count, routines_count
+    );
+
+    (schemas_count, routines_count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -445,6 +544,7 @@ mod tests {
             tags: vec!["test".into()],
             embedding: None,
             created_at: Utc::now(),
+            salience: 1.0,
         }
     }
 

@@ -96,6 +96,11 @@ pub struct WorkingMemory {
     /// successful plan step; reset to 0 when a new plan is loaded.
     #[serde(default)]
     pub plan_step: usize,
+    /// Set to true when the session activates a compiled routine's plan.
+    /// Used by episode storage to skip noise — successful plan-following
+    /// sessions don't need new episodes (the routine already captures the behavior).
+    #[serde(default)]
+    pub used_plan_following: bool,
 }
 
 /// Provenance of a bound input value — which source the runtime drew the value from.

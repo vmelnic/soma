@@ -226,6 +226,27 @@ export class SomaMcpClient {
       : "(no ports loaded)";
   }
 
+  async getRoutineSummary() {
+    try {
+      const raw = await this.callTool("dump_state", { sections: ["routines"] });
+      const data = this.unwrap(raw);
+      const routines = data?.routines || [];
+      if (routines.length === 0) return "(no routines compiled yet)";
+      return routines
+        .map((r) => {
+          const steps = Array.isArray(r.compiled_skill_path)
+            ? r.compiled_skill_path.join(" \u2192 ")
+            : "?";
+          const conf =
+            typeof r.confidence === "number" ? r.confidence.toFixed(2) : "?";
+          return `${r.routine_id} (${steps}, confidence: ${conf})`;
+        })
+        .join("\n");
+    } catch {
+      return "(routine fetch failed)";
+    }
+  }
+
   request(method, params) {
     if (!this.child || this.child.exitCode !== null) {
       return Promise.reject(new Error("soma-next child not running"));

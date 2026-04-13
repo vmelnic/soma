@@ -61,6 +61,7 @@ import {
   buildSystemPrompt,
 } from "./brain.mjs";
 import { DEFAULT_CHAT_TOOLS, makeInvokeTool } from "./mcp-tools.mjs";
+import { hasTable, extractTableNames, introspectTable, formatSchemaCache } from "./schema-cache.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const FRONTEND_DIR = resolvePath(__dirname, "..", "frontend");
@@ -263,6 +264,10 @@ async function main() {
   const contexts = createContexts(soma);
   const messages = createMessages(soma);
 
+  // Cache routine summary at startup (ports + routines are static
+  // for the life of the backend).
+  const cachedRoutineSummary = await soma.getRoutineSummary();
+
   // The chat brain's tool bindings — a closure over the live
   // SomaMcpClient so every tool call hits the same child process.
   const invokeTool = makeInvokeTool(soma);
@@ -435,12 +440,38 @@ async function main() {
         // returned in the response for debugging and can be
         // surfaced in a future commit (e.g. a "show tools used"
         // toggle on each message).
+        // Build runtime briefing — compact state for the brain's
+        // "working memory". This replaces deep conversation history
+        // with structured pointers into the runtime's actual state.
+        const briefingParts = [];
+
+        // Active schedules
+        try {
+          const schedRaw = await soma.callTool("list_schedules", {});
+          const scheds = soma.unwrap(schedRaw);
+          const schedList = scheds?.schedules || [];
+          if (schedList.length > 0) {
+            const labels = schedList.map(s => {
+              const type = s.interval_ms ? `every ${s.interval_ms}ms` : "one-shot";
+              return `${s.label} (${type})`;
+            }).join(", ");
+            briefingParts.push(`Active schedules (${schedList.length}): ${labels}`);
+          }
+        } catch {}
+
+        const runtimeBriefing = briefingParts.length > 0
+          ? briefingParts.join("\n")
+          : "(no background activity)";
+
         let reply;
         try {
           reply = await runChatTurn({
             systemPrompt: buildSystemPrompt(
               ctx.context,
               soma.getPortCatalogSummary(),
+              formatSchemaCache(contextId),
+              cachedRoutineSummary,
+              runtimeBriefing,
             ),
             history: hist.history,
             tools: DEFAULT_CHAT_TOOLS,
@@ -472,6 +503,25 @@ async function main() {
             user_message: userAppend.message,
           });
         }
+        // Lazy schema introspection: inspect tool calls for SQL that
+        // touched tables we haven't cached yet. Fire-and-forget — the
+        // schema will be available in the system prompt for the NEXT turn.
+        if (reply.tool_calls?.length > 0) {
+          for (const tc of reply.tool_calls) {
+            if (tc.name === "invoke_port" && tc.result?.ok) {
+              const capId = tc.args?.capability_id;
+              if (capId === "query" || capId === "execute") {
+                const tables = extractTableNames(tc.args?.input?.sql);
+                for (const t of tables) {
+                  if (!hasTable(contextId, t)) {
+                    introspectTable(soma, contextId, t).catch(() => {});
+                  }
+                }
+              }
+            }
+          }
+        }
+
         return sendJson(res, 201, {
           status: "ok",
           user_message: userAppend.message,

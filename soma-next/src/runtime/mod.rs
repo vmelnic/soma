@@ -19,3 +19,4 @@ pub mod trace;
 pub mod pack;
 pub mod metrics;
 pub mod proprioception;
+pub mod scheduler;

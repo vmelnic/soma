@@ -6,7 +6,7 @@
 
 ## Abstract
 
-SOMA (from Greek σῶμα, "body") is a computational architecture in which the runtime itself constitutes the program. No application source code is written, generated, compiled, or interpreted. A single Rust binary receives typed goals, maintains a structured belief state, selects skills from a ranked hierarchy, invokes external systems through dynamically loaded port adapters, observes results, patches beliefs, and iterates under policy constraints until the goal is satisfied or a budget is exhausted. The architecture implements a 16-step control loop with multi-objective skill selection, observation-grounded belief patching, rule-based critic evaluation, and an episodic learning pipeline that promotes observed execution patterns into reusable schemas and compiled routines. External intelligence — typically a large language model — drives the runtime through a 19-tool MCP interface; the runtime drives external systems through typed port libraries. The implementation comprises a ~10MB binary with 1177 tests and zero warnings, a workspace of 11 dynamically loaded port adapters covering databases, cryptography, email, object storage, authentication, geolocation, image processing, push notifications, and timers, and multiple deployed projects demonstrating end-to-end operation — including an embedded `no_std` leaf on ESP32 microcontrollers with 12 hardware ports, runtime-configurable pin assignments, and a driver-agnostic display port that renders live sensor data on an SSD1306 OLED under brain-side MCP control. We present the architecture, its formal properties, the episodic learning pipeline, the distributed execution model, and the embedded-leaf deployment path.
+SOMA (from Greek σῶμα, "body") is a computational architecture in which the runtime itself constitutes the program. No application source code is written, generated, compiled, or interpreted. A single Rust binary receives typed goals, maintains a structured belief state, selects skills from a ranked hierarchy, invokes external systems through dynamically loaded port adapters, observes results, patches beliefs, and iterates under policy constraints until the goal is satisfied or a budget is exhausted. The architecture implements a 16-step control loop with multi-objective skill selection, observation-grounded belief patching, rule-based critic evaluation, and an episodic learning pipeline that promotes observed execution patterns into reusable schemas and compiled routines. External intelligence — typically a large language model — drives the runtime through a 19-tool MCP interface; the runtime drives external systems through typed port libraries. The implementation comprises a ~10MB binary with 1198 tests and zero warnings, a workspace of 11 dynamically loaded port adapters covering databases, cryptography, email, object storage, authentication, geolocation, image processing, push notifications, and timers, and multiple deployed projects demonstrating end-to-end operation — including an embedded `no_std` leaf on ESP32 microcontrollers with 12 hardware ports, runtime-configurable pin assignments, and a driver-agnostic display port that renders live sensor data on an SSD1306 OLED under brain-side MCP control. We present the architecture, its formal properties, the episodic learning pipeline, the distributed execution model, and the embedded-leaf deployment path.
 
 ---
 
@@ -41,7 +41,7 @@ This paper makes the following contributions:
 3. A three-tier episodic learning pipeline (episodes → schema induction → routine compilation) that extracts reusable control structures from observed execution traces.
 4. A skill hierarchy (routines → schemas → composites → primitives) with tier-weighted multi-objective scoring and policy-gated selection.
 5. A policy system with seven lifecycle hooks providing fine-grained safety enforcement over a deliberative control loop.
-6. A working implementation: 1177 tests, 11 dynamically loaded server-side port adapters, multiple deployed projects, a distributed execution layer supporting TCP/TLS, WebSocket, and Unix socket transport with verified cross-instance skill delegation and routine transfer, and a `no_std` embedded deployment path proven on two distinct ESP32 chips with hardware-level I²C bus sharing between sensor and display ports.
+6. A working implementation: 1198 tests, 11 dynamically loaded server-side port adapters, multiple deployed projects, a distributed execution layer supporting TCP/TLS, WebSocket, and Unix socket transport with verified cross-instance skill delegation and routine transfer, and a `no_std` embedded deployment path proven on two distinct ESP32 chips with hardware-level I²C bus sharing between sensor and display ports.
 
 ---
 
@@ -511,7 +511,7 @@ Per-peer, per-action rate limiting with configurable windows. Graduated response
 
 ### 11.1 MCP Server
 
-The MCP server implements JSON-RPC 2.0 over stdin/stdout with 19 tools:
+The MCP server implements JSON-RPC 2.0 over stdin/stdout with 24 tools:
 
 | Tool | Purpose |
 |---|---|
@@ -531,11 +531,16 @@ The MCP server implements JSON-RPC 2.0 over stdin/stdout with 19 tools:
 | `dump_state` | Full runtime state snapshot |
 | `invoke_port` | Direct port capability invocation |
 | `list_ports` | Enumerate registered ports and capabilities |
+| `schedule` | Create a scheduled port invocation (one-shot or recurring) |
+| `list_schedules` | Enumerate active schedules |
+| `cancel_schedule` | Cancel a scheduled invocation |
 | `list_peers` | Enumerate connected remote SOMA peers |
 | `invoke_remote_skill` | Invoke a skill on a remote SOMA peer |
 | `transfer_routine` | Push a compiled routine to a remote peer |
+| `execute_routine` | Run a compiled routine by ID with pre-loaded plan |
+| `trigger_consolidation` | Manually trigger the episode → schema → routine pipeline |
 
-The `invoke_port` and `list_ports` tools provide direct port access, bypassing the goal/session/skill machinery. The three distributed tools — `list_peers`, `invoke_remote_skill`, and `transfer_routine` — enable LLM-orchestrated multi-instance coordination. MCP mode supports `--listen`, `--peer`, `--unix-listen`, and `--unix-peer` flags for distributed operation.
+The `invoke_port` and `list_ports` tools provide direct port access, bypassing the goal/session/skill machinery. The three scheduler tools — `schedule`, `list_schedules`, and `cancel_schedule` — enable timed port invocations with one-shot delays, recurring intervals, fire count limits, and optional brain routing for result interpretation. The three distributed tools — `list_peers`, `invoke_remote_skill`, and `transfer_routine` — enable LLM-orchestrated multi-instance coordination. The `execute_routine` tool bridges the LLM-driven and autonomous paths by letting the brain trigger compiled routines directly. MCP mode supports `--listen`, `--peer`, `--unix-listen`, `--unix-peer`, and `--discover-lan` flags for distributed operation.
 
 ### 11.2 The LLM Interaction Model
 
@@ -605,7 +610,7 @@ No controllers, no routes, no ORM mappings, no serialization layers, no build co
 
 Single Rust binary. ~56,000 lines across: runtime logic (session controller, belief, skill registry, skill executor, selector, predictor, critic, policy engine, goal runtime, port runtime, pack runtime, resource runtime, metrics, proprioception, dynamic port loading, port signature verification), adapter layer, memory stores (episodes, schemas, routines, checkpoints, persistence, working memory, world state), interfaces (CLI, MCP, internal API types), distributed transport (TCP/TLS, WebSocket, Unix socket, delegation, routing, streaming, sync, rate limiting, heartbeat, authentication, peer management, message queue, chunked transfer, distributed trace), type definitions (goals, sessions, skills, ports, packs, policies, beliefs, observations, resources, episodes, routines, schemas, peers), and built-in ports (filesystem, http).
 
-1177 tests. Zero compiler warnings. Zero clippy warnings. ~11MB release binary. 19 MCP tools (16 core + 3 distributed).
+1198 tests. Zero compiler warnings. Zero clippy warnings. ~11MB release binary. 24 MCP tools (16 core + 3 scheduler + 3 distributed + 2 learning).
 
 ### 13.2 soma-ports
 
@@ -739,7 +744,7 @@ Routines compiled from historical episodes may become stale as external system b
 
 SOMA is a computational architecture where the runtime is the program. A goal-driven control loop selects skills, invokes ports, observes outcomes, and adapts through an episodic learning pipeline — without generating, compiling, or interpreting application source code at any layer. The policy engine enforces safety at seven lifecycle hooks. The type system makes side effects, risk classes, trust levels, and determinism properties explicit and machine-evaluable. The distributed layer enables multi-instance delegation and knowledge transfer.
 
-The implementation — 1188 tests, 11 port adapters, 88 capabilities, and eleven deployed projects spanning LLM-driven server operation (smtp, s3, postgres, mcp, mcp-bridge), the autonomous learning path (multistep), cross-instance communication (s2s), in-browser runtime (web), end-user conversational product (terminal), and embedded leaf firmware on real ESP32 hardware (esp32) — demonstrates that the architecture is operational, not theoretical. The episodic learning pipeline (episodes → schemas → routines) provides a concrete mechanism for experience-based adaptation. The pack manifest pattern provides a concrete answer to "what do developers write instead of code."
+The implementation — 1198 tests, 11 port adapters, 88 capabilities, 24 MCP tools, and eleven deployed projects spanning LLM-driven server operation (smtp, s3, postgres, mcp, mcp-bridge), the autonomous learning path (multistep), cross-instance communication (s2s), in-browser runtime (web), end-user conversational product (terminal), and embedded leaf firmware on real ESP32 hardware (esp32) — demonstrates that the architecture is operational, not theoretical. The episodic learning pipeline (episodes → schemas → routines) provides a concrete mechanism for experience-based adaptation. The pack manifest pattern provides a concrete answer to "what do developers write instead of code."
 
 SOMA does not generate code. It eliminates the need for it.
 

@@ -1362,6 +1362,7 @@ mod tests {
                 output_bindings: vec![],
                 active_plan: None,
                 plan_step: 0,
+                used_plan_following: false,
             },
             status: SessionStatus::Created,
             trace: SessionTrace { steps: vec![] },
@@ -1499,6 +1500,7 @@ mod tests {
             tags: Vec::new(),
             embedding: None,
             created_at: Utc::now(),
+            salience: 1.0,
         };
         adapter.store(episode).unwrap();
 

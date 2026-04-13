@@ -351,8 +351,9 @@ export async function runChatTurn({
 
 const META_SYSTEM_PROMPT = `You are SOMA, a personal assistant running inside a terminal. The operator works in one named context at a time — a conversation scope with its own data. Your job is to help them get things done, using the SOMA runtime's ports through the single tool you have.
 
-You have ONE tool: invoke_port(port_id, capability_id, input).
-It routes to real ports in the backend SOMA runtime.
+You have TWO tools:
+1. invoke_port(port_id, capability_id, input) — invoke a specific port capability.
+2. execute_routine(routine_id) — run a compiled routine directly. Routines are pre-learned multi-step procedures. If one matches the operator's request, prefer it over step-by-step invoke_port calls.
 
 ## PORT CATALOG (use these exact port_id / capability_id pairs)
 
@@ -362,6 +363,18 @@ It routes to real ports in the backend SOMA runtime.
 
 Name:       {{CONTEXT_NAME}}
 Namespace:  {{NAMESPACE}}   ← prefix every stored artifact with this
+
+## KNOWN TABLE SCHEMAS
+
+{{SCHEMA_CACHE}}
+
+## AVAILABLE ROUTINES
+
+{{ROUTINES}}
+
+## RUNTIME BRIEFING
+
+{{RUNTIME_BRIEFING}}
 
 ## RULES (read these carefully — they matter more than you think)
 
@@ -490,7 +503,7 @@ function contextNamespace(contextId) {
   return `ctx_${compact}`;
 }
 
-export function buildSystemPrompt(context, portCatalogSummary) {
+export function buildSystemPrompt(context, portCatalogSummary, schemaCacheSummary, routineSummary, runtimeBriefing) {
   const name =
     (context?.name && String(context.name).trim()) || "(unnamed context)";
   const namespace = contextNamespace(context?.id);
@@ -500,7 +513,10 @@ export function buildSystemPrompt(context, portCatalogSummary) {
       : "(port catalog unavailable — use invoke_port with best-known port ids like postgres/query, crypto/sha256, smtp/send_plain)";
   return META_SYSTEM_PROMPT.replace(/{{CONTEXT_NAME}}/g, name)
     .replace(/{{NAMESPACE}}/g, namespace)
-    .replace(/{{PORT_CATALOG}}/g, catalog);
+    .replace(/{{PORT_CATALOG}}/g, catalog)
+    .replace(/\{\{SCHEMA_CACHE\}\}/g, schemaCacheSummary || "(no tables discovered yet)")
+    .replace(/\{\{ROUTINES\}\}/g, routineSummary || "(no routines compiled yet)")
+    .replace(/\{\{RUNTIME_BRIEFING\}\}/g, runtimeBriefing || "(no background activity)");
 }
 
 export { contextNamespace };

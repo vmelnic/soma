@@ -55,6 +55,30 @@ export const DEFAULT_CHAT_TOOLS = Object.freeze([
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "execute_routine",
+      description:
+        "Execute a compiled routine by ID. Routines are pre-learned procedures that run faster than step-by-step tool calls.",
+      parameters: {
+        type: "object",
+        properties: {
+          routine_id: {
+            type: "string",
+            description: "Routine ID from the available routines list",
+          },
+          input: {
+            type: "object",
+            description: "Optional input bindings",
+            additionalProperties: true,
+          },
+        },
+        required: ["routine_id"],
+        additionalProperties: false,
+      },
+    },
+  },
 ]);
 
 // Build an `invokeTool(name, args)` handler closed over a
@@ -81,6 +105,10 @@ export function makeInvokeTool(soma) {
         }
         const structured = await soma.invokePort(portId, capabilityId, input);
         return { ok: true, result: structured };
+      }
+      if (name === "execute_routine") {
+        const raw = await soma.callTool("execute_routine", args ?? {});
+        return { ok: true, result: soma.unwrap(raw) };
       }
       return { ok: false, error: `unknown tool: ${name}` };
     } catch (err) {

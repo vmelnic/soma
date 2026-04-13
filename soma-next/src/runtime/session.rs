@@ -208,6 +208,20 @@ pub struct PolicyCheckResult {
     pub waiting_for_input: Option<String>,
 }
 
+/// Optional external brain for skill selection fallback.
+/// When the predictor's confidence is below a threshold, the session
+/// controller can delegate the selection to an LLM or other external
+/// intelligence. The fallback receives the goal text, candidate skill
+/// IDs, and a belief summary, and returns the chosen skill ID.
+pub trait BrainFallback: Send + Sync {
+    fn select_skill(
+        &self,
+        goal: &str,
+        candidates: &[String],
+        belief_summary: &str,
+    ) -> crate::errors::Result<String>;
+}
+
 // ---------------------------------------------------------------------------
 // SessionController — orchestrates the 16-step loop
 // ---------------------------------------------------------------------------
@@ -236,6 +250,11 @@ pub struct SessionControllerDeps {
     /// CapabilityScope. If the skill's scope is narrower than the session's
     /// invocation context, execution is denied with a PolicyDenied error.
     pub capability_scope_checker: Option<CapabilityScopeChecker>,
+    /// Optional external brain fallback for skill selection. When the
+    /// predictor's top score falls below the confidence threshold (0.3),
+    /// the controller delegates to this fallback before committing to the
+    /// low-confidence selection.
+    pub brain_fallback: Option<Box<dyn BrainFallback>>,
 }
 
 /// SessionController holds references to all subsystems and manages sessions.
@@ -260,6 +279,8 @@ pub struct SessionController {
     /// When configured, resolves a capability FQN to its declared scope and
     /// enforces that the session's invocation context does not exceed it.
     capability_scope_checker: Option<CapabilityScopeChecker>,
+    /// Optional external brain fallback for low-confidence skill selection.
+    brain_fallback: Option<Box<dyn BrainFallback>>,
     /// Default maximum steps per session if goal does not specify.
     default_max_steps: u32,
     /// Shared runtime metrics for recording session lifecycle events,
@@ -282,6 +303,7 @@ impl SessionController {
             policy_engine: deps.policy_engine,
             remote_executor: deps.remote_executor,
             capability_scope_checker: deps.capability_scope_checker,
+            brain_fallback: deps.brain_fallback,
             default_max_steps: 100,
             metrics,
         }
@@ -1468,6 +1490,7 @@ impl SessionRuntime for SessionController {
                 output_bindings: Vec::new(),
                 active_plan: None,
                 plan_step: 0,
+                used_plan_following: false,
             },
             status: SessionStatus::Created,
             trace: SessionTrace { steps: Vec::new() },
@@ -1620,6 +1643,7 @@ impl SessionRuntime for SessionController {
             );
             session.working_memory.active_plan = Some(routine.compiled_skill_path.clone());
             session.working_memory.plan_step = 0;
+            session.working_memory.used_plan_following = true;
         }
 
         // If active plan is exhausted, clear it.
@@ -1701,7 +1725,42 @@ impl SessionRuntime for SessionController {
                 session.updated_at = Utc::now();
                 return Err(SomaError::NoCandidates);
             }
-            let chosen_score = &top_scores[0];
+            let mut chosen_score = &top_scores[0];
+
+            // If the top candidate's score is very low and a brain fallback
+            // is available, delegate the selection to the external brain.
+            // The brain picks from the same candidate list -- it cannot
+            // invent skills that don't exist.
+            if chosen_score.score < 0.3
+                && let Some(ref fallback) = self.brain_fallback
+            {
+                    let candidate_ids: Vec<String> = candidates.iter()
+                        .map(|c| c.skill_id.clone())
+                        .collect();
+                    let belief_json = serde_json::to_string(&session.belief)
+                        .unwrap_or_default();
+                    if let Ok(selected) = fallback.select_skill(
+                        &session.goal.objective.description,
+                        &candidate_ids,
+                        &belief_json,
+                    ) {
+                        // The brain's pick must be a valid candidate. Search
+                        // the full scored list, not just top_scores, so the
+                        // brain can override with any candidate.
+                        if let Some(brain_pick) = scores.iter().find(|s| s.skill_id == selected) {
+                            debug!(
+                                session_id = %session.session_id,
+                                original = %chosen_score.skill_id,
+                                brain_pick = %brain_pick.skill_id,
+                                original_score = chosen_score.score,
+                                "brain fallback overrode low-confidence selection"
+                            );
+                            chosen_score = brain_pick;
+                        }
+                    }
+            }
+            // end brain fallback
+
             let chosen_skill = match self.skill_registry.get_skill(&chosen_score.skill_id) {
                 Some(skill) => skill.clone(),
                 None => {
@@ -2522,6 +2581,7 @@ mod tests {
             policy_engine: Box::new(NoopPolicyEngine),
             remote_executor: None,
             capability_scope_checker: None,
+            brain_fallback: None,
         }, test_metrics())
     }
 
@@ -2538,6 +2598,7 @@ mod tests {
             policy_engine: Box::new(NoopPolicyEngine),
             remote_executor: None,
             capability_scope_checker: None,
+            brain_fallback: None,
         }, test_metrics())
     }
 
@@ -2765,6 +2826,7 @@ mod tests {
             policy_engine: Box::new(NoopPolicyEngine),
             remote_executor: None,
             capability_scope_checker: None,
+            brain_fallback: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -2822,6 +2884,7 @@ mod tests {
             policy_engine: Box::new(DenyAllPolicy),
             remote_executor: None,
             capability_scope_checker: None,
+            brain_fallback: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -2917,6 +2980,7 @@ mod tests {
             policy_engine: Box::new(NoopPolicyEngine),
             remote_executor: None,
             capability_scope_checker: None,
+            brain_fallback: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -3029,6 +3093,7 @@ mod tests {
             policy_engine: Box::new(NoopPolicyEngine),
             remote_executor: None,
             capability_scope_checker: None,
+            brain_fallback: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -3096,6 +3161,7 @@ mod tests {
             policy_engine: Box::new(HookDenyPolicy),
             remote_executor: None,
             capability_scope_checker: None,
+            brain_fallback: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -3186,6 +3252,7 @@ mod tests {
             policy_engine: Box::new(NoopPolicyEngine),
             remote_executor: None,
             capability_scope_checker: None,
+            brain_fallback: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -3449,6 +3516,7 @@ mod tests {
             policy_engine: Box::new(NoopPolicyEngine),
             remote_executor: None,
             capability_scope_checker: Some(scope_checker),
+            brain_fallback: None,
         }, test_metrics());
 
         let goal = test_goal(); // User source -> Local scope
@@ -3482,6 +3550,7 @@ mod tests {
             policy_engine: Box::new(NoopPolicyEngine),
             remote_executor: None,
             capability_scope_checker: Some(scope_checker),
+            brain_fallback: None,
         }, test_metrics());
 
         // Peer source -> Peer scope, which is broader than the skill's Local scope.
@@ -3523,6 +3592,7 @@ mod tests {
             policy_engine: Box::new(NoopPolicyEngine),
             remote_executor: None,
             capability_scope_checker: Some(scope_checker),
+            brain_fallback: None,
         }, test_metrics());
 
         let mut goal = test_goal();
@@ -3550,6 +3620,7 @@ mod tests {
             policy_engine: Box::new(NoopPolicyEngine),
             remote_executor: None,
             capability_scope_checker: None,
+            brain_fallback: None,
         }, test_metrics());
 
         // Even a Peer-sourced goal executes fine without a scope checker.
@@ -3581,6 +3652,7 @@ mod tests {
             policy_engine: Box::new(NoopPolicyEngine),
             remote_executor: None,
             capability_scope_checker: Some(scope_checker),
+            brain_fallback: None,
         }, test_metrics());
 
         let mut goal = test_goal();

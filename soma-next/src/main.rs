@@ -531,7 +531,21 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
 
     let mcp_is_auto = pack_paths.len() == 1 && pack_paths[0] == "auto";
 
-    let make_server = |runtime: crate::bootstrap::Runtime| -> McpServer {
+    type ConsolidationArcs = (
+        Arc<Mutex<dyn soma_next::memory::episodes::EpisodeStore + Send>>,
+        Arc<Mutex<dyn soma_next::memory::schemas::SchemaStore + Send>>,
+        Arc<Mutex<dyn soma_next::memory::routines::RoutineStore + Send>>,
+        Arc<dyn soma_next::memory::embedder::GoalEmbedder + Send + Sync>,
+    );
+
+    let make_server = |runtime: crate::bootstrap::Runtime| -> (McpServer, Option<ConsolidationArcs>) {
+        // Clone consolidation Arcs before RuntimeHandle consumes the runtime.
+        let consolidation = (
+            Arc::clone(&runtime.episode_store),
+            Arc::clone(&runtime.schema_store),
+            Arc::clone(&runtime.routine_store),
+            Arc::clone(&runtime.embedder),
+        );
         let handle = RuntimeHandle::from_runtime(runtime);
         let handle = if has_peers {
             if let Some(exec) = make_executor() {
@@ -542,10 +556,10 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
         } else {
             handle
         };
-        McpServer::new(handle)
+        (McpServer::new(handle), Some(consolidation))
     };
 
-    let server = if mcp_is_auto {
+    let (server, consolidation_arcs) = if mcp_is_auto {
         eprintln!("MCP: auto-discovering ports from plugin search paths");
         match bootstrap::bootstrap_auto(&config) {
             Ok(runtime) => make_server(runtime),
@@ -565,7 +579,7 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             Ok(runtime) => make_server(runtime),
             Err(e) => {
                 eprintln!("warning: failed to bootstrap runtime: {e}");
-                McpServer::new_stub()
+                (McpServer::new_stub(), None)
             }
         }
     } else {
@@ -577,6 +591,35 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             }
         }
     };
+
+    // Start the consolidation background thread ("sleep" cycle).
+    if config.runtime.consolidation_interval_secs > 0
+        && let Some((ep, sc, rt, emb)) = consolidation_arcs
+    {
+        let interval = config.runtime.consolidation_interval_secs;
+        std::thread::Builder::new()
+            .name("soma-consolidation".to_string())
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(interval));
+                    let (schemas, routines) =
+                        soma_next::memory::schemas::run_consolidation_cycle(
+                            &ep, &sc, &rt, &*emb,
+                        );
+                    if schemas > 0 || routines > 0 {
+                        eprintln!(
+                            "[consolidation] cycle: {} schemas induced, {} routines compiled",
+                            schemas, routines
+                        );
+                    }
+                }
+            })
+            .expect("failed to spawn consolidation thread");
+        eprintln!(
+            "MCP: consolidation thread started ({}s interval)",
+            config.runtime.consolidation_interval_secs
+        );
+    }
 
     // Start TCP listener if requested (background thread).
     if let Some(addr) = distributed.listen {
