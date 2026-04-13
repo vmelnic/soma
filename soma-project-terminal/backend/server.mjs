@@ -40,6 +40,12 @@
 //   POST /api/transcribe            — Whisper voice input
 //   GET  /api/health
 //
+//   PUT    /api/webhooks/:name/instruction — set brain instruction
+//   DELETE /api/webhooks/:name/instruction — remove brain instruction
+//   GET    /api/webhooks/:name/instruction — get current instruction
+//   POST   /api/webhooks/:name            — receive webhook, optionally
+//                                            route through brain
+//
 // Zero runtime node_modules. All side effects route through
 // SomaMcpClient.invokePort (postgres, smtp, crypto). OpenAI is the
 // one network hop that doesn't go through SOMA — for now. Future
@@ -61,12 +67,21 @@ import {
   buildSystemPrompt,
 } from "./brain.mjs";
 import { DEFAULT_CHAT_TOOLS, makeInvokeTool } from "./mcp-tools.mjs";
-import { hasTable, extractTableNames, introspectTable, formatSchemaCache } from "./schema-cache.mjs";
+import { hasTable, extractTableNames, introspectTable, formatSchemaCache, loadFromPostgres } from "./schema-cache.mjs";
+import {
+  secretsEnabled, ensureSecretsTable, storeSecret,
+  getSecret, deleteSecret, listSecrets,
+} from "./secrets.mjs";
+import { contextNamespace } from "./brain.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const FRONTEND_DIR = resolvePath(__dirname, "..", "frontend");
 const BIN_DIR = resolvePath(__dirname, "..", "bin");
 const PORT = Number(process.env.BACKEND_PORT ?? 8765);
+
+// Per-webhook-name brain instructions. Set via PUT /api/webhooks/:name/instruction.
+// When set, incoming webhooks are routed through the brain for interpretation.
+const webhookInstructions = new Map();
 
 // ------------------------------------------------------------------
 // startup preflight — verify the native binaries exist. wasm assets
@@ -260,6 +275,19 @@ async function main() {
 
   const soma = new SomaMcpClient();
   await soma.start();
+
+  // Ensure collaborator table exists.
+  try {
+    await soma.invokePort("postgres", "execute", {
+      sql: `CREATE TABLE IF NOT EXISTS context_collaborators (
+        context_id UUID NOT NULL,
+        user_id UUID NOT NULL,
+        added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (context_id, user_id)
+      )`,
+    });
+  } catch {}
+
   const auth = createAuth(soma);
   const contexts = createContexts(soma);
   const messages = createMessages(soma);
@@ -440,6 +468,11 @@ async function main() {
         // returned in the response for debugging and can be
         // surfaced in a future commit (e.g. a "show tools used"
         // toggle on each message).
+        // Lazy load persisted schema cache for this context
+        if (formatSchemaCache(contextId) === "(no tables discovered yet)") {
+          await loadFromPostgres(soma, contextId);
+        }
+
         // Build runtime briefing — compact state for the brain's
         // "working memory". This replaces deep conversation history
         // with structured pointers into the runtime's actual state.
@@ -531,6 +564,159 @@ async function main() {
         });
       }
 
+      // ---- SSE: real-time events (scheduler, webhook, email) ----
+      const sseMatch = path.match(/^\/api\/contexts\/([^/]+)\/events$/);
+      if (sseMatch && method === "GET") {
+        const contextId = sseMatch[1];
+        const user = await requireUser(req, res);
+        if (!user) return;
+        const ctx = await contexts.loadContext(user.id, contextId);
+        if (!ctx.ok) return sendJson(res, 404, { status: "error", error: "not found" });
+
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        });
+        res.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
+
+        const onEvent = (evt) => {
+          res.write(`data: ${JSON.stringify(evt)}\n\n`);
+        };
+        if (soma.events) {
+          soma.events.on("scheduler", onEvent);
+          soma.events.on("scheduler_brain", onEvent);
+          soma.events.on("webhook", onEvent);
+          soma.events.on("email", onEvent);
+        }
+        req.on("close", () => {
+          if (soma.events) {
+            soma.events.removeListener("scheduler", onEvent);
+            soma.events.removeListener("scheduler_brain", onEvent);
+            soma.events.removeListener("webhook", onEvent);
+            soma.events.removeListener("email", onEvent);
+          }
+        });
+        return;
+      }
+
+      // ---- file upload (text files via filesystem port) ----
+      const uploadMatch = path.match(/^\/api\/contexts\/([^/]+)\/upload$/);
+      if (uploadMatch && method === "POST") {
+        const contextId = uploadMatch[1];
+        const user = await requireUser(req, res);
+        if (!user) return;
+        const ctx = await contexts.loadContext(user.id, contextId);
+        if (!ctx.ok) return sendJson(res, 404, { status: "error", error: "not found" });
+
+        const filename = url.searchParams.get("filename") || "upload.txt";
+        const safeName = filename.replace(/[/\\]/g, "_");
+        let raw;
+        try {
+          raw = await readRawBody(req, 2 * 1024 * 1024);
+        } catch (e) {
+          return sendJson(res, e.statusCode ?? 400, { status: "error", error: e.message });
+        }
+        if (!raw || raw.length === 0) return sendJson(res, 400, { status: "error", error: "empty file body" });
+        const content = raw.toString("utf8");
+        const namespace = contextNamespace(contextId);
+        const dirPath = `/tmp/soma_uploads/${namespace}`;
+        const uploadPath = `${dirPath}/${safeName}`;
+        try { await soma.invokePort("filesystem", "mkdir", { path: dirPath }); } catch {}
+        try {
+          await soma.invokePort("filesystem", "writefile", { path: uploadPath, content });
+        } catch (err) {
+          return sendJson(res, 500, { status: "error", error: `write failed: ${err.message}` });
+        }
+        if (soma.events) {
+          soma.events.emit("webhook", { _webhook_event: true, name: "file-upload", payload: { filename: safeName, path: uploadPath, size: content.length }, received_at: new Date().toISOString() });
+        }
+        return sendJson(res, 200, { status: "ok", filename: safeName, path: uploadPath, size: content.length });
+      }
+
+      // ---- secrets vault ----
+      const secretNameMatch = path.match(/^\/api\/contexts\/([^/]+)\/secrets\/([^/]+)$/);
+      if (secretNameMatch && (method === "GET" || method === "DELETE")) {
+        if (!secretsEnabled()) return sendJson(res, 501, { status: "error", error: "SOMA_SECRETS_KEY not configured" });
+        const contextId = secretNameMatch[1];
+        const secretName = decodeURIComponent(secretNameMatch[2]);
+        const user = await requireUser(req, res);
+        if (!user) return;
+        const ctx = await contexts.loadContext(user.id, contextId);
+        if (!ctx.ok) return sendJson(res, 404, { status: "error", error: "not found" });
+        const namespace = contextNamespace(contextId);
+        if (method === "GET") {
+          const value = await getSecret(soma, namespace, secretName);
+          return sendJson(res, value !== null ? 200 : 404, value !== null ? { status: "ok", name: secretName, value } : { status: "error", error: "secret not found" });
+        }
+        await deleteSecret(soma, namespace, secretName);
+        return sendJson(res, 200, { status: "ok", deleted: secretName });
+      }
+
+      const secretsMatch = path.match(/^\/api\/contexts\/([^/]+)\/secrets$/);
+      if (secretsMatch && (method === "GET" || method === "POST")) {
+        if (!secretsEnabled()) return sendJson(res, 501, { status: "error", error: "SOMA_SECRETS_KEY not configured" });
+        const contextId = secretsMatch[1];
+        const user = await requireUser(req, res);
+        if (!user) return;
+        const ctx = await contexts.loadContext(user.id, contextId);
+        if (!ctx.ok) return sendJson(res, 404, { status: "error", error: "not found" });
+        const namespace = contextNamespace(contextId);
+        await ensureSecretsTable(soma, namespace);
+        if (method === "GET") {
+          const secrets = await listSecrets(soma, namespace);
+          return sendJson(res, 200, { status: "ok", secrets });
+        }
+        const body = JSON.parse(await readBody(req));
+        if (!body.name || !body.value) return sendJson(res, 400, { status: "error", error: "name and value required" });
+        await storeSecret(soma, namespace, body.name, body.value);
+        return sendJson(res, 200, { status: "ok", stored: body.name });
+      }
+
+      // ---- collaborators ----
+      const collabMatch = path.match(/^\/api\/contexts\/([^/]+)\/collaborators(?:\/([^/]+))?$/);
+      if (collabMatch) {
+        const contextId = collabMatch[1];
+        const targetUserId = collabMatch[2] ? decodeURIComponent(collabMatch[2]) : null;
+        const user = await requireUser(req, res);
+        if (!user) return;
+
+        if (method === "GET" && !targetUserId) {
+          const ctx = await contexts.loadContext(user.id, contextId);
+          if (!ctx.ok) return sendJson(res, 404, { status: "error", error: "not found" });
+          const result = await soma.invokePort("postgres", "query", {
+            sql: "SELECT cc.user_id, u.email, cc.added_at FROM context_collaborators cc JOIN users u ON u.id = cc.user_id WHERE cc.context_id = $1::text::uuid",
+            params: [contextId],
+          });
+          return sendJson(res, 200, { status: "ok", collaborators: result.rows || [] });
+        }
+
+        if (method === "POST" && !targetUserId) {
+          const ctx = await contexts.loadContext(user.id, contextId);
+          if (!ctx.ok) return sendJson(res, 404, { status: "error", error: "not found" });
+          const body = JSON.parse(await readBody(req));
+          if (!body.email) return sendJson(res, 400, { status: "error", error: "email required" });
+          const userResult = await soma.invokePort("postgres", "query", { sql: "SELECT id FROM users WHERE email = $1", params: [body.email] });
+          if (!userResult.rows?.length) return sendJson(res, 404, { status: "error", error: "user not found" });
+          const collabId = userResult.rows[0].id;
+          await soma.invokePort("postgres", "execute", {
+            sql: "INSERT INTO context_collaborators (context_id, user_id) VALUES ($1::text::uuid, $2::text::uuid) ON CONFLICT DO NOTHING",
+            params: [contextId, collabId],
+          });
+          return sendJson(res, 200, { status: "ok", added: body.email });
+        }
+
+        if (method === "DELETE" && targetUserId) {
+          const ctx = await contexts.loadContext(user.id, contextId);
+          if (!ctx.ok) return sendJson(res, 404, { status: "error", error: "not found" });
+          await soma.invokePort("postgres", "execute", {
+            sql: "DELETE FROM context_collaborators WHERE context_id = $1::text::uuid AND user_id = $2::text::uuid",
+            params: [contextId, targetUserId],
+          });
+          return sendJson(res, 200, { status: "ok", removed: targetUserId });
+        }
+      }
+
       // /api/contexts/:id — GET loads, DELETE removes.
       if (
         (method === "GET" || method === "DELETE") &&
@@ -614,6 +800,85 @@ async function main() {
           text: result.text,
           model: result.model,
         });
+      }
+
+      // ---- webhook instruction management ----
+      const webhookInstrMatch = path.match(/^\/api\/webhooks\/([a-zA-Z0-9_-]+)\/instruction$/);
+      if (webhookInstrMatch) {
+        const hookName = webhookInstrMatch[1];
+
+        if (method === "PUT") {
+          const body = await readBody(req);
+          const { instruction } = body;
+          if (!instruction) return sendJson(res, 400, { error: "instruction required" });
+          webhookInstructions.set(hookName, instruction);
+          return sendJson(res, 200, { status: "ok", hook: hookName, instruction });
+        }
+
+        if (method === "DELETE") {
+          webhookInstructions.delete(hookName);
+          return sendJson(res, 200, { status: "ok", hook: hookName, instruction: null });
+        }
+
+        if (method === "GET") {
+          return sendJson(res, 200, { hook: hookName, instruction: webhookInstructions.get(hookName) || null });
+        }
+      }
+
+      // ---- webhook receiver ----
+      const webhookMatch = path.match(/^\/api\/webhooks\/([a-zA-Z0-9_-]+)$/);
+      if (webhookMatch && method === "POST") {
+        const hookName = webhookMatch[1];
+        const body = await readBody(req);
+        const receivedAt = new Date().toISOString();
+
+        // Always return 200 immediately with the payload echo.
+        sendJson(res, 200, {
+          status: "ok",
+          hook: hookName,
+          received_at: receivedAt,
+        });
+
+        // If a brain instruction exists for this hook, route through
+        // the brain asynchronously. The webhook caller already got
+        // its 200 — brain processing is fire-and-forget.
+        const instruction = webhookInstructions.get(hookName);
+        if (instruction) {
+          (async () => {
+            try {
+              const briefPrompt = `You are SOMA processing an inbound webhook event.
+
+Webhook: "${hookName}"
+Payload: ${JSON.stringify(body)}
+
+Operator instruction: ${instruction}
+
+Follow the instruction. Use invoke_port if you need to take action (send email, update database, etc.). Keep your response concise.`;
+
+              const reply = await runChatTurn({
+                systemPrompt: briefPrompt,
+                history: [],
+                tools: DEFAULT_CHAT_TOOLS,
+                invokeTool,
+                temperature: 0.3,
+                maxTokens: 400,
+              });
+
+              console.log(
+                `[webhook] ${hookName}:brain → ${reply.content?.slice(0, 200)}` +
+                  (reply.tool_calls?.length
+                    ? ` (${reply.tool_calls.length} tool calls)`
+                    : ""),
+              );
+            } catch (err) {
+              console.error(
+                `[webhook] ${hookName}:brain-error → ${err.message}`,
+              );
+            }
+          })();
+        }
+
+        return;
       }
 
       // ---- health check ----

@@ -120,6 +120,18 @@ CREATE INDEX IF NOT EXISTS messages_context_created_idx
     ON messages (context_id, created_at);
 
 -- ------------------------------------------------------------------
+-- soma_schema_cache: persisted table introspection results so the
+-- brain's schema knowledge survives backend restarts.
+-- ------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS soma_schema_cache (
+    context_id  TEXT NOT NULL,
+    table_name  TEXT NOT NULL,
+    columns     JSONB NOT NULL,
+    cached_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (context_id, table_name)
+);
+
+-- ------------------------------------------------------------------
 -- One-shot cleanup for obsolete tables from earlier commits. Drops
 -- the per-context memory tiers and the context_kv store that were
 -- replaced by direct tool calling against soma-next's MCP catalog.

@@ -531,6 +531,10 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
 
     let mcp_is_auto = pack_paths.len() == 1 && pack_paths[0] == "auto";
 
+    type SchedulerArcs = (
+        Arc<Mutex<dyn soma_next::runtime::scheduler::ScheduleStore + Send>>,
+        Arc<Mutex<soma_next::runtime::port::DefaultPortRuntime>>,
+    );
     type ConsolidationArcs = (
         Arc<Mutex<dyn soma_next::memory::episodes::EpisodeStore + Send>>,
         Arc<Mutex<dyn soma_next::memory::schemas::SchemaStore + Send>>,
@@ -538,8 +542,11 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
         Arc<dyn soma_next::memory::embedder::GoalEmbedder + Send + Sync>,
     );
 
-    let make_server = |runtime: crate::bootstrap::Runtime| -> (McpServer, Option<ConsolidationArcs>) {
-        // Clone consolidation Arcs before RuntimeHandle consumes the runtime.
+    let make_server = |runtime: crate::bootstrap::Runtime| -> (McpServer, Option<SchedulerArcs>, Option<ConsolidationArcs>) {
+        let sched = (
+            Arc::clone(&runtime.schedule_store),
+            Arc::clone(&runtime.port_runtime),
+        );
         let consolidation = (
             Arc::clone(&runtime.episode_store),
             Arc::clone(&runtime.schema_store),
@@ -556,10 +563,10 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
         } else {
             handle
         };
-        (McpServer::new(handle), Some(consolidation))
+        (McpServer::new(handle), Some(sched), Some(consolidation))
     };
 
-    let (server, consolidation_arcs) = if mcp_is_auto {
+    let (server, scheduler_arcs, consolidation_arcs) = if mcp_is_auto {
         eprintln!("MCP: auto-discovering ports from plugin search paths");
         match bootstrap::bootstrap_auto(&config) {
             Ok(runtime) => make_server(runtime),
@@ -579,7 +586,7 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             Ok(runtime) => make_server(runtime),
             Err(e) => {
                 eprintln!("warning: failed to bootstrap runtime: {e}");
-                (McpServer::new_stub(), None)
+                (McpServer::new_stub(), None, None)
             }
         }
     } else {
@@ -591,6 +598,15 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             }
         }
     };
+
+    // Start the scheduler background thread.
+    if let Some((sched_store, port_rt)) = scheduler_arcs {
+        let _scheduler_handle = soma_next::runtime::scheduler::start_scheduler_thread(
+            sched_store,
+            port_rt,
+        );
+        eprintln!("MCP: scheduler started (1s tick)");
+    }
 
     // Start the consolidation background thread ("sleep" cycle).
     if config.runtime.consolidation_interval_secs > 0

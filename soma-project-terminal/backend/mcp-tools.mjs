@@ -79,12 +79,66 @@ export const DEFAULT_CHAT_TOOLS = Object.freeze([
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "schedule",
+      description:
+        "Create a scheduled action. delay_ms = one-shot, interval_ms = recurring. Provide message for chat notifications or port_id+capability_id for port calls. Optional max_fires to auto-stop.",
+      parameters: {
+        type: "object",
+        properties: {
+          label: { type: "string", description: "Human-readable label" },
+          delay_ms: { type: "integer", description: "Fire once after N ms" },
+          interval_ms: { type: "integer", description: "Fire every N ms" },
+          message: { type: "string", description: "Text to show in chat (no port call)" },
+          port_id: { type: "string", description: "Port to invoke" },
+          capability_id: { type: "string", description: "Capability on the port" },
+          input: { type: "object", description: "Port call payload", additionalProperties: true },
+          max_fires: { type: "integer", description: "Stop after N fires" },
+          brain: { type: "boolean", description: "Route result through LLM for interpretation" },
+        },
+        required: ["label"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_schedules",
+      description: "List all active schedules.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "cancel_schedule",
+      description: "Cancel a schedule by UUID.",
+      parameters: {
+        type: "object",
+        properties: {
+          schedule_id: { type: "string", description: "Schedule UUID to cancel" },
+        },
+        required: ["schedule_id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "trigger_consolidation",
+      description: "Force the learning pipeline to run now (episode → schema → routine compilation).",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
 ]);
 
 // Build an `invokeTool(name, args)` handler closed over a
-// SomaMcpClient instance. The only supported tool is `invoke_port`
-// — list_ports / list_skills were removed because the catalog is
-// already in the system prompt.
+// SomaMcpClient instance. All tools beyond invoke_port route
+// through soma.callTool as MCP pass-through.
 //
 // Returns { ok: true, result: <any> } on success or
 // { ok: false, error: "..." } on failure. Callers should catch
@@ -106,8 +160,10 @@ export function makeInvokeTool(soma) {
         const structured = await soma.invokePort(portId, capabilityId, input);
         return { ok: true, result: structured };
       }
-      if (name === "execute_routine") {
-        const raw = await soma.callTool("execute_routine", args ?? {});
+      // All other known tools route through MCP callTool.
+      const knownTools = new Set(DEFAULT_CHAT_TOOLS.map(t => t.function.name));
+      if (knownTools.has(name)) {
+        const raw = await soma.callTool(name, args ?? {});
         return { ok: true, result: soma.unwrap(raw) };
       }
       return { ok: false, error: `unknown tool: ${name}` };

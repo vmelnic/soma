@@ -17,6 +17,7 @@ import { spawn } from "child_process";
 import readline from "readline";
 import { dirname, resolve as resolvePath } from "path";
 import { fileURLToPath } from "url";
+import { EventEmitter } from "events";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -31,6 +32,11 @@ export class SomaMcpClient {
     this.pending = new Map();
     this.child = null;
     this.ready = false;
+
+    // SSE event bus — scheduler events are emitted here for any
+    // connected SSE client to pick up.
+    this.events = new EventEmitter();
+    this.events.setMaxListeners(100);
   }
 
   async start() {
@@ -47,9 +53,26 @@ export class SomaMcpClient {
     });
 
     // Forward soma-next's stderr to our own so pack load errors
-    // surface immediately in the backend log.
+    // surface immediately. Parse scheduler JSON events and emit
+    // them on the event bus for SSE clients.
+    let stderrBuf = "";
     this.child.stderr.on("data", (chunk) => {
-      process.stderr.write(`[soma-mcp] ${chunk}`);
+      stderrBuf += chunk.toString();
+      let idx;
+      while ((idx = stderrBuf.indexOf("\n")) !== -1) {
+        const line = stderrBuf.slice(0, idx).trim();
+        stderrBuf = stderrBuf.slice(idx + 1);
+        if (!line) continue;
+        process.stderr.write(`[soma-mcp] ${line}\n`);
+        if (line.startsWith("{") && line.includes("_scheduler_event")) {
+          try {
+            const evt = JSON.parse(line);
+            if (evt._scheduler_event) {
+              this.events.emit(evt.brain ? "scheduler_brain" : "scheduler", evt);
+            }
+          } catch {}
+        }
+      }
     });
 
     this.child.on("exit", (code, signal) => {

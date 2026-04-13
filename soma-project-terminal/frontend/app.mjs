@@ -34,6 +34,7 @@ const footerStatus = document.getElementById("footer-status");
 // The currently open context. Populated by `loadContextView` and
 // cleared on logout / back.
 let currentContext = null;
+let eventSource = null;
 
 function showView(name) {
   for (const [key, el] of Object.entries(views)) {
@@ -380,6 +381,82 @@ async function onVoiceRecordingStop() {
 // view: context detail — full-width chat
 // -------------------------------------------------------------------
 
+// -------------------------------------------------------------------
+// SSE — real-time events from scheduler, webhooks, email
+// -------------------------------------------------------------------
+
+function connectEvents(contextId) {
+  if (eventSource) { eventSource.close(); eventSource = null; }
+  const url = `/api/contexts/${encodeURIComponent(contextId)}/events`;
+  eventSource = new EventSource(url);
+  eventSource.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data._scheduler_event) renderSSEEvent(data, "SCHEDULER");
+      else if (data._scheduler_brain_event) renderSSEBrainEvent(data);
+      else if (data._email_event) renderSSEEvent(data, "EMAIL");
+      else if (data._webhook_event) renderSSEEvent(data, "WEBHOOK");
+    } catch {}
+  };
+  eventSource.onerror = () => {};
+}
+
+function renderSSEEvent(evt, label) {
+  const listEl = document.getElementById("chat-transcript");
+  if (!listEl) return;
+  const empty = document.getElementById("chat-empty");
+  if (empty) empty.style.display = "none";
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "chat-msg system";
+  const role = document.createElement("span");
+  role.className = "chat-role";
+  role.textContent = `[${label}]`;
+  const body = document.createElement("span");
+  body.className = "chat-body";
+
+  if (evt.message) {
+    body.textContent = evt.message;
+  } else if (evt._webhook_event) {
+    const payload = typeof evt.payload === "object" ? JSON.stringify(evt.payload) : String(evt.payload);
+    body.textContent = `${evt.name}: ${payload}`;
+  } else if (evt._email_event) {
+    body.textContent = `From: ${evt.from || "?"} | Subject: ${evt.subject || "?"}`;
+  } else {
+    const status = evt.success ? "ok" : "failed";
+    const detail = typeof evt.detail === "object" ? JSON.stringify(evt.detail) : String(evt.detail || "");
+    body.textContent = `${evt.label || ""} — ${status}: ${detail}`;
+  }
+
+  wrapper.appendChild(role);
+  wrapper.appendChild(body);
+  listEl.appendChild(wrapper);
+  listEl.scrollTop = listEl.scrollHeight;
+}
+
+function renderSSEBrainEvent(evt) {
+  const listEl = document.getElementById("chat-transcript");
+  if (!listEl) return;
+  const empty = document.getElementById("chat-empty");
+  if (empty) empty.style.display = "none";
+  const wrapper = document.createElement("div");
+  wrapper.className = "chat-msg assistant";
+  const role = document.createElement("span");
+  role.className = "chat-role";
+  role.textContent = "[SOMA]";
+  const body = document.createElement("span");
+  body.className = "chat-body";
+  body.innerHTML = renderMarkdown(evt.content || "(no response)");
+  wrapper.appendChild(role);
+  wrapper.appendChild(body);
+  listEl.appendChild(wrapper);
+  listEl.scrollTop = listEl.scrollHeight;
+}
+
+// -------------------------------------------------------------------
+// context detail view
+// -------------------------------------------------------------------
+
 async function loadContextView(contextId) {
   setStatus("LOADING CONTEXT");
   try {
@@ -405,6 +482,7 @@ async function loadContextView(contextId) {
     setStatus(`CONTEXT ${currentContext.name}`);
 
     await refreshTranscript();
+    connectEvents(contextId);
     const chatInput = document.getElementById("input-chat");
     if (chatInput) chatInput.focus();
   } catch (err) {
@@ -548,6 +626,7 @@ document
 // -------------------------------------------------------------------
 
 async function backToAuthenticated() {
+  if (eventSource) { eventSource.close(); eventSource = null; }
   currentContext = null;
   try {
     const res = await fetch("/api/me", { credentials: "include" });

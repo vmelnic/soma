@@ -150,6 +150,31 @@ impl RuntimeHandle {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Implicit sessions — bridge LLM-driven invoke_port calls to the learning
+// pipeline by grouping sequential calls into episodes.
+// ---------------------------------------------------------------------------
+
+/// Groups sequential `invoke_port` calls within a time window into a single
+/// logical session. When the caller goes quiet (no `invoke_port` for
+/// `IMPLICIT_SESSION_TIMEOUT`) or switches to a non-invoke_port MCP call,
+/// the session is finalized and stored as an episode for schema induction
+/// and routine compilation.
+struct ImplicitSession {
+    /// Ordered sequence of (port_id, capability_id) from invoke_port calls.
+    skill_sequence: Vec<(String, String)>,
+    /// The `PortCallRecord` from each successful invoke_port call.
+    observations: Vec<crate::types::observation::PortCallRecord>,
+    /// When the first invoke_port in this session was called.
+    started_at: Instant,
+    /// When the most recent invoke_port was called.
+    last_activity: Instant,
+}
+
+/// How long to wait after the last invoke_port before considering the
+/// implicit session complete.
+const IMPLICIT_SESSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// MCP (Model Context Protocol) server.
 ///
 /// Exposes the full SOMA interface as JSON-RPC 2.0 tools so that LLMs and
@@ -162,6 +187,10 @@ impl RuntimeHandle {
 pub struct McpServer {
     tools: Vec<McpTool>,
     runtime: Option<RuntimeHandle>,
+    /// Tracks the current implicit session for LLM-driven invoke_port calls.
+    /// When finalized, the session becomes an episode fed into the learning
+    /// pipeline (schema induction / routine compilation).
+    implicit_session: Mutex<Option<ImplicitSession>>,
 }
 
 impl McpServer {
@@ -170,6 +199,7 @@ impl McpServer {
         Self {
             tools: Self::build_tools(),
             runtime: Some(runtime),
+            implicit_session: Mutex::new(None),
         }
     }
 
@@ -179,6 +209,7 @@ impl McpServer {
         Self {
             tools: Self::build_tools(),
             runtime: None,
+            implicit_session: Mutex::new(None),
         }
     }
 
@@ -197,6 +228,22 @@ impl McpServer {
                 "jsonrpc must be \"2.0\"".to_string(),
                 None,
             ));
+        }
+
+        // Flush any open implicit session when the caller switches away from
+        // invoke_port. For tools/call, check the inner tool name.
+        let is_invoke_port = match request.method.as_str() {
+            "invoke_port" => true,
+            "tools/call" => request
+                .params
+                .as_ref()
+                .and_then(|p| p.get("name"))
+                .and_then(|v| v.as_str())
+                == Some("invoke_port"),
+            _ => false,
+        };
+        if !is_invoke_port {
+            self.flush_implicit_session();
         }
 
         match request.method.as_str() {
@@ -1463,7 +1510,17 @@ impl McpServer {
             let port_rt = rt.port_runtime.lock().unwrap();
             match port_rt.invoke(&port_id, &capability_id, input, &ctx) {
                 Ok(record) => {
+                    // Track this call in the implicit session for episode
+                    // creation. Clone what we need before serializing.
+                    let record_clone = record.clone();
                     let record_json = serde_json::to_value(&record).unwrap_or_default();
+
+                    self.record_implicit_call(
+                        port_id,
+                        capability_id,
+                        record_clone,
+                    );
+
                     Ok(Self::success_response(id, record_json))
                 }
                 Err(e) => Ok(Self::error_response(
@@ -2244,6 +2301,222 @@ impl McpServer {
     }
 
     // -----------------------------------------------------------------------
+    // Implicit session management
+    // -----------------------------------------------------------------------
+
+    /// Record a successful invoke_port call into the current implicit session.
+    /// If a stale session exists (last activity > timeout), finalize it first
+    /// and start a new one.
+    fn record_implicit_call(
+        &self,
+        port_id: String,
+        capability_id: String,
+        record: crate::types::observation::PortCallRecord,
+    ) {
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => return,
+        };
+
+        let now = Instant::now();
+
+        // Take the old session out if it's stale.
+        let stale = {
+            let mut guard = self.implicit_session.lock().unwrap();
+            if let Some(ref sess) = *guard {
+                if now.duration_since(sess.last_activity) > IMPLICIT_SESSION_TIMEOUT {
+                    guard.take()
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        // Finalize the stale session outside the lock.
+        if let Some(old) = stale {
+            self.finalize_implicit_session(old, rt);
+        }
+
+        // Append to the current session or create a new one.
+        let mut guard = self.implicit_session.lock().unwrap();
+        match guard.as_mut() {
+            Some(sess) => {
+                sess.skill_sequence.push((port_id, capability_id));
+                sess.observations.push(record);
+                sess.last_activity = now;
+            }
+            None => {
+                *guard = Some(ImplicitSession {
+                    skill_sequence: vec![(port_id, capability_id)],
+                    observations: vec![record],
+                    started_at: now,
+                    last_activity: now,
+                });
+            }
+        }
+    }
+
+    /// Flush any open implicit session, finalizing it as an episode.
+    /// Called when the caller switches to a non-invoke_port MCP method,
+    /// signaling the end of a logical "turn".
+    fn flush_implicit_session(&self) {
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => return,
+        };
+
+        let session = {
+            let mut guard = self.implicit_session.lock().unwrap();
+            guard.take()
+        };
+
+        if let Some(sess) = session {
+            self.finalize_implicit_session(sess, rt);
+        }
+    }
+
+    /// Convert a completed implicit session into an episode and store it.
+    /// Only creates episodes from sessions with 2+ steps — single
+    /// invoke_port calls are not patterns worth learning from.
+    fn finalize_implicit_session(&self, session: ImplicitSession, rt: &RuntimeHandle) {
+        if session.skill_sequence.len() < 2 {
+            return;
+        }
+
+        // Build a goal fingerprint from the skill sequence so episodes with
+        // the same port.capability pattern cluster together for PrefixSpan.
+        let fingerprint = session
+            .skill_sequence
+            .iter()
+            .map(|(p, c)| format!("{}.{}", p, c))
+            .collect::<Vec<_>>()
+            .join("\u{2192}"); // → arrow character
+
+        let embedding = Some(rt.embedder.embed(&fingerprint));
+
+        let outcome = if session.observations.iter().all(|o| o.success) {
+            crate::types::episode::EpisodeOutcome::Success
+        } else if session.observations.iter().any(|o| o.success) {
+            crate::types::episode::EpisodeOutcome::PartialSuccess
+        } else {
+            crate::types::episode::EpisodeOutcome::Failure
+        };
+        let success = outcome == crate::types::episode::EpisodeOutcome::Success;
+
+        let session_id = Uuid::new_v4();
+
+        let steps: Vec<crate::types::episode::EpisodeStep> = session
+            .skill_sequence
+            .iter()
+            .zip(session.observations.iter())
+            .enumerate()
+            .map(|(i, ((port_id, cap_id), pcr))| {
+                let skill_id = format!("{}.{}", port_id, cap_id);
+                let observation = crate::types::observation::Observation {
+                    observation_id: pcr.observation_id,
+                    session_id,
+                    skill_id: Some(skill_id.clone()),
+                    port_calls: vec![pcr.clone()],
+                    raw_result: pcr.raw_result.clone(),
+                    structured_result: pcr.structured_result.clone(),
+                    effect_patch: pcr.effect_patch.clone(),
+                    success: pcr.success,
+                    failure_class: None,
+                    latency_ms: pcr.latency_ms,
+                    resource_cost: crate::types::observation::default_cost_profile(),
+                    confidence: pcr.confidence,
+                    timestamp: pcr.timestamp,
+                };
+                crate::types::episode::EpisodeStep {
+                    step_index: i as u32,
+                    belief_summary: serde_json::json!({}),
+                    candidates_considered: vec![skill_id.clone()],
+                    predicted_scores: vec![1.0],
+                    selected_skill: skill_id,
+                    observation,
+                    belief_patch: serde_json::json!({}),
+                    progress_delta: 1.0 / session.skill_sequence.len() as f64,
+                    critic_decision: "Continue".to_string(),
+                    timestamp: pcr.timestamp,
+                }
+            })
+            .collect();
+
+        let observations: Vec<crate::types::observation::Observation> =
+            steps.iter().map(|s| s.observation.clone()).collect();
+
+        let total_cost: f64 = session
+            .observations
+            .iter()
+            .map(|o| o.resource_cost)
+            .sum();
+
+        let salience = {
+            let outcome_weight = match outcome {
+                crate::types::episode::EpisodeOutcome::Success => 1.0_f64,
+                crate::types::episode::EpisodeOutcome::PartialSuccess => 0.5,
+                crate::types::episode::EpisodeOutcome::Failure => 0.2,
+                _ => 0.1,
+            };
+            let efficiency = if total_cost > 0.0 {
+                (1.0 - (total_cost / 100.0).min(1.0)).max(0.0)
+            } else {
+                0.5
+            };
+            (outcome_weight * 0.7 + efficiency * 0.3).clamp(0.0, 1.0)
+        };
+
+        let episode = crate::types::episode::Episode {
+            episode_id: Uuid::new_v4(),
+            goal_fingerprint: fingerprint.clone(),
+            initial_belief_summary: serde_json::json!({}),
+            steps,
+            observations,
+            outcome,
+            total_cost,
+            success,
+            tags: vec!["implicit-session".to_string()],
+            embedding,
+            created_at: chrono::Utc::now(),
+            salience,
+        };
+
+        let step_count = episode.steps.len();
+        let duration_secs = session
+            .last_activity
+            .duration_since(session.started_at)
+            .as_secs_f64();
+        let sequence_display = session
+            .skill_sequence
+            .iter()
+            .map(|(p, c)| format!("{}.{}", p, c))
+            .collect::<Vec<_>>()
+            .join(" \u{2192} ");
+
+        let adapter = crate::adapters::EpisodeMemoryAdapter::new(
+            Arc::clone(&rt.episode_store),
+            Arc::clone(&rt.embedder),
+        );
+        if let Err(e) = adapter.store(episode) {
+            tracing::warn!(error = %e, "failed to store implicit session episode");
+        } else {
+            eprintln!(
+                "[implicit-session] stored episode: {} steps, {:.1}s, sequence: {}",
+                step_count, duration_secs, sequence_display
+            );
+            crate::interfaces::cli::attempt_learning(
+                &rt.episode_store,
+                &rt.schema_store,
+                &rt.routine_store,
+                &fingerprint,
+                &*rt.embedder,
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Tool definitions
     // -----------------------------------------------------------------------
 
@@ -2691,6 +2964,8 @@ impl Default for McpServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "native-filesystem")]
+    use crate::runtime::port::Port;
 
     fn make_request(method: &str, params: Option<Value>) -> McpRequest {
         McpRequest {
@@ -3147,8 +3422,31 @@ mod tests {
 
     /// Build a real RuntimeHandle from a bootstrapped runtime (no packs).
     fn make_wired_server() -> McpServer {
-        let config = crate::config::SomaConfig::default();
+        let mut config = crate::config::SomaConfig::default();
+        // Use in-memory stores so tests don't share disk state.
+        config.soma.data_dir = String::new();
         let runtime = crate::bootstrap::bootstrap(&config, &[]).unwrap();
+        let handle = RuntimeHandle::from_runtime(runtime);
+        McpServer::new(handle)
+    }
+
+    /// Build a wired server with the built-in filesystem port registered,
+    /// so invoke_port("filesystem", ...) calls produce real success records.
+    #[cfg(feature = "native-filesystem")]
+    fn make_wired_server_with_filesystem() -> McpServer {
+        let mut config = crate::config::SomaConfig::default();
+        config.soma.data_dir = String::new();
+        let runtime = crate::bootstrap::bootstrap(&config, &[]).unwrap();
+
+        // Register and activate the built-in filesystem port.
+        let fs_port = crate::ports::filesystem::FilesystemPort::new();
+        let spec = fs_port.spec().clone();
+        let port_id = spec.port_id.clone();
+        let mut port_rt = runtime.port_runtime.lock().unwrap();
+        port_rt.register_port(spec, Box::new(fs_port)).unwrap();
+        port_rt.activate(&port_id).unwrap();
+        drop(port_rt);
+
         let handle = RuntimeHandle::from_runtime(runtime);
         McpServer::new(handle)
     }
@@ -3464,5 +3762,238 @@ mod tests {
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert!(result["ports"].is_array());
+    }
+
+    // -----------------------------------------------------------------------
+    // Implicit session tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_implicit_session_not_created_for_stub() {
+        let server = McpServer::new_stub();
+        // invoke_port on a stub doesn't create implicit sessions (no runtime).
+        let req = make_request(
+            "invoke_port",
+            Some(serde_json::json!({
+                "port_id": "smtp",
+                "capability_id": "send_plain",
+                "input": {}
+            })),
+        );
+        let _ = server.handle_request(req).unwrap();
+        let guard = server.implicit_session.lock().unwrap();
+        assert!(guard.is_none());
+    }
+
+    #[test]
+    fn test_implicit_session_created_on_wired_invoke_port() {
+        // Uses make_wired_server (no ports). The port call returns a failure
+        // record, but the implicit session still tracks it.
+        let server = make_wired_server();
+        let req = make_request(
+            "invoke_port",
+            Some(serde_json::json!({
+                "port_id": "filesystem",
+                "capability_id": "stat",
+                "input": { "path": "/tmp" }
+            })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let guard = server.implicit_session.lock().unwrap();
+        assert!(guard.is_some());
+        let sess = guard.as_ref().unwrap();
+        assert_eq!(sess.skill_sequence.len(), 1);
+        assert_eq!(sess.skill_sequence[0], ("filesystem".to_string(), "stat".to_string()));
+    }
+
+    #[test]
+    fn test_implicit_session_accumulates_calls() {
+        let server = make_wired_server();
+        for cap in &["stat", "readdir"] {
+            let req = make_request(
+                "invoke_port",
+                Some(serde_json::json!({
+                    "port_id": "filesystem",
+                    "capability_id": cap,
+                    "input": { "path": "/tmp" }
+                })),
+            );
+            let resp = server.handle_request(req).unwrap();
+            assert!(resp.error.is_none());
+        }
+        let guard = server.implicit_session.lock().unwrap();
+        let sess = guard.as_ref().unwrap();
+        assert_eq!(sess.skill_sequence.len(), 2);
+        assert_eq!(sess.observations.len(), 2);
+    }
+
+    #[test]
+    fn test_implicit_session_flushed_on_non_invoke_port() {
+        let server = make_wired_server();
+        for cap in &["stat", "readdir"] {
+            let req = make_request(
+                "invoke_port",
+                Some(serde_json::json!({
+                    "port_id": "filesystem",
+                    "capability_id": cap,
+                    "input": { "path": "/tmp" }
+                })),
+            );
+            server.handle_request(req).unwrap();
+        }
+        {
+            let guard = server.implicit_session.lock().unwrap();
+            assert!(guard.is_some());
+            assert_eq!(guard.as_ref().unwrap().skill_sequence.len(), 2);
+        }
+        // A non-invoke_port call flushes the session.
+        let req = make_request("list_ports", None);
+        server.handle_request(req).unwrap();
+        let guard = server.implicit_session.lock().unwrap();
+        assert!(guard.is_none());
+    }
+
+    #[test]
+    fn test_implicit_session_episode_stored_after_flush() {
+        let server = make_wired_server();
+        for cap in &["stat", "readdir"] {
+            let req = make_request(
+                "invoke_port",
+                Some(serde_json::json!({
+                    "port_id": "filesystem",
+                    "capability_id": cap,
+                    "input": { "path": "/tmp" }
+                })),
+            );
+            server.handle_request(req).unwrap();
+        }
+        server.handle_request(make_request("list_ports", None)).unwrap();
+        let rt = server.runtime.as_ref().unwrap();
+        let store = rt.episode_store.lock().unwrap();
+        let episodes = store.retrieve_nearest("filesystem.stat\u{2192}filesystem.readdir", 10);
+        assert!(!episodes.is_empty(), "episode should be stored after flush");
+        let ep = &episodes[0];
+        assert_eq!(ep.steps.len(), 2);
+        assert!(ep.tags.contains(&"implicit-session".to_string()));
+        assert_eq!(
+            ep.goal_fingerprint,
+            "filesystem.stat\u{2192}filesystem.readdir"
+        );
+    }
+
+    #[test]
+    fn test_implicit_session_single_call_not_stored() {
+        let server = make_wired_server();
+        let req = make_request(
+            "invoke_port",
+            Some(serde_json::json!({
+                "port_id": "filesystem",
+                "capability_id": "stat",
+                "input": { "path": "/tmp" }
+            })),
+        );
+        server.handle_request(req).unwrap();
+        server.handle_request(make_request("list_ports", None)).unwrap();
+        let rt = server.runtime.as_ref().unwrap();
+        let store = rt.episode_store.lock().unwrap();
+        let episodes = store.retrieve_nearest("filesystem.stat", 10);
+        assert!(episodes.is_empty(), "single-call sessions should not produce episodes");
+    }
+
+    #[test]
+    fn test_implicit_session_flushed_via_tools_call_non_invoke() {
+        let server = make_wired_server();
+        for cap in &["stat", "readdir"] {
+            let req = make_request(
+                "tools/call",
+                Some(serde_json::json!({
+                    "name": "invoke_port",
+                    "arguments": {
+                        "port_id": "filesystem",
+                        "capability_id": cap,
+                        "input": { "path": "/tmp" }
+                    }
+                })),
+            );
+            server.handle_request(req).unwrap();
+        }
+        {
+            let guard = server.implicit_session.lock().unwrap();
+            assert!(guard.is_some());
+            assert_eq!(guard.as_ref().unwrap().skill_sequence.len(), 2);
+        }
+        let req = make_request(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "list_ports",
+                "arguments": {}
+            })),
+        );
+        server.handle_request(req).unwrap();
+        let guard = server.implicit_session.lock().unwrap();
+        assert!(guard.is_none());
+    }
+
+    #[test]
+    fn test_implicit_session_not_flushed_by_invoke_port() {
+        let server = make_wired_server();
+        let req = make_request(
+            "invoke_port",
+            Some(serde_json::json!({
+                "port_id": "filesystem",
+                "capability_id": "stat",
+                "input": { "path": "/tmp" }
+            })),
+        );
+        server.handle_request(req).unwrap();
+        let req2 = make_request(
+            "invoke_port",
+            Some(serde_json::json!({
+                "port_id": "filesystem",
+                "capability_id": "readdir",
+                "input": { "path": "/tmp" }
+            })),
+        );
+        server.handle_request(req2).unwrap();
+        let guard = server.implicit_session.lock().unwrap();
+        assert!(guard.is_some());
+        assert_eq!(guard.as_ref().unwrap().skill_sequence.len(), 2);
+    }
+
+    /// Full structural validation of an implicit session episode with a real
+    /// filesystem port that produces success=true records.
+    #[test]
+    #[cfg(feature = "native-filesystem")]
+    fn test_implicit_session_episode_has_correct_structure() {
+        let server = make_wired_server_with_filesystem();
+        for cap in &["stat", "readdir", "stat"] {
+            let req = make_request(
+                "invoke_port",
+                Some(serde_json::json!({
+                    "port_id": "filesystem",
+                    "capability_id": cap,
+                    "input": { "path": "/tmp" }
+                })),
+            );
+            server.handle_request(req).unwrap();
+        }
+        // Flush.
+        server.handle_request(make_request("query_metrics", None)).unwrap();
+
+        let rt = server.runtime.as_ref().unwrap();
+        let store = rt.episode_store.lock().unwrap();
+        let fp = "filesystem.stat\u{2192}filesystem.readdir\u{2192}filesystem.stat";
+        let episodes = store.retrieve_nearest(fp, 10);
+        assert_eq!(episodes.len(), 1);
+        let ep = &episodes[0];
+        assert_eq!(ep.steps.len(), 3);
+        assert!(ep.success);
+        assert_eq!(ep.outcome, crate::types::episode::EpisodeOutcome::Success);
+        assert_eq!(ep.steps[0].selected_skill, "filesystem.stat");
+        assert_eq!(ep.steps[1].selected_skill, "filesystem.readdir");
+        assert_eq!(ep.steps[2].selected_skill, "filesystem.stat");
+        assert!(ep.embedding.is_some());
+        assert_eq!(ep.goal_fingerprint, fp);
     }
 }
