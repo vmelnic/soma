@@ -65,7 +65,7 @@ target named `soma` from [`src/main.rs`](src/main.rs).
 cd soma-next
 
 cargo build                              # debug binary → target/debug/soma (~32 MB)
-cargo test                               # 1198+ tests, all must pass
+cargo test                               # 1222+ tests, all must pass
 cargo clippy --all-targets --all-features # must be zero warnings
 ```
 
@@ -196,7 +196,7 @@ cargo run -- --mcp --pack packs/reference/manifest.json
 SOMA_PORTS_PLUGIN_PATH=../soma-ports/target/release cargo run -- --mcp --pack auto
 ```
 
-The server exposes 24 runtime tools:
+The server exposes 27 runtime tools:
 
 **16 core tools:**
 
@@ -216,16 +216,22 @@ The server exposes 24 runtime tools:
 
 - `list_peers`, `invoke_remote_skill`, `transfer_routine`
 
-**3 memory and learning tools:**
+**3 world state and learning tools:**
+
+- `patch_world_state` — add/remove facts from the global world state
+- `dump_world_state` — return current world state snapshot
+- `set_routine_autonomous` — mark a routine to fire automatically when conditions match
+
+**2 execution tools:**
 
 - `execute_routine` — run a compiled routine by ID with pre-loaded plan
 - `trigger_consolidation` — manually trigger the episode → schema → routine pipeline
 
 Implementation lives in [`src/interfaces/mcp.rs`](src/interfaces/mcp.rs).
 
-## Peer and listener modes
+## Peer, listener, and webhook modes
 
-The runtime can listen for and connect to peers:
+The runtime can listen for peers, WebSocket connections, and inbound webhooks:
 
 ```bash
 # TCP listener
@@ -239,6 +245,9 @@ cargo run -- --peer 127.0.0.1:9101 packs
 
 # Unix socket listener (Unix only)
 cargo run -- --unix-listen /tmp/soma.sock repl
+
+# HTTP webhook listener (receives POST, patches world state)
+cargo run -- --mcp --pack auto --webhook-listen 127.0.0.1:9200
 ```
 
 Relevant flags:
@@ -248,6 +257,7 @@ Relevant flags:
 - `--peer <addr>`
 - `--unix-listen <path>`
 - `--unix-peer <path>`
+- `--webhook-listen <addr>` — HTTP server for inbound webhooks (POST → world state patch + stderr event)
 
 If `tls_cert` and `tls_key` are configured, outbound peer connections and TCP
 listeners use TLS. Rate limiting and blacklist behavior come from the

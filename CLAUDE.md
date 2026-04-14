@@ -248,7 +248,7 @@ The body does not think. It acts. An organism's hand doesn't decide where to rea
 - Autonomous path: create_goal → skill selection → port execution → episode → schema → routine → plan-following
 - Memory: ring buffer, HashEmbedder, PrefixSpan, consolidation, disk persistence
 - 8 proof projects (SMTP, S3, Postgres, LLM, MCP, S2S, MCP-Bridge, Web) + HelperBook app + multistep proof
-- 44/44 capabilities checklist, 1188 unit tests (zero clippy warnings)
+- 44/44 capabilities checklist, 1222 unit tests (zero clippy warnings)
 - Cross-compilation to Android (aarch64-linux-android), iOS (aarch64-apple-ios), **and browser (wasm32-unknown-unknown)** — all three verified
 - **MCP-client port backend** — `PortBackend::McpClient` with `Stdio` + `Http` transports. Any MCP server in any language is a port. Proven end-to-end in `soma-project-mcp-bridge` with co-resident Python + Node.js + PHP pure-stdlib MCP servers.
 - **soma-next in a browser tab** — phases 0 + 1a-1g shipped. 18 Playwright tests pass against headless Chromium in ~5 seconds. Full `Runtime` booted in a ~1.3 MB wasm cdylib via `bootstrap_from_specs()`. Three in-tab ports (`dom`, `audio`, `voice`). `soma_run_goal` drives the real `SessionController`. Plan-following via `soma_inject_routine`. LLM brain over HTTP via `scripts/brain-proxy.mjs` (OpenAI `gpt-5-mini`, `reasoning_effort: "low"`, also has `--fake` mode).
@@ -287,7 +287,7 @@ Build commands:
 - Android: `rustup target add aarch64-linux-android && cargo install cargo-ndk && cd soma-next && cargo ndk -t arm64-v8a build --release` (NDK installed via Android Studio SDK Tools, version 30.0.14904198 verified)
 - iOS: `rustup target add aarch64-apple-ios && cd soma-next && cargo build --target aarch64-apple-ios --release` (no NDK, Xcode SDK is auto-discovered via xcrun)
 
-Output: 10MB ELF (Android), 9MB Mach-O (iOS). Both contain the full runtime — control loop, memory pipeline, MCP server (19 tools), distributed transport, all built-in ports.
+Output: 10MB ELF (Android), 9MB Mach-O (iOS). Both contain the full runtime — control loop, memory pipeline, MCP server (27 tools), distributed transport, all built-in ports.
 
 iOS restriction worth noting: programmatic SMS is blocked by Apple (`MFMessageComposeViewController` requires user tap per message). iOS is best as a *perception peer* (camera, location, sensors, HealthKit). Android handles *actuation* (SMS, calls). See soma-project-android/POC.md and soma-project-ios/POC.md.
 
