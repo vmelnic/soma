@@ -16,6 +16,8 @@ pub struct Routine {
     pub expected_cost: f64,
     pub expected_effect: Vec<EffectDescriptor>,
     pub confidence: f64,
+    #[serde(default)]
+    pub autonomous: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

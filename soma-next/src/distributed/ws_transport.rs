@@ -565,6 +565,7 @@ mod tests {
             expected_cost: 1.0,
             expected_effect: vec![],
             confidence: 0.8,
+            autonomous: false,
         };
 
         let result = executor.transfer_routine("ws-peer-1", &routine);

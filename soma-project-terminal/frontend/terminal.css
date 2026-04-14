@@ -380,6 +380,60 @@ input[type="text"]:focus {
   color: var(--term-fg);
 }
 
+.chat-msg.system {
+  border-left-color: #ffaa33;
+  color: #ffaa33;
+}
+
+.chat-msg.system .chat-role {
+  color: #ffaa33;
+}
+
+/* Markdown rendering inside assistant/system messages */
+.chat-msg code {
+  background: var(--term-bg-lighter);
+  padding: 0.1rem 0.3rem;
+}
+
+.chat-msg pre {
+  background: var(--term-bg-lighter);
+  padding: 0.5rem;
+  overflow-x: auto;
+  margin: 0.3rem 0;
+  white-space: pre;
+}
+
+.chat-msg pre code {
+  background: none;
+  padding: 0;
+}
+
+.chat-msg table {
+  border-collapse: collapse;
+  margin: 0.3rem 0;
+}
+
+.chat-msg th,
+.chat-msg td {
+  border: 1px solid var(--term-fg-dim);
+  padding: 0.2rem 0.5rem;
+  text-align: left;
+}
+
+.chat-msg th {
+  color: var(--term-fg-bright);
+}
+
+.chat-msg ul,
+.chat-msg ol {
+  margin: 0.2rem 0;
+  padding-left: 1.5rem;
+}
+
+.chat-msg strong {
+  color: var(--term-fg-bright);
+}
+
 .chat-msg .chat-role {
   display: block;
   color: var(--term-fg-dim);

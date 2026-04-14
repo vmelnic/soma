@@ -53,6 +53,10 @@ const fn default_consolidation_interval_secs() -> u64 {
     300
 }
 
+const fn default_reactive_monitor_interval_secs() -> u64 {
+    0
+}
+
 fn default_mcp_transport() -> String {
     "stdio".to_string()
 }
@@ -146,6 +150,13 @@ pub struct RuntimeSection {
     /// Set to 0 to disable background consolidation.
     #[serde(default = "default_consolidation_interval_secs")]
     pub consolidation_interval_secs: u64,
+
+    /// Interval in seconds between reactive monitor ticks.
+    /// Set to 0 to disable the reactive monitor. When enabled, the monitor
+    /// scans the world state for changes and fires autonomous routines whose
+    /// match conditions are satisfied.
+    #[serde(default = "default_reactive_monitor_interval_secs")]
+    pub reactive_monitor_interval_secs: u64,
 }
 
 impl Default for RuntimeSection {
@@ -156,6 +167,7 @@ impl Default for RuntimeSection {
             default_latency_budget_ms: default_latency_budget_ms(),
             default_resource_budget: default_resource_budget(),
             consolidation_interval_secs: default_consolidation_interval_secs(),
+            reactive_monitor_interval_secs: default_reactive_monitor_interval_secs(),
         }
     }
 }
@@ -407,6 +419,10 @@ impl SomaConfig {
         if let Ok(v) = std::env::var("SOMA_RUNTIME_CONSOLIDATION_INTERVAL_SECS")
             && let Ok(n) = v.parse::<u64>() {
                 self.runtime.consolidation_interval_secs = n;
+            }
+        if let Ok(v) = std::env::var("SOMA_RUNTIME_REACTIVE_MONITOR_INTERVAL_SECS")
+            && let Ok(n) = v.parse::<u64>() {
+                self.runtime.reactive_monitor_interval_secs = n;
             }
         if let Ok(v) = std::env::var("SOMA_MCP_TRANSPORT") {
             self.mcp.transport = v;

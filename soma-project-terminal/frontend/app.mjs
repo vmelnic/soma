@@ -378,6 +378,55 @@ async function onVoiceRecordingStop() {
 })();
 
 // -------------------------------------------------------------------
+// file upload
+// -------------------------------------------------------------------
+
+(function initUploadButton() {
+  const btn = document.getElementById("btn-upload");
+  const input = document.getElementById("file-upload");
+  if (!btn || !input) return;
+
+  btn.addEventListener("click", () => input.click());
+
+  input.addEventListener("change", async () => {
+    const file = input.files[0];
+    if (!file || !currentContext) return;
+    try {
+      const text = await file.text();
+      const res = await fetch(
+        `/api/contexts/${encodeURIComponent(currentContext.id)}/upload?filename=${encodeURIComponent(file.name)}`,
+        { method: "POST", body: text, credentials: "include" },
+      );
+      const data = await res.json();
+      if (data.status === "ok") {
+        const listEl = document.getElementById("chat-transcript");
+        if (listEl) {
+          const empty = document.getElementById("chat-empty");
+          if (empty) empty.style.display = "none";
+          const wrapper = document.createElement("div");
+          wrapper.className = "chat-msg system";
+          const role = document.createElement("span");
+          role.className = "chat-role";
+          role.textContent = "[UPLOAD]";
+          const body = document.createElement("span");
+          body.className = "chat-body";
+          body.textContent = `${data.filename} uploaded (${data.size} bytes) → ${data.path}`;
+          wrapper.appendChild(role);
+          wrapper.appendChild(body);
+          listEl.appendChild(wrapper);
+          listEl.scrollTop = listEl.scrollHeight;
+        }
+      }
+    } catch (err) {
+      const status = document.getElementById("chat-status");
+      if (status) status.textContent = `Upload failed: ${err.message}`;
+    } finally {
+      input.value = "";
+    }
+  });
+})();
+
+// -------------------------------------------------------------------
 // view: context detail — full-width chat
 // -------------------------------------------------------------------
 
@@ -396,6 +445,7 @@ function connectEvents(contextId) {
       else if (data._scheduler_brain_event) renderSSEBrainEvent(data);
       else if (data._email_event) renderSSEEvent(data, "EMAIL");
       else if (data._webhook_event) renderSSEEvent(data, "WEBHOOK");
+      else if (data._reactive_event) renderSSEEvent(data, "AUTO");
     } catch {}
   };
   eventSource.onerror = () => {};

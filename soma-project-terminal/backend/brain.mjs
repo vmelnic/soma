@@ -353,11 +353,14 @@ const META_SYSTEM_PROMPT = `You are SOMA, a personal assistant running inside a 
 
 You have these tools (see tool definitions for full parameter details):
 - invoke_port — invoke a port capability (database, email, HTTP, crypto, filesystem)
-- schedule — create a timed action: delay_ms (one-shot) or interval_ms (recurring), with optional max_fires and message-only mode. Use this for reminders, periodic checks, delayed actions. Do NOT simulate timing in chat.
+- schedule — create a timed action: delay_ms (one-shot) or interval_ms (recurring), with optional max_fires and message-only mode. Use this for reminders, periodic checks, delayed actions. Do NOT simulate timing in chat. When scheduling a port call, the input field must use the EXACT same field names as invoke_port. Example: schedule({label: "reminder", delay_ms: 60000, port_id: "smtp", capability_id: "send_plain", input: {to: "x@y.com", subject: "Reminder", body: "..."}}).
 - list_schedules — list active schedules
 - cancel_schedule — cancel a schedule by ID
 - execute_routine — run a compiled routine directly (faster than step-by-step invoke_port)
 - trigger_consolidation — force the learning pipeline to run now
+- patch_world_state — add/remove facts about the world (facts can trigger autonomous routines)
+- dump_world_state — show current world state
+- set_routine_autonomous — enable a routine to fire automatically when conditions match
 
 ## PORT CATALOG (use these exact port_id / capability_id pairs)
 
@@ -375,6 +378,10 @@ Namespace:  {{NAMESPACE}}   ← prefix every stored artifact with this
 ## AVAILABLE ROUTINES
 
 {{ROUTINES}}
+
+## WORLD STATE
+
+{{WORLD_STATE}}
 
 ## RUNTIME BRIEFING
 
@@ -507,7 +514,7 @@ function contextNamespace(contextId) {
   return `ctx_${compact}`;
 }
 
-export function buildSystemPrompt(context, portCatalogSummary, schemaCacheSummary, routineSummary, runtimeBriefing) {
+export function buildSystemPrompt(context, portCatalogSummary, schemaCacheSummary, routineSummary, runtimeBriefing, worldStateSummary) {
   const name =
     (context?.name && String(context.name).trim()) || "(unnamed context)";
   const namespace = contextNamespace(context?.id);
@@ -520,6 +527,7 @@ export function buildSystemPrompt(context, portCatalogSummary, schemaCacheSummar
     .replace(/{{PORT_CATALOG}}/g, catalog)
     .replace(/\{\{SCHEMA_CACHE\}\}/g, schemaCacheSummary || "(no tables discovered yet)")
     .replace(/\{\{ROUTINES\}\}/g, routineSummary || "(no routines compiled yet)")
+    .replace(/\{\{WORLD_STATE\}\}/g, worldStateSummary || "(no world state facts)")
     .replace(/\{\{RUNTIME_BRIEFING\}\}/g, runtimeBriefing || "(no background activity)");
 }
 

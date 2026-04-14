@@ -1464,6 +1464,7 @@ mod tests {
                 expected_cost: 0.1,
                 expected_effect: Vec::new(),
                 confidence: 0.9,
+                autonomous: false,
             };
             s.register(routine).unwrap();
         }

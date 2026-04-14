@@ -134,6 +134,45 @@ export const DEFAULT_CHAT_TOOLS = Object.freeze([
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "patch_world_state",
+      description: "Add or remove facts from SOMA's world state. Facts are conditions that can trigger autonomous routines.",
+      parameters: {
+        type: "object",
+        properties: {
+          add_facts: { type: "array", description: "Facts to add: [{fact_id, subject, predicate, value, confidence}]", items: { type: "object" } },
+          remove_fact_ids: { type: "array", description: "Fact IDs to remove", items: { type: "string" } },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "dump_world_state",
+      description: "Show the current world state — all known facts about the world.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_routine_autonomous",
+      description: "Mark a compiled routine to fire automatically when its conditions match the world state.",
+      parameters: {
+        type: "object",
+        properties: {
+          routine_id: { type: "string", description: "Routine ID" },
+          autonomous: { type: "boolean", description: "Enable or disable autonomous execution" },
+        },
+        required: ["routine_id", "autonomous"],
+        additionalProperties: false,
+      },
+    },
+  },
 ]);
 
 // Build an `invokeTool(name, args)` handler closed over a

@@ -492,9 +492,34 @@ async function main() {
           }
         } catch {}
 
+        // Recent webhooks from world state — the brain can reference
+        // "that lead" or "the payment that just came in".
+        try {
+          const wsRaw = await soma.callTool("dump_world_state", {});
+          const wsData = soma.unwrap(wsRaw);
+          const webhookFacts = (wsData?.facts || []).filter(f => f.subject === "webhook");
+          if (webhookFacts.length > 0) {
+            const lines = webhookFacts.slice(-5).map(f => {
+              const val = typeof f.value === "object" ? JSON.stringify(f.value) : String(f.value);
+              return `[${f.predicate}] ${val}`;
+            });
+            briefingParts.push(`Recent webhooks:\n${lines.join("\n")}`);
+          }
+        } catch {}
+
         const runtimeBriefing = briefingParts.length > 0
           ? briefingParts.join("\n")
           : "(no background activity)";
+
+        // Fetch world state for the brain's system prompt.
+        let worldStateSummary = "(no world state facts)";
+        try {
+          const wsRaw = await soma.callTool("dump_world_state", {});
+          const ws = soma.unwrap(wsRaw);
+          if (ws?.facts?.length > 0) {
+            worldStateSummary = ws.facts.map(f => `${f.subject}.${f.predicate} = ${JSON.stringify(f.value)} (confidence: ${f.confidence})`).join("\n");
+          }
+        } catch {}
 
         let reply;
         try {
@@ -505,6 +530,7 @@ async function main() {
               formatSchemaCache(contextId),
               cachedRoutineSummary,
               runtimeBriefing,
+              worldStateSummary,
             ),
             history: hist.history,
             tools: DEFAULT_CHAT_TOOLS,
@@ -588,6 +614,7 @@ async function main() {
           soma.events.on("scheduler_brain", onEvent);
           soma.events.on("webhook", onEvent);
           soma.events.on("email", onEvent);
+          soma.events.on("reactive", onEvent);
         }
         req.on("close", () => {
           if (soma.events) {
@@ -595,6 +622,7 @@ async function main() {
             soma.events.removeListener("scheduler_brain", onEvent);
             soma.events.removeListener("webhook", onEvent);
             soma.events.removeListener("email", onEvent);
+            soma.events.removeListener("reactive", onEvent);
           }
         });
         return;
@@ -825,31 +853,43 @@ async function main() {
         }
       }
 
-      // ---- webhook receiver ----
+      // ---- webhook receiver (proxy to soma-next's HTTP listener) ----
+      // Webhook receive + world state patching happens in soma-next.
+      // The terminal just proxies the request. The webhook event arrives
+      // back via stderr JSON → SSE, same as scheduler events.
       const webhookMatch = path.match(/^\/api\/webhooks\/([a-zA-Z0-9_-]+)$/);
       if (webhookMatch && method === "POST") {
         const hookName = webhookMatch[1];
-        const body = await readBody(req);
-        const receivedAt = new Date().toISOString();
+        const rawBody = await readBody(req);
 
-        // Always return 200 immediately with the payload echo.
-        sendJson(res, 200, {
-          status: "ok",
-          hook: hookName,
-          received_at: receivedAt,
-        });
+        // Proxy to soma-next's webhook listener.
+        try {
+          const bodyStr = typeof rawBody === "string" ? rawBody : JSON.stringify(rawBody);
+          const proxyRes = await fetch(`http://${soma.webhookAddr}/${hookName}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Content-Length": String(Buffer.byteLength(bodyStr)),
+            },
+            body: bodyStr,
+          });
+          const proxyBody = await proxyRes.json();
+          sendJson(res, proxyRes.status, proxyBody);
+        } catch (err) {
+          sendJson(res, 502, { status: "error", error: `webhook proxy failed: ${err.message}` });
+        }
 
-        // If a brain instruction exists for this hook, route through
-        // the brain asynchronously. The webhook caller already got
-        // its 200 — brain processing is fire-and-forget.
+        // Brain instruction processing (terminal-level — brain logic).
         const instruction = webhookInstructions.get(hookName);
         if (instruction) {
+          let parsedBody = {};
+          try { parsedBody = JSON.parse(rawBody); } catch {}
           (async () => {
             try {
               const briefPrompt = `You are SOMA processing an inbound webhook event.
 
 Webhook: "${hookName}"
-Payload: ${JSON.stringify(body)}
+Payload: ${JSON.stringify(parsedBody)}
 
 Operator instruction: ${instruction}
 
@@ -863,17 +903,12 @@ Follow the instruction. Use invoke_port if you need to take action (send email, 
                 temperature: 0.3,
                 maxTokens: 400,
               });
-
               console.log(
                 `[webhook] ${hookName}:brain → ${reply.content?.slice(0, 200)}` +
-                  (reply.tool_calls?.length
-                    ? ` (${reply.tool_calls.length} tool calls)`
-                    : ""),
+                  (reply.tool_calls?.length ? ` (${reply.tool_calls.length} tool calls)` : ""),
               );
             } catch (err) {
-              console.error(
-                `[webhook] ${hookName}:brain-error → ${err.message}`,
-              );
+              console.error(`[webhook] ${hookName}:brain-error → ${err.message}`);
             }
           })();
         }

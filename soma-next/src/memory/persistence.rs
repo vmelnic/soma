@@ -13,6 +13,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use uuid::Uuid;
 
 use crate::errors::{Result, SomaError};
+use crate::types::belief::Fact;
 use crate::types::episode::Episode;
 use crate::types::schema::Schema;
 use crate::types::routine::Routine;
@@ -20,6 +21,8 @@ use crate::types::routine::Routine;
 use super::episodes::{DefaultEpisodeStore, EpisodeStore};
 use super::routines::{DefaultRoutineStore, InvalidationReason, RoutineStore};
 use super::schemas::{DefaultSchemaStore, SchemaStore};
+
+use crate::runtime::world_state::{DefaultWorldStateStore, WorldStateStore};
 
 // ---------------------------------------------------------------------------
 // Generic disk persistence helpers
@@ -347,6 +350,86 @@ impl RoutineStore for DiskRoutineStore {
     fn list_all(&self) -> Vec<&Routine> {
         self.inner.list_all()
     }
+
+    fn set_autonomous(&mut self, routine_id: &str, autonomous: bool) -> Result<bool> {
+        let found = self.inner.set_autonomous(routine_id, autonomous)?;
+        if found
+            && let Err(e) = self.flush()
+        {
+            tracing::error!(error = %e, "failed to flush routines after set_autonomous");
+        }
+        Ok(found)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DiskWorldStateStore
+// ---------------------------------------------------------------------------
+
+/// Disk-backed world state store. Delegates queries to DefaultWorldStateStore,
+/// writes the full fact list to disk after every mutation.
+pub struct DiskWorldStateStore {
+    inner: DefaultWorldStateStore,
+    path: PathBuf,
+}
+
+impl DiskWorldStateStore {
+    /// Create a new DiskWorldStateStore, loading any existing facts from disk.
+    pub fn new(data_dir: &Path) -> Result<Self> {
+        let path = data_dir.join("world_state.json");
+        let facts: Vec<Fact> = load_from_disk(&path)?;
+
+        let mut inner = DefaultWorldStateStore::new();
+        for fact in facts {
+            inner.add_fact(fact)?;
+        }
+
+        let count = inner.list_facts().len();
+        tracing::info!(
+            path = %path.display(),
+            count,
+            "loaded world state facts from disk"
+        );
+
+        Ok(Self { inner, path })
+    }
+
+    fn flush(&self) -> Result<()> {
+        let facts: Vec<&Fact> = self.inner.list_facts();
+        save_to_disk(&self.path, &facts)
+    }
+}
+
+impl WorldStateStore for DiskWorldStateStore {
+    fn snapshot(&self) -> serde_json::Value {
+        self.inner.snapshot()
+    }
+
+    fn add_fact(&mut self, fact: Fact) -> Result<()> {
+        self.inner.add_fact(fact)?;
+        self.flush()
+    }
+
+    fn remove_fact(&mut self, fact_id: &str) -> Result<bool> {
+        let removed = self.inner.remove_fact(fact_id)?;
+        if removed {
+            self.flush()?;
+        }
+        Ok(removed)
+    }
+
+    fn update_fact(&mut self, fact: Fact) -> Result<()> {
+        self.inner.update_fact(fact)?;
+        self.flush()
+    }
+
+    fn list_facts(&self) -> Vec<&Fact> {
+        self.inner.list_facts()
+    }
+
+    fn snapshot_hash(&self) -> String {
+        self.inner.snapshot_hash()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +439,7 @@ impl RoutineStore for DiskRoutineStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::common::Precondition;
+    use crate::types::common::{FactProvenance, Precondition};
     use crate::types::episode::EpisodeOutcome;
     use crate::types::routine::RoutineOrigin;
     use crate::types::schema::RollbackBias;
@@ -429,6 +512,7 @@ mod tests {
             expected_cost: 0.1,
             expected_effect: Vec::new(),
             confidence: 0.9,
+            autonomous: false,
         }
     }
 
@@ -739,6 +823,115 @@ mod tests {
 
         let ctx = serde_json::json!({ "domain": "file" });
         assert_eq!(store.find_matching(&ctx).len(), 1);
+
+        cleanup(&dir);
+    }
+
+    // --- DiskWorldStateStore ---
+
+    fn make_fact(id: &str, subject: &str, predicate: &str, value: serde_json::Value) -> Fact {
+        Fact {
+            fact_id: id.to_string(),
+            subject: subject.to_string(),
+            predicate: predicate.to_string(),
+            value,
+            confidence: 1.0,
+            provenance: FactProvenance::Observed,
+            timestamp: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn world_state_persists_across_instances() {
+        let dir = test_dir("ws_persist");
+
+        {
+            let mut store = DiskWorldStateStore::new(&dir).unwrap();
+            store.add_fact(make_fact("f1", "sensor", "temp", serde_json::json!(22.5))).unwrap();
+            store.add_fact(make_fact("f2", "door", "open", serde_json::json!(true))).unwrap();
+            assert_eq!(store.list_facts().len(), 2);
+        }
+
+        {
+            let store = DiskWorldStateStore::new(&dir).unwrap();
+            assert_eq!(store.list_facts().len(), 2);
+            let snap = store.snapshot();
+            let obj = snap.as_object().unwrap();
+            assert_eq!(obj.get("sensor.temp"), Some(&serde_json::json!(22.5)));
+            assert_eq!(obj.get("door.open"), Some(&serde_json::json!(true)));
+        }
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn world_state_empty_dir() {
+        let dir = test_dir("ws_empty");
+
+        let store = DiskWorldStateStore::new(&dir).unwrap();
+        assert!(store.list_facts().is_empty());
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn world_state_remove_fact_persists() {
+        let dir = test_dir("ws_remove");
+
+        {
+            let mut store = DiskWorldStateStore::new(&dir).unwrap();
+            store.add_fact(make_fact("f1", "sensor", "temp", serde_json::json!(20))).unwrap();
+            store.add_fact(make_fact("f2", "sensor", "humidity", serde_json::json!(50))).unwrap();
+            assert_eq!(store.remove_fact("f1").unwrap(), true);
+            assert_eq!(store.list_facts().len(), 1);
+        }
+
+        {
+            let store = DiskWorldStateStore::new(&dir).unwrap();
+            assert_eq!(store.list_facts().len(), 1);
+            let snap = store.snapshot();
+            assert!(snap.as_object().unwrap().get("sensor.temp").is_none());
+            assert_eq!(
+                snap.as_object().unwrap().get("sensor.humidity"),
+                Some(&serde_json::json!(50))
+            );
+        }
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn world_state_update_fact_persists() {
+        let dir = test_dir("ws_update");
+
+        {
+            let mut store = DiskWorldStateStore::new(&dir).unwrap();
+            store.add_fact(make_fact("f1", "sensor", "temp", serde_json::json!(20))).unwrap();
+            store.update_fact(make_fact("f1", "sensor", "temp", serde_json::json!(25))).unwrap();
+        }
+
+        {
+            let store = DiskWorldStateStore::new(&dir).unwrap();
+            assert_eq!(store.list_facts().len(), 1);
+            let snap = store.snapshot();
+            assert_eq!(
+                snap.as_object().unwrap().get("sensor.temp"),
+                Some(&serde_json::json!(25))
+            );
+        }
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn world_state_remove_nonexistent_does_not_flush() {
+        let dir = test_dir("ws_remove_noop");
+
+        let mut store = DiskWorldStateStore::new(&dir).unwrap();
+        assert_eq!(store.remove_fact("nonexistent").unwrap(), false);
+
+        // File should not have been created since no mutation occurred.
+        assert!(!dir.join("world_state.json").exists());
 
         cleanup(&dir);
     }

@@ -728,6 +728,7 @@ impl IncomingHandler for LocalDispatchHandler {
                         expected_cost: routine.expected_cost,
                         expected_effect: routine.expected_effect,
                         confidence: routine.confidence,
+                        autonomous: routine.autonomous,
                     };
                     match store.lock().unwrap().register(routine_to_store) {
                         Ok(()) => {
@@ -1654,6 +1655,7 @@ mod tests {
             expected_cost: 1.0,
             expected_effect: vec![],
             confidence: 0.8,
+            autonomous: false,
         };
 
         let result = executor.transfer_routine("peer-1", &routine);

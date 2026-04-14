@@ -14,4 +14,5 @@ pub mod trace;
 pub mod transport;
 #[cfg(unix)]
 pub mod unix_transport;
+pub mod webhook_listener;
 pub mod ws_transport;

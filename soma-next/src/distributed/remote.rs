@@ -618,6 +618,7 @@ mod tests {
             expected_cost: 1.0,
             expected_effect: vec![],
             confidence: 0.95,
+            autonomous: false,
         };
         let result = exec.transfer_routine("peer-1", &routine);
         assert!(result.is_err());
@@ -1065,6 +1066,7 @@ mod tests {
             expected_cost: 1.0,
             expected_effect: vec![],
             confidence: 0.95,
+            autonomous: false,
         };
 
         let result = exec.transfer_routine("peer-1", &routine);

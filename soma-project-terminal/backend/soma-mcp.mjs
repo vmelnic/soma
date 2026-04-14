@@ -40,7 +40,16 @@ export class SomaMcpClient {
   }
 
   async start() {
-    this.child = spawn(this.binPath, ["--mcp", "--pack", "auto"], {
+    // Webhook listen port — soma-next runs its own HTTP server for
+    // incoming webhooks. The terminal proxies /api/webhooks/* to it,
+    // or callers POST directly to this port.
+    const webhookPort = process.env.SOMA_WEBHOOK_PORT || "9200";
+    this.webhookAddr = `127.0.0.1:${webhookPort}`;
+
+    this.child = spawn(this.binPath, [
+      "--mcp", "--pack", "auto",
+      "--webhook-listen", this.webhookAddr,
+    ], {
       cwd: this.projectRoot,
       env: {
         ...process.env,
@@ -69,6 +78,22 @@ export class SomaMcpClient {
             const evt = JSON.parse(line);
             if (evt._scheduler_event) {
               this.events.emit(evt.brain ? "scheduler_brain" : "scheduler", evt);
+            }
+          } catch {}
+        }
+        if (line.startsWith("{") && line.includes("_webhook_event")) {
+          try {
+            const evt = JSON.parse(line);
+            if (evt._webhook_event) {
+              this.events.emit("webhook", evt);
+            }
+          } catch {}
+        }
+        if (line.startsWith("{") && line.includes("_reactive_event")) {
+          try {
+            const evt = JSON.parse(line);
+            if (evt._reactive_event) {
+              this.events.emit("reactive", evt);
             }
           } catch {}
         }

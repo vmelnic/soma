@@ -3369,6 +3369,7 @@ mod tests {
                 expected_cost: 0.1,
                 expected_effect: Vec::new(),
                 confidence: 0.9,
+                autonomous: false,
             })
             .unwrap();
 
@@ -3388,6 +3389,7 @@ mod tests {
                 expected_cost: 0.05,
                 expected_effect: Vec::new(),
                 confidence: 0.85,
+                autonomous: false,
             })
             .unwrap();
 
@@ -3433,6 +3435,7 @@ mod tests {
                 expected_cost: 0.1,
                 expected_effect: Vec::new(),
                 confidence: 0.9,
+                autonomous: false,
             })
             .unwrap();
 
@@ -3473,6 +3476,7 @@ mod tests {
                 expected_cost: 0.1,
                 expected_effect: Vec::new(),
                 confidence: 0.9,
+                autonomous: false,
             })
             .unwrap();
 

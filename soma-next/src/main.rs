@@ -39,6 +39,7 @@ fn main() {
         let mut mcp_unix_listen: Option<std::path::PathBuf> = None;
         #[cfg(unix)]
         let mut mcp_unix_peers: Vec<std::path::PathBuf> = Vec::new();
+        let mut mcp_webhook_listen: Option<SocketAddr> = None;
         let mut mcp_discover_lan = false;
         let mut mcp_skip = false;
         for (i, arg) in args.iter().enumerate() {
@@ -65,6 +66,13 @@ fn main() {
                     }
                     mcp_skip = true;
                 }
+            if arg == "--webhook-listen"
+                && let Some(addr_str) = args.get(i + 1) {
+                    if let Ok(addr) = addr_str.parse::<SocketAddr>() {
+                        mcp_webhook_listen = Some(addr);
+                    }
+                    mcp_skip = true;
+                }
             if arg == "--discover-lan" {
                 mcp_discover_lan = true;
             }
@@ -85,6 +93,7 @@ fn main() {
         let mcp_distributed = McpDistributedConfig {
             listen: mcp_listen,
             peer_addrs: mcp_peer_addrs,
+            webhook_listen: mcp_webhook_listen,
             discover_lan: mcp_discover_lan,
             #[cfg(unix)]
             unix_listen: mcp_unix_listen,
@@ -100,6 +109,7 @@ fn main() {
     let mut pack_paths: Vec<String> = Vec::new();
     let mut listen_addr: Option<SocketAddr> = None;
     let mut ws_listen_addr: Option<SocketAddr> = None;
+    let mut webhook_listen_addr: Option<SocketAddr> = None;
     let mut peer_addrs: Vec<SocketAddr> = Vec::new();
     #[cfg(unix)]
     let mut unix_listen_path: Option<std::path::PathBuf> = None;
@@ -137,6 +147,18 @@ fn main() {
                     Ok(addr) => ws_listen_addr = Some(addr),
                     Err(e) => {
                         eprintln!("error: invalid --ws-listen address '{}': {}", addr_str, e);
+                        std::process::exit(1);
+                    }
+                }
+                skip_next = true;
+                continue;
+            }
+        if arg == "--webhook-listen"
+            && let Some(addr_str) = args.get(i + 1) {
+                match addr_str.parse::<SocketAddr>() {
+                    Ok(addr) => webhook_listen_addr = Some(addr),
+                    Err(e) => {
+                        eprintln!("error: invalid --webhook-listen address '{}': {}", addr_str, e);
                         std::process::exit(1);
                     }
                 }
@@ -279,10 +301,11 @@ fn main() {
     #[cfg(not(unix))]
     let has_unix_listener = false;
     let has_any_listener =
-        listen_addr.is_some() || ws_listen_addr.is_some() || has_unix_listener;
+        listen_addr.is_some() || ws_listen_addr.is_some() || webhook_listen_addr.is_some() || has_unix_listener;
     if has_any_listener {
         let schema_store = Arc::clone(&runtime.schema_store);
         let routine_store = Arc::clone(&runtime.routine_store);
+        let world_state_for_webhook = Arc::clone(&runtime.world_state);
         let runtime_arc = Arc::new(Mutex::new(runtime));
         let handler: Arc<dyn soma_next::distributed::transport::IncomingHandler> =
             Arc::new(LocalDispatchHandler::with_stores(
@@ -316,6 +339,15 @@ fn main() {
             let _unix_handle =
                 start_unix_listener_background(path.clone(), Arc::clone(&handler));
             eprintln!("Unix transport listening on {}", path.display());
+        }
+
+        if let Some(addr) = webhook_listen_addr {
+            let _webhook_handle =
+                soma_next::distributed::webhook_listener::start_webhook_listener(
+                    addr,
+                    Arc::clone(&world_state_for_webhook),
+                );
+            eprintln!("Webhook HTTP listener on http://{}", addr);
         }
 
         // In listener mode, we wrap the runtime in an Arc so the CLI runner
@@ -407,6 +439,7 @@ FLAGS:
     --mcp                     Start MCP JSON-RPC server on stdin/stdout
     --listen <addr>           Start TCP listener for incoming peer connections
     --ws-listen <addr>        Start WebSocket listener for browser/UI connections
+    --webhook-listen <addr>   Start HTTP webhook listener (POST /<hook> patches world state)
     --peer <addr>             Register a remote TCP peer at the given address
     --unix-listen <path>      Start Unix socket listener for fast local IPC
     --unix-peer <path>        Register a remote peer via Unix socket path"
@@ -417,6 +450,7 @@ FLAGS:
 struct McpDistributedConfig {
     listen: Option<SocketAddr>,
     peer_addrs: Vec<SocketAddr>,
+    webhook_listen: Option<SocketAddr>,
     /// When true, start an mDNS browser for `_soma._tcp.local.` and
     /// register discovered peers dynamically. Discovered peers share
     /// the same peer_map and peer_ids list as static `--peer` entries.
@@ -534,6 +568,7 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
     type SchedulerArcs = (
         Arc<Mutex<dyn soma_next::runtime::scheduler::ScheduleStore + Send>>,
         Arc<Mutex<soma_next::runtime::port::DefaultPortRuntime>>,
+        Arc<Mutex<dyn soma_next::runtime::world_state::WorldStateStore + Send>>,
     );
     type ConsolidationArcs = (
         Arc<Mutex<dyn soma_next::memory::episodes::EpisodeStore + Send>>,
@@ -541,11 +576,22 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
         Arc<Mutex<dyn soma_next::memory::routines::RoutineStore + Send>>,
         Arc<dyn soma_next::memory::embedder::GoalEmbedder + Send + Sync>,
     );
+    type ReactiveMonitorArcs = (
+        Arc<Mutex<dyn soma_next::runtime::world_state::WorldStateStore + Send>>,
+        Arc<Mutex<dyn soma_next::memory::routines::RoutineStore + Send>>,
+        Arc<Mutex<soma_next::runtime::session::SessionController>>,
+        Arc<Mutex<soma_next::runtime::goal::DefaultGoalRuntime>>,
+        Arc<Mutex<dyn soma_next::memory::episodes::EpisodeStore + Send>>,
+        Arc<dyn soma_next::memory::embedder::GoalEmbedder + Send + Sync>,
+    );
 
-    let make_server = |runtime: crate::bootstrap::Runtime| -> (McpServer, Option<SchedulerArcs>, Option<ConsolidationArcs>) {
+    type WorldStateArc = Arc<Mutex<dyn soma_next::runtime::world_state::WorldStateStore + Send>>;
+
+    let make_server = |runtime: crate::bootstrap::Runtime| -> (McpServer, Option<SchedulerArcs>, Option<ConsolidationArcs>, Option<ReactiveMonitorArcs>, Option<WorldStateArc>) {
         let sched = (
             Arc::clone(&runtime.schedule_store),
             Arc::clone(&runtime.port_runtime),
+            Arc::clone(&runtime.world_state),
         );
         let consolidation = (
             Arc::clone(&runtime.episode_store),
@@ -553,7 +599,16 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             Arc::clone(&runtime.routine_store),
             Arc::clone(&runtime.embedder),
         );
+        let world_state_for_webhook = Arc::clone(&runtime.world_state);
         let handle = RuntimeHandle::from_runtime(runtime);
+        let monitor = (
+            Arc::clone(&handle.world_state),
+            Arc::clone(&handle.routine_store),
+            Arc::clone(&handle.session_controller),
+            Arc::clone(&handle.goal_runtime),
+            Arc::clone(&handle.episode_store),
+            Arc::clone(&handle.embedder),
+        );
         let handle = if has_peers {
             if let Some(exec) = make_executor() {
                 handle.with_remote_shared(exec, Arc::clone(&shared_peer_ids))
@@ -563,10 +618,10 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
         } else {
             handle
         };
-        (McpServer::new(handle), Some(sched), Some(consolidation))
+        (McpServer::new(handle), Some(sched), Some(consolidation), Some(monitor), Some(world_state_for_webhook))
     };
 
-    let (server, scheduler_arcs, consolidation_arcs) = if mcp_is_auto {
+    let (server, scheduler_arcs, consolidation_arcs, monitor_arcs, webhook_world_state) = if mcp_is_auto {
         eprintln!("MCP: auto-discovering ports from plugin search paths");
         match bootstrap::bootstrap_auto(&config) {
             Ok(runtime) => make_server(runtime),
@@ -586,7 +641,7 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             Ok(runtime) => make_server(runtime),
             Err(e) => {
                 eprintln!("warning: failed to bootstrap runtime: {e}");
-                (McpServer::new_stub(), None, None)
+                (McpServer::new_stub(), None, None, None, None)
             }
         }
     } else {
@@ -600,10 +655,11 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
     };
 
     // Start the scheduler background thread.
-    if let Some((sched_store, port_rt)) = scheduler_arcs {
+    if let Some((sched_store, port_rt, ws)) = scheduler_arcs {
         let _scheduler_handle = soma_next::runtime::scheduler::start_scheduler_thread(
             sched_store,
             port_rt,
+            Some(ws),
         );
         eprintln!("MCP: scheduler started (1s tick)");
     }
@@ -635,6 +691,31 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             "MCP: consolidation thread started ({}s interval)",
             config.runtime.consolidation_interval_secs
         );
+    }
+
+    // Start the reactive monitor background thread.
+    if config.runtime.reactive_monitor_interval_secs > 0
+        && let Some((ws, rs, sc, gr, es, emb)) = monitor_arcs
+    {
+        let interval = config.runtime.reactive_monitor_interval_secs;
+        let _handle = soma_next::runtime::world_state::start_reactive_monitor(
+            ws, rs, sc, gr, es, emb, interval,
+        );
+        eprintln!("MCP: reactive monitor started ({}s interval)", interval);
+    }
+
+    // Start webhook HTTP listener if requested.
+    if let Some(addr) = distributed.webhook_listen {
+        if let Some(ref ws) = webhook_world_state {
+            let _webhook_handle =
+                soma_next::distributed::webhook_listener::start_webhook_listener(
+                    addr,
+                    Arc::clone(ws),
+                );
+            eprintln!("MCP: webhook listener on http://{}", addr);
+        } else {
+            eprintln!("warning: --webhook-listen requires a bootstrapped runtime, skipping");
+        }
     }
 
     // Start TCP listener if requested (background thread).

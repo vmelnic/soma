@@ -47,6 +47,10 @@ pub trait RoutineStore {
 
     /// List all registered routines.
     fn list_all(&self) -> Vec<&Routine>;
+
+    /// Set the `autonomous` flag on a routine. Returns Ok(true) if the
+    /// routine was found and updated, Ok(false) if not found.
+    fn set_autonomous(&mut self, routine_id: &str, autonomous: bool) -> Result<bool>;
 }
 
 /// Default in-memory routine store backed by Vec<Routine>.
@@ -192,6 +196,7 @@ impl RoutineStore for DefaultRoutineStore {
             expected_cost: avg_cost,
             expected_effect: expected_effects,
             confidence,
+            autonomous: false,
         };
 
         Some(routine)
@@ -262,6 +267,15 @@ impl RoutineStore for DefaultRoutineStore {
     fn list_all(&self) -> Vec<&Routine> {
         self.routines.iter().collect()
     }
+
+    fn set_autonomous(&mut self, routine_id: &str, autonomous: bool) -> Result<bool> {
+        if let Some(r) = self.routines.iter_mut().find(|r| r.routine_id == routine_id) {
+            r.autonomous = autonomous;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
 }
 
 /// Check if `needle` is a subsequence of `haystack`.
@@ -299,6 +313,7 @@ mod tests {
             expected_cost: 0.1,
             expected_effect: Vec::new(),
             confidence: 0.9,
+            autonomous: false,
         }
     }
 
@@ -540,6 +555,7 @@ mod tests {
             expected_cost: 0.1,
             expected_effect: Vec::new(),
             confidence,
+            autonomous: false,
         }
     }
 

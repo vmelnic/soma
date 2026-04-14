@@ -154,6 +154,7 @@ pub fn now_epoch_ms() -> u64 {
 pub fn start_scheduler_thread(
     schedule_store: Arc<Mutex<dyn ScheduleStore + Send>>,
     port_runtime: Arc<Mutex<DefaultPortRuntime>>,
+    world_state: Option<Arc<Mutex<dyn crate::runtime::world_state::WorldStateStore + Send>>>,
 ) -> JoinHandle<()> {
     thread::Builder::new()
         .name("soma-scheduler".to_string())
@@ -207,6 +208,22 @@ pub fn start_scheduler_thread(
                             if success { detail.clone() } else { format!("\"{}\"", detail.replace('"', "\\\"")) },
                             schedule.brain,
                         );
+
+                        // Record the scheduled fire as a WorldState fact.
+                        if let Some(ref ws_arc) = world_state
+                            && let Ok(mut ws) = ws_arc.lock()
+                        {
+                            let fact = crate::types::belief::Fact {
+                                fact_id: format!("scheduler.{}", schedule.id),
+                                subject: "scheduler".to_string(),
+                                predicate: format!("{}_fired", schedule.label),
+                                value: serde_json::json!(success),
+                                confidence: 1.0,
+                                provenance: crate::types::common::FactProvenance::Observed,
+                                timestamp: chrono::Utc::now(),
+                            };
+                            let _ = ws.add_fact(fact);
+                        }
                     } else if let Some(ref message) = schedule.message {
                         // Message-only mode — emit directly, no port call.
                         let escaped = message.replace('"', "\\\"");

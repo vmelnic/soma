@@ -167,6 +167,8 @@ pub struct RoutineTransfer {
     pub expected_cost: f64,
     pub expected_effect: Vec<EffectDescriptor>,
     pub confidence: f64,
+    #[serde(default)]
+    pub autonomous: bool,
 }
 
 /// Observation in a distributed stream — 10 required fields from distributed.md.

@@ -20,3 +20,4 @@ pub mod pack;
 pub mod metrics;
 pub mod proprioception;
 pub mod scheduler;
+pub mod world_state;

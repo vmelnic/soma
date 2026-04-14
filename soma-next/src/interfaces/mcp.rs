@@ -94,6 +94,7 @@ pub struct RuntimeHandle {
     pub routine_store: Arc<Mutex<dyn RoutineStore + Send>>,
     pub embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>,
     pub schedule_store: Arc<Mutex<dyn crate::runtime::scheduler::ScheduleStore + Send>>,
+    pub world_state: Arc<Mutex<dyn crate::runtime::world_state::WorldStateStore + Send>>,
     pub start_time: Instant,
     pub remote_executor: Option<Arc<dyn RemoteExecutor>>,
     /// Live list of peer IDs known to the runtime. Static peers from
@@ -119,6 +120,7 @@ impl RuntimeHandle {
             routine_store: runtime.routine_store,
             embedder: runtime.embedder,
             schedule_store: runtime.schedule_store,
+            world_state: runtime.world_state,
             start_time: runtime.start_time,
             remote_executor: None,
             peer_ids: Arc::new(Mutex::new(Vec::new())),
@@ -277,6 +279,9 @@ impl McpServer {
             "cancel_schedule" => self.handle_cancel_schedule(request.id, request.params),
             "trigger_consolidation" => self.handle_trigger_consolidation(request.id, request.params),
             "execute_routine" => self.handle_execute_routine(request.id, request.params),
+            "patch_world_state" => self.handle_patch_world_state(request.id, request.params),
+            "dump_world_state" => self.handle_dump_world_state(request.id, request.params),
+            "set_routine_autonomous" => self.handle_set_routine_autonomous(request.id, request.params),
 
             _ => Ok(Self::error_response(
                 request.id,
@@ -364,6 +369,9 @@ impl McpServer {
             "cancel_schedule" => self.handle_cancel_schedule(inner_id, arguments),
             "trigger_consolidation" => self.handle_trigger_consolidation(inner_id, arguments),
             "execute_routine" => self.handle_execute_routine(inner_id, arguments),
+            "patch_world_state" => self.handle_patch_world_state(inner_id, arguments),
+            "dump_world_state" => self.handle_dump_world_state(inner_id, arguments),
+            "set_routine_autonomous" => self.handle_set_routine_autonomous(inner_id, arguments),
             _ => {
                 return Ok(Self::error_response(
                     id,
@@ -1772,6 +1780,7 @@ impl McpServer {
                     expected_cost: routine.expected_cost,
                     expected_effect: routine.expected_effect.clone(),
                     confidence: routine.confidence,
+                    autonomous: routine.autonomous,
                 };
 
                 match exec.transfer_routine(&peer_id, &transfer) {
@@ -2012,6 +2021,23 @@ impl McpServer {
             }
         }
 
+        // Record routine completion (or failure) as a WorldState fact so the
+        // reactive monitor can chain routines or trigger follow-up logic.
+        if is_terminal
+            && let Ok(mut ws) = rt.world_state.lock()
+        {
+            let fact = crate::types::belief::Fact {
+                fact_id: format!("routine_completed.{}", routine_id),
+                subject: "routine".to_string(),
+                predicate: format!("{}_completed", routine_id),
+                value: serde_json::json!(succeeded),
+                confidence: if succeeded { 1.0 } else { 0.5 },
+                provenance: crate::types::common::FactProvenance::Observed,
+                timestamp: chrono::Utc::now(),
+            };
+            let _ = ws.add_fact(fact);
+        }
+
         Ok(Self::success_response(
             id,
             serde_json::json!({
@@ -2053,7 +2079,25 @@ impl McpServer {
             }
         };
 
-        let port_id = params.get("port_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+        // Resolve short port names (e.g. "smtp") to full port IDs
+        // (e.g. "soma.smtp") so the scheduler can invoke them directly.
+        let port_id = params.get("port_id").and_then(|v| v.as_str()).map(|s| {
+            if let Some(ref rt) = self.runtime {
+                if let Ok(pr) = rt.port_runtime.lock() {
+                    // If the exact ID exists, use it. Otherwise search for
+                    // a registered port whose ID ends with the given name.
+                    if pr.get_port(s).is_some() {
+                        return s.to_string();
+                    }
+                    for p in pr.list_ports(None) {
+                        if p.port_id.ends_with(s) || p.port_id.ends_with(&format!(".{}", s)) {
+                            return p.port_id.clone();
+                        }
+                    }
+                }
+            }
+            s.to_string()
+        });
         let capability_id = params.get("capability_id").and_then(|v| v.as_str()).map(|s| s.to_string());
         let input = params.get("input").cloned().unwrap_or(serde_json::json!({}));
         let interval_ms = params.get("interval_ms").and_then(|v| v.as_u64());
@@ -2256,6 +2300,200 @@ impl McpServer {
     }
 
     // -----------------------------------------------------------------------
+    // World-state and autonomous-routine handlers
+    // -----------------------------------------------------------------------
+
+    fn handle_patch_world_state(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: add_facts and/or remove_fact_ids".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => {
+                return Ok(Self::success_response(
+                    id,
+                    serde_json::json!({
+                        "added": 0,
+                        "removed": 0,
+                        "note": "stub mode"
+                    }),
+                ));
+            }
+        };
+
+        let mut ws = rt.world_state.lock().unwrap();
+        let mut added = 0u64;
+        let mut removed = 0u64;
+
+        // Process removals first so adds can replace removed facts.
+        if let Some(ids) = params.get("remove_fact_ids").and_then(|v| v.as_array()) {
+            for val in ids {
+                if let Some(fact_id) = val.as_str()
+                    && let Ok(true) = ws.remove_fact(fact_id)
+                {
+                    removed += 1;
+                }
+            }
+        }
+
+        // Process additions.
+        if let Some(facts) = params.get("add_facts").and_then(|v| v.as_array()) {
+            for fact_val in facts {
+                let fact: crate::types::belief::Fact = match serde_json::from_value(fact_val.clone()) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        return Ok(Self::error_response(
+                            id,
+                            INVALID_PARAMS,
+                            format!("invalid fact: {e}"),
+                            None,
+                        ));
+                    }
+                };
+                if let Err(e) = ws.add_fact(fact) {
+                    return Ok(Self::error_response(
+                        id,
+                        INTERNAL_ERROR,
+                        format!("add_fact failed: {e}"),
+                        None,
+                    ));
+                }
+                added += 1;
+            }
+        }
+
+        Ok(Self::success_response(
+            id,
+            serde_json::json!({
+                "added": added,
+                "removed": removed,
+                "snapshot_hash": ws.snapshot_hash(),
+            }),
+        ))
+    }
+
+    fn handle_dump_world_state(
+        &self,
+        id: Value,
+        _params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => {
+                return Ok(Self::success_response(
+                    id,
+                    serde_json::json!({
+                        "snapshot": {},
+                        "facts": [],
+                        "note": "stub mode"
+                    }),
+                ));
+            }
+        };
+
+        let ws = rt.world_state.lock().unwrap();
+        let snapshot = ws.snapshot();
+        let facts: Vec<Value> = ws
+            .list_facts()
+            .into_iter()
+            .map(|f| serde_json::to_value(f).unwrap_or(Value::Null))
+            .collect();
+
+        Ok(Self::success_response(
+            id,
+            serde_json::json!({
+                "snapshot": snapshot,
+                "facts": facts,
+                "snapshot_hash": ws.snapshot_hash(),
+            }),
+        ))
+    }
+
+    fn handle_set_routine_autonomous(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: routine_id (string), autonomous (bool)".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let routine_id = params
+            .get("routine_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if routine_id.is_empty() {
+            return Ok(Self::error_response(
+                id,
+                INVALID_PARAMS,
+                "routine_id must be a non-empty string".to_string(),
+                None,
+            ));
+        }
+
+        let autonomous = params
+            .get("autonomous")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => {
+                return Ok(Self::success_response(
+                    id,
+                    serde_json::json!({
+                        "routine_id": routine_id,
+                        "autonomous": autonomous,
+                        "found": false,
+                        "note": "stub mode"
+                    }),
+                ));
+            }
+        };
+
+        let mut rs = rt.routine_store.lock().unwrap();
+        match rs.set_autonomous(&routine_id, autonomous) {
+            Ok(found) => Ok(Self::success_response(
+                id,
+                serde_json::json!({
+                    "routine_id": routine_id,
+                    "autonomous": autonomous,
+                    "found": found,
+                }),
+            )),
+            Err(e) => Ok(Self::error_response(
+                id,
+                INTERNAL_ERROR,
+                format!("set_autonomous failed: {e}"),
+                None,
+            )),
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
@@ -2381,6 +2619,30 @@ impl McpServer {
     /// Only creates episodes from sessions with 2+ steps — single
     /// invoke_port calls are not patterns worth learning from.
     fn finalize_implicit_session(&self, session: ImplicitSession, rt: &RuntimeHandle) {
+        // Patch WorldState with last-called facts from this session.
+        // This runs for ALL sessions (including single-call) so the reactive
+        // monitor can match routines against recent port activity.
+        if let Ok(mut ws) = rt.world_state.lock() {
+            for ((port_id, cap_id), obs) in session.skill_sequence.iter()
+                .zip(session.observations.iter())
+            {
+                let fact = crate::types::belief::Fact {
+                    fact_id: format!("last_call.{}.{}", port_id, cap_id),
+                    subject: port_id.clone(),
+                    predicate: format!("last_{}", cap_id),
+                    value: if obs.success {
+                        serde_json::json!(true)
+                    } else {
+                        serde_json::json!(false)
+                    },
+                    confidence: if obs.success { 1.0 } else { 0.5 },
+                    provenance: crate::types::common::FactProvenance::Observed,
+                    timestamp: chrono::Utc::now(),
+                };
+                let _ = ws.add_fact(fact);
+            }
+        }
+
         if session.skill_sequence.len() < 2 {
             return;
         }
@@ -2947,6 +3209,61 @@ impl McpServer {
                     "required": ["routine_id"]
                 }),
             },
+            McpTool {
+                name: "patch_world_state".to_string(),
+                description: "Add or remove facts in the world state. Facts are the runtime's persistent beliefs about the external environment. Changes may trigger autonomous routines on the next monitor tick.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "add_facts": {
+                            "type": "array",
+                            "description": "Facts to add or upsert",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "fact_id": { "type": "string" },
+                                    "subject": { "type": "string" },
+                                    "predicate": { "type": "string" },
+                                    "value": { "description": "Any JSON value" },
+                                    "confidence": { "type": "number" }
+                                },
+                                "required": ["fact_id", "subject", "predicate", "value", "confidence"]
+                            }
+                        },
+                        "remove_fact_ids": {
+                            "type": "array",
+                            "description": "Fact IDs to remove",
+                            "items": { "type": "string" }
+                        }
+                    }
+                }),
+            },
+            McpTool {
+                name: "dump_world_state".to_string(),
+                description: "Return the full world state snapshot including all facts and the current snapshot hash.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {}
+                }),
+            },
+            McpTool {
+                name: "set_routine_autonomous".to_string(),
+                description: "Set or clear the autonomous flag on a routine. Autonomous routines are automatically executed by the reactive monitor when their match conditions are satisfied by the world state.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "routine_id": {
+                            "type": "string",
+                            "description": "The routine ID to modify"
+                        },
+                        "autonomous": {
+                            "type": "boolean",
+                            "description": "Whether the routine should run autonomously"
+                        }
+                    },
+                    "required": ["routine_id", "autonomous"]
+                }),
+            },
         ]
     }
 }
@@ -2992,7 +3309,7 @@ mod tests {
     fn test_list_tools_count() {
         let server = McpServer::new_stub();
         let tools = server.list_tools();
-        assert_eq!(tools.len(), 24);
+        assert_eq!(tools.len(), 27);
     }
 
     #[test]
@@ -3017,6 +3334,9 @@ mod tests {
         assert!(names.contains(&"list_ports".to_string()));
         assert!(names.contains(&"trigger_consolidation".to_string()));
         assert!(names.contains(&"execute_routine".to_string()));
+        assert!(names.contains(&"patch_world_state".to_string()));
+        assert!(names.contains(&"dump_world_state".to_string()));
+        assert!(names.contains(&"set_routine_autonomous".to_string()));
     }
 
     #[test]
@@ -3417,7 +3737,7 @@ mod tests {
     #[test]
     fn test_default_impl() {
         let server = McpServer::default();
-        assert_eq!(server.list_tools().len(), 24);
+        assert_eq!(server.list_tools().len(), 27);
     }
 
     /// Build a real RuntimeHandle from a bootstrapped runtime (no packs).

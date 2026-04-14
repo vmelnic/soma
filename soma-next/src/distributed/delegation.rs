@@ -315,6 +315,7 @@ impl DelegationManager for DefaultDelegationManager {
                         expected_cost: 0.0,
                         expected_effect: vec![],
                         confidence: 0.0,
+                        autonomous: false,
                     };
                     executor.transfer_routine(peer_id, &routine)?;
                 } else {

@@ -19,7 +19,7 @@ use crate::runtime::remote::RemoteExecutor;
 use crate::config::SomaConfig;
 use crate::errors::{Result, SomaError};
 use crate::memory::episodes::{DefaultEpisodeStore, EpisodeStore};
-use crate::memory::persistence::{resolve_data_dir, DiskEpisodeStore, DiskSchemaStore, DiskRoutineStore};
+use crate::memory::persistence::{resolve_data_dir, DiskEpisodeStore, DiskSchemaStore, DiskRoutineStore, DiskWorldStateStore};
 use crate::memory::routines::{DefaultRoutineStore, RoutineStore};
 use crate::memory::schemas::{DefaultSchemaStore, SchemaStore};
 #[cfg(feature = "dylib-ports")]
@@ -37,6 +37,7 @@ type SharedEpisodeStore = Arc<Mutex<dyn EpisodeStore + Send>>;
 type SharedSchemaStore = Arc<Mutex<dyn SchemaStore + Send>>;
 type SharedRoutineStore = Arc<Mutex<dyn RoutineStore + Send>>;
 type SharedScheduleStore = Arc<Mutex<dyn ScheduleStore + Send>>;
+type SharedWorldStateStore = Arc<Mutex<dyn crate::runtime::world_state::WorldStateStore + Send>>;
 #[cfg(feature = "native-filesystem")]
 use crate::ports::filesystem::FilesystemPort;
 #[cfg(feature = "native-http")]
@@ -69,6 +70,8 @@ pub struct Runtime {
     pub embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>,
     /// Schedule store for the scheduler subsystem.
     pub schedule_store: SharedScheduleStore,
+    /// World state store for the reactive monitor subsystem.
+    pub world_state: SharedWorldStateStore,
     /// Instant when the runtime was created, used for uptime and CPU tracking.
     pub start_time: Instant,
 }
@@ -181,15 +184,17 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
     let port_runtime = Arc::new(Mutex::new(port_runtime));
 
     let data_dir = resolve_data_dir(&config.soma.data_dir);
-    let (episode_store, schema_store, routine_store): (
+    let (episode_store, schema_store, routine_store, world_state): (
         SharedEpisodeStore,
         SharedSchemaStore,
         SharedRoutineStore,
+        SharedWorldStateStore,
     ) = if data_dir.as_os_str().is_empty() {
         (
             Arc::new(Mutex::new(DefaultEpisodeStore::new())),
             Arc::new(Mutex::new(DefaultSchemaStore::new())),
             Arc::new(Mutex::new(DefaultRoutineStore::new())),
+            Arc::new(Mutex::new(crate::runtime::world_state::DefaultWorldStateStore::new())),
         )
     } else {
         tracing::info!(data_dir = %data_dir.display(), "using disk-backed memory stores");
@@ -197,6 +202,7 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
             Arc::new(Mutex::new(DiskEpisodeStore::new(&data_dir)?)),
             Arc::new(Mutex::new(DiskSchemaStore::new(&data_dir)?)),
             Arc::new(Mutex::new(DiskRoutineStore::new(&data_dir)?)),
+            Arc::new(Mutex::new(DiskWorldStateStore::new(&data_dir)?)),
         )
     };
 
@@ -262,6 +268,7 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
         metrics,
         embedder,
         schedule_store: Arc::new(Mutex::new(DefaultScheduleStore::new())),
+        world_state,
         start_time: Instant::now(),
     })
 }
@@ -344,15 +351,17 @@ pub fn bootstrap_with_remote(
     let port_runtime = Arc::new(Mutex::new(port_runtime));
 
     let data_dir = resolve_data_dir(&config.soma.data_dir);
-    let (episode_store, schema_store, routine_store): (
+    let (episode_store, schema_store, routine_store, world_state): (
         SharedEpisodeStore,
         SharedSchemaStore,
         SharedRoutineStore,
+        SharedWorldStateStore,
     ) = if data_dir.as_os_str().is_empty() {
         (
             Arc::new(Mutex::new(DefaultEpisodeStore::new())),
             Arc::new(Mutex::new(DefaultSchemaStore::new())),
             Arc::new(Mutex::new(DefaultRoutineStore::new())),
+            Arc::new(Mutex::new(crate::runtime::world_state::DefaultWorldStateStore::new())),
         )
     } else {
         tracing::info!(data_dir = %data_dir.display(), "using disk-backed memory stores (remote bootstrap)");
@@ -360,6 +369,7 @@ pub fn bootstrap_with_remote(
             Arc::new(Mutex::new(DiskEpisodeStore::new(&data_dir)?)),
             Arc::new(Mutex::new(DiskSchemaStore::new(&data_dir)?)),
             Arc::new(Mutex::new(DiskRoutineStore::new(&data_dir)?)),
+            Arc::new(Mutex::new(DiskWorldStateStore::new(&data_dir)?)),
         )
     };
 
@@ -423,6 +433,7 @@ pub fn bootstrap_with_remote(
         metrics,
         embedder,
         schedule_store: Arc::new(Mutex::new(DefaultScheduleStore::new())),
+        world_state,
         start_time: Instant::now(),
     })
 }
@@ -569,6 +580,7 @@ pub fn bootstrap_from_specs(
         metrics,
         embedder,
         schedule_store: Arc::new(Mutex::new(DefaultScheduleStore::new())),
+        world_state: Arc::new(Mutex::new(crate::runtime::world_state::DefaultWorldStateStore::new())),
         start_time: Instant::now(),
     })
 }
@@ -663,15 +675,17 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
     let port_runtime = Arc::new(Mutex::new(port_runtime));
 
     let data_dir = resolve_data_dir(&config.soma.data_dir);
-    let (episode_store, schema_store, routine_store): (
+    let (episode_store, schema_store, routine_store, world_state): (
         SharedEpisodeStore,
         SharedSchemaStore,
         SharedRoutineStore,
+        SharedWorldStateStore,
     ) = if data_dir.as_os_str().is_empty() {
         (
             Arc::new(Mutex::new(DefaultEpisodeStore::new())),
             Arc::new(Mutex::new(DefaultSchemaStore::new())),
             Arc::new(Mutex::new(DefaultRoutineStore::new())),
+            Arc::new(Mutex::new(crate::runtime::world_state::DefaultWorldStateStore::new())),
         )
     } else {
         tracing::info!(data_dir = %data_dir.display(), "auto: using disk-backed memory stores");
@@ -679,6 +693,7 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
             Arc::new(Mutex::new(DiskEpisodeStore::new(&data_dir)?)),
             Arc::new(Mutex::new(DiskSchemaStore::new(&data_dir)?)),
             Arc::new(Mutex::new(DiskRoutineStore::new(&data_dir)?)),
+            Arc::new(Mutex::new(DiskWorldStateStore::new(&data_dir)?)),
         )
     };
 
@@ -729,6 +744,7 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
         metrics,
         embedder,
         schedule_store: Arc::new(Mutex::new(DefaultScheduleStore::new())),
+        world_state,
         start_time: Instant::now(),
     })
 }
