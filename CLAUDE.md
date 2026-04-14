@@ -8,7 +8,7 @@ SOMA (Greek "soma" = body) — the runtime IS the program. Two production paths:
 - **Autonomous**: SOMA receives goals → selects skills → invokes ports → learns from episodes → compiles routines → plan-following mode for known patterns. Proven with reference pack (filesystem skills, episode→schema→routine cycle).
 
 Active deliverables:
-- **soma-next/** — Rust runtime. 1177 tests, zero warnings. Cross-compiles to `aarch64-linux-android` (10MB ELF) and `aarch64-apple-ios` (9MB Mach-O) with no code changes after the rustls/reqwest fix.
+- **soma-next/** — Rust runtime. 1225 tests, zero warnings. Cross-compiles to `aarch64-linux-android` (10MB ELF) and `aarch64-apple-ios` (9MB Mach-O) with no code changes after the rustls/reqwest fix.
 - **soma-ports/** — 11 dynamically loaded port adapters + SDK.
 - **soma-helperbook/** — Service marketplace app (postgres + redis + auth, Express frontend).
 - **soma-project-smtp/** — Email delivery proof.
@@ -248,7 +248,7 @@ The body does not think. It acts. An organism's hand doesn't decide where to rea
 - Autonomous path: create_goal → skill selection → port execution → episode → schema → routine → plan-following
 - Memory: ring buffer, HashEmbedder, PrefixSpan, consolidation, disk persistence
 - 8 proof projects (SMTP, S3, Postgres, LLM, MCP, S2S, MCP-Bridge, Web) + HelperBook app + multistep proof
-- 44/44 capabilities checklist, 1222 unit tests (zero clippy warnings)
+- 44/44 capabilities checklist, 1225 unit tests (zero clippy warnings)
 - Cross-compilation to Android (aarch64-linux-android), iOS (aarch64-apple-ios), **and browser (wasm32-unknown-unknown)** — all three verified
 - **MCP-client port backend** — `PortBackend::McpClient` with `Stdio` + `Http` transports. Any MCP server in any language is a port. Proven end-to-end in `soma-project-mcp-bridge` with co-resident Python + Node.js + PHP pure-stdlib MCP servers.
 - **soma-next in a browser tab** — phases 0 + 1a-1g shipped. 18 Playwright tests pass against headless Chromium in ~5 seconds. Full `Runtime` booted in a ~1.3 MB wasm cdylib via `bootstrap_from_specs()`. Three in-tab ports (`dom`, `audio`, `voice`). `soma_run_goal` drives the real `SessionController`. Plan-following via `soma_inject_routine`. LLM brain over HTTP via `scripts/brain-proxy.mjs` (OpenAI `gpt-5-mini`, `reasoning_effort: "low"`, also has `--fake` mode).

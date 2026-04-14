@@ -21,7 +21,7 @@ The same architecture runs on microcontrollers. `soma-project-esp32` deploys a `
 
 | Component | What | Status |
 |---|---|---|
-| [soma-next](soma-next/) | Rust runtime binary. 1222 tests, zero warnings. 27 MCP tools. Cross-compiles to Android (aarch64-linux-android), iOS (aarch64-apple-ios), and browser (wasm32-unknown-unknown). | Production |
+| [soma-next](soma-next/) | Rust runtime binary. 1225 tests, zero warnings. 27 MCP tools. Cross-compiles to Android (aarch64-linux-android), iOS (aarch64-apple-ios), and browser (wasm32-unknown-unknown). | Production |
 | [soma-ports](soma-ports/) | 11 dynamically loaded port adapters + SDK | Production |
 | [soma-helperbook](soma-helperbook/) | Service marketplace — first real app (postgres + redis + auth) | Production |
 | [soma-project-smtp](soma-project-smtp/) | SMTP email delivery via SOMA MCP | Production |

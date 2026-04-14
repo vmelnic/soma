@@ -65,7 +65,7 @@ target named `soma` from [`src/main.rs`](src/main.rs).
 cd soma-next
 
 cargo build                              # debug binary → target/debug/soma (~32 MB)
-cargo test                               # 1222+ tests, all must pass
+cargo test                               # 1225+ tests, all must pass
 cargo clippy --all-targets --all-features # must be zero warnings
 ```
 
