@@ -194,7 +194,7 @@ All messages are `TransportMessage` variants (serde JSON, `#[serde(tag = "type")
 
 Responses are `TransportResponse` variants: `SkillResult`, `ResourceResult`, `GoalResult`, `SchemaOk`, `RoutineOk`, `ChunkedAck`, `Error`, `Capabilities`, `RoutineStored`, `RoutineRemoved`.
 
-`ListCapabilities`, `RemoveRoutine`, `Capabilities`, `RoutineStored`, and `RoutineRemoved` were added to support the embedded leaf use case where the server needs to introspect the leaf's registered primitives and revoke previously-transferred routines. All 1177 soma-next tests pass with the additions; existing peers that don't send these variants are unaffected (backward compatible).
+`ListCapabilities`, `RemoveRoutine`, `Capabilities`, `RoutineStored`, and `RoutineRemoved` were added to support the embedded leaf use case where the server needs to introspect the leaf's registered primitives and revoke previously-transferred routines. All 1225 soma-next tests pass with the additions; existing peers that don't send these variants are unaffected (backward compatible).
 
 Framing: 4-byte big-endian length prefix followed by JSON payload. Same format across TCP and Unix socket transports. WebSocket uses native text frames. Max frame size is 16 MB on all transports.
 

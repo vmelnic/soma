@@ -710,6 +710,16 @@ SOMA does not require replacing existing systems. Three coexistence models: (A) 
 
 SOMA is well-suited to: data-driven applications, CRUD operations, API orchestration, IoT automation, multi-service coordination. Traditional code remains preferable for: performance-critical inner loops, UI framework implementation, and systems requiring formal verification beyond what the policy engine provides.
 
+### 15.5 What Counts as Code
+
+The claim "no application source code" invites a fair objection: aren't pack manifests, SQL strings in skill schemas, and port configuration files just code in a different notation?
+
+The SOMA runtime and port adapters are hand-written Rust (section 15.1). That is real code. Pack manifests are declarative configuration — they describe what the runtime should be able to do, not how. The how is the control loop, skill selection, belief updates, and policy enforcement. A Kubernetes manifest is not "application code" even though it describes behavior. A database schema is not "application code" even though it shapes what the application stores. Pack manifests are in this category: they parameterize a general-purpose engine, they don't contain execution logic.
+
+The honest edge case is SQL strings embedded in skill declarations. These are domain-specific logic, and the boundary between "configuration parameter" and "code" is genuinely fuzzy here. The key distinction: they don't execute alone. A bare SQL string is inert data. It becomes operative only when the runtime's control loop selects a skill, binds parameters from belief state, dispatches through a port adapter, and the policy engine permits execution. The SQL is an input to a capability, not a standalone program.
+
+The autonomous path eliminates even this residual ambiguity. When routines compile from episodes via PrefixSpan sequence mining, the "code" — the skill sequences that constitute the compiled procedure — was never written by anyone. It emerged from observed execution traces, clustered by embedding similarity, and generalized into reusable patterns. The developer authored nothing; the runtime learned the procedure from its own experience.
+
 ---
 
 ## 16. Limitations and Open Questions

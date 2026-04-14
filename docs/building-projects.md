@@ -2,6 +2,16 @@
 
 A **soma-project** is a self-contained directory that wires a soma-next binary to one or more port `.dylib` libraries via pack manifests. The MCP server exposes `invoke_port` and `list_ports` tools for LLMs and test clients.
 
+## Quick Alternative: `--pack auto`
+
+If you want to skip manifest writing entirely, use `--pack auto`. The runtime scans `SOMA_PORTS_PLUGIN_PATH` for port dylibs, loads every one it finds, and exposes all their capabilities through MCP — no manifest file needed:
+
+```bash
+SOMA_PORTS_PLUGIN_PATH=soma-ports/target/release soma-next/target/release/soma --mcp --pack auto
+```
+
+This is how `soma-project-terminal` runs in production: zero manifests, all ports auto-discovered. It works well for the LLM-driven path where the brain (LLM) decides which capabilities to invoke. For the autonomous path (goal-driven skill selection), you still need manifests because the runtime's selector needs skill metadata (input schemas, effect classes, preconditions) to make informed choices.
+
 ## Project Structure
 
 ```

@@ -58,9 +58,10 @@ This means:
 loop with selection, prediction, criticism, and policy enforcement. Typed skills
 and ports. Belief state and resource tracking. Episode memory with persistence.
 Session checkpoints and restore. Distributed peer transport (TCP, TLS, WebSocket,
-Unix sockets, mDNS LAN discovery). MCP server with 19 tools. CLI with 11 commands.
-1177 tests, zero warnings. Cross-compiles unchanged to `aarch64-linux-android`
-(10 MB ELF) and `aarch64-apple-ios` (9 MB Mach-O).
+Unix sockets, mDNS LAN discovery). MCP server with 27 tools. CLI with 11 commands.
+1225 tests, zero warnings. Cross-compiles unchanged to `aarch64-linux-android`
+(10 MB ELF) and `aarch64-apple-ios` (9 MB Mach-O). `--pack auto` discovers and
+loads all pack manifests under `packs/` automatically.
 
 **soma-ports** -- 11 dynamically loaded port adapters in a Rust workspace:
 postgres, redis, auth, smtp, s3, crypto, geo, image, push, timer, plus an SDK
@@ -124,7 +125,11 @@ recovery, and adaptation.
 
 **Observation-driven.** Every port call produces a typed record: what was called,
 what was returned, how long it took, whether it succeeded. Episodes accumulate.
-The runtime learns from its own execution history.
+The runtime learns from its own execution history. The webhook listener receives
+signals from the external world (HTTP callbacks, event notifications); the
+reactive monitor watches world state and triggers autonomous routines when
+conditions match. The body does not only act on command -- it also reacts to
+changes in its environment.
 
 **Self-adaptive.** Belief state updates from observations. The policy engine
 enforces risk budgets, latency budgets, and resource limits. Sessions can be

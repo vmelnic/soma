@@ -65,6 +65,30 @@ scripts/setup-db.sh && scripts/seed-db.sh
 cd frontend && npm install && node server.js  # http://localhost:8080
 ```
 
+## Try It in 5 Minutes
+
+If you have the runtime and ports already built:
+
+```bash
+# One command: auto-discover ports, list what's available
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_ports","arguments":{}}}' \
+| SOMA_PORTS_PLUGIN_PATH=soma-ports/target/release soma-next/target/release/soma --mcp --pack auto
+```
+
+No manifest. No configuration. SOMA discovers every port library in the search path, loads it, and reports what it can do. The LLM calls `invoke_port` to use any capability.
+
+To see it work against a real database:
+
+```bash
+export SOMA_POSTGRES_URL=postgres://user:pass@localhost/mydb
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"invoke_port","arguments":{"port_id":"postgres","capability_id":"query","input":{"sql":"SELECT version()"}}}}' \
+| SOMA_PORTS_PLUGIN_PATH=soma-ports/target/release soma-next/target/release/soma --mcp --pack auto
+```
+
+The runtime queried your real database. No application code was written.
+
 ## Architecture
 
 ```

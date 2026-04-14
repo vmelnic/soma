@@ -72,9 +72,17 @@ Disk persistence uses JSON files in a configurable `data_dir`. Each `Disk*Store`
 | `dump` | Structured JSON dump for LLM context (sections: full, belief, episodes, schemas, routines, sessions, skills, ports, packs, metrics) |
 | `repl` | Interactive mode |
 
-**MCP Server** (16 tools, JSON-RPC 2.0):
+**MCP Server** (27 tools, JSON-RPC 2.0):
 
-`create_goal`, `inspect_session`, `inspect_belief`, `inspect_resources`, `inspect_packs`, `inspect_skills`, `inspect_trace`, `pause_session`, `resume_session`, `abort_session`, `list_sessions`, `query_metrics`, `query_policy`, `dump_state`, `invoke_port`, `list_ports`.
+*16 core*: `create_goal`, `inspect_session`, `inspect_belief`, `inspect_resources`, `inspect_packs`, `inspect_skills`, `inspect_trace`, `pause_session`, `resume_session`, `abort_session`, `list_sessions`, `query_metrics`, `query_policy`, `dump_state`, `invoke_port`, `list_ports`.
+
+*3 distributed*: `list_peers`, `invoke_remote_skill`, `transfer_routine`.
+
+*3 scheduler*: `schedule`, `list_schedules`, `cancel_schedule`.
+
+*3 world state*: `patch_world_state`, `dump_world_state`, `set_routine_autonomous`.
+
+*2 execution*: `trigger_consolidation`, `execute_routine`.
 
 Also supports the MCP protocol methods `initialize`, `tools/list`, and `tools/call`.
 

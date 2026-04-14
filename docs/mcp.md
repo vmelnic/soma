@@ -2,7 +2,7 @@
 
 ## Overview
 
-SOMA exposes its full runtime as 19 JSON-RPC 2.0 tools over stdio. Any MCP-aware client (Claude Desktop, ChatGPT, custom tooling) can submit goals, control sessions, inspect state, invoke ports, invoke skills on remote peers (including embedded ESP32 leaves discovered via mDNS), transfer routines between instances, and query metrics through this interface.
+SOMA exposes its full runtime as 27 JSON-RPC 2.0 tools over stdio. Any MCP-aware client (Claude Desktop, ChatGPT, custom tooling) can submit goals, control sessions, inspect state, invoke ports, invoke skills on remote peers (including embedded ESP32 leaves discovered via mDNS), transfer routines between instances, manage schedules, manipulate world state, and query metrics through this interface.
 
 ## Protocol
 
@@ -31,7 +31,7 @@ Response:
 {"jsonrpc":"2.0","method":"tools/list","params":{},"id":2}
 ```
 
-Returns `{"tools": [...]}` with all 16 tool definitions including `name`, `description`, and `input_schema`.
+Returns `{"tools": [...]}` with all 27 tool definitions including `name`, `description`, and `input_schema`.
 
 ### Error Codes
 
@@ -405,6 +405,132 @@ Push a compiled routine to a remote peer for local storage and future invocation
 ```
 
 Transfer semantics depend on the peer: a server peer uses `LocalDispatchHandler::with_stores(..., routine_store)` to persist the routine to its `RoutineStore`; an embedded leaf stores the routine in RAM (vanishes on reboot — the leaf intentionally has no disk persistence for routines).
+
+### 20. schedule
+
+Create a scheduled port invocation. Supports one-shot (delay) and recurring (interval) schedules with optional fire limits and brain routing.
+
+**Input**:
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `port_id` | string | yes | Port to invoke |
+| `capability_id` | string | yes | Capability to invoke |
+| `input` | object | no | Input payload (defaults to `{}`) |
+| `delay_ms` | integer | no | One-shot delay in milliseconds |
+| `interval_ms` | integer | no | Recurring interval in milliseconds |
+| `max_fires` | integer | no | Maximum number of times to fire (omit for unlimited) |
+| `message_only` | boolean | no | If true, emit a message instead of invoking the port |
+| `route_to_brain` | boolean | no | If true, route the result back to the brain |
+
+**Response**:
+
+```json
+{"schedule_id":"<uuid>","port_id":"postgres","capability_id":"query","interval_ms":60000,"max_fires":10,"status":"active"}
+```
+
+### 21. list_schedules
+
+List all active schedules. No parameters.
+
+**Input**: none
+
+**Response**:
+
+```json
+{"schedules":[{"schedule_id":"<uuid>","port_id":"postgres","capability_id":"query","interval_ms":60000,"remaining_fires":8,"status":"active"}]}
+```
+
+### 22. cancel_schedule
+
+Cancel an active schedule by its UUID.
+
+**Input**:
+
+| Param | Type | Required |
+|-------|------|----------|
+| `schedule_id` | string (UUID) | yes |
+
+**Response**:
+
+```json
+{"schedule_id":"<uuid>","status":"cancelled"}
+```
+
+### 23. trigger_consolidation
+
+Manually trigger the episode-to-schema-to-routine learning pipeline. Runs PrefixSpan over stored episodes, induces schemas, and compiles high-confidence schemas into routines.
+
+**Input**: none
+
+**Response**:
+
+```json
+{"schemas_induced":2,"routines_compiled":1,"episodes_consolidated":12}
+```
+
+### 24. execute_routine
+
+Run a compiled routine by its ID. Walks the routine's `compiled_skill_path` through the session controller.
+
+**Input**:
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `routine_id` | string | yes | Routine ID from the routine store |
+| `input` | object | no | Input bindings for the routine |
+
+**Response**:
+
+```json
+{"routine_id":"scan_and_report","status":"completed","steps_walked":3,"trace":["fs.stat","fs.list_directory","fs.stat"]}
+```
+
+### 25. patch_world_state
+
+Add or remove facts from the global world state. World state persists across sessions and is visible to the belief source, critic, and reactive monitor.
+
+**Input**:
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `add` | array of objects | no | Facts to add (each: `{subject, predicate, value, confidence}`) |
+| `remove` | array of objects | no | Facts to remove (each: `{subject, predicate}`) |
+
+**Response**:
+
+```json
+{"world_state_size":5,"added":2,"removed":1}
+```
+
+### 26. dump_world_state
+
+Return the current world state snapshot. No parameters.
+
+**Input**: none
+
+**Response**:
+
+```json
+{"facts":[{"subject":"sensor.temperature","predicate":"above_threshold","value":"true","confidence":0.95},{"subject":"db.connection","predicate":"healthy","value":"true","confidence":1.0}],"size":2}
+```
+
+### 27. set_routine_autonomous
+
+Mark a routine to fire automatically when its match conditions are satisfied against the current world state. The reactive monitor checks world state changes against autonomous routines and triggers execution without explicit invocation.
+
+**Input**:
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `routine_id` | string | yes | Routine to mark |
+| `autonomous` | boolean | yes | `true` to enable, `false` to disable |
+
+**Response**:
+
+```json
+{"routine_id":"alert_on_threshold","autonomous":true}
+```
 
 ## Key Tools for LLMs
 

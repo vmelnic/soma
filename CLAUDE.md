@@ -42,7 +42,7 @@ Active deliverables:
   - **Workspace profile override REQUIRED**: `[profile.release.package.esp-storage] opt-level = 3` — ESP32 LX6 esp-storage flash write loops are timing-sensitive and its build script refuses `opt-level = "s"`. Do not remove.
   - **Known ESP32 LX6 wifi quirk**: `wifi.scan` can crash with an illegal-instruction exception if called AFTER heavy SPI flash writes in the same boot cycle. Workaround baked in: `scripts/wire-test.py --wifi` runs wifi tests FIRST, before storage. ESP32-S3 is unaffected. Real esp-wifi 0.12 bug, not fixed here.
   - Real esp-hal 0.23, esp-wifi 0.12, esp-storage 0.4, smoltcp 0.12, xtensa-lx 0.10, xtensa-lx-rt 0.18. ESP-IDF app descriptor placed at the start of drom_seg via a custom `rwtext.x` linker fragment in `firmware/build.rs` (without it, the stage-2 bootloader rejects the image with a garbage "efuse blk rev" error).
-  - Wire protocol extension (option B): soma-next added `ListCapabilities`, `RemoveRoutine` request variants and `Capabilities`, `RoutineStored`, `RoutineRemoved` response variants — backward compatible, all 1177 soma-next tests still pass.
+  - Wire protocol extension (option B): soma-next added `ListCapabilities`, `RemoveRoutine` request variants and `Capabilities`, `RoutineStored`, `RoutineRemoved` response variants — backward compatible, all 1225 soma-next tests still pass.
   - **Runtime pin configuration**: `board` port exposes `chip_info`, `pin_map`, `configure_pin`, `probe_i2c_buses`, `reboot`. Pin assignments for every peripheral (i2c sda/scl, spi sck/mosi, adc, pwm, uart tx/rx, gpio test) are loaded from FlashKvStore at boot with `DEFAULT_*` constants as fallbacks. Changing a pin is one MCP call + a reboot — no reflash needed. ADC uses a typed `match` over valid ADC1-capable GPIOs because `esp-hal`'s `AdcChannel` trait is only implemented for concrete `GpioPin<N>`; everything else dispatches via `AnyPin::steal(n)`. Proven cycle: `board.probe_i2c_buses [[5,4],[21,22]]` → found OLED at 0x3C → `board.configure_pin` → `board.reboot` → new pin map loaded on next boot.
   - **Display port (SSD1306 OLED)**: ships with the firmware by default. Skills: `display.info`, `display.clear`, `display.draw_text {line, column?, text, invert?}`, `display.draw_text_xy {x, y, text}`, `display.fill_rect`, `display.set_contrast`, `display.flush`. Uses `ssd1306 0.10` + `embedded-graphics 0.8` + `embedded-hal-bus 0.3` (RefCellDevice) to share the I²C0 bus with the `i2c` port — both consumers get their own `RefCellDevice` handle into a leaked `&'static RefCell<I2c>`. The port crate (`ports/display/`) has NO esp-hal / ssd1306 deps; the firmware injects seven type-erased closures that capture the real driver. **PROVEN ON PHYSICAL HARDWARE (WROOM-32D)**: `scripts/thermistor-to-display.py` drives a 5-second-period sensor-to-OLED update loop from brain-side Python over direct TCP. Text is visible on the real OLED panel: "Temperature: 22.00 C" updating every tick, plus ancillary lines showing tick number and label. The MCP path works the same way (`invoke_remote_skill thermistor.read_temp` → `invoke_remote_skill display.draw_text`) — an LLM driving soma-next produces identical behavior with no firmware changes. Cleanest demonstration of the brain/body split in the codebase: leaf has no concept of "every 5 seconds" (brain cadence) or "read sensor, show on screen" (brain composition), yet the panel shows the sensor reading.
 
@@ -144,7 +144,7 @@ soma/
 # Runtime
 cd soma-next
 cargo build --release        # ~10MB binary
-cargo test                   # 1177+ tests, must all pass
+cargo test                   # 1225+ tests, must all pass
 cargo clippy                 # Must be zero warnings
 
 # Ports
@@ -219,7 +219,7 @@ The body does not think. It acts. An organism's hand doesn't decide where to rea
 ## When Editing
 
 ### soma-next
-- `cargo test` after changes — 1177+ tests passing.
+- `cargo test` after changes — 1225+ tests passing.
 - `cargo clippy` — zero warnings.
 - MCP tool changes: update build_tools(), add handler, add routing (tools/call AND direct dispatch), update tool count in tests (currently 19). The `McpTool` struct uses `#[serde(rename = "inputSchema")]` — MCP spec requires camelCase. tools/call responses are wrapped via `tool_success_response()` into MCP content array format.
 - Episode/learning changes: update both cli.rs AND mcp.rs (both paths store episodes).

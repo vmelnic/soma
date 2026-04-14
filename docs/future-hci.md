@@ -307,7 +307,7 @@ SIGTERM-clean, single-file. Changing the brain from OpenAI → Claude →
 local model is a proxy body swap — the wire contract stays fixed.
 
 **Phase 1 complete. 18 Playwright tests, ~5 seconds. Full native build
-unchanged at 1188/1188, zero clippy warnings, zero regressions across
+unchanged at 1225/1225, zero clippy warnings, zero regressions across
 every proof project.**
 
 ### Phase 2 — Showcases across other bodies  (next)
