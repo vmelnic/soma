@@ -137,10 +137,38 @@ export function createContexts(soma) {
     });
   }
 
+  // ---- load with collaborator access ----
+  // Returns { ok, context, role } where role is "owner" or "collaborator".
+  // Used for routes where collaborators need access (messages, SSE, upload).
+  async function loadContextWithAccess(userId, contextId) {
+    if (!looksLikeUuid(userId) || !looksLikeUuid(contextId)) {
+      return { ok: false, error: "not found" };
+    }
+    // Check ownership first (fast path).
+    const owned = await loadContext(userId, contextId);
+    if (owned.ok) return { ...owned, role: "owner" };
+
+    // Check collaborator access.
+    const collabResult = await soma.invokePort("postgres", "query", {
+      sql:
+        `SELECT c.id, c.name, c.description, c.kind, ` +
+        `       to_char(c.created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at, ` +
+        `       to_char(c.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at ` +
+        `FROM contexts c ` +
+        `JOIN context_collaborators cc ON cc.context_id = c.id ` +
+        `WHERE c.id = $1::text::uuid AND cc.user_id = $2::text::uuid`,
+      params: [contextId, userId],
+    });
+    const row = collabResult.rows?.[0];
+    if (!row) return { ok: false, error: "not found" };
+    return { ok: true, context: row, role: "collaborator" };
+  }
+
   return {
     createContext,
     listForUser,
     loadContext,
+    loadContextWithAccess,
     deleteContext,
     bumpUpdatedAt,
   };

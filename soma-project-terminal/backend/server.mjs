@@ -445,7 +445,8 @@ async function main() {
 
         // Load the context for its system-prompt fields + full
         // transcript (including the turn we just appended).
-        const ctx = await contexts.loadContext(user.id, contextId);
+        // Uses loadContextWithAccess so collaborators can chat too.
+        const ctx = await contexts.loadContextWithAccess(user.id, contextId);
         if (!ctx.ok) {
           return sendJson(res, 404, {
             status: "error",
@@ -596,7 +597,7 @@ async function main() {
         const contextId = sseMatch[1];
         const user = await requireUser(req, res);
         if (!user) return;
-        const ctx = await contexts.loadContext(user.id, contextId);
+        const ctx = await contexts.loadContextWithAccess(user.id, contextId);
         if (!ctx.ok) return sendJson(res, 404, { status: "error", error: "not found" });
 
         res.writeHead(200, {
@@ -634,7 +635,7 @@ async function main() {
         const contextId = uploadMatch[1];
         const user = await requireUser(req, res);
         if (!user) return;
-        const ctx = await contexts.loadContext(user.id, contextId);
+        const ctx = await contexts.loadContextWithAccess(user.id, contextId);
         if (!ctx.ok) return sendJson(res, 404, { status: "error", error: "not found" });
 
         const filename = url.searchParams.get("filename") || "upload.txt";

@@ -131,6 +131,25 @@ CREATE TABLE IF NOT EXISTS soma_schema_cache (
     PRIMARY KEY (context_id, table_name)
 );
 
+-- Collaborator access to shared contexts.
+CREATE TABLE IF NOT EXISTS context_collaborators (
+    context_id  UUID NOT NULL,
+    user_id     UUID NOT NULL,
+    added_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (context_id, user_id)
+);
+
+-- Inbound emails received via /api/webhooks/email.
+CREATE TABLE IF NOT EXISTS soma_inbound_emails (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    from_addr   TEXT NOT NULL DEFAULT '',
+    to_addr     TEXT NOT NULL DEFAULT '',
+    subject     TEXT NOT NULL DEFAULT '',
+    body_text   TEXT NOT NULL DEFAULT '',
+    received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processed   BOOLEAN NOT NULL DEFAULT false
+);
+
 -- ------------------------------------------------------------------
 -- One-shot cleanup for obsolete tables from earlier commits. Drops
 -- the per-context memory tiers and the context_kv store that were

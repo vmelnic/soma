@@ -38,17 +38,19 @@ function looksLikeUuid(s) {
 }
 
 export function createMessages(soma) {
-  // Confirm the user owns the context before any read/write. This
-  // keeps the ownership check in a single place so every caller
-  // inherits it automatically.
-  async function assertOwnership(userId, contextId) {
+  // Confirm the user owns or collaborates on the context before any
+  // read/write. Checks ownership first, then collaborator access.
+  async function assertAccess(userId, contextId) {
     if (!looksLikeUuid(userId) || !looksLikeUuid(contextId)) {
       return false;
     }
     const result = await soma.invokePort("postgres", "query", {
       sql:
         `SELECT 1 AS ok FROM contexts ` +
-        `WHERE id = $1::text::uuid AND user_id = $2::text::uuid`,
+        `WHERE id = $1::text::uuid ` +
+        `AND (user_id = $2::text::uuid ` +
+        `     OR EXISTS (SELECT 1 FROM context_collaborators cc ` +
+        `                WHERE cc.context_id = id AND cc.user_id = $2::text::uuid))`,
       params: [contextId, userId],
     });
     return !!result.rows?.[0];
@@ -56,7 +58,7 @@ export function createMessages(soma) {
 
   // ---- list ----
   async function listForContext(userId, contextId) {
-    const owned = await assertOwnership(userId, contextId);
+    const owned = await assertAccess(userId, contextId);
     if (!owned) return { ok: false, error: "not found" };
 
     const result = await soma.invokePort("postgres", "query", {
@@ -72,7 +74,7 @@ export function createMessages(soma) {
   }
 
   // ---- append ----
-  // Caller must have already called assertOwnership (or we do it
+  // Caller must have already called assertAccess (or we do it
   // here as a safety net — the extra query is cheap relative to a
   // brain call).
   async function append(userId, contextId, role, content) {
@@ -84,7 +86,7 @@ export function createMessages(soma) {
     if (text.length > CONTENT_MAX) {
       return { ok: false, error: "content too long" };
     }
-    const owned = await assertOwnership(userId, contextId);
+    const owned = await assertAccess(userId, contextId);
     if (!owned) return { ok: false, error: "not found" };
 
     // INSERT ... RETURNING gives us the row id and created_at so the
@@ -131,5 +133,5 @@ export function createMessages(soma) {
     };
   }
 
-  return { assertOwnership, listForContext, append, historyFor };
+  return { assertAccess, listForContext, append, historyFor };
 }
