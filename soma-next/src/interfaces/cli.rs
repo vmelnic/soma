@@ -382,7 +382,10 @@ impl DefaultCliRunner {
         let succeeded = session.status == SessionStatus::Completed;
         let should_store = !used_routine || !succeeded;
         if is_terminal && should_store {
-            let episode = build_episode_from_session(&session, Some(rt.embedder.as_ref()));
+            let mut episode = build_episode_from_session(&session, Some(rt.embedder.as_ref()));
+            episode.world_state_context = rt.world_state.lock().ok()
+                .map(|ws| ws.snapshot())
+                .unwrap_or(serde_json::json!({}));
             let fingerprint = episode.goal_fingerprint.clone();
             let adapter = EpisodeMemoryAdapter::new(
                 std::sync::Arc::clone(&rt.episode_store),
@@ -848,6 +851,7 @@ pub fn build_episode_from_session(
         embedding,
         created_at: Utc::now(),
         salience,
+        world_state_context: serde_json::json!({}),
     }
 }
 
@@ -1848,6 +1852,7 @@ mod tests {
             embedding: None,
             created_at: Utc::now(),
             salience: 1.0,
+            world_state_context: serde_json::json!({}),
         }
     }
 }

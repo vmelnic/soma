@@ -1502,6 +1502,7 @@ mod tests {
             embedding: None,
             created_at: Utc::now(),
             salience: 1.0,
+            world_state_context: serde_json::json!({}),
         };
         adapter.store(episode).unwrap();
 

@@ -23,6 +23,10 @@ pub struct Episode {
     /// pattern extraction. Computed from outcome quality and efficiency.
     #[serde(default = "default_salience")]
     pub salience: f64,
+    /// World state facts present when this episode was created.
+    /// Used by schema induction to derive world-state-triggered routines.
+    #[serde(default)]
+    pub world_state_context: serde_json::Value,
 }
 
 fn default_salience() -> f64 {

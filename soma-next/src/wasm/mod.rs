@@ -376,10 +376,13 @@ pub fn soma_run_goal(objective: &str) -> Result<String, JsValue> {
         let is_terminal = matches!(status, "completed" | "failed" | "aborted");
 
         if is_terminal {
-            let episode = crate::interfaces::cli::build_episode_from_session(
+            let mut episode = crate::interfaces::cli::build_episode_from_session(
                 &session,
                 Some(&*runtime.embedder),
             );
+            episode.world_state_context = runtime.world_state.lock().ok()
+                .map(|ws| ws.snapshot())
+                .unwrap_or(serde_json::json!({}));
             let fingerprint = episode.goal_fingerprint.clone();
             let adapter = crate::adapters::EpisodeMemoryAdapter::new(
                 std::sync::Arc::clone(&runtime.episode_store),

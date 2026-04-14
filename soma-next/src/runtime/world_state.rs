@@ -220,11 +220,14 @@ pub fn start_reactive_monitor(
 
                             // Store episode on failure (same pattern as handle_execute_routine).
                             if !final_success {
-                                let episode =
+                                let mut episode =
                                     crate::interfaces::cli::build_episode_from_session(
                                         &session,
                                         Some(&*embedder),
                                     );
+                                episode.world_state_context = world_state.lock().ok()
+                                    .map(|ws| ws.snapshot())
+                                    .unwrap_or(serde_json::json!({}));
                                 let adapter = crate::adapters::EpisodeMemoryAdapter::new(
                                     Arc::clone(&episode_store),
                                     Arc::clone(&embedder),

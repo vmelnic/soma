@@ -561,10 +561,13 @@ impl McpServer {
         let succeeded = final_status == "completed";
         let should_store = !used_routine || !succeeded;
         if is_terminal && should_store {
-            let episode = crate::interfaces::cli::build_episode_from_session(
+            let mut episode = crate::interfaces::cli::build_episode_from_session(
                 &session,
                 Some(&*rt.embedder),
             );
+            episode.world_state_context = rt.world_state.lock().ok()
+                .map(|ws| ws.snapshot())
+                .unwrap_or(serde_json::json!({}));
             let fingerprint = episode.goal_fingerprint.clone();
             let adapter = crate::adapters::EpisodeMemoryAdapter::new(
                 Arc::clone(&rt.episode_store),
@@ -1999,10 +2002,13 @@ impl McpServer {
         );
         let succeeded = final_status == "completed";
         if is_terminal && !succeeded {
-            let episode = crate::interfaces::cli::build_episode_from_session(
+            let mut episode = crate::interfaces::cli::build_episode_from_session(
                 &session,
                 Some(&*rt.embedder),
             );
+            episode.world_state_context = rt.world_state.lock().ok()
+                .map(|ws| ws.snapshot())
+                .unwrap_or(serde_json::json!({}));
             let fingerprint = episode.goal_fingerprint.clone();
             let adapter = crate::adapters::EpisodeMemoryAdapter::new(
                 Arc::clone(&rt.episode_store),
@@ -2730,6 +2736,10 @@ impl McpServer {
             (outcome_weight * 0.7 + efficiency * 0.3).clamp(0.0, 1.0)
         };
 
+        let ws_context = rt.world_state.lock().ok()
+            .map(|ws| ws.snapshot())
+            .unwrap_or(serde_json::json!({}));
+
         let episode = crate::types::episode::Episode {
             episode_id: Uuid::new_v4(),
             goal_fingerprint: fingerprint.clone(),
@@ -2743,6 +2753,7 @@ impl McpServer {
             embedding,
             created_at: chrono::Utc::now(),
             salience,
+            world_state_context: ws_context,
         };
 
         let step_count = episode.steps.len();

@@ -74,6 +74,10 @@ impl Default for DefaultRoutineStore {
 
 /// Check whether a Precondition is satisfied by the given context.
 /// Same matching logic as in schemas.rs for consistency.
+///
+/// For `world_state` conditions: if the expression value for a key is
+/// `true` (boolean), the check passes when the key exists in the context
+/// regardless of its actual value (existence-only match).
 fn precondition_matches(precondition: &Precondition, context: &serde_json::Value) -> bool {
     match &precondition.expression {
         serde_json::Value::Object(expr_map) => {
@@ -81,9 +85,20 @@ fn precondition_matches(precondition: &Precondition, context: &serde_json::Value
                 Some(m) => m,
                 None => return false,
             };
-            expr_map
-                .iter()
-                .all(|(k, v)| ctx_map.get(k).is_some_and(|cv| cv == v))
+            expr_map.iter().all(|(k, v)| match ctx_map.get(k) {
+                None => false,
+                Some(cv) => {
+                    // For world_state conditions: `true` means "key must
+                    // exist" — any value satisfies.
+                    if *v == serde_json::Value::Bool(true)
+                        && precondition.condition_type == "world_state"
+                    {
+                        true
+                    } else {
+                        cv == v
+                    }
+                }
+            })
         }
         serde_json::Value::String(key) => {
             context
@@ -113,17 +128,53 @@ impl RoutineStore for DefaultRoutineStore {
         self.routines
             .iter()
             .filter(|routine| {
-                // Both match_conditions AND guard_conditions must all be satisfied.
-                let match_ok = !routine.match_conditions.is_empty()
-                    && routine
-                        .match_conditions
-                        .iter()
-                        .all(|pc| precondition_matches(pc, context));
+                if routine.match_conditions.is_empty() {
+                    return false;
+                }
 
+                // Group conditions by type and match if ANY group fully
+                // satisfies. This lets the same routine fire from either a
+                // goal match OR a world state match.
+                let goal_conds: Vec<_> = routine
+                    .match_conditions
+                    .iter()
+                    .filter(|c| c.condition_type == "goal_fingerprint")
+                    .collect();
+                let ws_conds: Vec<_> = routine
+                    .match_conditions
+                    .iter()
+                    .filter(|c| c.condition_type == "world_state")
+                    .collect();
+                let other_conds: Vec<_> = routine
+                    .match_conditions
+                    .iter()
+                    .filter(|c| {
+                        c.condition_type != "goal_fingerprint"
+                            && c.condition_type != "world_state"
+                    })
+                    .collect();
+
+                let goal_match = !goal_conds.is_empty()
+                    && goal_conds
+                        .iter()
+                        .all(|c| precondition_matches(c, context));
+                let ws_match = !ws_conds.is_empty()
+                    && ws_conds
+                        .iter()
+                        .all(|c| precondition_matches(c, context));
+                let other_match = !other_conds.is_empty()
+                    && other_conds
+                        .iter()
+                        .all(|c| precondition_matches(c, context));
+
+                let match_ok = goal_match || ws_match || other_match;
+
+                // Guard conditions must ALL pass regardless of which group
+                // triggered.
                 let guard_ok = routine
                     .guard_conditions
                     .iter()
-                    .all(|pc| precondition_matches(pc, context));
+                    .all(|c| precondition_matches(c, context));
 
                 match_ok && guard_ok
             })
@@ -398,6 +449,7 @@ mod tests {
             embedding: None,
             created_at: Utc::now(),
             salience: 1.0,
+            world_state_context: serde_json::json!({}),
         }
     }
 
@@ -794,5 +846,124 @@ mod tests {
         let invalidated = store.invalidate_by_condition(&reason);
 
         assert_eq!(invalidated, vec!["r1".to_string()]);
+    }
+
+    // --- OR-group matching and world_state tests ---
+
+    #[test]
+    fn test_find_matching_by_world_state() {
+        let mut store = DefaultRoutineStore::new();
+        let r = Routine {
+            routine_id: "r_ws".to_string(),
+            namespace: "test".to_string(),
+            origin: RoutineOrigin::SchemaCompiled,
+            match_conditions: vec![Precondition {
+                condition_type: "world_state".to_string(),
+                expression: serde_json::json!({ "webhook.crm": "active" }),
+                description: "CRM webhook active".to_string(),
+            }],
+            compiled_skill_path: vec!["handle_crm".into()],
+            guard_conditions: Vec::new(),
+            expected_cost: 0.1,
+            expected_effect: Vec::new(),
+            confidence: 0.9,
+            autonomous: false,
+        };
+        store.register(r).unwrap();
+
+        // Matches: world state has the right key+value.
+        let ctx = serde_json::json!({ "webhook.crm": "active" });
+        assert_eq!(store.find_matching(&ctx).len(), 1);
+
+        // Does not match: wrong value.
+        let ctx_wrong = serde_json::json!({ "webhook.crm": "inactive" });
+        assert!(store.find_matching(&ctx_wrong).is_empty());
+
+        // Does not match: key absent.
+        let ctx_missing = serde_json::json!({ "other_key": "active" });
+        assert!(store.find_matching(&ctx_missing).is_empty());
+    }
+
+    #[test]
+    fn test_find_matching_or_groups() {
+        let mut store = DefaultRoutineStore::new();
+        // Routine with BOTH goal_fingerprint and world_state conditions.
+        let r = Routine {
+            routine_id: "r_or".to_string(),
+            namespace: "test".to_string(),
+            origin: RoutineOrigin::SchemaCompiled,
+            match_conditions: vec![
+                Precondition {
+                    condition_type: "goal_fingerprint".to_string(),
+                    expression: serde_json::json!({ "goal_fingerprint": "handle_lead" }),
+                    description: "Goal matches handle_lead".to_string(),
+                },
+                Precondition {
+                    condition_type: "world_state".to_string(),
+                    expression: serde_json::json!({ "webhook.crm": "new_lead" }),
+                    description: "CRM new_lead event".to_string(),
+                },
+            ],
+            compiled_skill_path: vec!["process_lead".into()],
+            guard_conditions: Vec::new(),
+            expected_cost: 0.1,
+            expected_effect: Vec::new(),
+            confidence: 0.9,
+            autonomous: false,
+        };
+        store.register(r).unwrap();
+
+        // Matches via goal_fingerprint only (world state absent).
+        let ctx_goal = serde_json::json!({ "goal_fingerprint": "handle_lead" });
+        assert_eq!(store.find_matching(&ctx_goal).len(), 1);
+
+        // Matches via world_state only (goal absent).
+        let ctx_ws = serde_json::json!({ "webhook.crm": "new_lead" });
+        assert_eq!(store.find_matching(&ctx_ws).len(), 1);
+
+        // Matches when both are present.
+        let ctx_both =
+            serde_json::json!({ "goal_fingerprint": "handle_lead", "webhook.crm": "new_lead" });
+        assert_eq!(store.find_matching(&ctx_both).len(), 1);
+
+        // Does not match: neither group satisfied.
+        let ctx_none = serde_json::json!({ "unrelated": "data" });
+        assert!(store.find_matching(&ctx_none).is_empty());
+    }
+
+    #[test]
+    fn test_world_state_existence_match() {
+        let mut store = DefaultRoutineStore::new();
+        // world_state condition with `true` sentinel = existence check.
+        let r = Routine {
+            routine_id: "r_exist".to_string(),
+            namespace: "test".to_string(),
+            origin: RoutineOrigin::SchemaCompiled,
+            match_conditions: vec![Precondition {
+                condition_type: "world_state".to_string(),
+                expression: serde_json::json!({ "webhook.crm": true }),
+                description: "CRM webhook present".to_string(),
+            }],
+            compiled_skill_path: vec!["handle_crm".into()],
+            guard_conditions: Vec::new(),
+            expected_cost: 0.1,
+            expected_effect: Vec::new(),
+            confidence: 0.9,
+            autonomous: false,
+        };
+        store.register(r).unwrap();
+
+        // Matches: key exists with an object value (existence check).
+        let ctx_obj =
+            serde_json::json!({ "webhook.crm": { "event": "new_lead", "source": "hubspot" } });
+        assert_eq!(store.find_matching(&ctx_obj).len(), 1);
+
+        // Matches: key exists with a string value.
+        let ctx_str = serde_json::json!({ "webhook.crm": "anything" });
+        assert_eq!(store.find_matching(&ctx_str).len(), 1);
+
+        // Does not match: key absent.
+        let ctx_missing = serde_json::json!({ "other": "data" });
+        assert!(store.find_matching(&ctx_missing).is_empty());
     }
 }

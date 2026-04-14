@@ -64,6 +64,9 @@ impl Default for DefaultSchemaStore {
 /// Matching rules:
 /// - If expression is an object, every key/value in the expression must appear
 ///   in the context at the top level (shallow structural match).
+/// - For `world_state` conditions: if the expression value for a key is `true`
+///   (boolean), the check passes when the key exists regardless of its actual
+///   value (existence-only match).
 /// - If expression is a string, it is treated as a required key in the context.
 /// - Otherwise, the precondition is considered non-matchable (returns false).
 fn precondition_matches(precondition: &Precondition, context: &serde_json::Value) -> bool {
@@ -73,9 +76,18 @@ fn precondition_matches(precondition: &Precondition, context: &serde_json::Value
                 Some(m) => m,
                 None => return false,
             };
-            expr_map
-                .iter()
-                .all(|(k, v)| ctx_map.get(k).is_some_and(|cv| cv == v))
+            expr_map.iter().all(|(k, v)| match ctx_map.get(k) {
+                None => false,
+                Some(cv) => {
+                    if *v == serde_json::Value::Bool(true)
+                        && precondition.condition_type == "world_state"
+                    {
+                        true
+                    } else {
+                        cv == v
+                    }
+                }
+            })
         }
         serde_json::Value::String(key) => {
             context
@@ -101,13 +113,46 @@ impl SchemaStore for DefaultSchemaStore {
         self.schemas
             .iter()
             .filter(|schema| {
-                // A schema matches if ALL of its trigger_conditions are satisfied.
-                // A schema with no trigger conditions matches nothing (must be explicit).
-                !schema.trigger_conditions.is_empty()
-                    && schema
-                        .trigger_conditions
+                if schema.trigger_conditions.is_empty() {
+                    return false;
+                }
+
+                // Group conditions by type and match if ANY group fully
+                // satisfies. A schema with both goal_fingerprint and
+                // world_state conditions can fire from either trigger.
+                let goal_conds: Vec<_> = schema
+                    .trigger_conditions
+                    .iter()
+                    .filter(|c| c.condition_type == "goal_fingerprint")
+                    .collect();
+                let ws_conds: Vec<_> = schema
+                    .trigger_conditions
+                    .iter()
+                    .filter(|c| c.condition_type == "world_state")
+                    .collect();
+                let other_conds: Vec<_> = schema
+                    .trigger_conditions
+                    .iter()
+                    .filter(|c| {
+                        c.condition_type != "goal_fingerprint"
+                            && c.condition_type != "world_state"
+                    })
+                    .collect();
+
+                let goal_match = !goal_conds.is_empty()
+                    && goal_conds
                         .iter()
-                        .all(|pc| precondition_matches(pc, trigger_context))
+                        .all(|c| precondition_matches(c, trigger_context));
+                let ws_match = !ws_conds.is_empty()
+                    && ws_conds
+                        .iter()
+                        .all(|c| precondition_matches(c, trigger_context));
+                let other_match = !other_conds.is_empty()
+                    && other_conds
+                        .iter()
+                        .all(|c| precondition_matches(c, trigger_context));
+
+                goal_match || ws_match || other_match
             })
             .collect()
     }
@@ -235,17 +280,96 @@ impl SchemaStore for DefaultSchemaStore {
                 all_tags.sort();
                 all_tags.dedup();
 
+                // Extract common world state facts across all successful
+                // episodes in this cluster. These become the "stimulus" that
+                // can trigger the routine reactively via world state.
+                let ws_precondition = {
+                    let contexts: Vec<&serde_json::Map<String, serde_json::Value>> =
+                        successful_indices
+                            .iter()
+                            .filter_map(|&i| episodes[i].world_state_context.as_object())
+                            .collect();
+
+                    if contexts.len() >= 2 {
+                        // Find keys present in ALL contexts within this cluster.
+                        let first_keys: std::collections::HashSet<&String> =
+                            contexts[0].keys().collect();
+                        let common_keys: Vec<&String> = first_keys
+                            .iter()
+                            .filter(|k| contexts[1..].iter().all(|ctx| ctx.contains_key(**k)))
+                            .copied()
+                            .collect();
+
+                        // Filter out ubiquitous keys (present in >80% of ALL
+                        // episodes, not distinctive for this cluster).
+                        let total_episodes = episodes.len();
+                        let distinctive_keys: Vec<&String> = common_keys
+                            .into_iter()
+                            .filter(|k| {
+                                let global_count = episodes
+                                    .iter()
+                                    .filter(|ep| {
+                                        ep.world_state_context
+                                            .as_object()
+                                            .is_some_and(|m| m.contains_key(*k))
+                                    })
+                                    .count();
+                                // Keep if present in <80% of all episodes.
+                                global_count * 5 < total_episodes * 4
+                            })
+                            .collect();
+
+                        if !distinctive_keys.is_empty() {
+                            let mut expr = serde_json::Map::new();
+                            for key in &distinctive_keys {
+                                let first_val = &contexts[0][*key];
+                                let all_same = contexts
+                                    .iter()
+                                    .all(|ctx| ctx.get(*key) == Some(first_val));
+                                if all_same {
+                                    expr.insert((*key).clone(), first_val.clone());
+                                } else {
+                                    // Values differ across episodes — check key
+                                    // existence only (sentinel `true`).
+                                    expr.insert((*key).clone(), serde_json::json!(true));
+                                }
+                            }
+                            Some(Precondition {
+                                condition_type: "world_state".to_string(),
+                                expression: serde_json::Value::Object(expr),
+                                description: format!(
+                                    "World state contains: {}",
+                                    distinctive_keys
+                                        .iter()
+                                        .map(|k| k.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                ),
+                            })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                };
+
+                let mut trigger_conditions = vec![Precondition {
+                    condition_type: "goal_fingerprint".to_string(),
+                    expression: serde_json::json!({ "goal_fingerprint": fingerprint }),
+                    description: format!("Goal matches {fingerprint}"),
+                }];
+                if let Some(ws_cond) = ws_precondition {
+                    trigger_conditions.push(ws_cond);
+                }
+
                 let schema = Schema {
                     schema_id: format!("induced_{fingerprint}"),
                     namespace: String::new(),
                     pack: String::new(),
                     name: format!("Induced schema for {fingerprint}"),
                     version: semver::Version::new(0, 1, 0),
-                    trigger_conditions: vec![Precondition {
-                        condition_type: "goal_fingerprint".to_string(),
-                        expression: serde_json::json!({ "goal_fingerprint": fingerprint }),
-                        description: format!("Goal matches {fingerprint}"),
-                    }],
+                    trigger_conditions,
                     resource_requirements: Vec::new(),
                     subgoal_structure: subgoals,
                     candidate_skill_ordering: candidate_ordering,
@@ -545,6 +669,7 @@ mod tests {
             embedding: None,
             created_at: Utc::now(),
             salience: 1.0,
+            world_state_context: serde_json::json!({}),
         }
     }
 
