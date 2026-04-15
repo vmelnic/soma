@@ -297,6 +297,32 @@ pub struct SessionController {
     metrics: Arc<RuntimeMetrics>,
 }
 
+/// Checks whether a data condition expression matches an observation's structured_result.
+/// The expression must be a JSON object. Each key/value pair is checked against the result:
+/// - If the value is `true`, the key just needs to exist in the result (existence check).
+/// - Otherwise, the result's value for that key must equal the expression's value exactly.
+/// All entries must match (AND semantics). Non-object expressions always return false.
+fn data_condition_matches(expression: &serde_json::Value, result: &serde_json::Value) -> bool {
+    match expression {
+        serde_json::Value::Object(expr_map) => {
+            let ctx_map = match result.as_object() {
+                Some(m) => m,
+                None => return false,
+            };
+            expr_map.iter().all(|(k, v)| {
+                ctx_map.get(k).map_or(false, |cv| {
+                    if *v == serde_json::Value::Bool(true) {
+                        true
+                    } else {
+                        cv == v
+                    }
+                })
+            })
+        }
+        _ => false,
+    }
+}
+
 impl SessionController {
     pub fn new(deps: SessionControllerDeps, metrics: Arc<RuntimeMetrics>) -> Self {
         Self {
@@ -2220,7 +2246,21 @@ impl SessionRuntime for SessionController {
             let current_step = session.working_memory.active_steps.as_ref()
                 .and_then(|s| s.get(session.working_memory.plan_step));
 
-            let next_action = if observation.success {
+            // Check data conditions against the observation's structured_result.
+            // Conditions only apply on success; failures always use on_failure.
+            let condition_match = current_step.and_then(|step| {
+                if observation.success {
+                    step.conditions().iter().find(|c| {
+                        data_condition_matches(&c.expression, &observation.structured_result)
+                    })
+                } else {
+                    None
+                }
+            });
+
+            let next_action = if let Some(matched) = condition_match {
+                matched.next_step.clone()
+            } else if observation.success {
                 current_step.map(|s| s.on_success().clone())
                     .unwrap_or(NextStep::Continue)
             } else {
@@ -4402,6 +4442,7 @@ mod tests {
             skill_id: skill_id.to_string(),
             on_success: NextStep::Continue,
             on_failure: NextStep::Abandon,
+            conditions: vec![],
         }
     }
 
@@ -4644,6 +4685,138 @@ mod tests {
         assert_eq!(wm.plan_step, 0);
         assert!(wm.plan_stack.is_empty());
         assert_eq!(decision, CriticDecision::Revise);
+    }
+
+    #[test]
+    fn test_data_condition_matches_basic() {
+        // Exact value match
+        assert!(data_condition_matches(
+            &serde_json::json!({"count": 0}),
+            &serde_json::json!({"count": 0, "items": []}),
+        ));
+
+        // Value mismatch
+        assert!(!data_condition_matches(
+            &serde_json::json!({"count": 0}),
+            &serde_json::json!({"count": 5, "items": []}),
+        ));
+
+        // Existence check (true sentinel)
+        assert!(data_condition_matches(
+            &serde_json::json!({"count": true}),
+            &serde_json::json!({"count": 42}),
+        ));
+
+        // Key missing
+        assert!(!data_condition_matches(
+            &serde_json::json!({"missing_key": 0}),
+            &serde_json::json!({"count": 0}),
+        ));
+
+        // Non-object expression always false
+        assert!(!data_condition_matches(
+            &serde_json::json!(42),
+            &serde_json::json!({"count": 42}),
+        ));
+
+        // Non-object result always false
+        assert!(!data_condition_matches(
+            &serde_json::json!({"count": 0}),
+            &serde_json::json!("not an object"),
+        ));
+
+        // Multiple keys, all must match
+        assert!(data_condition_matches(
+            &serde_json::json!({"status": "empty", "count": 0}),
+            &serde_json::json!({"status": "empty", "count": 0, "extra": true}),
+        ));
+        assert!(!data_condition_matches(
+            &serde_json::json!({"status": "empty", "count": 0}),
+            &serde_json::json!({"status": "ok", "count": 0}),
+        ));
+    }
+
+    #[test]
+    fn test_data_condition_overrides_on_success() {
+        use crate::types::routine::DataCondition;
+
+        // Step with on_success=Continue but a condition that triggers Goto.
+        let step_with_condition = CompiledStep::Skill {
+            skill_id: "query".to_string(),
+            on_success: NextStep::Continue,
+            on_failure: NextStep::Abandon,
+            conditions: vec![DataCondition {
+                expression: serde_json::json!({"count": 0}),
+                description: "no rows returned".to_string(),
+                next_step: NextStep::Goto { step_index: 2, max_iterations: None },
+            }],
+        };
+
+        let steps = vec![
+            step_with_condition,
+            simple_step("process"),
+            simple_step("handle_empty"),
+        ];
+        let mut wm = test_working_memory(steps.clone(), 0);
+        let rm = NoopRoutineMemory;
+        let sid = Uuid::new_v4();
+
+        // Simulate: observation succeeds with count=0.
+        // The condition should match and fire Goto(2) instead of Continue.
+        let matched_next_step = {
+            let current_step = wm.active_steps.as_ref().unwrap().get(wm.plan_step).unwrap();
+            let condition_match = current_step.conditions().iter().find(|c| {
+                data_condition_matches(&c.expression, &serde_json::json!({"count": 0}))
+            });
+
+            assert!(condition_match.is_some());
+            let matched = condition_match.unwrap();
+            assert!(matches!(matched.next_step, NextStep::Goto { step_index: 2, .. }));
+            matched.next_step.clone()
+        };
+
+        // Apply the matched next_step
+        let decision = SessionController::apply_next_step(
+            &matched_next_step, &mut wm, &rm, sid, 0,
+        );
+
+        assert_eq!(wm.plan_step, 2);
+        assert_eq!(decision, CriticDecision::Continue);
+    }
+
+    #[test]
+    fn test_data_condition_no_match_falls_through() {
+        use crate::types::routine::DataCondition;
+
+        // Step with a condition that does NOT match the observation.
+        let step_with_condition = CompiledStep::Skill {
+            skill_id: "query".to_string(),
+            on_success: NextStep::Continue,
+            on_failure: NextStep::Abandon,
+            conditions: vec![DataCondition {
+                expression: serde_json::json!({"count": 0}),
+                description: "no rows returned".to_string(),
+                next_step: NextStep::Goto { step_index: 2, max_iterations: None },
+            }],
+        };
+
+        let steps = vec![
+            step_with_condition,
+            simple_step("process"),
+            simple_step("handle_empty"),
+        ];
+        let wm = test_working_memory(steps, 0);
+
+        let current_step = wm.active_steps.as_ref().unwrap().get(wm.plan_step).unwrap();
+
+        // Observation has count=5 — condition expression wants count=0.
+        let condition_match = current_step.conditions().iter().find(|c| {
+            data_condition_matches(&c.expression, &serde_json::json!({"count": 5}))
+        });
+
+        // No match → should fall through to on_success.
+        assert!(condition_match.is_none());
+        assert!(matches!(current_step.on_success(), NextStep::Continue));
     }
 
 }

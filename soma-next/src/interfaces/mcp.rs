@@ -2869,6 +2869,15 @@ impl McpServer {
                             ));
                         }
                     };
+                    let conditions: Vec<crate::types::routine::DataCondition> = step
+                        .get("conditions")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|c| serde_json::from_value(c.clone()).ok())
+                                .collect()
+                        })
+                        .unwrap_or_default();
                     compiled_steps.push(crate::types::routine::CompiledStep::Skill {
                         skill_id,
                         on_success: Self::parse_authored_next_step(step.get("on_success")),
@@ -2876,6 +2885,7 @@ impl McpServer {
                             step.get("on_failure"),
                             crate::types::routine::NextStep::Abandon,
                         ),
+                        conditions,
                     });
                 }
                 "sub_routine" => {
@@ -2890,6 +2900,15 @@ impl McpServer {
                             ));
                         }
                     };
+                    let conditions: Vec<crate::types::routine::DataCondition> = step
+                        .get("conditions")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|c| serde_json::from_value(c.clone()).ok())
+                                .collect()
+                        })
+                        .unwrap_or_default();
                     compiled_steps.push(crate::types::routine::CompiledStep::SubRoutine {
                         routine_id: sub_routine_id,
                         on_success: Self::parse_authored_next_step(step.get("on_success")),
@@ -2897,6 +2916,7 @@ impl McpServer {
                             step.get("on_failure"),
                             crate::types::routine::NextStep::Abandon,
                         ),
+                        conditions,
                     });
                 }
                 _ => {
@@ -3504,33 +3524,49 @@ impl McpServer {
                     }
                 };
 
+                let format_conditions = |conds: &[crate::types::routine::DataCondition]| -> String {
+                    if conds.is_empty() {
+                        return String::new();
+                    }
+                    let parts: Vec<String> = conds.iter().map(|c| {
+                        format!("if {} → {}", c.expression, format_next(&c.next_step))
+                    }).collect();
+                    format!(", conditions: [{}]", parts.join("; "))
+                };
+
                 match step {
                     crate::types::routine::CompiledStep::Skill {
                         skill_id,
                         on_success,
                         on_failure,
+                        conditions,
                     } => serde_json::json!({
                         "step": i,
                         "type": "skill",
                         "skill_id": skill_id,
+                        "conditions_count": conditions.len(),
                         "summary": format!(
-                            "Step {i}: invoke skill {skill_id}, on success → {}, on failure → {}",
+                            "Step {i}: invoke skill {skill_id}, on success → {}, on failure → {}{}",
                             format_next(on_success),
-                            format_next(on_failure)
+                            format_next(on_failure),
+                            format_conditions(conditions)
                         ),
                     }),
                     crate::types::routine::CompiledStep::SubRoutine {
                         routine_id: sub_id,
                         on_success,
                         on_failure,
+                        conditions,
                     } => serde_json::json!({
                         "step": i,
                         "type": "sub_routine",
                         "routine_id": sub_id,
+                        "conditions_count": conditions.len(),
                         "summary": format!(
-                            "Step {i}: call sub-routine {sub_id}, on success → {}, on failure → {}",
+                            "Step {i}: call sub-routine {sub_id}, on success → {}, on failure → {}{}",
                             format_next(on_success),
-                            format_next(on_failure)
+                            format_next(on_failure),
+                            format_conditions(conditions)
                         ),
                     }),
                 }
@@ -4450,7 +4486,20 @@ impl McpServer {
                                     "skill_id": { "type": "string", "description": "For skill steps" },
                                     "routine_id": { "type": "string", "description": "For sub_routine steps" },
                                     "on_success": { "type": "object", "description": "Action on success (default: continue)" },
-                                    "on_failure": { "type": "object", "description": "Action on failure (default: abandon)" }
+                                    "on_failure": { "type": "object", "description": "Action on failure (default: abandon)" },
+                                    "conditions": {
+                                        "type": "array",
+                                        "description": "Data conditions evaluated against the observation's structured_result on success. First match wins, overriding on_success.",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "expression": { "description": "JSON object to match against structured_result. Key with value true = existence check; other values = exact match." },
+                                                "description": { "type": "string" },
+                                                "next_step": { "type": "object", "description": "NextStep action if condition matches (same format as on_success/on_failure)" }
+                                            },
+                                            "required": ["expression", "description", "next_step"]
+                                        }
+                                    }
                                 },
                                 "required": ["type"]
                             }

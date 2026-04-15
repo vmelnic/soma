@@ -288,6 +288,7 @@ impl RoutineStore for DefaultRoutineStore {
                     skill_id: sid.clone(),
                     on_success: NextStep::Continue,
                     on_failure: NextStep::Abandon,
+                    conditions: vec![],
                 })
                 .collect(),
             guard_conditions,
@@ -1072,6 +1073,7 @@ mod tests {
                     skill_id,
                     on_success,
                     on_failure,
+                    ..
                 } => {
                     assert_eq!(skill_id, expected_id);
                     assert!(matches!(on_success, NextStep::Continue));
@@ -1102,11 +1104,13 @@ mod tests {
                     skill_id: "ns.open".to_string(),
                     on_success: NextStep::Continue,
                     on_failure: NextStep::Abandon,
+                    conditions: vec![],
                 },
                 CompiledStep::Skill {
                     skill_id: "ns.read".to_string(),
                     on_success: NextStep::Continue,
                     on_failure: NextStep::Abandon,
+                    conditions: vec![],
                 },
             ],
             guard_conditions: Vec::new(),
@@ -1157,6 +1161,7 @@ mod tests {
                     skill_id: "ns.read_users".to_string(),
                     on_success: NextStep::Continue,
                     on_failure: NextStep::Abandon,
+                    conditions: vec![],
                 },
             ],
             guard_conditions: Vec::new(),

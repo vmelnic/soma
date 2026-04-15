@@ -5,6 +5,22 @@ use super::common::{EffectDescriptor, Precondition};
 /// Maximum call depth for sub-routine nesting.
 pub const MAX_CALL_DEPTH: usize = 16;
 
+/// A condition evaluated against the observation's structured_result.
+/// If the expression matches, the associated next_step fires instead
+/// of on_success. Conditions are checked in order; the first match wins.
+/// Only evaluated when the step succeeds — failures always use on_failure.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DataCondition {
+    /// JSON expression to match against structured_result.
+    /// Object keys are checked against the result: `true` means "key exists",
+    /// any other value means "key equals this value exactly".
+    pub expression: serde_json::Value,
+    /// Human-readable description of what this condition checks.
+    pub description: String,
+    /// What to do if this condition matches.
+    pub next_step: NextStep,
+}
+
 /// A single step in a compiled routine's execution path.
 /// Supports sub-routine calls and branching on success/failure.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -17,6 +33,8 @@ pub enum CompiledStep {
         on_success: NextStep,
         #[serde(default)]
         on_failure: NextStep,
+        #[serde(default)]
+        conditions: Vec<DataCondition>,
     },
     /// Call another routine as a sub-routine. Pushes the current
     /// plan state onto the stack, executes the referenced routine,
@@ -27,6 +45,8 @@ pub enum CompiledStep {
         on_success: NextStep,
         #[serde(default)]
         on_failure: NextStep,
+        #[serde(default)]
+        conditions: Vec<DataCondition>,
     },
 }
 
@@ -42,6 +62,13 @@ impl CompiledStep {
         match self {
             CompiledStep::Skill { on_failure, .. } => on_failure,
             CompiledStep::SubRoutine { on_failure, .. } => on_failure,
+        }
+    }
+
+    pub fn conditions(&self) -> &[DataCondition] {
+        match self {
+            CompiledStep::Skill { conditions, .. } => conditions,
+            CompiledStep::SubRoutine { conditions, .. } => conditions,
         }
     }
 }
@@ -113,6 +140,7 @@ impl Routine {
                 skill_id: sid.clone(),
                 on_success: NextStep::Continue,
                 on_failure: NextStep::Abandon,
+                conditions: vec![],
             })
             .collect()
     }
@@ -161,11 +189,13 @@ mod tests {
                 skill_id: "x".to_string(),
                 on_success: NextStep::Continue,
                 on_failure: NextStep::Abandon,
+                conditions: vec![],
             },
             CompiledStep::SubRoutine {
                 routine_id: "sub_r".to_string(),
                 on_success: NextStep::Complete,
                 on_failure: NextStep::Abandon,
+                conditions: vec![],
             },
         ];
         let r = make_test_routine(vec!["a", "b"], steps);
@@ -197,6 +227,7 @@ mod tests {
                     skill_id,
                     on_success,
                     on_failure,
+                    ..
                 } => {
                     assert_eq!(skill_id, expected_id);
                     assert!(matches!(on_success, NextStep::Continue));
@@ -219,6 +250,7 @@ mod tests {
             skill_id: "s1".to_string(),
             on_success: NextStep::Goto { step_index: 3, max_iterations: None },
             on_failure: NextStep::Abandon,
+            conditions: vec![],
         };
         assert!(matches!(skill_step.on_success(), NextStep::Goto { step_index: 3, .. }));
         assert!(matches!(skill_step.on_failure(), NextStep::Abandon));
@@ -229,6 +261,7 @@ mod tests {
             on_failure: NextStep::CallRoutine {
                 routine_id: "fallback".to_string(),
             },
+            conditions: vec![],
         };
         assert!(matches!(sub_step.on_success(), NextStep::Complete));
         match sub_step.on_failure() {
@@ -250,6 +283,7 @@ mod tests {
             skill_id: "read_file".to_string(),
             on_success: NextStep::Goto { step_index: 2, max_iterations: None },
             on_failure: NextStep::Abandon,
+            conditions: vec![],
         };
         let json = serde_json::to_string(&skill).unwrap();
         let deserialized: CompiledStep = serde_json::from_str(&json).unwrap();
@@ -258,6 +292,7 @@ mod tests {
                 skill_id,
                 on_success,
                 on_failure,
+                ..
             } => {
                 assert_eq!(skill_id, "read_file");
                 assert!(matches!(on_success, NextStep::Goto { step_index: 2, .. }));
@@ -273,6 +308,7 @@ mod tests {
             on_failure: NextStep::CallRoutine {
                 routine_id: "error_handler".to_string(),
             },
+            conditions: vec![],
         };
         let json = serde_json::to_string(&sub).unwrap();
         let deserialized: CompiledStep = serde_json::from_str(&json).unwrap();
@@ -281,6 +317,7 @@ mod tests {
                 routine_id,
                 on_success,
                 on_failure,
+                ..
             } => {
                 assert_eq!(routine_id, "cleanup");
                 assert!(matches!(on_success, NextStep::Complete));
@@ -315,5 +352,70 @@ mod tests {
             let json2 = serde_json::to_string(&deserialized).unwrap();
             assert_eq!(json, json2, "round-trip failed for {:?}", variant);
         }
+    }
+
+    #[test]
+    fn test_compiled_step_conditions_accessor() {
+        let conds = vec![
+            DataCondition {
+                expression: serde_json::json!({"count": 0}),
+                description: "no results".to_string(),
+                next_step: NextStep::Goto { step_index: 2, max_iterations: None },
+            },
+        ];
+
+        let skill_step = CompiledStep::Skill {
+            skill_id: "query".to_string(),
+            on_success: NextStep::Continue,
+            on_failure: NextStep::Abandon,
+            conditions: conds.clone(),
+        };
+        assert_eq!(skill_step.conditions().len(), 1);
+        assert_eq!(skill_step.conditions()[0].description, "no results");
+
+        let sub_step = CompiledStep::SubRoutine {
+            routine_id: "sub".to_string(),
+            on_success: NextStep::Continue,
+            on_failure: NextStep::Abandon,
+            conditions: conds,
+        };
+        assert_eq!(sub_step.conditions().len(), 1);
+        assert_eq!(sub_step.conditions()[0].description, "no results");
+
+        // Empty conditions
+        let empty_step = CompiledStep::Skill {
+            skill_id: "x".to_string(),
+            on_success: NextStep::Continue,
+            on_failure: NextStep::Abandon,
+            conditions: vec![],
+        };
+        assert!(empty_step.conditions().is_empty());
+    }
+
+    #[test]
+    fn test_data_condition_serde_roundtrip() {
+        let cond = DataCondition {
+            expression: serde_json::json!({"row_count": 0, "status": "empty"}),
+            description: "no rows returned".to_string(),
+            next_step: NextStep::Goto { step_index: 3, max_iterations: Some(5) },
+        };
+
+        let json = serde_json::to_string(&cond).unwrap();
+        let deserialized: DataCondition = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.description, "no rows returned");
+        assert_eq!(deserialized.expression, serde_json::json!({"row_count": 0, "status": "empty"}));
+        assert!(matches!(deserialized.next_step, NextStep::Goto { step_index: 3, max_iterations: Some(5) }));
+
+        // Round-trip a step with conditions
+        let step = CompiledStep::Skill {
+            skill_id: "check".to_string(),
+            on_success: NextStep::Continue,
+            on_failure: NextStep::Abandon,
+            conditions: vec![cond],
+        };
+        let step_json = serde_json::to_string(&step).unwrap();
+        let step_back: CompiledStep = serde_json::from_str(&step_json).unwrap();
+        assert_eq!(step_back.conditions().len(), 1);
+        assert_eq!(step_back.conditions()[0].description, "no rows returned");
     }
 }
