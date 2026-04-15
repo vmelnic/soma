@@ -203,6 +203,7 @@ mod tests {
                 plan_stack: Vec::new(),
                 used_plan_following: false,
                 active_policy_scope: None,
+                loop_counts: std::collections::HashMap::new(),
             },
             status: SessionStatus::Completed,
             trace: SessionTrace { steps: Vec::new() },

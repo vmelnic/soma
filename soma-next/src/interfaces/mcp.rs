@@ -3489,8 +3489,12 @@ impl McpServer {
                 let format_next = |ns: &crate::types::routine::NextStep| -> String {
                     match ns {
                         crate::types::routine::NextStep::Continue => "continue".to_string(),
-                        crate::types::routine::NextStep::Goto { step_index } => {
-                            format!("goto step {step_index}")
+                        crate::types::routine::NextStep::Goto { step_index, max_iterations } => {
+                            if let Some(max) = max_iterations {
+                                format!("goto step {step_index} (max {max} iterations)")
+                            } else {
+                                format!("goto step {step_index}")
+                            }
                         }
                         crate::types::routine::NextStep::CallRoutine { routine_id } => {
                             format!("call routine {routine_id}")

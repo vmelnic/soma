@@ -113,6 +113,10 @@ pub struct WorkingMemory {
     pub used_plan_following: bool,
     #[serde(default)]
     pub active_policy_scope: Option<String>,
+    /// Tracks iteration count per Goto target for bounded loops.
+    /// Key: "step_{index}" string. Cleared by `clear_plan`.
+    #[serde(default)]
+    pub loop_counts: std::collections::HashMap<String, u32>,
 }
 
 impl WorkingMemory {
@@ -124,6 +128,7 @@ impl WorkingMemory {
         self.plan_step = 0;
         self.plan_stack.clear();
         self.active_policy_scope = None;
+        self.loop_counts.clear();
     }
 }
 

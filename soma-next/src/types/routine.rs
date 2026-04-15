@@ -54,7 +54,13 @@ pub enum NextStep {
     #[default]
     Continue,
     /// Jump to a specific step index within the current routine.
-    Goto { step_index: usize },
+    /// If `max_iterations` is set, the jump is allowed at most that many
+    /// times before auto-completing. This enables bounded loops.
+    Goto {
+        step_index: usize,
+        #[serde(default)]
+        max_iterations: Option<u32>,
+    },
     /// Call a sub-routine.
     CallRoutine { routine_id: String },
     /// Mark the current routine as successfully complete.
@@ -211,10 +217,10 @@ mod tests {
     fn test_compiled_step_on_success_on_failure_accessors() {
         let skill_step = CompiledStep::Skill {
             skill_id: "s1".to_string(),
-            on_success: NextStep::Goto { step_index: 3 },
+            on_success: NextStep::Goto { step_index: 3, max_iterations: None },
             on_failure: NextStep::Abandon,
         };
-        assert!(matches!(skill_step.on_success(), NextStep::Goto { step_index: 3 }));
+        assert!(matches!(skill_step.on_success(), NextStep::Goto { step_index: 3, .. }));
         assert!(matches!(skill_step.on_failure(), NextStep::Abandon));
 
         let sub_step = CompiledStep::SubRoutine {
@@ -242,7 +248,7 @@ mod tests {
         // Skill variant
         let skill = CompiledStep::Skill {
             skill_id: "read_file".to_string(),
-            on_success: NextStep::Goto { step_index: 2 },
+            on_success: NextStep::Goto { step_index: 2, max_iterations: None },
             on_failure: NextStep::Abandon,
         };
         let json = serde_json::to_string(&skill).unwrap();
@@ -254,7 +260,7 @@ mod tests {
                 on_failure,
             } => {
                 assert_eq!(skill_id, "read_file");
-                assert!(matches!(on_success, NextStep::Goto { step_index: 2 }));
+                assert!(matches!(on_success, NextStep::Goto { step_index: 2, .. }));
                 assert!(matches!(on_failure, NextStep::Abandon));
             }
             other => panic!("expected Skill, got {:?}", other),
@@ -293,7 +299,7 @@ mod tests {
     fn test_next_step_serde_roundtrip() {
         let variants: Vec<NextStep> = vec![
             NextStep::Continue,
-            NextStep::Goto { step_index: 5 },
+            NextStep::Goto { step_index: 5, max_iterations: None },
             NextStep::CallRoutine {
                 routine_id: "sub_r".to_string(),
             },

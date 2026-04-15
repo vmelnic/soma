@@ -485,11 +485,40 @@ impl SessionController {
                     }
                 }
             }
-            NextStep::Goto { step_index: target } => {
+            NextStep::Goto { step_index: target, max_iterations } => {
+                let loop_key = format!("step_{target}");
+                let count = wm.loop_counts.entry(loop_key).or_insert(0);
+                *count += 1;
+
+                // If max_iterations is set and exceeded, auto-complete instead of looping.
+                if let Some(max) = max_iterations {
+                    if *count > *max {
+                        debug!(
+                            session_id = %session_id,
+                            step = step_index,
+                            target = target,
+                            iterations = *count - 1,
+                            max = max,
+                            "loop iteration limit reached, completing"
+                        );
+                        wm.loop_counts.clear();
+                        // Complete the current routine (or pop to parent).
+                        if let Some(frame) = wm.plan_stack.pop() {
+                            wm.active_steps = Some(frame.steps);
+                            wm.plan_step = frame.step_index;
+                            return CriticDecision::Continue;
+                        }
+                        wm.active_steps = None;
+                        wm.plan_step = 0;
+                        return CriticDecision::Stop;
+                    }
+                }
+
                 debug!(
                     session_id = %session_id,
                     step = step_index,
                     target = target,
+                    iteration = *count,
                     "plan-following: branching to step"
                 );
                 wm.plan_step = *target;
@@ -1623,6 +1652,7 @@ impl SessionRuntime for SessionController {
                 plan_stack: Vec::new(),
                 used_plan_following: false,
                 active_policy_scope: None,
+                loop_counts: std::collections::HashMap::new(),
             },
             status: SessionStatus::Created,
             trace: SessionTrace { steps: Vec::new() },
@@ -4362,6 +4392,7 @@ mod tests {
             plan_stack: Vec::new(),
             used_plan_following: false,
             active_policy_scope: None,
+            loop_counts: std::collections::HashMap::new(),
         }
     }
 
@@ -4454,7 +4485,7 @@ mod tests {
         let sid = Uuid::new_v4();
 
         let decision = SessionController::apply_next_step(
-            &NextStep::Goto { step_index: 3 }, &mut wm, &rm, sid, 1,
+            &NextStep::Goto { step_index: 3, max_iterations: None }, &mut wm, &rm, sid, 1,
         );
 
         assert_eq!(wm.plan_step, 3);
