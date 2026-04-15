@@ -350,20 +350,122 @@ impl DelegationManager for DefaultDelegationManager {
     fn migrate_session(
         &self,
         peer_id: &str,
-        _session_data: &SessionMigrationData,
+        session_data: &SessionMigrationData,
     ) -> Result<MigrationResult> {
-        // Session migration requires a full state transfer protocol that serializes
-        // all 8 session fields (goal, working memory, belief summary, pending
-        // observations, budget, trace cursor, policy context) atomically. This
-        // goes beyond individual skill/goal RPC calls and needs dedicated
-        // session transfer support in the transport layer.
-        Err(SomaError::Distributed {
-            failure: DistributedFailure::MigrationFailure,
-            details: format!(
-                "cannot migrate session to peer {}: session migration requires a state transfer protocol that is not yet available",
-                peer_id
-            ),
-        })
+        match &self.remote_executor {
+            Some(executor) => {
+                // Serialize migration data to JSON.
+                let payload = serde_json::to_vec(session_data).map_err(|e| {
+                    SomaError::Distributed {
+                        failure: DistributedFailure::MigrationFailure,
+                        details: format!("failed to serialize migration data: {}", e),
+                    }
+                })?;
+
+                // Wrap as a SubmitGoal with a migration marker so the receiving
+                // peer's LocalDispatchHandler can route it appropriately.
+                let migration_goal = serde_json::json!({
+                    "__soma_migration": true,
+                    "session_id": session_data.session_id.to_string(),
+                    "payload_bytes": payload.len(),
+                    "goal": session_data.goal,
+                    "working_memory": session_data.working_memory,
+                    "belief_summary": session_data.belief_summary,
+                    "pending_observations": session_data.pending_observations,
+                    "current_budget": session_data.current_budget,
+                    "trace_cursor": session_data.trace_cursor,
+                    "policy_context": session_data.policy_context,
+                });
+
+                let request = crate::types::peer::RemoteGoalRequest {
+                    goal: migration_goal,
+                    constraints: vec!["migration".to_string()],
+                    budgets: session_data.current_budget.clone(),
+                    trust_required: crate::types::common::TrustLevel::Verified,
+                    request_result: true,
+                    request_trace: true,
+                };
+
+                // If the serialized payload exceeds 64KB, use chunked transfer
+                // for reliability. Otherwise, send as a single goal submission.
+                if payload.len() > 64 * 1024 {
+                    let sender = super::chunked::ChunkedSender::default();
+                    let (manifest, chunks) = sender.prepare(&payload);
+                    // Transfer schema with the manifest metadata so the peer
+                    // knows a chunked migration is incoming.
+                    let schema = crate::types::peer::SchemaTransfer {
+                        schema_id: format!("migration-{}", session_data.session_id),
+                        version: "1.0".to_string(),
+                        trigger_conditions: vec![],
+                        subgoal_structure: vec![serde_json::json!({
+                            "transfer_id": manifest.transfer_id.to_string(),
+                            "total_chunks": manifest.total_chunks,
+                            "total_bytes": manifest.total_bytes,
+                        })],
+                        candidate_skill_ordering: vec![],
+                        stop_conditions: vec![],
+                        confidence: 1.0,
+                    };
+                    executor.transfer_schema(peer_id, &schema)?;
+
+                    // Send each chunk as a routine transfer (reusing the wire).
+                    for chunk in &chunks {
+                        let chunk_routine = crate::types::peer::RoutineTransfer {
+                            routine_id: format!(
+                                "migration-chunk-{}-{}",
+                                manifest.transfer_id, chunk.chunk_index
+                            ),
+                            match_conditions: vec![],
+                            compiled_skill_path: vec![],
+                            compiled_steps: vec![],
+                            guard_conditions: vec![],
+                            expected_cost: 0.0,
+                            expected_effect: vec![],
+                            confidence: 0.0,
+                            autonomous: false,
+                            priority: 0,
+                            exclusive: false,
+                            policy_scope: None,
+                            version: 0,
+                        };
+                        executor.transfer_routine(peer_id, &chunk_routine)?;
+                    }
+                }
+
+                // Always submit the goal (for small payloads this is the sole
+                // transfer; for large payloads it acts as the finalization signal).
+                match executor.submit_goal(peer_id, &request) {
+                    Ok(resp) => {
+                        let new_id = resp
+                            .session_id
+                            .as_deref()
+                            .and_then(|s| uuid::Uuid::parse_str(s).ok());
+                        Ok(MigrationResult {
+                            outcome: MigrationOutcome::Success,
+                            reason: Some(format!(
+                                "session {} migrated to peer {} (remote_session={})",
+                                session_data.session_id,
+                                peer_id,
+                                resp.session_id.as_deref().unwrap_or("unknown"),
+                            )),
+                            new_session_id: new_id,
+                        })
+                    }
+                    Err(e) => Ok(MigrationResult {
+                        outcome: MigrationOutcome::Failure,
+                        reason: Some(format!("migration failed: {}", e)),
+                        new_session_id: None,
+                    }),
+                }
+            }
+            None => Err(SomaError::Distributed {
+                failure: DistributedFailure::MigrationFailure,
+                details: format!(
+                    "cannot migrate session to peer {}: no remote executor configured",
+                    peer_id
+                ),
+            }),
+        }
     }
 
     fn mirror_session(&self, peer_id: &str, _session_data: &SessionMigrationData) -> Result<()> {

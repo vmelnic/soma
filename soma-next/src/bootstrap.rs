@@ -253,6 +253,7 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
         remote_executor: None,
         capability_scope_checker: None,
         brain_fallback: None,
+        delegation_manager: None,
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());
@@ -421,6 +422,7 @@ pub fn bootstrap_with_remote(
         remote_executor: Some(remote_executor),
         capability_scope_checker: None,
         brain_fallback: None,
+        delegation_manager: None,
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());
@@ -570,6 +572,7 @@ pub fn bootstrap_from_specs(
         remote_executor: None,
         capability_scope_checker: None,
         brain_fallback: None,
+        delegation_manager: None,
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());
@@ -737,6 +740,7 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
         remote_executor: None,
         capability_scope_checker: None,
         brain_fallback: None,
+        delegation_manager: None,
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());

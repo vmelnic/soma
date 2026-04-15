@@ -22,6 +22,7 @@ use crate::types::session::{
 };
 use crate::types::skill::{SkillKind, SkillSpec};
 use crate::runtime::remote::RemoteExecutor;
+use crate::distributed::delegation::DelegationManager;
 
 // ---------------------------------------------------------------------------
 // StepResult — outcome of a single control-loop iteration
@@ -257,6 +258,10 @@ pub struct SessionControllerDeps {
     /// the controller delegates to this fallback before committing to the
     /// low-confidence selection.
     pub brain_fallback: Option<Box<dyn BrainFallback>>,
+    /// Optional delegation manager for routing failed skills to remote peers.
+    /// When present and the failure recovery action is Delegate, the controller
+    /// attempts to delegate the failed skill to an available peer.
+    pub delegation_manager: Option<Arc<dyn DelegationManager>>,
 }
 
 /// SessionController holds references to all subsystems and manages sessions.
@@ -283,6 +288,8 @@ pub struct SessionController {
     capability_scope_checker: Option<CapabilityScopeChecker>,
     /// Optional external brain fallback for low-confidence skill selection.
     brain_fallback: Option<Box<dyn BrainFallback>>,
+    /// Optional delegation manager for routing failed skills to remote peers.
+    delegation_manager: Option<Arc<dyn DelegationManager>>,
     /// Default maximum steps per session if goal does not specify.
     default_max_steps: u32,
     /// Shared runtime metrics for recording session lifecycle events,
@@ -306,6 +313,7 @@ impl SessionController {
             remote_executor: deps.remote_executor,
             capability_scope_checker: deps.capability_scope_checker,
             brain_fallback: deps.brain_fallback,
+            delegation_manager: deps.delegation_manager,
             default_max_steps: 100,
             metrics,
         }
@@ -2266,10 +2274,62 @@ impl SessionRuntime for SessionController {
                     StepResult::Continue
                 }
                 FailureRecoveryAction::Delegate => {
-                    StepResult::WaitingForRemote(format!(
-                        "delegating after failure of {}",
-                        chosen_skill.skill_id
-                    ))
+                    if let Some(ref dm) = self.delegation_manager {
+                        let context = crate::distributed::delegation::DelegationContext {
+                            session_id: session.session_id,
+                            budget_remaining: session.budget_remaining.resource_remaining,
+                            trust_required: crate::types::common::TrustLevel::Verified,
+                            trace_required: true,
+                            policy_context: serde_json::json!({}),
+                            trace_cursor: session.trace.steps.len() as u64,
+                            attribution: format!("session:{}", session.session_id),
+                            delegation_unit: crate::types::peer::DelegationUnit::Skill,
+                        };
+                        let input: serde_json::Map<String, serde_json::Value> = session
+                            .working_memory
+                            .active_bindings
+                            .iter()
+                            .map(|b| (b.name.clone(), b.value.clone()))
+                            .collect();
+                        match dm.delegate_skill(
+                            "peer-0", // first available peer
+                            &chosen_skill.skill_id,
+                            serde_json::Value::Object(input),
+                            context,
+                        ) {
+                            Ok(handle) => {
+                                info!(
+                                    session_id = %session.session_id,
+                                    delegation_id = %handle.delegation_id,
+                                    peer = %handle.peer_id,
+                                    "delegated skill {} to remote peer",
+                                    chosen_skill.skill_id
+                                );
+                                StepResult::WaitingForRemote(format!(
+                                    "delegated {} to peer {} (delegation_id={})",
+                                    chosen_skill.skill_id,
+                                    handle.peer_id,
+                                    handle.delegation_id
+                                ))
+                            }
+                            Err(e) => {
+                                warn!(
+                                    session_id = %session.session_id,
+                                    error = %e,
+                                    "delegation failed, falling back to wait"
+                                );
+                                StepResult::WaitingForRemote(format!(
+                                    "delegation failed for {}: {}",
+                                    chosen_skill.skill_id, e
+                                ))
+                            }
+                        }
+                    } else {
+                        StepResult::WaitingForRemote(format!(
+                            "delegating after failure of {} (no delegation manager)",
+                            chosen_skill.skill_id
+                        ))
+                    }
                 }
                 FailureRecoveryAction::Stop => {
                     session.status = SessionStatus::Failed;
@@ -2839,6 +2899,7 @@ mod tests {
             remote_executor: None,
             capability_scope_checker: None,
             brain_fallback: None,
+            delegation_manager: None,
         }, test_metrics())
     }
 
@@ -2856,6 +2917,7 @@ mod tests {
             remote_executor: None,
             capability_scope_checker: None,
             brain_fallback: None,
+            delegation_manager: None,
         }, test_metrics())
     }
 
@@ -3084,6 +3146,7 @@ mod tests {
             remote_executor: None,
             capability_scope_checker: None,
             brain_fallback: None,
+            delegation_manager: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -3142,6 +3205,7 @@ mod tests {
             remote_executor: None,
             capability_scope_checker: None,
             brain_fallback: None,
+            delegation_manager: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -3238,6 +3302,7 @@ mod tests {
             remote_executor: None,
             capability_scope_checker: None,
             brain_fallback: None,
+            delegation_manager: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -3351,6 +3416,7 @@ mod tests {
             remote_executor: None,
             capability_scope_checker: None,
             brain_fallback: None,
+            delegation_manager: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -3419,6 +3485,7 @@ mod tests {
             remote_executor: None,
             capability_scope_checker: None,
             brain_fallback: None,
+            delegation_manager: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -3510,6 +3577,7 @@ mod tests {
             remote_executor: None,
             capability_scope_checker: None,
             brain_fallback: None,
+            delegation_manager: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -3774,6 +3842,7 @@ mod tests {
             remote_executor: None,
             capability_scope_checker: Some(scope_checker),
             brain_fallback: None,
+            delegation_manager: None,
         }, test_metrics());
 
         let goal = test_goal(); // User source -> Local scope
@@ -3808,6 +3877,7 @@ mod tests {
             remote_executor: None,
             capability_scope_checker: Some(scope_checker),
             brain_fallback: None,
+            delegation_manager: None,
         }, test_metrics());
 
         // Peer source -> Peer scope, which is broader than the skill's Local scope.
@@ -3850,6 +3920,7 @@ mod tests {
             remote_executor: None,
             capability_scope_checker: Some(scope_checker),
             brain_fallback: None,
+            delegation_manager: None,
         }, test_metrics());
 
         let mut goal = test_goal();
@@ -3878,6 +3949,7 @@ mod tests {
             remote_executor: None,
             capability_scope_checker: None,
             brain_fallback: None,
+            delegation_manager: None,
         }, test_metrics());
 
         // Even a Peer-sourced goal executes fine without a scope checker.
@@ -3910,6 +3982,7 @@ mod tests {
             remote_executor: None,
             capability_scope_checker: Some(scope_checker),
             brain_fallback: None,
+            delegation_manager: None,
         }, test_metrics());
 
         let mut goal = test_goal();

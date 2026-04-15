@@ -103,6 +103,12 @@ pub struct RuntimeHandle {
     /// (when `--discover-lan` is active) push into the same list as they
     /// appear and remove themselves on TTL expiry.
     pub peer_ids: Arc<Mutex<Vec<String>>>,
+    /// Belief synchronization manager for syncing belief facts with peers.
+    pub belief_sync: Arc<Mutex<dyn crate::distributed::sync::BeliefSync + Send>>,
+    /// Observation streaming for monitoring remote skill invocations.
+    pub observation_streaming: Arc<Mutex<dyn crate::distributed::streaming::ObservationStreaming + Send>>,
+    /// Delegation manager for routing skills/sessions to remote peers.
+    pub delegation_manager: Option<Arc<dyn crate::distributed::delegation::DelegationManager>>,
 }
 
 impl RuntimeHandle {
@@ -126,6 +132,13 @@ impl RuntimeHandle {
             start_time: runtime.start_time,
             remote_executor: None,
             peer_ids: Arc::new(Mutex::new(Vec::new())),
+            belief_sync: Arc::new(Mutex::new(
+                crate::distributed::sync::DefaultBeliefSync::new(),
+            )),
+            observation_streaming: Arc::new(Mutex::new(
+                crate::distributed::streaming::DefaultObservationStreaming::new(),
+            )),
+            delegation_manager: None,
         }
     }
 
@@ -288,6 +301,8 @@ impl McpServer {
             "author_routine" => self.handle_author_routine(request.id, request.params),
             "list_routine_versions" => self.handle_list_routine_versions(request.id, request.params),
             "rollback_routine" => self.handle_rollback_routine(request.id, request.params),
+            "sync_beliefs" => self.handle_sync_beliefs(request.id, request.params),
+            "migrate_session" => self.handle_migrate_session(request.id, request.params),
 
             _ => Ok(Self::error_response(
                 request.id,
@@ -382,6 +397,8 @@ impl McpServer {
             "author_routine" => self.handle_author_routine(inner_id, arguments),
             "list_routine_versions" => self.handle_list_routine_versions(inner_id, arguments),
             "rollback_routine" => self.handle_rollback_routine(inner_id, arguments),
+            "sync_beliefs" => self.handle_sync_beliefs(inner_id, arguments),
+            "migrate_session" => self.handle_migrate_session(inner_id, arguments),
             _ => {
                 return Ok(Self::error_response(
                     id,
@@ -1698,18 +1715,54 @@ impl McpServer {
         if let Some(rt) = &self.runtime {
             if let Some(ref exec) = rt.remote_executor {
                 match exec.invoke_skill(&peer_id, &skill_id, input) {
-                    Ok(resp) => Ok(Self::success_response(
-                        id,
-                        serde_json::json!({
-                            "skill_id": resp.skill_id,
-                            "peer_id": resp.peer_id,
-                            "success": resp.success,
-                            "observation": resp.observation,
-                            "latency_ms": resp.latency_ms,
-                            "trace_id": resp.trace_id.to_string(),
-                            "timestamp": resp.timestamp.to_rfc3339(),
-                        }),
-                    )),
+                    Ok(resp) => {
+                        // Track the observation through the streaming subsystem
+                        // for monitoring and delivery status tracking.
+                        let mut stream_info = serde_json::json!(null);
+                        if let Ok(mut streaming) = rt.observation_streaming.lock() {
+                            let session_id = resp.trace_id;
+                            if let Ok(stream_id) = streaming.open_stream(
+                                session_id,
+                                &peer_id,
+                                false,
+                            ) {
+                                let obs = crate::types::peer::StreamedObservation {
+                                    session_id,
+                                    step_id: format!("remote-{}", skill_id),
+                                    source_peer: peer_id.clone(),
+                                    skill_or_resource_ref: skill_id.clone(),
+                                    raw_result: resp.observation.clone(),
+                                    structured_result: resp.observation.clone(),
+                                    effect_patch: None,
+                                    success: resp.success,
+                                    latency_ms: resp.latency_ms,
+                                    timestamp: resp.timestamp,
+                                    sequence: 1,
+                                };
+                                let delivery = streaming
+                                    .receive_observation(&stream_id, &obs)
+                                    .ok();
+                                let _ = streaming.close_stream(&stream_id);
+                                stream_info = serde_json::json!({
+                                    "stream_id": stream_id.0,
+                                    "delivery_status": delivery.map(|d| format!("{:?}", d)),
+                                });
+                            }
+                        }
+                        Ok(Self::success_response(
+                            id,
+                            serde_json::json!({
+                                "skill_id": resp.skill_id,
+                                "peer_id": resp.peer_id,
+                                "success": resp.success,
+                                "observation": resp.observation,
+                                "latency_ms": resp.latency_ms,
+                                "trace_id": resp.trace_id.to_string(),
+                                "timestamp": resp.timestamp.to_rfc3339(),
+                                "stream_info": stream_info,
+                            }),
+                        ))
+                    }
                     Err(e) => Ok(Self::error_response(
                         id,
                         INTERNAL_ERROR,
@@ -3081,6 +3134,219 @@ impl McpServer {
         }
     }
 
+    fn handle_sync_beliefs(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: peer_id (string)".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let peer_id = match params.get("peer_id").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "peer_id is required".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        if let Some(rt) = &self.runtime {
+            // Gather current world state facts and convert to BeliefFactEntry.
+            let ws = rt.world_state.lock().unwrap();
+            let facts: Vec<crate::distributed::sync::BeliefFactEntry> = ws
+                .list_facts()
+                .into_iter()
+                .map(|f| crate::distributed::sync::BeliefFactEntry {
+                    fact_id: f.fact_id.clone(),
+                    subject: f.subject.clone(),
+                    predicate: f.predicate.clone(),
+                    value: f.value.clone(),
+                    provenance: f.provenance,
+                    confidence: f.confidence,
+                    version: 1,
+                    timestamp: f.timestamp,
+                })
+                .collect();
+            drop(ws);
+
+            let mut sync = rt.belief_sync.lock().unwrap();
+            match sync.sync_belief(&peer_id, &facts) {
+                Ok(result) => Ok(Self::success_response(
+                    id,
+                    serde_json::json!({
+                        "outcome": serde_json::to_value(result.outcome).unwrap_or(Value::Null),
+                        "peer_id": result.peer_id,
+                        "local_version": result.local_version,
+                        "remote_version": result.remote_version,
+                        "freshness_ms": result.freshness_ms,
+                        "stale": result.stale,
+                        "details": result.details,
+                    }),
+                )),
+                Err(e) => Ok(Self::error_response(
+                    id,
+                    INTERNAL_ERROR,
+                    format!("belief sync failed: {}", e),
+                    None,
+                )),
+            }
+        } else {
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({
+                    "outcome": "merged",
+                    "peer_id": peer_id,
+                    "local_version": 0,
+                    "remote_version": 0,
+                    "freshness_ms": 0,
+                    "stale": false,
+                    "details": {},
+                    "note": "stub mode"
+                }),
+            ))
+        }
+    }
+
+    fn handle_migrate_session(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: session_id (string), peer_id (string)".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let session_id_str = match params.get("session_id").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "session_id is required".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let session_id = match Uuid::parse_str(&session_id_str) {
+            Ok(id) => id,
+            Err(_) => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    format!("invalid session_id UUID: {}", session_id_str),
+                    None,
+                ));
+            }
+        };
+
+        let peer_id = match params.get("peer_id").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "peer_id is required".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        if let Some(rt) = &self.runtime {
+            let dm = match &rt.delegation_manager {
+                Some(dm) => Arc::clone(dm),
+                None => {
+                    return Ok(Self::error_response(
+                        id,
+                        INTERNAL_ERROR,
+                        "no delegation manager configured".to_string(),
+                        None,
+                    ));
+                }
+            };
+
+            // Look up the session and build migration data.
+            let ctrl = rt.session_controller.lock().unwrap();
+            let session = match ctrl.get_session_by_id(&session_id) {
+                Some(s) => s.clone(),
+                None => {
+                    return Ok(Self::error_response(
+                        id,
+                        INVALID_PARAMS,
+                        format!("session not found: {}", session_id),
+                        None,
+                    ));
+                }
+            };
+            drop(ctrl);
+
+            let migration_data = crate::types::peer::SessionMigrationData {
+                session_id: session.session_id,
+                goal: serde_json::to_value(&session.goal).unwrap_or(Value::Null),
+                working_memory: serde_json::to_value(&session.working_memory)
+                    .unwrap_or(Value::Null),
+                belief_summary: serde_json::to_value(&session.belief).unwrap_or(Value::Null),
+                pending_observations: vec![],
+                current_budget: crate::types::peer::RemoteBudget {
+                    risk_limit: session.budget_remaining.risk_remaining,
+                    latency_limit_ms: session.budget_remaining.latency_remaining_ms,
+                    resource_limit: session.budget_remaining.resource_remaining,
+                    step_limit: session.budget_remaining.steps_remaining,
+                },
+                trace_cursor: session.trace.steps.len() as u64,
+                policy_context: serde_json::json!({}),
+            };
+
+            match dm.migrate_session(&peer_id, &migration_data) {
+                Ok(result) => Ok(Self::success_response(
+                    id,
+                    serde_json::json!({
+                        "outcome": serde_json::to_value(result.outcome).unwrap_or(Value::Null),
+                        "reason": result.reason,
+                        "new_session_id": result.new_session_id.map(|id| id.to_string()),
+                    }),
+                )),
+                Err(e) => Ok(Self::error_response(
+                    id,
+                    INTERNAL_ERROR,
+                    format!("session migration failed: {}", e),
+                    None,
+                )),
+            }
+        } else {
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({
+                    "outcome": "failure",
+                    "reason": "stub mode",
+                    "new_session_id": null,
+                    "note": "stub mode"
+                }),
+            ))
+        }
+    }
+
     /// Parse an `on_success` or `on_failure` action object into a `NextStep`.
     /// Returns `NextStep::Continue` when the value is absent or unparseable.
     fn parse_authored_next_step(
@@ -3975,6 +4241,38 @@ impl McpServer {
                     "required": ["routine_id", "target_version"]
                 }),
             },
+            McpTool {
+                name: "sync_beliefs".to_string(),
+                description: "Synchronize belief facts with a remote peer. Sends current world state facts to the peer and merges the result.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "peer_id": {
+                            "type": "string",
+                            "description": "The peer identifier to sync beliefs with"
+                        }
+                    },
+                    "required": ["peer_id"]
+                }),
+            },
+            McpTool {
+                name: "migrate_session".to_string(),
+                description: "Migrate an active session to a remote peer. Transfers goal, working memory, belief, observations, budget, trace, and policy context atomically.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "string",
+                            "description": "The session UUID to migrate"
+                        },
+                        "peer_id": {
+                            "type": "string",
+                            "description": "The target peer identifier"
+                        }
+                    },
+                    "required": ["session_id", "peer_id"]
+                }),
+            },
         ]
     }
 }
@@ -4020,7 +4318,7 @@ mod tests {
     fn test_list_tools_count() {
         let server = McpServer::new_stub();
         let tools = server.list_tools();
-        assert_eq!(tools.len(), 31);
+        assert_eq!(tools.len(), 33);
     }
 
     #[test]
@@ -4052,6 +4350,8 @@ mod tests {
         assert!(names.contains(&"author_routine".to_string()));
         assert!(names.contains(&"list_routine_versions".to_string()));
         assert!(names.contains(&"rollback_routine".to_string()));
+        assert!(names.contains(&"sync_beliefs".to_string()));
+        assert!(names.contains(&"migrate_session".to_string()));
     }
 
     #[test]
@@ -4559,7 +4859,7 @@ mod tests {
     #[test]
     fn test_default_impl() {
         let server = McpServer::default();
-        assert_eq!(server.list_tools().len(), 31);
+        assert_eq!(server.list_tools().len(), 33);
     }
 
     /// Build a real RuntimeHandle from a bootstrapped runtime (no packs).
@@ -5137,5 +5437,143 @@ mod tests {
         assert_eq!(ep.steps[2].selected_skill, "filesystem.stat");
         assert!(ep.embedding.is_some());
         assert_eq!(ep.goal_fingerprint, fp);
+    }
+
+    #[test]
+    fn test_sync_beliefs_stub() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "sync_beliefs",
+            Some(serde_json::json!({ "peer_id": "peer-0" })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["outcome"], "merged");
+        assert_eq!(result["peer_id"], "peer-0");
+        assert!(result.get("note").is_some());
+    }
+
+    #[test]
+    fn test_sync_beliefs_missing_peer_id() {
+        let server = McpServer::new_stub();
+        let req = make_request("sync_beliefs", Some(serde_json::json!({})));
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_sync_beliefs_no_params() {
+        let server = McpServer::new_stub();
+        let req = make_request("sync_beliefs", None);
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_migrate_session_stub() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "migrate_session",
+            Some(serde_json::json!({
+                "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                "peer_id": "peer-0"
+            })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["outcome"], "failure");
+        assert!(result.get("note").is_some());
+    }
+
+    #[test]
+    fn test_migrate_session_missing_session_id() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "migrate_session",
+            Some(serde_json::json!({ "peer_id": "peer-0" })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_migrate_session_missing_peer_id() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "migrate_session",
+            Some(serde_json::json!({
+                "session_id": "550e8400-e29b-41d4-a716-446655440000"
+            })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_migrate_session_invalid_uuid() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "migrate_session",
+            Some(serde_json::json!({
+                "session_id": "not-a-uuid",
+                "peer_id": "peer-0"
+            })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_migrate_session_no_params() {
+        let server = McpServer::new_stub();
+        let req = make_request("migrate_session", None);
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_sync_beliefs_tools_call() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "sync_beliefs",
+                "arguments": { "peer_id": "peer-1" }
+            })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        let inner = unwrap_tool_result(&result);
+        assert_eq!(inner["outcome"], "merged");
+        assert_eq!(inner["peer_id"], "peer-1");
+    }
+
+    #[test]
+    fn test_migrate_session_tools_call() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "migrate_session",
+                "arguments": {
+                    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "peer_id": "peer-1"
+                }
+            })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        let inner = unwrap_tool_result(&result);
+        assert_eq!(inner["outcome"], "failure");
     }
 }

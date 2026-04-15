@@ -439,18 +439,48 @@ impl RemoteExecutor for TcpRemoteExecutor {
     }
 
     fn transfer_routine(&self, peer_id: &str, routine: &RoutineTransfer) -> Result<()> {
-        let msg = TransportMessage::TransferRoutine {
-            peer_id: peer_id.to_string(),
-            routine: routine.clone(),
-        };
-        let response = self.send_request(peer_id, &msg)?;
-        Self::check_error(&response)?;
-        match response {
-            TransportResponse::RoutineOk => Ok(()),
-            other => Err(SomaError::Distributed {
-                failure: DistributedFailure::TransportFailure,
-                details: format!("unexpected response type for transfer_routine: {:?}", other),
-            }),
+        // Serialize and check size. If the payload exceeds 64KB, use chunked
+        // transfer for reliability and resumability.
+        let payload = serde_json::to_vec(routine).map_err(|e| SomaError::Distributed {
+            failure: DistributedFailure::TransportFailure,
+            details: format!("failed to serialize routine: {}", e),
+        })?;
+
+        if payload.len() > 64 * 1024 {
+            let sender = super::chunked::ChunkedSender::default();
+            let (manifest, chunks) = sender.prepare(&payload);
+
+            let manifest_msg = TransportMessage::ChunkedTransferStart {
+                peer_id: peer_id.to_string(),
+                manifest: manifest.clone(),
+            };
+            let resp = self.send_request(peer_id, &manifest_msg)?;
+            Self::check_error(&resp)?;
+
+            for chunk in &chunks {
+                let chunk_msg = TransportMessage::ChunkedTransferData {
+                    peer_id: peer_id.to_string(),
+                    chunk: chunk.clone(),
+                };
+                let resp = self.send_request(peer_id, &chunk_msg)?;
+                Self::check_error(&resp)?;
+            }
+
+            Ok(())
+        } else {
+            let msg = TransportMessage::TransferRoutine {
+                peer_id: peer_id.to_string(),
+                routine: routine.clone(),
+            };
+            let response = self.send_request(peer_id, &msg)?;
+            Self::check_error(&response)?;
+            match response {
+                TransportResponse::RoutineOk | TransportResponse::RoutineStored { .. } => Ok(()),
+                other => Err(SomaError::Distributed {
+                    failure: DistributedFailure::TransportFailure,
+                    details: format!("unexpected response type for transfer_routine: {:?}", other),
+                }),
+            }
         }
     }
 }
@@ -1398,18 +1428,46 @@ impl RemoteExecutor for TlsTcpRemoteExecutor {
     }
 
     fn transfer_routine(&self, peer_id: &str, routine: &RoutineTransfer) -> Result<()> {
-        let msg = TransportMessage::TransferRoutine {
-            peer_id: peer_id.to_string(),
-            routine: routine.clone(),
-        };
-        let response = self.send_request(peer_id, &msg)?;
-        Self::check_error(&response)?;
-        match response {
-            TransportResponse::RoutineOk => Ok(()),
-            other => Err(SomaError::Distributed {
-                failure: DistributedFailure::TransportFailure,
-                details: format!("unexpected response type for transfer_routine: {:?}", other),
-            }),
+        let payload = serde_json::to_vec(routine).map_err(|e| SomaError::Distributed {
+            failure: DistributedFailure::TransportFailure,
+            details: format!("failed to serialize routine: {}", e),
+        })?;
+
+        if payload.len() > 64 * 1024 {
+            let sender = super::chunked::ChunkedSender::default();
+            let (manifest, chunks) = sender.prepare(&payload);
+
+            let manifest_msg = TransportMessage::ChunkedTransferStart {
+                peer_id: peer_id.to_string(),
+                manifest: manifest.clone(),
+            };
+            let resp = self.send_request(peer_id, &manifest_msg)?;
+            Self::check_error(&resp)?;
+
+            for chunk in &chunks {
+                let chunk_msg = TransportMessage::ChunkedTransferData {
+                    peer_id: peer_id.to_string(),
+                    chunk: chunk.clone(),
+                };
+                let resp = self.send_request(peer_id, &chunk_msg)?;
+                Self::check_error(&resp)?;
+            }
+
+            Ok(())
+        } else {
+            let msg = TransportMessage::TransferRoutine {
+                peer_id: peer_id.to_string(),
+                routine: routine.clone(),
+            };
+            let response = self.send_request(peer_id, &msg)?;
+            Self::check_error(&response)?;
+            match response {
+                TransportResponse::RoutineOk | TransportResponse::RoutineStored { .. } => Ok(()),
+                other => Err(SomaError::Distributed {
+                    failure: DistributedFailure::TransportFailure,
+                    details: format!("unexpected response type for transfer_routine: {:?}", other),
+                }),
+            }
         }
     }
 }
