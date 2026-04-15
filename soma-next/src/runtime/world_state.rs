@@ -128,6 +128,13 @@ pub fn start_reactive_monitor(
 
         let mut last_hash = String::new();
         let mut fired_set: HashSet<String> = HashSet::new();
+        // Track consecutive failure count per routine for feedback loop.
+        // After max_consecutive_failures, reduce confidence. Below
+        // confidence_invalidation_threshold, invalidate the routine.
+        let mut failure_counts: HashMap<String, u32> = HashMap::new();
+        let max_consecutive_failures: u32 = 3;
+        let confidence_decay: f64 = 0.7; // multiply confidence by this on failure
+        let confidence_invalidation_threshold: f64 = 0.3;
 
         loop {
             thread::sleep(Duration::from_secs(interval_secs));
@@ -327,6 +334,42 @@ pub fn start_reactive_monitor(
                         let _ = ws.add_fact(fact);
                         // Clear any prior success fact.
                         let _ = ws.remove_fact(&format!("routine_success_{routine_id}"));
+                    }
+                }
+
+                // Feedback loop: track consecutive failures, decay confidence,
+                // auto-invalidate routines that fail too often.
+                if success {
+                    failure_counts.remove(&routine_id);
+                } else {
+                    let count = failure_counts.entry(routine_id.clone()).or_insert(0);
+                    *count += 1;
+                    if *count >= max_consecutive_failures {
+                        // Decay confidence on the routine.
+                        let mut rs = routine_store.lock().unwrap();
+                        if let Some(routine) = rs.get(&routine_id).cloned() {
+                            let new_confidence = routine.confidence * confidence_decay;
+                            tracing::warn!(
+                                routine_id = %routine_id,
+                                failures = *count,
+                                old_confidence = routine.confidence,
+                                new_confidence = new_confidence,
+                                "decaying routine confidence after consecutive failures"
+                            );
+                            if new_confidence < confidence_invalidation_threshold {
+                                tracing::warn!(
+                                    routine_id = %routine_id,
+                                    "invalidating routine — confidence below threshold"
+                                );
+                                let _ = rs.invalidate(&routine_id);
+                                failure_counts.remove(&routine_id);
+                            } else {
+                                // Re-register with reduced confidence.
+                                let mut updated = routine;
+                                updated.confidence = new_confidence;
+                                let _ = rs.register(updated);
+                            }
+                        }
                     }
                 }
 

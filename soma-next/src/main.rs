@@ -15,6 +15,7 @@ use soma_next::distributed::transport::{
 use soma_next::distributed::unix_transport::{
     UnixPeerPathMap, UnixRemoteExecutor, start_unix_listener_background,
 };
+use soma_next::distributed::peer::PeerRegistry;
 use soma_next::distributed::ws_transport::start_ws_listener_background;
 use soma_next::interfaces::cli::{CliCommand, CliRunner, DefaultCliRunner};
 use soma_next::interfaces::mcp::{McpRequest, McpServer};
@@ -711,8 +712,38 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             max_missed: config.distributed.heartbeat_max_missed,
             timeout_ms: config.distributed.heartbeat_timeout_ms,
         };
+        let mut hb_reg = soma_next::distributed::peer::DefaultPeerRegistry::new();
+        // Register each known peer so heartbeat can ping them.
+        for pid in shared_peer_ids.lock().unwrap().iter() {
+            let addr = tcp_peer_map.lock().unwrap().get(pid).map(|a| a.to_string())
+                .unwrap_or_default();
+            let spec = soma_next::types::peer::PeerSpec {
+                peer_id: pid.clone(),
+                version: "0.1.0".to_string(),
+                trust_class: soma_next::types::common::TrustLevel::Untrusted,
+                supported_transports: vec![soma_next::types::peer::Transport::Tcp],
+                reachable_endpoints: vec![addr],
+                current_availability: soma_next::types::peer::PeerAvailability::Available,
+                policy_limits: vec![],
+                exposed_packs: vec![],
+                exposed_skills: vec![],
+                exposed_resources: vec![],
+                latency_class: "medium".to_string(),
+                cost_class: "low".to_string(),
+                current_load: 0.0,
+                last_seen: chrono::Utc::now(),
+                replay_support: false,
+                observation_streaming: false,
+                advertisement_version: 0,
+                advertisement_expires_at: chrono::Utc::now() + chrono::Duration::hours(24),
+            };
+            if let Err(e) = hb_reg.register_peer(spec) {
+                eprintln!("warning: failed to register peer {pid} for heartbeat: {e}");
+            }
+        }
+        let peer_count = hb_reg.list_peers().len();
         let hb_registry: Arc<Mutex<dyn soma_next::distributed::peer::PeerRegistry>> =
-            Arc::new(Mutex::new(soma_next::distributed::peer::DefaultPeerRegistry::new()));
+            Arc::new(Mutex::new(hb_reg));
         let hb_world_state = webhook_world_state.as_ref().map(Arc::clone);
         let _heartbeat_handle = soma_next::distributed::heartbeat::start_heartbeat_thread(
             hb_config,
@@ -720,7 +751,7 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             Arc::clone(&tcp_peer_map),
             hb_world_state,
         );
-        eprintln!("MCP: heartbeat thread started");
+        eprintln!("MCP: heartbeat thread started ({peer_count} peers registered)");
     }
 
     // Start webhook HTTP listener if requested.
