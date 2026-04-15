@@ -311,11 +311,15 @@ impl DelegationManager for DefaultDelegationManager {
                         routine_id: query["routine_id"].as_str().unwrap_or("unknown").to_string(),
                         match_conditions: vec![],
                         compiled_skill_path: vec![],
+                        compiled_steps: vec![],
                         guard_conditions: vec![],
                         expected_cost: 0.0,
                         expected_effect: vec![],
                         confidence: 0.0,
                         autonomous: false,
+                        priority: 0,
+                        exclusive: false,
+                        policy_scope: None,
                     };
                     executor.transfer_routine(peer_id, &routine)?;
                 } else {

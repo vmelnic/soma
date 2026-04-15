@@ -72,17 +72,17 @@ Disk persistence uses JSON files in a configurable `data_dir`. Each `Disk*Store`
 | `dump` | Structured JSON dump for LLM context (sections: full, belief, episodes, schemas, routines, sessions, skills, ports, packs, metrics) |
 | `repl` | Interactive mode |
 
-**MCP Server** (27 tools, JSON-RPC 2.0):
+**MCP Server** (29 tools, JSON-RPC 2.0):
 
 *16 core*: `create_goal`, `inspect_session`, `inspect_belief`, `inspect_resources`, `inspect_packs`, `inspect_skills`, `inspect_trace`, `pause_session`, `resume_session`, `abort_session`, `list_sessions`, `query_metrics`, `query_policy`, `dump_state`, `invoke_port`, `list_ports`.
 
-*3 distributed*: `list_peers`, `invoke_remote_skill`, `transfer_routine`.
+*4 distributed*: `list_peers`, `invoke_remote_skill`, `transfer_routine`, `replicate_routine`.
 
 *3 scheduler*: `schedule`, `list_schedules`, `cancel_schedule`.
 
 *3 world state*: `patch_world_state`, `dump_world_state`, `set_routine_autonomous`.
 
-*2 execution*: `trigger_consolidation`, `execute_routine`.
+*3 execution*: `trigger_consolidation`, `execute_routine`, `author_routine`.
 
 Also supports the MCP protocol methods `initialize`, `tools/list`, and `tools/call`.
 
@@ -482,6 +482,27 @@ Executed in step 11 of the control loop via `execute_skill_lifecycle`:
 | BindingFailure, PreconditionFailure | SwitchCandidate |
 | PortFailure, RemoteFailure | Retry (if budget allows), else SwitchCandidate |
 | Unknown, ValidationFailure, PartialSuccess | Backtrack |
+
+### Plan-Following with Composition and Branching
+
+When a matching routine is found (step 5), the session controller enters plan-following mode. Routines use `compiled_steps` with per-step branching and sub-routine composition:
+
+**CompiledStep variants:**
+- `Skill { skill_id, on_success, on_failure }` -- invoke a single skill
+- `SubRoutine { routine_id, on_success, on_failure }` -- call another routine, pushing a `PlanFrame` onto the `plan_stack`
+
+**NextStep enum** (used for `on_success` and `on_failure`):
+- `Continue` -- advance to the next step in sequence
+- `Goto { step_index }` -- jump to a specific step (enables retry loops and recovery branches)
+- `CallRoutine { routine_id }` -- push a new routine onto the call stack
+- `Complete` -- finish the current routine (pops to parent frame if nested)
+- `Abandon` -- drop plan-following entirely, fall back to full deliberation
+
+**Call stack:** `plan_stack` holds `PlanFrame` entries (one per nesting level). Max depth 16. When a sub-routine completes at its last step, `apply_next_step` loops through exhausted stack frames to correctly stop or continue the parent.
+
+**Priority and conflict resolution:** Routines carry `priority: u32` (higher fires first) and `exclusive: bool`. `find_matching` sorts by priority DESC then confidence DESC. When `exclusive: true`, the reactive monitor fires only the first match.
+
+**Per-routine policy scope:** `policy_scope: Option<String>` on Routine overrides the `namespace` in `PolicyContext` via `build_context` in adapters.rs during plan-following execution.
 
 ---
 

@@ -276,6 +276,184 @@ impl Router for DefaultRouter {
     }
 }
 
+// --- RoutingDecision ---
+
+/// Decision from the RoutineRouter about where to execute a routine.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+pub enum RoutingDecision {
+    /// Execute locally.
+    Local,
+    /// Route to a specific remote peer.
+    Remote { peer_id: String },
+}
+
+// --- RoutingStrategy ---
+
+/// Strategy for how the RoutineRouter selects a target.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutingStrategy {
+    /// Execute locally unless local load exceeds threshold.
+    #[default]
+    LocalFirst,
+    /// Always pick the least-loaded peer with required skills.
+    LeastLoaded,
+    /// Prefer the peer with the highest skill coverage for this routine.
+    RoutineAffinity,
+}
+
+// --- RoutineRouter trait ---
+
+/// Routes routine execution to the optimal target based on peer load,
+/// capability coverage, and strategy.
+pub trait RoutineRouter: Send + Sync {
+    fn route(
+        &self,
+        routine: &crate::types::routine::Routine,
+        local_load: f64,
+        registry: &dyn PeerRegistry,
+        strategy: RoutingStrategy,
+    ) -> RoutingDecision;
+
+    /// The load threshold above which the router considers remote peers.
+    fn local_load_threshold(&self) -> f64 {
+        0.8
+    }
+}
+
+// --- DefaultRoutineRouter ---
+
+/// Default implementation — uses the existing `DefaultRouter` scoring
+/// infrastructure to find suitable peers.
+pub struct DefaultRoutineRouter {
+    /// Local load threshold above which `LocalFirst` considers remote peers.
+    pub local_load_threshold: f64,
+}
+
+impl DefaultRoutineRouter {
+    pub fn new() -> Self {
+        Self {
+            local_load_threshold: 0.8,
+        }
+    }
+
+    /// Extract unique skill IDs from a routine's effective steps.
+    fn required_skill_ids(
+        routine: &crate::types::routine::Routine,
+    ) -> Vec<String> {
+        let mut ids = Vec::new();
+        for step in routine.effective_steps() {
+            if let crate::types::routine::CompiledStep::Skill { skill_id, .. } = step
+                && !ids.contains(&skill_id)
+            {
+                ids.push(skill_id);
+            }
+        }
+        ids
+    }
+
+    /// Find the least-loaded available peer that has ALL required skills.
+    fn find_least_loaded_peer(
+        &self,
+        routine: &crate::types::routine::Routine,
+        registry: &dyn PeerRegistry,
+    ) -> Option<String> {
+        let skill_ids = Self::required_skill_ids(routine);
+        if skill_ids.is_empty() {
+            return None;
+        }
+
+        registry
+            .list_peers()
+            .into_iter()
+            .filter(|p| {
+                p.current_availability == PeerAvailability::Available
+                    && skill_ids.iter().all(|sid| {
+                        p.exposed_skills.iter().any(|s| s.skill_id == *sid)
+                    })
+            })
+            .min_by(|a, b| {
+                a.current_load
+                    .partial_cmp(&b.current_load)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|p| p.peer_id.clone())
+    }
+
+    /// Find the peer with the highest skill coverage for this routine,
+    /// breaking ties by lowest load.
+    fn find_affinity_peer(
+        &self,
+        routine: &crate::types::routine::Routine,
+        registry: &dyn PeerRegistry,
+    ) -> Option<String> {
+        let skill_ids = Self::required_skill_ids(routine);
+        if skill_ids.is_empty() {
+            return None;
+        }
+
+        registry
+            .list_peers()
+            .into_iter()
+            .filter(|p| {
+                p.current_availability == PeerAvailability::Available
+                    && skill_ids.iter().all(|sid| {
+                        p.exposed_skills.iter().any(|s| s.skill_id == *sid)
+                    })
+            })
+            .max_by(|a, b| {
+                // All candidates have full coverage (filtered above),
+                // so tiebreak by load (lower is better).
+                b.current_load
+                    .partial_cmp(&a.current_load)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|p| p.peer_id.clone())
+    }
+}
+
+impl Default for DefaultRoutineRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RoutineRouter for DefaultRoutineRouter {
+    fn route(
+        &self,
+        routine: &crate::types::routine::Routine,
+        local_load: f64,
+        registry: &dyn PeerRegistry,
+        strategy: RoutingStrategy,
+    ) -> RoutingDecision {
+        match strategy {
+            RoutingStrategy::LocalFirst => {
+                if local_load < self.local_load_threshold {
+                    return RoutingDecision::Local;
+                }
+                self.find_least_loaded_peer(routine, registry)
+                    .map(|pid| RoutingDecision::Remote { peer_id: pid })
+                    .unwrap_or(RoutingDecision::Local)
+            }
+            RoutingStrategy::LeastLoaded => {
+                self.find_least_loaded_peer(routine, registry)
+                    .map(|pid| RoutingDecision::Remote { peer_id: pid })
+                    .unwrap_or(RoutingDecision::Local)
+            }
+            RoutingStrategy::RoutineAffinity => {
+                self.find_affinity_peer(routine, registry)
+                    .map(|pid| RoutingDecision::Remote { peer_id: pid })
+                    .unwrap_or(RoutingDecision::Local)
+            }
+        }
+    }
+
+    fn local_load_threshold(&self) -> f64 {
+        self.local_load_threshold
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -717,5 +895,131 @@ mod tests {
         req.our_version = None;
         let result = router.find_best_peer(&reg, &req).unwrap();
         assert_eq!(result, Some("peer-1".to_string()));
+    }
+
+    // --- RoutineRouter tests ---
+
+    fn make_routine_for_routing(skill_ids: &[&str]) -> crate::types::routine::Routine {
+        crate::types::routine::Routine {
+            routine_id: "test_routine".to_string(),
+            namespace: "test".to_string(),
+            origin: crate::types::routine::RoutineOrigin::SchemaCompiled,
+            match_conditions: vec![],
+            compiled_skill_path: skill_ids.iter().map(|s| s.to_string()).collect(),
+            compiled_steps: vec![],
+            guard_conditions: vec![],
+            expected_cost: 0.1,
+            expected_effect: vec![],
+            confidence: 0.9,
+            autonomous: false,
+            priority: 0,
+            exclusive: false,
+            policy_scope: None,
+        }
+    }
+
+    #[test]
+    fn routine_router_local_first_under_threshold() {
+        let router = DefaultRoutineRouter::new();
+        let reg = DefaultPeerRegistry::new();
+        let routine = make_routine_for_routing(&["file.list"]);
+        let decision = router.route(&routine, 0.5, &reg, RoutingStrategy::LocalFirst);
+        assert!(matches!(decision, RoutingDecision::Local));
+    }
+
+    #[test]
+    fn routine_router_local_first_over_threshold_no_peers() {
+        let router = DefaultRoutineRouter::new();
+        let reg = DefaultPeerRegistry::new();
+        let routine = make_routine_for_routing(&["file.list"]);
+        let decision = router.route(&routine, 0.9, &reg, RoutingStrategy::LocalFirst);
+        // No peers available, falls back to local
+        assert!(matches!(decision, RoutingDecision::Local));
+    }
+
+    #[test]
+    fn routine_router_local_first_over_threshold_routes_remote() {
+        let router = DefaultRoutineRouter::new();
+        let mut reg = DefaultPeerRegistry::new();
+        let mut peer = make_peer(
+            "peer-1",
+            TrustLevel::Trusted,
+            PeerAvailability::Available,
+            "low",
+        );
+        peer.current_load = 0.3;
+        reg.register_peer(peer).unwrap();
+        let routine = make_routine_for_routing(&["file.list"]);
+        let decision = router.route(&routine, 0.9, &reg, RoutingStrategy::LocalFirst);
+        assert!(matches!(decision, RoutingDecision::Remote { peer_id } if peer_id == "peer-1"));
+    }
+
+    #[test]
+    fn routine_router_least_loaded_picks_lowest() {
+        let router = DefaultRoutineRouter::new();
+        let mut reg = DefaultPeerRegistry::new();
+        let mut peer1 = make_peer(
+            "peer-heavy",
+            TrustLevel::Trusted,
+            PeerAvailability::Available,
+            "low",
+        );
+        peer1.current_load = 0.8;
+        let mut peer2 = make_peer(
+            "peer-light",
+            TrustLevel::Trusted,
+            PeerAvailability::Available,
+            "low",
+        );
+        peer2.current_load = 0.2;
+        reg.register_peer(peer1).unwrap();
+        reg.register_peer(peer2).unwrap();
+        let routine = make_routine_for_routing(&["file.list"]);
+        let decision = router.route(&routine, 0.5, &reg, RoutingStrategy::LeastLoaded);
+        assert!(matches!(decision, RoutingDecision::Remote { peer_id } if peer_id == "peer-light"));
+    }
+
+    #[test]
+    fn routine_router_skips_peer_missing_skill() {
+        let router = DefaultRoutineRouter::new();
+        let mut reg = DefaultPeerRegistry::new();
+        let mut peer = make_peer(
+            "peer-1",
+            TrustLevel::Trusted,
+            PeerAvailability::Available,
+            "low",
+        );
+        peer.current_load = 0.1;
+        // Peer only has file.list, not http.get
+        reg.register_peer(peer).unwrap();
+        let routine = make_routine_for_routing(&["http.get"]);
+        let decision = router.route(&routine, 0.9, &reg, RoutingStrategy::LocalFirst);
+        // Peer doesn't have the skill, falls back to local
+        assert!(matches!(decision, RoutingDecision::Local));
+    }
+
+    #[test]
+    fn routine_router_affinity_prefers_lowest_load() {
+        let router = DefaultRoutineRouter::new();
+        let mut reg = DefaultPeerRegistry::new();
+        let mut peer1 = make_peer(
+            "peer-busy",
+            TrustLevel::Trusted,
+            PeerAvailability::Available,
+            "low",
+        );
+        peer1.current_load = 0.7;
+        let mut peer2 = make_peer(
+            "peer-idle",
+            TrustLevel::Trusted,
+            PeerAvailability::Available,
+            "low",
+        );
+        peer2.current_load = 0.1;
+        reg.register_peer(peer1).unwrap();
+        reg.register_peer(peer2).unwrap();
+        let routine = make_routine_for_routing(&["file.list"]);
+        let decision = router.route(&routine, 0.5, &reg, RoutingStrategy::RoutineAffinity);
+        assert!(matches!(decision, RoutingDecision::Remote { peer_id } if peer_id == "peer-idle"));
     }
 }

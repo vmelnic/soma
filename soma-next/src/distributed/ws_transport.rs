@@ -561,11 +561,15 @@ mod tests {
             routine_id: "r1".to_string(),
             match_conditions: vec![],
             compiled_skill_path: vec![],
+            compiled_steps: vec![],
             guard_conditions: vec![],
             expected_cost: 1.0,
             expected_effect: vec![],
             confidence: 0.8,
             autonomous: false,
+            priority: 0,
+            exclusive: false,
+            policy_scope: None,
         };
 
         let result = executor.transfer_routine("ws-peer-1", &routine);

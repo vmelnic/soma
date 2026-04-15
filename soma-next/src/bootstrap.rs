@@ -72,6 +72,8 @@ pub struct Runtime {
     pub schedule_store: SharedScheduleStore,
     /// World state store for the reactive monitor subsystem.
     pub world_state: SharedWorldStateStore,
+    /// Routine router for load-aware distributed execution.
+    pub routine_router: Arc<dyn crate::distributed::routing::RoutineRouter>,
     /// Instant when the runtime was created, used for uptime and CPU tracking.
     pub start_time: Instant,
 }
@@ -269,6 +271,7 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
         embedder,
         schedule_store: Arc::new(Mutex::new(DefaultScheduleStore::new())),
         world_state,
+        routine_router: Arc::new(crate::distributed::routing::DefaultRoutineRouter::new()),
         start_time: Instant::now(),
     })
 }
@@ -434,6 +437,7 @@ pub fn bootstrap_with_remote(
         embedder,
         schedule_store: Arc::new(Mutex::new(DefaultScheduleStore::new())),
         world_state,
+        routine_router: Arc::new(crate::distributed::routing::DefaultRoutineRouter::new()),
         start_time: Instant::now(),
     })
 }
@@ -581,6 +585,7 @@ pub fn bootstrap_from_specs(
         embedder,
         schedule_store: Arc::new(Mutex::new(DefaultScheduleStore::new())),
         world_state: Arc::new(Mutex::new(crate::runtime::world_state::DefaultWorldStateStore::new())),
+        routine_router: Arc::new(crate::distributed::routing::DefaultRoutineRouter::new()),
         start_time: Instant::now(),
     })
 }
@@ -745,6 +750,7 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
         embedder,
         schedule_store: Arc::new(Mutex::new(DefaultScheduleStore::new())),
         world_state,
+        routine_router: Arc::new(crate::distributed::routing::DefaultRoutineRouter::new()),
         start_time: Instant::now(),
     })
 }

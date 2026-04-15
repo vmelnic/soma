@@ -163,12 +163,20 @@ pub struct RoutineTransfer {
     pub routine_id: String,
     pub match_conditions: Vec<Precondition>,
     pub compiled_skill_path: Vec<String>,
+    #[serde(default)]
+    pub compiled_steps: Vec<super::routine::CompiledStep>,
     pub guard_conditions: Vec<Precondition>,
     pub expected_cost: f64,
     pub expected_effect: Vec<EffectDescriptor>,
     pub confidence: f64,
     #[serde(default)]
     pub autonomous: bool,
+    #[serde(default)]
+    pub priority: u32,
+    #[serde(default)]
+    pub exclusive: bool,
+    #[serde(default)]
+    pub policy_scope: Option<String>,
 }
 
 /// Observation in a distributed stream — 10 required fields from distributed.md.

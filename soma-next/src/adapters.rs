@@ -214,6 +214,9 @@ impl RoutineMemory for EmptyRoutineMemory {
     fn retrieve_matching(&self, _goal: &GoalSpec, _belief: &BeliefState) -> Vec<Routine> {
         vec![]
     }
+    fn get_routine(&self, _routine_id: &str) -> Option<Routine> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +249,10 @@ impl RoutineMemory for RoutineMemoryAdapter {
             .into_iter()
             .cloned()
             .collect()
+    }
+
+    fn get_routine(&self, routine_id: &str) -> Option<Routine> {
+        self.store.lock().ok()?.get(routine_id).cloned()
     }
 }
 
@@ -280,11 +287,20 @@ impl SkillRegistry for SkillRegistryAdapter {
         schemas: &[Schema],
         routines: &[Routine],
     ) -> Vec<SkillSpec> {
-        // If a routine matches and has a compiled skill path, narrow
-        // candidates to just those skills (plan-following mode).
-        if let Some(routine) = routines.iter().find(|r| !r.compiled_skill_path.is_empty()) {
-            let narrowed: Vec<SkillSpec> = routine
-                .compiled_skill_path
+        // If a routine matches and has steps, narrow candidates to
+        // the skills referenced in those steps (plan-following mode).
+        if let Some(routine) = routines.iter().find(|r| {
+            !r.compiled_steps.is_empty() || !r.compiled_skill_path.is_empty()
+        }) {
+            let skill_ids: Vec<String> = routine.effective_steps().iter().filter_map(|s| {
+                match s {
+                    crate::types::routine::CompiledStep::Skill { skill_id, .. } => {
+                        Some(skill_id.clone())
+                    }
+                    _ => None,
+                }
+            }).collect();
+            let narrowed: Vec<SkillSpec> = skill_ids
                 .iter()
                 .filter_map(|sid| self.skills.iter().find(|s| s.skill_id == *sid))
                 .cloned()
@@ -292,7 +308,6 @@ impl SkillRegistry for SkillRegistryAdapter {
             if !narrowed.is_empty() {
                 return narrowed;
             }
-            // If none of the routine's skill IDs could be resolved, fall through.
         }
 
         // If a schema matches but no routine, narrow to the schema's
@@ -791,7 +806,8 @@ impl PolicyEngineAdapter {
         PolicyContext {
             session_id: Some(session.session_id),
             trust_level: Self::derive_trust_level(session),
-            namespace: skill.namespace.clone(),
+            namespace: session.working_memory.active_policy_scope.clone()
+                .unwrap_or_else(|| skill.namespace.clone()),
             budget_remaining: Some(session.budget_remaining.resource_remaining),
             side_effect_class: Some(Self::derive_side_effect_class(skill)),
         }
@@ -1361,8 +1377,11 @@ mod tests {
                 budget_deltas: vec![],
                 output_bindings: vec![],
                 active_plan: None,
+                active_steps: None,
                 plan_step: 0,
+                plan_stack: Vec::new(),
                 used_plan_following: false,
+                active_policy_scope: None,
             },
             status: SessionStatus::Created,
             trace: SessionTrace { steps: vec![] },
@@ -1460,11 +1479,15 @@ mod tests {
                     description: "goal matches test goal".to_string(),
                 }],
                 compiled_skill_path: vec!["a".into(), "b".into()],
+                compiled_steps: vec![],
                 guard_conditions: Vec::new(),
                 expected_cost: 0.1,
                 expected_effect: Vec::new(),
                 confidence: 0.9,
                 autonomous: false,
+                priority: 0,
+                exclusive: false,
+                policy_scope: None,
             };
             s.register(routine).unwrap();
         }

@@ -58,8 +58,8 @@ This means:
 loop with selection, prediction, criticism, and policy enforcement. Typed skills
 and ports. Belief state and resource tracking. Episode memory with persistence.
 Session checkpoints and restore. Distributed peer transport (TCP, TLS, WebSocket,
-Unix sockets, mDNS LAN discovery). MCP server with 27 tools. CLI with 11 commands.
-1225 tests, zero warnings. Cross-compiles unchanged to `aarch64-linux-android`
+Unix sockets, mDNS LAN discovery). MCP server with 29 tools. CLI with 11 commands.
+1261 tests, zero warnings. Cross-compiles unchanged to `aarch64-linux-android`
 (10 MB ELF) and `aarch64-apple-ios` (9 MB Mach-O). `--pack auto` discovers and
 loads all pack manifests under `packs/` automatically.
 

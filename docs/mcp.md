@@ -2,7 +2,7 @@
 
 ## Overview
 
-SOMA exposes its full runtime as 27 JSON-RPC 2.0 tools over stdio. Any MCP-aware client (Claude Desktop, ChatGPT, custom tooling) can submit goals, control sessions, inspect state, invoke ports, invoke skills on remote peers (including embedded ESP32 leaves discovered via mDNS), transfer routines between instances, manage schedules, manipulate world state, and query metrics through this interface.
+SOMA exposes its full runtime as 29 JSON-RPC 2.0 tools over stdio. Any MCP-aware client (Claude Desktop, ChatGPT, custom tooling) can submit goals, control sessions, inspect state, invoke ports, invoke skills on remote peers (including embedded ESP32 leaves discovered via mDNS), transfer and replicate routines between instances, manage schedules, manipulate world state, and query metrics through this interface.
 
 ## Protocol
 
@@ -31,7 +31,7 @@ Response:
 {"jsonrpc":"2.0","method":"tools/list","params":{},"id":2}
 ```
 
-Returns `{"tools": [...]}` with all 27 tool definitions including `name`, `description`, and `input_schema`.
+Returns `{"tools": [...]}` with all 29 tool definitions including `name`, `description`, and `input_schema`.
 
 ### Error Codes
 
@@ -530,6 +530,46 @@ Mark a routine to fire automatically when its match conditions are satisfied aga
 
 ```json
 {"routine_id":"alert_on_threshold","autonomous":true}
+```
+
+### 28. replicate_routine
+
+Replicate a compiled routine to remote peers. Transfers the routine (steps, match conditions, guard conditions) so the peer can execute it locally. Optional `peer_ids` array targets specific peers; omitted = all known peers.
+
+**Input**:
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `routine_id` | string | yes | Routine to replicate from the local routine store |
+| `peer_ids` | array of strings | no | Target peer IDs from `list_peers`. Omit to replicate to all known peers. |
+
+**Response**:
+
+```json
+{"routine_id":"scan_and_report","replicated_to":["lan-soma-esp32-ccdba79df9e8"],"failed":[]}
+```
+
+### 29. author_routine
+
+Create or update a routine from a structured definition. The LLM translates natural language behavioral intent into a compiled routine with steps, branching, priority, and policy scope.
+
+**Input**:
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `routine_id` | string | yes | Unique identifier for the routine |
+| `match_conditions` | array of objects | yes | Conditions that trigger this routine (each: `{condition_type, expression, description}`) |
+| `steps` | array of objects | yes | Ordered skill steps (each: `{skill_id, input}`) |
+| `guard_conditions` | array of objects | no | Pre-execution guard conditions |
+| `priority` | integer | no | Routine priority (higher = preferred) |
+| `exclusive` | boolean | no | If true, only one instance runs at a time |
+| `policy_scope` | string | no | Policy scope for execution |
+| `autonomous` | boolean | no | If true, mark for autonomous execution when conditions match |
+
+**Response**:
+
+```json
+{"routine_id":"daily_report","steps":3,"status":"stored","autonomous":false}
 ```
 
 ## Key Tools for LLMs

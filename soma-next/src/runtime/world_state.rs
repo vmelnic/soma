@@ -155,8 +155,15 @@ pub fn start_reactive_monitor(
                     .collect()
             };
 
-            // 4. Execute each matching routine.
-            for routine in matching_routines {
+            // 4. Apply exclusive handling: if the highest-priority match
+            //    is exclusive, only fire that one.
+            let routines_to_fire = if matching_routines.first().is_some_and(|r| r.exclusive) {
+                matching_routines.into_iter().take(1).collect::<Vec<_>>()
+            } else {
+                matching_routines
+            };
+
+            for routine in routines_to_fire {
                 let routine_id = routine.routine_id.clone();
                 let label = format!("reactive: {routine_id}");
 
@@ -197,9 +204,14 @@ pub fn start_reactive_monitor(
                     let mut ctrl = session_controller.lock().unwrap();
                     match ctrl.create_session(goal) {
                         Ok(mut session) => {
-                            // Pre-load the routine's compiled skill path.
-                            session.working_memory.active_plan =
-                                Some(routine.compiled_skill_path.clone());
+                            // Pre-load the routine's steps.
+                            let steps = routine.effective_steps();
+                            if !steps.is_empty() {
+                                session.working_memory.active_steps = Some(steps);
+                            } else {
+                                session.working_memory.active_plan =
+                                    Some(routine.compiled_skill_path.clone());
+                            }
                             session.working_memory.plan_step = 0;
                             session.working_memory.used_plan_following = true;
 

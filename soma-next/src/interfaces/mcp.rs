@@ -95,6 +95,7 @@ pub struct RuntimeHandle {
     pub embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>,
     pub schedule_store: Arc<Mutex<dyn crate::runtime::scheduler::ScheduleStore + Send>>,
     pub world_state: Arc<Mutex<dyn crate::runtime::world_state::WorldStateStore + Send>>,
+    pub routine_router: Arc<dyn crate::distributed::routing::RoutineRouter>,
     pub start_time: Instant,
     pub remote_executor: Option<Arc<dyn RemoteExecutor>>,
     /// Live list of peer IDs known to the runtime. Static peers from
@@ -121,6 +122,7 @@ impl RuntimeHandle {
             embedder: runtime.embedder,
             schedule_store: runtime.schedule_store,
             world_state: runtime.world_state,
+            routine_router: runtime.routine_router,
             start_time: runtime.start_time,
             remote_executor: None,
             peer_ids: Arc::new(Mutex::new(Vec::new())),
@@ -282,6 +284,8 @@ impl McpServer {
             "patch_world_state" => self.handle_patch_world_state(request.id, request.params),
             "dump_world_state" => self.handle_dump_world_state(request.id, request.params),
             "set_routine_autonomous" => self.handle_set_routine_autonomous(request.id, request.params),
+            "replicate_routine" => self.handle_replicate_routine(request.id, request.params),
+            "author_routine" => self.handle_author_routine(request.id, request.params),
 
             _ => Ok(Self::error_response(
                 request.id,
@@ -372,6 +376,8 @@ impl McpServer {
             "patch_world_state" => self.handle_patch_world_state(inner_id, arguments),
             "dump_world_state" => self.handle_dump_world_state(inner_id, arguments),
             "set_routine_autonomous" => self.handle_set_routine_autonomous(inner_id, arguments),
+            "replicate_routine" => self.handle_replicate_routine(inner_id, arguments),
+            "author_routine" => self.handle_author_routine(inner_id, arguments),
             _ => {
                 return Ok(Self::error_response(
                     id,
@@ -637,6 +643,12 @@ impl McpServer {
                             "unresolved_slots": &session.working_memory.unresolved_slots,
                             "current_subgoal": &session.working_memory.current_subgoal,
                             "candidate_shortlist": &session.working_memory.candidate_shortlist,
+                            "plan_step": session.working_memory.plan_step,
+                            "has_active_steps": session.working_memory.active_steps.is_some(),
+                            "active_steps_len": session.working_memory.active_steps.as_ref().map(|s| s.len()).unwrap_or(0),
+                            "has_active_plan": session.working_memory.active_plan.is_some(),
+                            "plan_stack_depth": session.working_memory.plan_stack.len(),
+                            "used_plan_following": session.working_memory.used_plan_following,
                         },
                         "budget_remaining": {
                             "risk_remaining": session.budget_remaining.risk_remaining,
@@ -1326,6 +1338,12 @@ impl McpServer {
                                 "unresolved_slots": &session.working_memory.unresolved_slots,
                                 "current_subgoal": &session.working_memory.current_subgoal,
                                 "candidate_shortlist": &session.working_memory.candidate_shortlist,
+                                "plan_step": session.working_memory.plan_step,
+                                "has_active_steps": session.working_memory.active_steps.is_some(),
+                                "active_steps_len": session.working_memory.active_steps.as_ref().map(|s| s.len()).unwrap_or(0),
+                                "has_active_plan": session.working_memory.active_plan.is_some(),
+                                "plan_stack_depth": session.working_memory.plan_stack.len(),
+                                "used_plan_following": session.working_memory.used_plan_following,
                             },
                             "trace": session.trace.steps.iter().map(|step| {
                                 serde_json::json!({
@@ -1779,11 +1797,15 @@ impl McpServer {
                     routine_id: routine.routine_id.clone(),
                     match_conditions: routine.match_conditions.clone(),
                     compiled_skill_path: routine.compiled_skill_path.clone(),
+                    compiled_steps: routine.compiled_steps.clone(),
                     guard_conditions: routine.guard_conditions.clone(),
                     expected_cost: routine.expected_cost,
                     expected_effect: routine.expected_effect.clone(),
                     confidence: routine.confidence,
                     autonomous: routine.autonomous,
+                    priority: routine.priority,
+                    exclusive: routine.exclusive,
+                    policy_scope: routine.policy_scope.clone(),
                 };
 
                 match exec.transfer_routine(&peer_id, &transfer) {
@@ -1916,6 +1938,62 @@ impl McpServer {
 
         let goal_id = goal.goal_id;
 
+        // Consult the routine router to decide where to execute.
+        // The MCP server has a peer ID list and a remote executor but not
+        // a full PeerRegistry with load/skill data. When peers are available
+        // and local load exceeds the router's threshold, delegate to the
+        // first known peer. Full PeerRegistry-based routing is used by the
+        // distributed listener layer (--listen mode) where peer specs are
+        // populated via heartbeat and mDNS.
+        if let Some(ref exec) = rt.remote_executor {
+            let local_load = rt.metrics.active_sessions
+                .load(std::sync::atomic::Ordering::Relaxed) as f64 / 100.0;
+            if local_load >= rt.routine_router.local_load_threshold() {
+                let peers = rt.peer_ids.lock().unwrap();
+                if let Some(peer_id) = peers.first().cloned() {
+                    drop(peers);
+                    // Transfer the routine first so the peer has it, then
+                    // submit the goal for execution.
+                    let transfer = crate::types::peer::RoutineTransfer {
+                        routine_id: routine.routine_id.clone(),
+                        match_conditions: routine.match_conditions.clone(),
+                        compiled_skill_path: routine.compiled_skill_path.clone(),
+                        compiled_steps: routine.compiled_steps.clone(),
+                        guard_conditions: routine.guard_conditions.clone(),
+                        expected_cost: routine.expected_cost,
+                        expected_effect: routine.expected_effect.clone(),
+                        confidence: routine.confidence,
+                        autonomous: routine.autonomous,
+                        priority: routine.priority,
+                        exclusive: routine.exclusive,
+                        policy_scope: routine.policy_scope.clone(),
+                    };
+                    let _ = exec.transfer_routine(&peer_id, &transfer);
+                    let skill_ids: Vec<String> = routine.effective_steps().iter().filter_map(|s| {
+                        if let crate::types::routine::CompiledStep::Skill { skill_id, .. } = s {
+                            Some(skill_id.clone())
+                        } else { None }
+                    }).collect();
+                    let first_skill = skill_ids.first().cloned().unwrap_or_default();
+                    match exec.invoke_skill(&peer_id, &first_skill, serde_json::json!({})) {
+                        Ok(resp) => {
+                            return Ok(Self::success_response(
+                                id,
+                                serde_json::json!({
+                                    "routine_id": routine_id,
+                                    "routed_to": peer_id,
+                                    "remote_result": resp.observation,
+                                }),
+                            ));
+                        }
+                        Err(e) => {
+                            tracing::debug!("remote execution failed, falling back to local: {e}");
+                        }
+                    }
+                }
+            }
+        }
+
         // Create a session and pre-load the routine's plan.
         let mut ctrl = rt.session_controller.lock().unwrap();
         let mut session = match ctrl.create_session(goal) {
@@ -1946,10 +2024,16 @@ impl McpServer {
             }
         }
 
-        // Pre-load the routine's compiled skill path as the session's active plan.
-        session.working_memory.active_plan = Some(routine.compiled_skill_path.clone());
+        // Pre-load the routine's steps as the session's active plan.
+        let steps = routine.effective_steps();
+        if !steps.is_empty() {
+            session.working_memory.active_steps = Some(steps);
+        } else {
+            session.working_memory.active_plan = Some(routine.compiled_skill_path.clone());
+        }
         session.working_memory.plan_step = 0;
         session.working_memory.used_plan_following = true;
+        session.working_memory.active_policy_scope = routine.policy_scope.clone();
 
         // Run the control loop until it reaches a non-Continue state.
         let final_status;
@@ -2497,6 +2581,381 @@ impl McpServer {
                 None,
             )),
         }
+    }
+
+    fn handle_replicate_routine(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: routine_id (string), optional peer_ids (string[])".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let routine_id = params
+            .get("routine_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if routine_id.is_empty() {
+            return Ok(Self::error_response(
+                id,
+                INVALID_PARAMS,
+                "routine_id must be a non-empty string".to_string(),
+                None,
+            ));
+        }
+
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => {
+                return Ok(Self::success_response(
+                    id,
+                    serde_json::json!({
+                        "routine_id": routine_id,
+                        "replicated_to": [],
+                        "note": "stub mode"
+                    }),
+                ));
+            }
+        };
+
+        // Look up the routine.
+        let routine = {
+            let rs = rt.routine_store.lock().unwrap();
+            rs.get(&routine_id).cloned()
+        };
+
+        let routine = match routine {
+            Some(r) => r,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    format!("routine not found: {routine_id}"),
+                    None,
+                ));
+            }
+        };
+
+        // Determine target peers.
+        let target_peers: Vec<String> = if let Some(arr) = params.get("peer_ids").and_then(|v| v.as_array()) {
+            arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+        } else {
+            // Default: replicate to all known peers.
+            rt.peer_ids.lock().unwrap().clone()
+        };
+
+        if target_peers.is_empty() {
+            return Ok(Self::success_response(
+                id,
+                serde_json::json!({
+                    "routine_id": routine_id,
+                    "replicated_to": [],
+                    "note": "no peers available"
+                }),
+            ));
+        }
+
+        let exec = match &rt.remote_executor {
+            Some(e) => e,
+            None => {
+                return Ok(Self::success_response(
+                    id,
+                    serde_json::json!({
+                        "routine_id": routine_id,
+                        "replicated_to": [],
+                        "note": "no remote executor configured"
+                    }),
+                ));
+            }
+        };
+
+        let transfer = crate::types::peer::RoutineTransfer {
+            routine_id: routine.routine_id.clone(),
+            match_conditions: routine.match_conditions.clone(),
+            compiled_skill_path: routine.compiled_skill_path.clone(),
+            compiled_steps: routine.compiled_steps.clone(),
+            guard_conditions: routine.guard_conditions.clone(),
+            expected_cost: routine.expected_cost,
+            expected_effect: routine.expected_effect.clone(),
+            confidence: routine.confidence,
+            autonomous: routine.autonomous,
+            priority: routine.priority,
+            exclusive: routine.exclusive,
+            policy_scope: routine.policy_scope.clone(),
+        };
+
+        let mut successes = Vec::new();
+        let mut failures = Vec::new();
+        for peer_id in &target_peers {
+            match exec.transfer_routine(peer_id, &transfer) {
+                Ok(()) => successes.push(peer_id.clone()),
+                Err(e) => failures.push(serde_json::json!({
+                    "peer_id": peer_id,
+                    "error": e.to_string()
+                })),
+            }
+        }
+
+        Ok(Self::success_response(
+            id,
+            serde_json::json!({
+                "routine_id": routine_id,
+                "replicated_to": successes,
+                "failures": failures,
+            }),
+        ))
+    }
+
+    fn handle_author_routine(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: routine_id (string), match_conditions (array), steps (array)".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let routine_id = params
+            .get("routine_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if routine_id.is_empty() {
+            return Ok(Self::error_response(
+                id,
+                INVALID_PARAMS,
+                "routine_id must be a non-empty string".to_string(),
+                None,
+            ));
+        }
+
+        let match_conditions_val = match params.get("match_conditions") {
+            Some(v) if v.is_array() && !v.as_array().unwrap().is_empty() => v.clone(),
+            _ => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "match_conditions must be a non-empty array".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let steps_val = match params.get("steps") {
+            Some(v) if v.is_array() && !v.as_array().unwrap().is_empty() => v.clone(),
+            _ => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "steps must be a non-empty array".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let match_conditions: Vec<crate::types::common::Precondition> =
+            match serde_json::from_value(match_conditions_val) {
+                Ok(v) => v,
+                Err(e) => {
+                    return Ok(Self::error_response(
+                        id,
+                        INVALID_PARAMS,
+                        format!("invalid match_conditions: {e}"),
+                        None,
+                    ));
+                }
+            };
+
+        let steps_arr = steps_val.as_array().unwrap();
+        let mut compiled_steps: Vec<crate::types::routine::CompiledStep> =
+            Vec::with_capacity(steps_arr.len());
+        for (i, step) in steps_arr.iter().enumerate() {
+            let step_type = step
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match step_type {
+                "skill" => {
+                    let skill_id = match step.get("skill_id").and_then(|v| v.as_str()) {
+                        Some(s) if !s.is_empty() => s.to_string(),
+                        _ => {
+                            return Ok(Self::error_response(
+                                id,
+                                INVALID_PARAMS,
+                                format!("step {i}: skill step requires non-empty skill_id"),
+                                None,
+                            ));
+                        }
+                    };
+                    compiled_steps.push(crate::types::routine::CompiledStep::Skill {
+                        skill_id,
+                        on_success: Self::parse_authored_next_step(step.get("on_success")),
+                        on_failure: Self::parse_authored_next_step_or(
+                            step.get("on_failure"),
+                            crate::types::routine::NextStep::Abandon,
+                        ),
+                    });
+                }
+                "sub_routine" => {
+                    let sub_routine_id = match step.get("routine_id").and_then(|v| v.as_str()) {
+                        Some(s) if !s.is_empty() => s.to_string(),
+                        _ => {
+                            return Ok(Self::error_response(
+                                id,
+                                INVALID_PARAMS,
+                                format!("step {i}: sub_routine step requires non-empty routine_id"),
+                                None,
+                            ));
+                        }
+                    };
+                    compiled_steps.push(crate::types::routine::CompiledStep::SubRoutine {
+                        routine_id: sub_routine_id,
+                        on_success: Self::parse_authored_next_step(step.get("on_success")),
+                        on_failure: Self::parse_authored_next_step_or(
+                            step.get("on_failure"),
+                            crate::types::routine::NextStep::Abandon,
+                        ),
+                    });
+                }
+                _ => {
+                    return Ok(Self::error_response(
+                        id,
+                        INVALID_PARAMS,
+                        format!("step {i}: type must be \"skill\" or \"sub_routine\""),
+                        None,
+                    ));
+                }
+            }
+        }
+
+        // Extract skill_ids for the legacy compiled_skill_path field.
+        let compiled_skill_path: Vec<String> = compiled_steps
+            .iter()
+            .filter_map(|s| match s {
+                crate::types::routine::CompiledStep::Skill { skill_id, .. } => {
+                    Some(skill_id.clone())
+                }
+                _ => None,
+            })
+            .collect();
+
+        // Parse optional fields.
+        let guard_conditions: Vec<crate::types::common::Precondition> = params
+            .get("guard_conditions")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        let priority = params
+            .get("priority")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+
+        let exclusive = params
+            .get("exclusive")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let policy_scope = params
+            .get("policy_scope")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
+        let autonomous = params
+            .get("autonomous")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let routine = crate::types::routine::Routine {
+            routine_id: routine_id.clone(),
+            namespace: "llm_authored".to_string(),
+            origin: crate::types::routine::RoutineOrigin::PackAuthored,
+            match_conditions,
+            compiled_skill_path,
+            compiled_steps,
+            guard_conditions,
+            expected_cost: 0.0,
+            expected_effect: Vec::new(),
+            confidence: 1.0,
+            autonomous,
+            priority,
+            exclusive,
+            policy_scope,
+        };
+
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => {
+                return Ok(Self::success_response(
+                    id,
+                    serde_json::json!({
+                        "created": true,
+                        "routine_id": routine_id,
+                        "note": "stub mode"
+                    }),
+                ));
+            }
+        };
+
+        {
+            let mut rs = rt.routine_store.lock().unwrap();
+            if let Err(e) = rs.register(routine) {
+                return Ok(Self::error_response(
+                    id,
+                    INTERNAL_ERROR,
+                    format!("failed to register routine: {e}"),
+                    None,
+                ));
+            }
+        }
+
+        Ok(Self::success_response(
+            id,
+            serde_json::json!({
+                "created": true,
+                "routine_id": routine_id,
+            }),
+        ))
+    }
+
+    /// Parse an `on_success` or `on_failure` action object into a `NextStep`.
+    /// Returns `NextStep::Continue` when the value is absent or unparseable.
+    fn parse_authored_next_step(
+        val: Option<&serde_json::Value>,
+    ) -> crate::types::routine::NextStep {
+        Self::parse_authored_next_step_or(val, crate::types::routine::NextStep::Continue)
+    }
+
+    /// Parse an action object into a `NextStep`, returning `default` when the
+    /// value is absent or unparseable.
+    fn parse_authored_next_step_or(
+        val: Option<&serde_json::Value>,
+        default: crate::types::routine::NextStep,
+    ) -> crate::types::routine::NextStep {
+        let val = match val {
+            Some(v) => v,
+            None => return default,
+        };
+        serde_json::from_value(val.clone()).unwrap_or(default)
     }
 
     // -----------------------------------------------------------------------
@@ -3275,6 +3734,69 @@ impl McpServer {
                     "required": ["routine_id", "autonomous"]
                 }),
             },
+            McpTool {
+                name: "replicate_routine".to_string(),
+                description: "Replicate a compiled routine to remote peers. Transfers the routine (including compiled steps, match conditions, and guard conditions) so the peer can execute it locally. If peer_ids is omitted, replicates to all known peers.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "routine_id": {
+                            "type": "string",
+                            "description": "The routine ID to replicate"
+                        },
+                        "peer_ids": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Target peer IDs (optional, defaults to all known peers)"
+                        }
+                    },
+                    "required": ["routine_id"]
+                }),
+            },
+            McpTool {
+                name: "author_routine".to_string(),
+                description: "Create or update a routine from a structured definition. The LLM translates natural language behavioral intent into a compiled routine that the runtime can execute, match against world state, and fire autonomously.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "routine_id": { "type": "string", "description": "Unique identifier for the routine" },
+                        "match_conditions": {
+                            "type": "array",
+                            "description": "Conditions that trigger this routine (goal_fingerprint or world_state)",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "condition_type": { "type": "string" },
+                                    "expression": { "description": "JSON expression to match against context" },
+                                    "description": { "type": "string" }
+                                },
+                                "required": ["condition_type", "expression", "description"]
+                            }
+                        },
+                        "steps": {
+                            "type": "array",
+                            "description": "Ordered execution steps with branching",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "type": { "type": "string", "enum": ["skill", "sub_routine"] },
+                                    "skill_id": { "type": "string", "description": "For skill steps" },
+                                    "routine_id": { "type": "string", "description": "For sub_routine steps" },
+                                    "on_success": { "type": "object", "description": "Action on success (default: continue)" },
+                                    "on_failure": { "type": "object", "description": "Action on failure (default: abandon)" }
+                                },
+                                "required": ["type"]
+                            }
+                        },
+                        "guard_conditions": { "type": "array", "description": "Optional conditions that must ALL pass" },
+                        "priority": { "type": "integer", "description": "Higher fires first (default 0)" },
+                        "exclusive": { "type": "boolean", "description": "If true, blocks lower-priority matches (default false)" },
+                        "policy_scope": { "type": "string", "description": "Optional policy namespace override" },
+                        "autonomous": { "type": "boolean", "description": "If true, reactive monitor fires this automatically (default false)" }
+                    },
+                    "required": ["routine_id", "match_conditions", "steps"]
+                }),
+            },
         ]
     }
 }
@@ -3320,7 +3842,7 @@ mod tests {
     fn test_list_tools_count() {
         let server = McpServer::new_stub();
         let tools = server.list_tools();
-        assert_eq!(tools.len(), 27);
+        assert_eq!(tools.len(), 29);
     }
 
     #[test]
@@ -3348,6 +3870,8 @@ mod tests {
         assert!(names.contains(&"patch_world_state".to_string()));
         assert!(names.contains(&"dump_world_state".to_string()));
         assert!(names.contains(&"set_routine_autonomous".to_string()));
+        assert!(names.contains(&"replicate_routine".to_string()));
+        assert!(names.contains(&"author_routine".to_string()));
     }
 
     #[test]
@@ -3450,6 +3974,85 @@ mod tests {
         let resp = server.handle_request(req).unwrap();
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_replicate_routine_stub() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "replicate_routine",
+            Some(serde_json::json!({ "routine_id": "test-routine-1" })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["routine_id"], "test-routine-1");
+        assert!(result["replicated_to"].is_array());
+        assert_eq!(result["note"], "stub mode");
+    }
+
+    #[test]
+    fn test_replicate_routine_missing_id() {
+        let server = McpServer::new_stub();
+        let req = make_request("replicate_routine", Some(serde_json::json!({})));
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_replicate_routine_no_params() {
+        let server = McpServer::new_stub();
+        let req = make_request("replicate_routine", None);
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_author_routine_stub() {
+        let server = McpServer::new_stub();
+        let req = make_request("author_routine", Some(serde_json::json!({
+            "routine_id": "test_authored",
+            "match_conditions": [{"condition_type": "world_state", "expression": {"event": true}, "description": "test"}],
+            "steps": [{"type": "skill", "skill_id": "do_thing"}]
+        })));
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["routine_id"], "test_authored");
+        assert_eq!(result["created"], true);
+    }
+
+    #[test]
+    fn test_author_routine_missing_id() {
+        let server = McpServer::new_stub();
+        let req = make_request("author_routine", Some(serde_json::json!({
+            "match_conditions": [{"condition_type": "world_state", "expression": {}, "description": "test"}],
+            "steps": [{"type": "skill", "skill_id": "x"}]
+        })));
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+    }
+
+    #[test]
+    fn test_author_routine_empty_steps() {
+        let server = McpServer::new_stub();
+        let req = make_request("author_routine", Some(serde_json::json!({
+            "routine_id": "test",
+            "match_conditions": [{"condition_type": "world_state", "expression": {}, "description": "test"}],
+            "steps": []
+        })));
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+    }
+
+    #[test]
+    fn test_author_routine_no_params() {
+        let server = McpServer::new_stub();
+        let req = make_request("author_routine", None);
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
     }
 
     #[test]
@@ -3748,7 +4351,7 @@ mod tests {
     #[test]
     fn test_default_impl() {
         let server = McpServer::default();
-        assert_eq!(server.list_tools().len(), 27);
+        assert_eq!(server.list_tools().len(), 29);
     }
 
     /// Build a real RuntimeHandle from a bootstrapped runtime (no packs).

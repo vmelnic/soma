@@ -724,11 +724,15 @@ impl IncomingHandler for LocalDispatchHandler {
                         origin: crate::types::routine::RoutineOrigin::PeerTransferred,
                         match_conditions: routine.match_conditions,
                         compiled_skill_path: routine.compiled_skill_path,
+                        compiled_steps: routine.compiled_steps,
                         guard_conditions: routine.guard_conditions,
                         expected_cost: routine.expected_cost,
                         expected_effect: routine.expected_effect,
                         confidence: routine.confidence,
                         autonomous: routine.autonomous,
+                        priority: routine.priority,
+                        exclusive: routine.exclusive,
+                        policy_scope: routine.policy_scope,
                     };
                     match store.lock().unwrap().register(routine_to_store) {
                         Ok(()) => {
@@ -1651,11 +1655,15 @@ mod tests {
             routine_id: "r1".to_string(),
             match_conditions: vec![],
             compiled_skill_path: vec![],
+            compiled_steps: vec![],
             guard_conditions: vec![],
             expected_cost: 1.0,
             expected_effect: vec![],
             confidence: 0.8,
             autonomous: false,
+            priority: 0,
+            exclusive: false,
+            policy_scope: None,
         };
 
         let result = executor.transfer_routine("peer-1", &routine);

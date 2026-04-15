@@ -8,7 +8,7 @@ SOMA (Greek "soma" = body) — the runtime IS the program. Two production paths:
 - **Autonomous**: SOMA receives goals → selects skills → invokes ports → learns from episodes → compiles routines → plan-following mode for known patterns. Proven with reference pack (filesystem skills, episode→schema→routine cycle).
 
 Active deliverables:
-- **soma-next/** — Rust runtime. 1225 tests, zero warnings. Cross-compiles to `aarch64-linux-android` (10MB ELF) and `aarch64-apple-ios` (9MB Mach-O) with no code changes after the rustls/reqwest fix.
+- **soma-next/** — Rust runtime. 1261 tests, zero warnings. Cross-compiles to `aarch64-linux-android` (10MB ELF) and `aarch64-apple-ios` (9MB Mach-O) with no code changes after the rustls/reqwest fix.
 - **soma-ports/** — 11 dynamically loaded port adapters + SDK.
 - **soma-helperbook/** — Service marketplace app (postgres + redis + auth, Express frontend).
 - **soma-project-smtp/** — Email delivery proof.
@@ -42,7 +42,7 @@ Active deliverables:
   - **Workspace profile override REQUIRED**: `[profile.release.package.esp-storage] opt-level = 3` — ESP32 LX6 esp-storage flash write loops are timing-sensitive and its build script refuses `opt-level = "s"`. Do not remove.
   - **Known ESP32 LX6 wifi quirk**: `wifi.scan` can crash with an illegal-instruction exception if called AFTER heavy SPI flash writes in the same boot cycle. Workaround baked in: `scripts/wire-test.py --wifi` runs wifi tests FIRST, before storage. ESP32-S3 is unaffected. Real esp-wifi 0.12 bug, not fixed here.
   - Real esp-hal 0.23, esp-wifi 0.12, esp-storage 0.4, smoltcp 0.12, xtensa-lx 0.10, xtensa-lx-rt 0.18. ESP-IDF app descriptor placed at the start of drom_seg via a custom `rwtext.x` linker fragment in `firmware/build.rs` (without it, the stage-2 bootloader rejects the image with a garbage "efuse blk rev" error).
-  - Wire protocol extension (option B): soma-next added `ListCapabilities`, `RemoveRoutine` request variants and `Capabilities`, `RoutineStored`, `RoutineRemoved` response variants — backward compatible, all 1225 soma-next tests still pass.
+  - Wire protocol extension (option B): soma-next added `ListCapabilities`, `RemoveRoutine` request variants and `Capabilities`, `RoutineStored`, `RoutineRemoved` response variants — backward compatible, all 1261 soma-next tests still pass.
   - **Runtime pin configuration**: `board` port exposes `chip_info`, `pin_map`, `configure_pin`, `probe_i2c_buses`, `reboot`. Pin assignments for every peripheral (i2c sda/scl, spi sck/mosi, adc, pwm, uart tx/rx, gpio test) are loaded from FlashKvStore at boot with `DEFAULT_*` constants as fallbacks. Changing a pin is one MCP call + a reboot — no reflash needed. ADC uses a typed `match` over valid ADC1-capable GPIOs because `esp-hal`'s `AdcChannel` trait is only implemented for concrete `GpioPin<N>`; everything else dispatches via `AnyPin::steal(n)`. Proven cycle: `board.probe_i2c_buses [[5,4],[21,22]]` → found OLED at 0x3C → `board.configure_pin` → `board.reboot` → new pin map loaded on next boot.
   - **Display port (SSD1306 OLED)**: ships with the firmware by default. Skills: `display.info`, `display.clear`, `display.draw_text {line, column?, text, invert?}`, `display.draw_text_xy {x, y, text}`, `display.fill_rect`, `display.set_contrast`, `display.flush`. Uses `ssd1306 0.10` + `embedded-graphics 0.8` + `embedded-hal-bus 0.3` (RefCellDevice) to share the I²C0 bus with the `i2c` port — both consumers get their own `RefCellDevice` handle into a leaked `&'static RefCell<I2c>`. The port crate (`ports/display/`) has NO esp-hal / ssd1306 deps; the firmware injects seven type-erased closures that capture the real driver. **PROVEN ON PHYSICAL HARDWARE (WROOM-32D)**: `scripts/thermistor-to-display.py` drives a 5-second-period sensor-to-OLED update loop from brain-side Python over direct TCP. Text is visible on the real OLED panel: "Temperature: 22.00 C" updating every tick, plus ancillary lines showing tick number and label. The MCP path works the same way (`invoke_remote_skill thermistor.read_temp` → `invoke_remote_skill display.draw_text`) — an LLM driving soma-next produces identical behavior with no firmware changes. Cleanest demonstration of the brain/body split in the codebase: leaf has no concept of "every 5 seconds" (brain cadence) or "read sensor, show on screen" (brain composition), yet the panel shows the sensor reading.
 
@@ -80,8 +80,8 @@ Episodes (ring buffer 1024) → PrefixSpan → Schemas → compile → Routines 
 - **HashEmbedder** (memory/embedder.rs): FNV-1a feature hashing, 128-dim, deterministic, works on ESP32
 - **PrefixSpan** (memory/sequence_mining.rs): frequent subsequence mining, min_support threshold
 - **Schema induction** (memory/schemas.rs): cluster episodes by embedding similarity (cosine 0.8), run PrefixSpan per cluster
-- **Routine compilation** (memory/routines.rs): high-confidence schema → fixed skill path
-- **Plan-following** (runtime/session.rs): when routine matches, working_memory.active_plan set, control loop walks the plan without fresh selection each step
+- **Routine compilation** (memory/routines.rs): high-confidence schema → compiled steps with branching (`on_success`/`on_failure` per step) and sub-routine composition
+- **Plan-following** (runtime/session.rs): when routine matches, working_memory.active_plan set, control loop walks the plan without fresh selection each step. Supports branching (Goto/Complete/Abandon), sub-routine calls via `plan_stack` (max depth 16), and priority-based routine selection
 
 ## Repository Structure
 
@@ -103,7 +103,7 @@ soma/
       adapters.rs             # SkillRegistryAdapter (routine/schema-aware), EpisodeMemoryAdapter (embedding-aware), PolicyEngineAdapter, PortBackedSkillExecutor
       interfaces/
         cli.rs                # 11 commands, build_episode_from_session, attempt_learning
-        mcp.rs                # 19 MCP tools (16 core + list_peers, invoke_remote_skill, transfer_routine), episode storage after create_goal
+        mcp.rs                # 29 MCP tools, episode storage after create_goal
       memory/
         episodes.rs           # Ring buffer (VecDeque, 1024 cap), retrieve_by_embedding
         schemas.rs            # PrefixSpan-based induction with embedding clustering
@@ -144,7 +144,7 @@ soma/
 # Runtime
 cd soma-next
 cargo build --release        # ~10MB binary
-cargo test                   # 1225+ tests, must all pass
+cargo test                   # 1261+ tests, must all pass
 cargo clippy                 # Must be zero warnings
 
 # Ports
@@ -175,7 +175,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
 - **output_schema**: use `{"schema": {"description": "any"}}` for ports returning non-objects (redis, crypto).
 - **Policy**: read-only skills skip rule evaluation. Destructive/irreversible require confirmation or host override.
 - **Episode ring buffer**: VecDeque with capacity 1024. Evicts oldest, returns to caller for consolidation.
-- **Plan-following**: WorkingMemory.active_plan + plan_step. Set from matching routine's compiled_skill_path. Critic advances/clears plan.
+- **Plan-following**: WorkingMemory.active_plan + plan_step + plan_stack. Set from matching routine's compiled_steps (or compiled_skill_path for legacy routines). Supports branching (NextStep enum), sub-routine calls (PlanFrame stack, max depth 16), and priority-based matching. Critic advances/clears plan.
 - **MCP episode storage**: create_goal in MCP handler stores episodes + triggers learning (was missing, added).
 - **MCP protocol compliance**: tools/list must return `inputSchema` (camelCase, not snake_case). tools/call results must be wrapped in `{"content": [{"type": "text", "text": "..."}]}`. Both were bugs, both fixed.
 - **macOS binary copy**: copied binaries may need `xattr -d com.apple.quarantine` + `codesign -fs -` to run.
@@ -186,6 +186,12 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
 - **LocalDispatchHandler stores**: `with_stores()` constructor wires `SchemaStore` and `RoutineStore` so transferred schemas/routines are actually persisted. Without stores, transfers are silently accepted (backward-compatible).
 - **Precondition format**: `{ condition_type: String, expression: Value, description: String }`. Missing `expression` or `description` fields cause serde deserialization failures.
 - **Wire protocol framing**: 4-byte big-endian length prefix + JSON. Max frame 16 MB. `TransportMessage` uses `#[serde(tag = "type", rename_all = "snake_case")]`.
+- **Routine composition**: `CompiledStep::SubRoutine` pushes a `PlanFrame` onto `plan_stack`. Max depth 16. Sub-routine resolution loop in session.rs step 8-10.
+- **Branching**: `NextStep` enum (Continue/Goto/CallRoutine/Complete/Abandon) on each step's `on_success`/`on_failure`. `apply_next_step` loops through exhausted frames.
+- **Priority + exclusive**: `find_matching` sorts by priority DESC, confidence DESC. Reactive monitor fires only the first match when `exclusive: true`.
+- **Policy scope**: `policy_scope` on Routine overrides `namespace` in `PolicyContext` via `build_context` in adapters.rs.
+- **author_routine**: MCP tool #29. LLM submits routine definition → validates → registers via `routine_store.register()`.
+- **Peer failover**: `HeartbeatManager` `on_peer_offline` callback emits world state facts when peers go offline, enabling declarative failover routines.
 
 ## Core Analogy
 
@@ -219,12 +225,12 @@ The body does not think. It acts. An organism's hand doesn't decide where to rea
 ## When Editing
 
 ### soma-next
-- `cargo test` after changes — 1225+ tests passing.
+- `cargo test` after changes — 1261+ tests passing.
 - `cargo clippy` — zero warnings.
-- MCP tool changes: update build_tools(), add handler, add routing (tools/call AND direct dispatch), update tool count in tests (currently 19). The `McpTool` struct uses `#[serde(rename = "inputSchema")]` — MCP spec requires camelCase. tools/call responses are wrapped via `tool_success_response()` into MCP content array format.
+- MCP tool changes: update build_tools(), add handler, add routing (tools/call AND direct dispatch), update tool count in tests (currently 29). The `McpTool` struct uses `#[serde(rename = "inputSchema")]` — MCP spec requires camelCase. tools/call responses are wrapped via `tool_success_response()` into MCP content array format.
 - Episode/learning changes: update both cli.rs AND mcp.rs (both paths store episodes).
 - Memory system: embedder.rs (GoalEmbedder trait), sequence_mining.rs (PrefixSpan), schemas.rs (induction), routines.rs (compilation).
-- Plan-following: session.rs (active_plan logic after step 6), adapters.rs (SkillRegistryAdapter, SimpleSessionCritic).
+- Plan-following: session.rs (active_plan logic after step 6), adapters.rs (SkillRegistryAdapter, SimpleSessionCritic). Plan-following now supports branching (`NextStep` enum with Goto/CallRoutine/Complete/Abandon), sub-routine composition via `plan_stack` (`PlanFrame`, max depth 16), priority-based routine matching, and per-routine `policy_scope` override.
 
 ### soma-ports
 - Each port: cdylib crate, depends on soma-port-sdk, exports `soma_port_init`.
@@ -248,13 +254,18 @@ The body does not think. It acts. An organism's hand doesn't decide where to rea
 - Autonomous path: create_goal → skill selection → port execution → episode → schema → routine → plan-following
 - Memory: ring buffer, HashEmbedder, PrefixSpan, consolidation, disk persistence
 - 8 proof projects (SMTP, S3, Postgres, LLM, MCP, S2S, MCP-Bridge, Web) + HelperBook app + multistep proof
-- 44/44 capabilities checklist, 1225 unit tests (zero clippy warnings)
+- 44/44 capabilities checklist, 1261 unit tests (zero clippy warnings)
 - Cross-compilation to Android (aarch64-linux-android), iOS (aarch64-apple-ios), **and browser (wasm32-unknown-unknown)** — all three verified
 - **MCP-client port backend** — `PortBackend::McpClient` with `Stdio` + `Http` transports. Any MCP server in any language is a port. Proven end-to-end in `soma-project-mcp-bridge` with co-resident Python + Node.js + PHP pure-stdlib MCP servers.
 - **soma-next in a browser tab** — phases 0 + 1a-1g shipped. 18 Playwright tests pass against headless Chromium in ~5 seconds. Full `Runtime` booted in a ~1.3 MB wasm cdylib via `bootstrap_from_specs()`. Three in-tab ports (`dom`, `audio`, `voice`). `soma_run_goal` drives the real `SessionController`. Plan-following via `soma_inject_routine`. LLM brain over HTTP via `scripts/brain-proxy.mjs` (OpenAI `gpt-5-mini`, `reasoning_effort: "low"`, also has `--fake` mode).
 - **ESP32-S3 + ESP32 LX6 firmware dual-chip with wifi** — 14/14 non-wifi and 16/16 wifi tests on both real boards. `./scripts/cycle.sh esp32s3 wifi` and `./scripts/cycle.sh esp32 wifi`. Real `wifi.scan` returns live APs on both chips.
 - **ESP32 runtime pin configuration + SSD1306 OLED display port** — `board.configure_pin` + `board.reboot` persists pin assignments to flash across boots (verified end-to-end over MCP). `display.draw_text` renders visibly on a real OLED panel on the WROOM-32D via `embedded-hal-bus::RefCellDevice` sharing the I²C0 bus with the `i2c` port. `scripts/thermistor-to-display.py` 5-second loop showing "Temperature: 22.00 C" + ancillary lines confirmed on the physical panel by the user.
 - **mDNS auto-discovery for leaf peers** — soma-next `--discover-lan` browses `_soma._tcp.local.` via `mdns-sd` and registers discovered peers. ESP32 leaf announces via `edge-mdns` + smoltcp UDP on 224.0.0.251:5353 after DHCP. `list_peers` returns the leaf without any static configuration.
+- **Routine composition and branching** — `CompiledStep::SubRoutine` with call stack (`PlanFrame`, `plan_stack`, max depth 16). Each step has `on_success`/`on_failure` with `NextStep` (Continue/Goto/CallRoutine/Complete/Abandon). `apply_next_step` loops through exhausted stack frames correctly.
+- **Priority and conflict resolution** — `priority: u32` on Routine (higher fires first), `exclusive: bool` (blocks lower-priority matches). `find_matching` sorts by priority DESC then confidence DESC.
+- **Per-routine policy scope** — `policy_scope: Option<String>` on Routine overrides policy namespace during plan-following execution.
+- **LLM routine authoring** — `author_routine` MCP tool (#29) lets the LLM create routines from structured definitions with steps, branching, priority, and policy scope.
+- **Peer failover** — `HeartbeatManager` `on_peer_offline` callback emits world state facts when peers go offline, enabling declarative failover routines.
 
 ## Multi-step routines: PROVEN
 
@@ -287,7 +298,7 @@ Build commands:
 - Android: `rustup target add aarch64-linux-android && cargo install cargo-ndk && cd soma-next && cargo ndk -t arm64-v8a build --release` (NDK installed via Android Studio SDK Tools, version 30.0.14904198 verified)
 - iOS: `rustup target add aarch64-apple-ios && cd soma-next && cargo build --target aarch64-apple-ios --release` (no NDK, Xcode SDK is auto-discovered via xcrun)
 
-Output: 10MB ELF (Android), 9MB Mach-O (iOS). Both contain the full runtime — control loop, memory pipeline, MCP server (27 tools), distributed transport, all built-in ports.
+Output: 10MB ELF (Android), 9MB Mach-O (iOS). Both contain the full runtime — control loop, memory pipeline, MCP server (29 tools), distributed transport, all built-in ports.
 
 iOS restriction worth noting: programmatic SMS is blocked by Apple (`MFMessageComposeViewController` requires user tap per message). iOS is best as a *perception peer* (camera, location, sensors, HealthKit). Android handles *actuation* (SMS, calls). See soma-project-android/POC.md and soma-project-ios/POC.md.
 

@@ -102,6 +102,8 @@ pub trait SchemaMemory: Send + Sync {
 /// Routine memory — finds routines matching current belief/goal.
 pub trait RoutineMemory: Send + Sync {
     fn retrieve_matching(&self, goal: &GoalSpec, belief: &BeliefState) -> Vec<Routine>;
+    /// Look up a routine by ID (needed for sub-routine resolution).
+    fn get_routine(&self, routine_id: &str) -> Option<Routine>;
 }
 
 /// Skill registry — enumerates and looks up skills.
@@ -431,6 +433,125 @@ impl SessionController {
             session.budget_remaining.steps_remaining.saturating_sub(1);
 
         session.working_memory.budget_deltas.push(delta);
+    }
+
+    /// Apply a NextStep action from a compiled routine step's on_success/on_failure.
+    /// Updates working_memory (plan_step, active_steps, plan_stack) and returns
+    /// the appropriate CriticDecision.
+    fn apply_next_step(
+        next: &crate::types::routine::NextStep,
+        wm: &mut WorkingMemory,
+        routine_memory: &dyn RoutineMemory,
+        session_id: uuid::Uuid,
+        step_index: u32,
+    ) -> CriticDecision {
+        use crate::types::routine::NextStep;
+        match next {
+            NextStep::Continue => {
+                wm.plan_step += 1;
+                // Pop through exhausted frames until we find one with
+                // remaining steps, or the entire plan is done.
+                loop {
+                    let plan_len = wm.active_steps.as_ref().map(|s| s.len()).unwrap_or(0);
+                    if wm.plan_step < plan_len {
+                        break CriticDecision::Continue;
+                    }
+                    if let Some(frame) = wm.plan_stack.pop() {
+                        debug!(
+                            session_id = %session_id,
+                            step = step_index,
+                            "sub-routine complete, returning to parent"
+                        );
+                        wm.active_steps = Some(frame.steps);
+                        wm.plan_step = frame.step_index;
+                        // Loop again to check if parent is also exhausted
+                    } else {
+                        debug!(
+                            session_id = %session_id,
+                            step = step_index,
+                            "plan-following: all steps completed"
+                        );
+                        wm.active_steps = None;
+                        wm.plan_step = 0;
+                        break CriticDecision::Stop;
+                    }
+                }
+            }
+            NextStep::Goto { step_index: target } => {
+                debug!(
+                    session_id = %session_id,
+                    step = step_index,
+                    target = target,
+                    "plan-following: branching to step"
+                );
+                wm.plan_step = *target;
+                CriticDecision::Continue
+            }
+            NextStep::CallRoutine { routine_id } => {
+                if wm.plan_stack.len() >= crate::types::routine::MAX_CALL_DEPTH {
+                    warn!(
+                        session_id = %session_id,
+                        "max call depth in branch, abandoning plan"
+                    );
+                    wm.active_steps = None;
+                    wm.plan_step = 0;
+                    wm.plan_stack.clear();
+                    return CriticDecision::Revise;
+                }
+                if let Some(ref steps) = wm.active_steps {
+                    let frame = crate::types::session::PlanFrame {
+                        steps: steps.clone(),
+                        step_index: wm.plan_step + 1,
+                        routine_id: routine_id.clone(),
+                    };
+                    wm.plan_stack.push(frame);
+                }
+                if let Some(routine) = routine_memory.get_routine(routine_id) {
+                    let sub_steps = routine.effective_steps();
+                    wm.active_steps = Some(sub_steps);
+                    wm.plan_step = 0;
+                    CriticDecision::Continue
+                } else {
+                    warn!(
+                        session_id = %session_id,
+                        routine_id = %routine_id,
+                        "branch target routine not found, abandoning"
+                    );
+                    wm.active_steps = None;
+                    wm.plan_step = 0;
+                    wm.plan_stack.clear();
+                    CriticDecision::Revise
+                }
+            }
+            NextStep::Complete => {
+                // Pop through frames until we find a parent with remaining
+                // steps, or the entire plan is done.
+                loop {
+                    if let Some(frame) = wm.plan_stack.pop() {
+                        wm.active_steps = Some(frame.steps);
+                        wm.plan_step = frame.step_index;
+                        let parent_len = wm.active_steps.as_ref().map(|s| s.len()).unwrap_or(0);
+                        if wm.plan_step < parent_len {
+                            break CriticDecision::Continue;
+                        }
+                        // Parent also exhausted — keep popping
+                    } else {
+                        wm.active_steps = None;
+                        wm.plan_step = 0;
+                        break CriticDecision::Stop;
+                    }
+                }
+            }
+            NextStep::Abandon => {
+                debug!(
+                    session_id = %session_id,
+                    step = step_index,
+                    "plan step triggered abandon"
+                );
+                wm.clear_plan();
+                CriticDecision::Revise
+            }
+        }
     }
 
     /// Build a belief patch from an observation (minimal: records facts from the result).
@@ -1489,8 +1610,11 @@ impl SessionRuntime for SessionController {
                 budget_deltas: Vec::new(),
                 output_bindings: Vec::new(),
                 active_plan: None,
+                active_steps: None,
                 plan_step: 0,
+                plan_stack: Vec::new(),
                 used_plan_following: false,
+                active_policy_scope: None,
             },
             status: SessionStatus::Created,
             trace: SessionTrace { steps: Vec::new() },
@@ -1630,30 +1754,55 @@ impl SessionRuntime for SessionController {
         // ---------------------------------------------------------------
         // Step 6b: plan-following — load or advance an active plan
         // ---------------------------------------------------------------
-        // If no active plan and a routine was found, load the routine's
-        // compiled skill path as the plan.
-        if session.working_memory.active_plan.is_none()
-            && let Some(routine) = routines.iter().find(|r| !r.compiled_skill_path.is_empty())
+        // If no active plan/steps and a routine was found, load it.
+        if session.working_memory.active_steps.is_none()
+            && session.working_memory.active_plan.is_none()
+            && let Some(routine) = routines.iter().find(|r| {
+                !r.compiled_steps.is_empty() || !r.compiled_skill_path.is_empty()
+            })
         {
-            debug!(
-                session_id = %session.session_id,
-                routine_id = %routine.routine_id,
-                path_len = routine.compiled_skill_path.len(),
-                "activating plan-following mode from routine"
-            );
-            session.working_memory.active_plan = Some(routine.compiled_skill_path.clone());
-            session.working_memory.plan_step = 0;
-            session.working_memory.used_plan_following = true;
+            let steps = routine.effective_steps();
+            if !steps.is_empty() {
+                debug!(
+                    session_id = %session.session_id,
+                    routine_id = %routine.routine_id,
+                    step_count = steps.len(),
+                    "activating plan-following mode from routine"
+                );
+                session.working_memory.active_steps = Some(steps);
+                session.working_memory.plan_step = 0;
+                session.working_memory.used_plan_following = true;
+                session.working_memory.active_policy_scope = routine.policy_scope.clone();
+            }
         }
 
-        // If active plan is exhausted, clear it.
-        if let Some(ref plan) = session.working_memory.active_plan
+        // If active_steps is exhausted, pop from stack or clear.
+        if let Some(ref steps) = session.working_memory.active_steps
+            && session.working_memory.plan_step >= steps.len()
+        {
+            if let Some(frame) = session.working_memory.plan_stack.pop() {
+                debug!(
+                    session_id = %session.session_id,
+                    returning_to = %frame.routine_id,
+                    "sub-routine complete, returning to parent"
+                );
+                session.working_memory.active_steps = Some(frame.steps);
+                session.working_memory.plan_step = frame.step_index;
+            } else {
+                debug!(
+                    session_id = %session.session_id,
+                    "plan-following complete, clearing active steps"
+                );
+                session.working_memory.active_steps = None;
+                session.working_memory.plan_step = 0;
+            }
+        }
+
+        // Legacy: if active_plan is exhausted, clear it.
+        if session.working_memory.active_steps.is_none()
+            && let Some(ref plan) = session.working_memory.active_plan
             && session.working_memory.plan_step >= plan.len()
         {
-            debug!(
-                session_id = %session.session_id,
-                "plan-following complete, clearing active plan"
-            );
             session.working_memory.active_plan = None;
             session.working_memory.plan_step = 0;
         }
@@ -1672,34 +1821,134 @@ impl SessionRuntime for SessionController {
         // from the active plan directly.
         // ---------------------------------------------------------------
 
-        // Try plan-following first: resolve the next skill from the active plan.
-        let plan_selected = session
-            .working_memory
-            .active_plan
-            .as_ref()
-            .and_then(|plan| plan.get(session.working_memory.plan_step))
-            .cloned()
-            .and_then(|skill_id| {
-                self.skill_registry.get_skill(&skill_id).map(|s| {
-                    debug!(
+        // Resolve plan step — handle sub-routine calls by pushing frames
+        // until we land on a Skill step.
+        let plan_selected: Option<(String, _)> = if session.working_memory.active_steps.is_some() {
+            use crate::types::routine::{CompiledStep, MAX_CALL_DEPTH};
+            let mut resolved = None;
+            let mut depth = 0;
+            loop {
+                if depth >= MAX_CALL_DEPTH {
+                    warn!(
                         session_id = %session.session_id,
-                        plan_step = session.working_memory.plan_step,
-                        skill_id = %skill_id,
-                        "plan-following: selecting skill from active plan"
+                        "max sub-routine call depth reached, abandoning plan"
                     );
-                    (skill_id, s.clone())
-                })
-            });
+                    session.working_memory.active_steps = None;
+                    session.working_memory.plan_step = 0;
+                    session.working_memory.plan_stack.clear();
+                    break;
+                }
+                depth += 1;
 
-        // If plan resolution failed (skill not found), abandon the plan.
-        if session.working_memory.active_plan.is_some() && plan_selected.is_none() {
-            warn!(
-                session_id = %session.session_id,
-                "plan skill not found in registry, abandoning plan"
-            );
-            session.working_memory.active_plan = None;
-            session.working_memory.plan_step = 0;
-        }
+                let step = session.working_memory.active_steps.as_ref()
+                    .and_then(|s| s.get(session.working_memory.plan_step))
+                    .cloned();
+
+                match step {
+                    Some(CompiledStep::Skill { ref skill_id, .. }) => {
+                        resolved = self.skill_registry.get_skill(skill_id).map(|s| {
+                            debug!(
+                                session_id = %session.session_id,
+                                plan_step = session.working_memory.plan_step,
+                                skill_id = %skill_id,
+                                "plan-following: selecting skill from compiled step"
+                            );
+                            (skill_id.clone(), s.clone())
+                        });
+                        if resolved.is_none() {
+                            warn!(
+                                session_id = %session.session_id,
+                                skill_id = %skill_id,
+                                "plan skill not found in registry, abandoning plan"
+                            );
+                            session.working_memory.active_steps = None;
+                            session.working_memory.plan_step = 0;
+                            session.working_memory.plan_stack.clear();
+                        }
+                        break;
+                    }
+                    Some(CompiledStep::SubRoutine { ref routine_id, .. }) => {
+                        if let Some(sub) = self.routine_memory.get_routine(routine_id) {
+                            let sub_steps = sub.effective_steps();
+                            if sub_steps.is_empty() {
+                                warn!(
+                                    session_id = %session.session_id,
+                                    routine_id = %routine_id,
+                                    "sub-routine has no steps, skipping"
+                                );
+                                session.working_memory.plan_step += 1;
+                                continue;
+                            }
+                            let current_steps = session.working_memory.active_steps.take().unwrap();
+                            let frame = crate::types::session::PlanFrame {
+                                steps: current_steps,
+                                step_index: session.working_memory.plan_step + 1,
+                                routine_id: routine_id.clone(),
+                            };
+                            session.working_memory.plan_stack.push(frame);
+                            session.working_memory.active_steps = Some(sub_steps);
+                            session.working_memory.plan_step = 0;
+                            debug!(
+                                session_id = %session.session_id,
+                                routine_id = %routine_id,
+                                stack_depth = session.working_memory.plan_stack.len(),
+                                "entered sub-routine"
+                            );
+                        } else {
+                            warn!(
+                                session_id = %session.session_id,
+                                routine_id = %routine_id,
+                                "sub-routine not found, abandoning plan"
+                            );
+                            session.working_memory.active_steps = None;
+                            session.working_memory.plan_step = 0;
+                            session.working_memory.plan_stack.clear();
+                            break;
+                        }
+                    }
+                    None => {
+                        // Past end — try to pop from stack
+                        if let Some(frame) = session.working_memory.plan_stack.pop() {
+                            session.working_memory.active_steps = Some(frame.steps);
+                            session.working_memory.plan_step = frame.step_index;
+                        } else {
+                            session.working_memory.active_steps = None;
+                            session.working_memory.plan_step = 0;
+                            break;
+                        }
+                    }
+                }
+            }
+            resolved
+        } else {
+            // Legacy active_plan path
+            let selected = session
+                .working_memory
+                .active_plan
+                .as_ref()
+                .and_then(|plan| plan.get(session.working_memory.plan_step))
+                .cloned()
+                .and_then(|skill_id| {
+                    self.skill_registry.get_skill(&skill_id).map(|s| {
+                        debug!(
+                            session_id = %session.session_id,
+                            plan_step = session.working_memory.plan_step,
+                            skill_id = %skill_id,
+                            "plan-following: selecting skill from active plan (legacy)"
+                        );
+                        (skill_id, s.clone())
+                    })
+                });
+            if session.working_memory.active_plan.is_some() && selected.is_none() {
+                warn!(
+                    session_id = %session.session_id,
+                    "plan skill not found in registry, abandoning plan"
+                );
+                session.working_memory.active_plan = None;
+                session.working_memory.plan_step = 0;
+            }
+            selected
+        };
 
         let (scores, chosen_skill) = if let Some((skill_id, skill)) = plan_selected {
             let plan_score = CandidateScore {
@@ -1927,10 +2176,30 @@ impl SessionRuntime for SessionController {
         // ---------------------------------------------------------------
         // Plan-following: override the critic decision based on plan state
         // ---------------------------------------------------------------
-        let critic_decision = if session.working_memory.active_plan.is_some() {
+        let critic_decision = if session.working_memory.active_steps.is_some() {
+            use crate::types::routine::NextStep;
+
+            let current_step = session.working_memory.active_steps.as_ref()
+                .and_then(|s| s.get(session.working_memory.plan_step));
+
+            let next_action = if observation.success {
+                current_step.map(|s| s.on_success().clone())
+                    .unwrap_or(NextStep::Continue)
+            } else {
+                current_step.map(|s| s.on_failure().clone())
+                    .unwrap_or(NextStep::Abandon)
+            };
+
+            Self::apply_next_step(
+                &next_action,
+                &mut session.working_memory,
+                &*self.routine_memory,
+                session.session_id,
+                step_index,
+            )
+        } else if session.working_memory.active_plan.is_some() {
+            // Legacy active_plan path (flat skill sequence, no branching)
             if !observation.success {
-                // Failure during plan execution — abandon the plan and
-                // fall back to deliberation on the next step.
                 debug!(
                     session_id = %session.session_id,
                     step = step_index,
@@ -1940,7 +2209,6 @@ impl SessionRuntime for SessionController {
                 session.working_memory.plan_step = 0;
                 CriticDecision::Revise
             } else {
-                // Advance to the next step in the plan.
                 session.working_memory.plan_step += 1;
                 let plan_len = session
                     .working_memory
@@ -1950,24 +2218,10 @@ impl SessionRuntime for SessionController {
                     .unwrap_or(0);
 
                 if session.working_memory.plan_step >= plan_len {
-                    // Plan complete — signal completion.
-                    debug!(
-                        session_id = %session.session_id,
-                        step = step_index,
-                        "plan-following: all steps completed"
-                    );
                     session.working_memory.active_plan = None;
                     session.working_memory.plan_step = 0;
                     CriticDecision::Stop
                 } else {
-                    // More steps remain — continue regardless of what the
-                    // base critic decided (it would Stop on first success).
-                    debug!(
-                        session_id = %session.session_id,
-                        step = step_index,
-                        remaining = plan_len - session.working_memory.plan_step,
-                        "plan-following: continuing to next plan step"
-                    );
                     CriticDecision::Continue
                 }
             }
@@ -2273,6 +2527,9 @@ pub struct NoopRoutineMemory;
 impl RoutineMemory for NoopRoutineMemory {
     fn retrieve_matching(&self, _goal: &GoalSpec, _belief: &BeliefState) -> Vec<Routine> {
         Vec::new()
+    }
+    fn get_routine(&self, _routine_id: &str) -> Option<Routine> {
+        None
     }
 }
 
@@ -3967,6 +4224,321 @@ mod tests {
         let mut ctrl = make_stub_controller();
         let result = ctrl.restore_session(b"this is not json");
         assert!(result.is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // apply_next_step tests — plan-following with CompiledStep/NextStep
+    // branching and sub-routine support.
+    // -----------------------------------------------------------------------
+
+    use crate::types::routine::{CompiledStep, NextStep, Routine, RoutineOrigin, MAX_CALL_DEPTH};
+    use crate::types::session::PlanFrame;
+    use std::collections::HashMap;
+
+    /// A test routine memory that resolves routines by ID from a HashMap.
+    struct TestRoutineMemory {
+        routines: HashMap<String, Routine>,
+    }
+
+    impl RoutineMemory for TestRoutineMemory {
+        fn retrieve_matching(&self, _goal: &GoalSpec, _belief: &BeliefState) -> Vec<Routine> {
+            self.routines.values().cloned().collect()
+        }
+
+        fn get_routine(&self, routine_id: &str) -> Option<Routine> {
+            self.routines.get(routine_id).cloned()
+        }
+    }
+
+    /// Build a minimal Routine with the given ID and compiled_skill_path.
+    /// Uses `effective_steps()` to convert to CompiledStep entries.
+    fn test_routine(id: &str, skill_ids: &[&str]) -> Routine {
+        Routine {
+            routine_id: id.to_string(),
+            namespace: "test".to_string(),
+            origin: RoutineOrigin::SchemaCompiled,
+            match_conditions: Vec::new(),
+            compiled_skill_path: skill_ids.iter().map(|s| s.to_string()).collect(),
+            compiled_steps: Vec::new(),
+            guard_conditions: Vec::new(),
+            expected_cost: 0.1,
+            expected_effect: Vec::new(),
+            confidence: 0.9,
+            autonomous: false,
+            priority: 0,
+            exclusive: false,
+            policy_scope: None,
+        }
+    }
+
+    /// Build a fresh WorkingMemory with active_steps and plan_step set.
+    fn test_working_memory(steps: Vec<CompiledStep>, plan_step: usize) -> WorkingMemory {
+        WorkingMemory {
+            active_bindings: Vec::new(),
+            unresolved_slots: Vec::new(),
+            current_subgoal: None,
+            recent_observations: Vec::new(),
+            candidate_shortlist: Vec::new(),
+            current_branch_state: None,
+            budget_deltas: Vec::new(),
+            output_bindings: Vec::new(),
+            active_plan: None,
+            active_steps: Some(steps),
+            plan_step,
+            plan_stack: Vec::new(),
+            used_plan_following: false,
+            active_policy_scope: None,
+        }
+    }
+
+    /// Build a simple CompiledStep::Skill with Continue/Abandon defaults.
+    fn simple_step(skill_id: &str) -> CompiledStep {
+        CompiledStep::Skill {
+            skill_id: skill_id.to_string(),
+            on_success: NextStep::Continue,
+            on_failure: NextStep::Abandon,
+        }
+    }
+
+    #[test]
+    fn test_apply_next_step_continue_advances() {
+        let steps = vec![simple_step("a"), simple_step("b"), simple_step("c")];
+        let mut wm = test_working_memory(steps, 0);
+        let rm = NoopRoutineMemory;
+        let sid = Uuid::new_v4();
+
+        let decision = SessionController::apply_next_step(
+            &NextStep::Continue, &mut wm, &rm, sid, 0,
+        );
+
+        assert_eq!(wm.plan_step, 1);
+        assert!(wm.active_steps.is_some());
+        assert_eq!(decision, CriticDecision::Continue);
+    }
+
+    #[test]
+    fn test_apply_next_step_continue_completes_plan() {
+        let steps = vec![simple_step("a"), simple_step("b")];
+        let mut wm = test_working_memory(steps, 1);
+        let rm = NoopRoutineMemory;
+        let sid = Uuid::new_v4();
+
+        let decision = SessionController::apply_next_step(
+            &NextStep::Continue, &mut wm, &rm, sid, 1,
+        );
+
+        // plan_step was incremented to 2, past end of 2-element list.
+        // No stack frames → plan completes.
+        assert!(wm.active_steps.is_none());
+        assert_eq!(wm.plan_step, 0);
+        assert_eq!(decision, CriticDecision::Stop);
+    }
+
+    #[test]
+    fn test_apply_next_step_continue_pops_stack() {
+        // Parent routine has 3 steps; sub-routine has 1 step.
+        let parent_steps = vec![
+            simple_step("p0"),
+            simple_step("p1"),
+            simple_step("p2"),
+        ];
+        let sub_steps = vec![simple_step("sub0")];
+
+        let mut wm = test_working_memory(sub_steps, 0);
+        wm.plan_stack.push(PlanFrame {
+            steps: parent_steps.clone(),
+            step_index: 2, // resume at parent step 2 after sub-routine
+            routine_id: "parent_r".to_string(),
+        });
+
+        let rm = NoopRoutineMemory;
+        let sid = Uuid::new_v4();
+
+        let decision = SessionController::apply_next_step(
+            &NextStep::Continue, &mut wm, &rm, sid, 0,
+        );
+
+        // plan_step incremented to 1, past end of 1-element sub-routine.
+        // Stack had a frame → popped, restored parent.
+        assert_eq!(wm.active_steps.as_ref().unwrap(), &parent_steps);
+        assert_eq!(wm.plan_step, 2);
+        assert!(wm.plan_stack.is_empty());
+        assert_eq!(decision, CriticDecision::Continue);
+    }
+
+    #[test]
+    fn test_apply_next_step_goto() {
+        let steps = vec![
+            simple_step("s0"),
+            simple_step("s1"),
+            simple_step("s2"),
+            simple_step("s3"),
+            simple_step("s4"),
+        ];
+        let mut wm = test_working_memory(steps, 1);
+        let rm = NoopRoutineMemory;
+        let sid = Uuid::new_v4();
+
+        let decision = SessionController::apply_next_step(
+            &NextStep::Goto { step_index: 3 }, &mut wm, &rm, sid, 1,
+        );
+
+        assert_eq!(wm.plan_step, 3);
+        assert!(wm.active_steps.is_some());
+        assert_eq!(decision, CriticDecision::Continue);
+    }
+
+    #[test]
+    fn test_apply_next_step_call_routine() {
+        let parent_steps = vec![
+            simple_step("p0"),
+            simple_step("p1"),
+            simple_step("p2"),
+        ];
+        let mut wm = test_working_memory(parent_steps.clone(), 1);
+
+        let sub_routine = test_routine("sub_r", &["sub0", "sub1"]);
+        let mut routines = HashMap::new();
+        routines.insert("sub_r".to_string(), sub_routine.clone());
+        let rm = TestRoutineMemory { routines };
+
+        let sid = Uuid::new_v4();
+        let decision = SessionController::apply_next_step(
+            &NextStep::CallRoutine { routine_id: "sub_r".to_string() },
+            &mut wm, &rm, sid, 1,
+        );
+
+        // Stack should have the parent frame with resume at step 2.
+        assert_eq!(wm.plan_stack.len(), 1);
+        assert_eq!(wm.plan_stack[0].steps, parent_steps);
+        assert_eq!(wm.plan_stack[0].step_index, 2);
+
+        // Active steps should be the sub-routine's effective steps.
+        let expected_sub_steps = sub_routine.effective_steps();
+        assert_eq!(wm.active_steps.as_ref().unwrap(), &expected_sub_steps);
+        assert_eq!(wm.plan_step, 0);
+        assert_eq!(decision, CriticDecision::Continue);
+    }
+
+    #[test]
+    fn test_apply_next_step_call_routine_not_found() {
+        let steps = vec![simple_step("p0"), simple_step("p1")];
+        let mut wm = test_working_memory(steps, 0);
+        let rm = TestRoutineMemory { routines: HashMap::new() };
+        let sid = Uuid::new_v4();
+
+        let decision = SessionController::apply_next_step(
+            &NextStep::CallRoutine { routine_id: "missing".to_string() },
+            &mut wm, &rm, sid, 0,
+        );
+
+        assert!(wm.active_steps.is_none());
+        assert_eq!(wm.plan_step, 0);
+        assert!(wm.plan_stack.is_empty());
+        assert_eq!(decision, CriticDecision::Revise);
+    }
+
+    #[test]
+    fn test_apply_next_step_complete() {
+        let steps = vec![simple_step("a"), simple_step("b"), simple_step("c")];
+        let mut wm = test_working_memory(steps, 1);
+        let rm = NoopRoutineMemory;
+        let sid = Uuid::new_v4();
+
+        let decision = SessionController::apply_next_step(
+            &NextStep::Complete, &mut wm, &rm, sid, 1,
+        );
+
+        // No stack → plan is done.
+        assert!(wm.active_steps.is_none());
+        assert_eq!(wm.plan_step, 0);
+        assert_eq!(decision, CriticDecision::Stop);
+    }
+
+    #[test]
+    fn test_apply_next_step_complete_pops_stack() {
+        let parent_steps = vec![
+            simple_step("p0"),
+            simple_step("p1"),
+            simple_step("p2"),
+        ];
+        let sub_steps = vec![simple_step("sub0")];
+        let mut wm = test_working_memory(sub_steps, 0);
+        wm.plan_stack.push(PlanFrame {
+            steps: parent_steps.clone(),
+            step_index: 2,
+            routine_id: "parent_r".to_string(),
+        });
+
+        let rm = NoopRoutineMemory;
+        let sid = Uuid::new_v4();
+
+        let decision = SessionController::apply_next_step(
+            &NextStep::Complete, &mut wm, &rm, sid, 0,
+        );
+
+        // Stack popped → restored parent.
+        assert_eq!(wm.active_steps.as_ref().unwrap(), &parent_steps);
+        assert_eq!(wm.plan_step, 2);
+        assert!(wm.plan_stack.is_empty());
+        assert_eq!(decision, CriticDecision::Continue);
+    }
+
+    #[test]
+    fn test_apply_next_step_abandon() {
+        let steps = vec![simple_step("a"), simple_step("b")];
+        let mut wm = test_working_memory(steps, 1);
+        // Put something on the stack to verify it gets cleared.
+        wm.plan_stack.push(PlanFrame {
+            steps: vec![simple_step("parent0")],
+            step_index: 0,
+            routine_id: "r".to_string(),
+        });
+
+        let rm = NoopRoutineMemory;
+        let sid = Uuid::new_v4();
+
+        let decision = SessionController::apply_next_step(
+            &NextStep::Abandon, &mut wm, &rm, sid, 1,
+        );
+
+        assert!(wm.active_steps.is_none());
+        assert_eq!(wm.plan_step, 0);
+        assert!(wm.plan_stack.is_empty());
+        assert_eq!(decision, CriticDecision::Revise);
+    }
+
+    #[test]
+    fn test_apply_next_step_max_call_depth() {
+        let steps = vec![simple_step("a"), simple_step("b")];
+        let mut wm = test_working_memory(steps, 0);
+
+        // Fill the stack to MAX_CALL_DEPTH.
+        for i in 0..MAX_CALL_DEPTH {
+            wm.plan_stack.push(PlanFrame {
+                steps: vec![simple_step(&format!("frame_{}", i))],
+                step_index: 0,
+                routine_id: format!("r_{}", i),
+            });
+        }
+
+        // Provide the routine so the only reason for failure is depth.
+        let sub = test_routine("deep_r", &["d0"]);
+        let mut routines = HashMap::new();
+        routines.insert("deep_r".to_string(), sub);
+        let rm = TestRoutineMemory { routines };
+
+        let sid = Uuid::new_v4();
+        let decision = SessionController::apply_next_step(
+            &NextStep::CallRoutine { routine_id: "deep_r".to_string() },
+            &mut wm, &rm, sid, 0,
+        );
+
+        // Max depth exceeded → abandons.
+        assert!(wm.active_steps.is_none());
+        assert_eq!(wm.plan_step, 0);
+        assert!(wm.plan_stack.is_empty());
+        assert_eq!(decision, CriticDecision::Revise);
     }
 
 }

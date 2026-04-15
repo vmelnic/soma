@@ -67,10 +67,15 @@ episodes produced a general schema.
 
 **Routine compilation = basal ganglia habit formation.** When a
 schema reaches sufficient confidence (0.7+), it compiles into a
-routine — a fixed skill path that executes without deliberation.
+routine — a compiled step sequence that executes without deliberation.
 The routine IS the memory. It's not consulted, it's executed.
 Like how you don't think about each step of walking — the motor
-program runs on its own.
+program runs on its own. Compiled routines now support composition
+(sub-routine calls via a call stack, max depth 16) and branching
+(each step has `on_success`/`on_failure` paths) — mirroring how
+biological motor programs nest sub-programs (reaching includes
+grip adjustment) and branch on sensory feedback (surface is hot,
+withdraw hand).
 
 ## What the brain does vs what the body does
 

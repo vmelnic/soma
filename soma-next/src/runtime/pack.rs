@@ -563,9 +563,9 @@ impl DefaultPackRuntime {
                     rid
                 ));
             }
-            if routine.compiled_skill_path.is_empty() {
+            if routine.compiled_skill_path.is_empty() && routine.compiled_steps.is_empty() {
                 errors.push(format!(
-                    "routine '{}': compiled_skill_path is empty",
+                    "routine '{}': both compiled_skill_path and compiled_steps are empty",
                     rid
                 ));
             }
@@ -3365,11 +3365,15 @@ mod tests {
                     description: "test".to_string(),
                 }],
                 compiled_skill_path: vec!["ns1.test_skill".to_string()],
+                compiled_steps: vec![],
                 guard_conditions: Vec::new(),
                 expected_cost: 0.1,
                 expected_effect: Vec::new(),
                 confidence: 0.9,
                 autonomous: false,
+                priority: 0,
+                exclusive: false,
+                policy_scope: None,
             })
             .unwrap();
 
@@ -3385,11 +3389,15 @@ mod tests {
                     description: "other".to_string(),
                 }],
                 compiled_skill_path: vec!["other.ping".to_string()],
+                compiled_steps: vec![],
                 guard_conditions: Vec::new(),
                 expected_cost: 0.05,
                 expected_effect: Vec::new(),
                 confidence: 0.85,
                 autonomous: false,
+                priority: 0,
+                exclusive: false,
+                policy_scope: None,
             })
             .unwrap();
 
@@ -3431,11 +3439,15 @@ mod tests {
                     description: "test".to_string(),
                 }],
                 compiled_skill_path: vec!["ns1.test_skill".to_string()],
+                compiled_steps: vec![],
                 guard_conditions: Vec::new(),
                 expected_cost: 0.1,
                 expected_effect: Vec::new(),
                 confidence: 0.9,
                 autonomous: false,
+                priority: 0,
+                exclusive: false,
+                policy_scope: None,
             })
             .unwrap();
 
@@ -3472,11 +3484,15 @@ mod tests {
                     description: "test".to_string(),
                 }],
                 compiled_skill_path: vec!["ns1.test_skill".to_string()],
+                compiled_steps: vec![],
                 guard_conditions: Vec::new(),
                 expected_cost: 0.1,
                 expected_effect: Vec::new(),
                 confidence: 0.9,
                 autonomous: false,
+                priority: 0,
+                exclusive: false,
+                policy_scope: None,
             })
             .unwrap();
 

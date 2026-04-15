@@ -65,7 +65,7 @@ target named `soma` from [`src/main.rs`](src/main.rs).
 cd soma-next
 
 cargo build                              # debug binary → target/debug/soma (~32 MB)
-cargo test                               # 1225+ tests, all must pass
+cargo test                               # 1261+ tests, all must pass
 cargo clippy --all-targets --all-features # must be zero warnings
 ```
 
@@ -196,7 +196,7 @@ cargo run -- --mcp --pack packs/reference/manifest.json
 SOMA_PORTS_PLUGIN_PATH=../soma-ports/target/release cargo run -- --mcp --pack auto
 ```
 
-The server exposes 27 runtime tools:
+The server exposes 29 runtime tools:
 
 **16 core tools:**
 
@@ -212,9 +212,10 @@ The server exposes 27 runtime tools:
 - `list_schedules` — list active schedules
 - `cancel_schedule` — cancel by UUID
 
-**3 distributed peer tools:**
+**4 distributed peer tools:**
 
 - `list_peers`, `invoke_remote_skill`, `transfer_routine`
+- `replicate_routine` — replicate a compiled routine to remote peers (optional `peer_ids` targets specific peers; omitted = all known peers)
 
 **3 world state and learning tools:**
 
@@ -222,10 +223,11 @@ The server exposes 27 runtime tools:
 - `dump_world_state` — return current world state snapshot
 - `set_routine_autonomous` — mark a routine to fire automatically when conditions match
 
-**2 execution tools:**
+**3 execution tools:**
 
 - `execute_routine` — run a compiled routine by ID with pre-loaded plan
 - `trigger_consolidation` — manually trigger the episode → schema → routine pipeline
+- `author_routine` — create or update a routine from a structured definition (LLM translates behavioral intent into compiled routine with steps, branching, priority, and policy scope)
 
 Implementation lives in [`src/interfaces/mcp.rs`](src/interfaces/mcp.rs).
 

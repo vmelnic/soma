@@ -509,11 +509,15 @@ mod tests {
                 description: "domain = file".to_string(),
             }],
             compiled_skill_path: vec!["a".into(), "b".into()],
+            compiled_steps: vec![],
             guard_conditions: Vec::new(),
             expected_cost: 0.1,
             expected_effect: Vec::new(),
             confidence: 0.9,
             autonomous: false,
+            priority: 0,
+            exclusive: false,
+            policy_scope: None,
         }
     }
 

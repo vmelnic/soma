@@ -36,7 +36,7 @@ emerged from observation — nobody designed it.
 
 ## SOMA is not merely an MCP server
 
-SOMA exposes an MCP interface (27 tools over JSON-RPC 2.0), but the MCP
+SOMA exposes an MCP interface (29 tools over JSON-RPC 2.0), but the MCP
 server is one of six architectural layers. Underneath it: a 16-step
 control loop with budget-constrained deliberation, a three-tier episodic
 learning pipeline, a policy engine with seven lifecycle hooks, and a

@@ -6,6 +6,7 @@ use super::belief::BeliefState;
 use super::common::Budget;
 use super::goal::GoalSpec;
 use super::observation::PortCallRecord;
+use super::routine::CompiledStep;
 
 /// What the session controller should do after a skill execution fails.
 /// The `handle_failure` method on `SessionController` returns one of these
@@ -92,15 +93,46 @@ pub struct WorkingMemory {
     /// instead of scoring/selecting from scratch each step.
     #[serde(default)]
     pub active_plan: Option<Vec<String>>,
-    /// Current position within `active_plan`. Incremented after each
-    /// successful plan step; reset to 0 when a new plan is loaded.
+    /// Rich plan representation with branching and sub-routine support.
+    /// When present, takes precedence over `active_plan`.
+    #[serde(default)]
+    pub active_steps: Option<Vec<CompiledStep>>,
+    /// Current position within `active_plan` or `active_steps`. Incremented
+    /// after each successful plan step; reset to 0 when a new plan is loaded.
     #[serde(default)]
     pub plan_step: usize,
+    /// Call stack for sub-routine nesting. Each frame stores the calling
+    /// routine's steps and resume position so execution continues after
+    /// the sub-routine completes.
+    #[serde(default)]
+    pub plan_stack: Vec<PlanFrame>,
     /// Set to true when the session activates a compiled routine's plan.
     /// Used by episode storage to skip noise — successful plan-following
     /// sessions don't need new episodes (the routine already captures the behavior).
     #[serde(default)]
     pub used_plan_following: bool,
+    #[serde(default)]
+    pub active_policy_scope: Option<String>,
+}
+
+impl WorkingMemory {
+    /// Clear all plan-following state. Used when a plan completes, is
+    /// abandoned, or fails irrecoverably.
+    pub fn clear_plan(&mut self) {
+        self.active_steps = None;
+        self.active_plan = None;
+        self.plan_step = 0;
+        self.plan_stack.clear();
+        self.active_policy_scope = None;
+    }
+}
+
+/// A single frame on the plan call stack for sub-routine composition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanFrame {
+    pub steps: Vec<CompiledStep>,
+    pub step_index: usize,
+    pub routine_id: String,
 }
 
 /// Provenance of a bound input value — which source the runtime drew the value from.

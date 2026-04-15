@@ -21,7 +21,7 @@ The same architecture runs on microcontrollers. `soma-project-esp32` deploys a `
 
 | Component | What | Status |
 |---|---|---|
-| [soma-next](soma-next/) | Rust runtime binary. 1225 tests, zero warnings. 27 MCP tools. Cross-compiles to Android (aarch64-linux-android), iOS (aarch64-apple-ios), and browser (wasm32-unknown-unknown). | Production |
+| [soma-next](soma-next/) | Rust runtime binary. 1261 tests, zero warnings. 29 MCP tools. Cross-compiles to Android (aarch64-linux-android), iOS (aarch64-apple-ios), and browser (wasm32-unknown-unknown). | Production |
 | [soma-ports](soma-ports/) | 11 dynamically loaded port adapters + SDK | Production |
 | [soma-helperbook](soma-helperbook/) | Service marketplace — first real app (postgres + redis + auth) | Production |
 | [soma-project-smtp](soma-project-smtp/) | SMTP email delivery via SOMA MCP | Production |
@@ -95,7 +95,7 @@ The runtime queried your real database. No application code was written.
 Runtime Logic — goal parsing, skill selection, belief state, policy, plan-following
 Adapter Layer — bridges traits to implementations (embedder, predictor, critic, executor)
 Memory Stores — episodes (ring buffer), schemas (PrefixSpan-induced), routines (compiled)
-Interfaces — CLI (11 commands), MCP server (27 tools)
+Interfaces — CLI (11 commands), MCP server (29 tools)
 Distributed — TCP/TLS, WebSocket, Unix socket, peer delegation
 Ports — built-in (filesystem, http) + dynamic (.dylib/.so via soma-port-sdk)
 ```
@@ -116,7 +116,7 @@ Consolidation cycle: episodes accumulate → HashEmbedder clusters by semantic s
 
 - [Vision](docs/vision.md) — Why SOMA exists, Web 4, the LLM context problem
 - [Architecture](docs/architecture.md) — 6-layer runtime, type system, skill/port/pack contracts
-- [MCP Interface](docs/mcp.md) — 27 tools, invoke_port, dump_state, scheduler, world state, distributed peer tools, JSON-RPC
+- [MCP Interface](docs/mcp.md) — 29 tools, invoke_port, dump_state, scheduler, world state, distributed peer tools, JSON-RPC
 - [What SOMA Is Not](docs/what-soma-is-not.md) — Not a code generator, LLM wrapper, workflow engine, or chatbot
 - [Tradeoffs](docs/tradeoffs.md) — Where SOMA wins, where conventional apps win, architectural costs
 - [Neuroscience Architecture](docs/neuroscience-architecture.md) — How SOMA maps to biological neural systems

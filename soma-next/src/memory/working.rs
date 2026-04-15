@@ -52,8 +52,11 @@ impl WorkingMemoryStore for DefaultWorkingMemoryStore {
             budget_deltas: Vec::new(),
             output_bindings: Vec::new(),
             active_plan: None,
+            active_steps: None,
             plan_step: 0,
+            plan_stack: Vec::new(),
             used_plan_following: false,
+            active_policy_scope: None,
         }
     }
 

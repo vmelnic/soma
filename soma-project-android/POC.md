@@ -634,7 +634,7 @@ Size:   10 MB
 This is the full soma-next binary — complete runtime with:
 - 16-step control loop with plan-following
 - Memory system (episodes, schemas, routines, PrefixSpan, HashEmbedder)
-- MCP server (19 tools)
+- MCP server (29 tools)
 - Distributed transport (TCP, TLS, WebSocket, Unix socket)
 - Built-in ports (HTTP via reqwest, filesystem via std::fs)
 - Dynamic port loading (libloading, loads .so on Android)

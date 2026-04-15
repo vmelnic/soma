@@ -69,10 +69,16 @@ impl Default for HeartbeatConfig {
 /// Manages periodic heartbeat pings to all known peers. Tracks RTT, updates
 /// PeerSpec.last_seen and PeerSpec.current_load in the registry, and marks
 /// peers unavailable when they stop responding.
+/// Callback invoked when a peer transitions to offline.
+pub type PeerOfflineCallback = Box<dyn Fn(&str) + Send>;
+
 pub struct HeartbeatManager {
     peers: HashMap<String, PeerHealth>,
     config: HeartbeatConfig,
     nonce_counter: u64,
+    /// Called when a peer transitions to offline. Used to emit world state
+    /// facts that the reactive monitor can match against for failover routines.
+    pub on_peer_offline: Option<PeerOfflineCallback>,
 }
 
 impl HeartbeatManager {
@@ -81,6 +87,7 @@ impl HeartbeatManager {
             peers: HashMap::new(),
             config,
             nonce_counter: 0,
+            on_peer_offline: None,
         }
     }
 
@@ -179,6 +186,9 @@ impl HeartbeatManager {
             if let Err(e) = registry.update_availability(peer_id, PeerAvailability::Offline) {
                 debug!(peer = %peer_id, error = %e, "failed to update availability");
             }
+            if let Some(ref cb) = self.on_peer_offline {
+                cb(peer_id);
+            }
         }
     }
 }
@@ -196,11 +206,32 @@ pub fn start_heartbeat_task(
     config: HeartbeatConfig,
     registry: Arc<Mutex<dyn PeerRegistry>>,
     peer_addresses: PeerAddressMap,
+    world_state: Option<Arc<Mutex<dyn crate::runtime::world_state::WorldStateStore + Send>>>,
 ) -> tokio::task::JoinHandle<()> {
     let interval_ms = config.interval_ms;
 
     tokio::spawn(async move {
         let mut manager = HeartbeatManager::new(config);
+
+        // Wire the on_peer_offline callback to emit world state facts.
+        if let Some(ws) = world_state {
+            manager.on_peer_offline = Some(Box::new(move |peer_id: &str| {
+                if let Ok(mut store) = ws.lock() {
+                    let fact = crate::types::belief::Fact {
+                        fact_id: format!("peer_offline_{peer_id}"),
+                        subject: "peer".to_string(),
+                        predicate: format!("{peer_id}.status"),
+                        value: serde_json::json!("offline"),
+                        confidence: 1.0,
+                        provenance: crate::types::common::FactProvenance::Inferred,
+                        timestamp: chrono::Utc::now(),
+                    };
+                    let _ = store.add_fact(fact);
+                    info!(peer_id = %peer_id, "emitted peer offline fact to world state");
+                }
+            }));
+        }
+
         let executor = TcpRemoteExecutor::new(peer_addresses);
         let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(interval_ms));
 

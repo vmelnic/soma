@@ -1,7 +1,7 @@
 use crate::errors::{Result, SomaError};
 use crate::types::common::{EffectDescriptor, Precondition};
 use crate::types::episode::Episode;
-use crate::types::routine::{Routine, RoutineOrigin};
+use crate::types::routine::{CompiledStep, NextStep, Routine, RoutineOrigin};
 use crate::types::schema::Schema;
 
 /// Why a routine is being invalidated. Each variant triggers different
@@ -125,7 +125,7 @@ impl RoutineStore for DefaultRoutineStore {
     }
 
     fn find_matching(&self, context: &serde_json::Value) -> Vec<&Routine> {
-        self.routines
+        let mut results: Vec<&Routine> = self.routines
             .iter()
             .filter(|routine| {
                 if routine.match_conditions.is_empty() {
@@ -178,7 +178,20 @@ impl RoutineStore for DefaultRoutineStore {
 
                 match_ok && guard_ok
             })
-            .collect()
+            .collect::<Vec<_>>();
+
+        // Sort by priority DESC, then confidence DESC as tiebreaker.
+        results.sort_by(|a, b| {
+            b.priority
+                .cmp(&a.priority)
+                .then(
+                    b.confidence
+                        .partial_cmp(&a.confidence)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+        });
+
+        results
     }
 
     fn get(&self, routine_id: &str) -> Option<&Routine> {
@@ -243,11 +256,21 @@ impl RoutineStore for DefaultRoutineStore {
             origin: RoutineOrigin::SchemaCompiled,
             match_conditions,
             compiled_skill_path: schema.candidate_skill_ordering.clone(),
+            compiled_steps: schema.candidate_skill_ordering.iter()
+                .map(|sid| CompiledStep::Skill {
+                    skill_id: sid.clone(),
+                    on_success: NextStep::Continue,
+                    on_failure: NextStep::Abandon,
+                })
+                .collect(),
             guard_conditions,
             expected_cost: avg_cost,
             expected_effect: expected_effects,
             confidence,
             autonomous: false,
+            priority: 0,
+            exclusive: false,
+            policy_scope: None,
         };
 
         Some(routine)
@@ -269,13 +292,17 @@ impl RoutineStore for DefaultRoutineStore {
 
         let should_remove: Box<dyn Fn(&Routine) -> bool> = match reason {
             InvalidationReason::PackVersionBreak { removed_skills } => {
-                // Invalidate routines whose compiled_skill_path contains any removed skill.
+                // Invalidate routines whose skill path contains any removed skill.
                 let removed = removed_skills.clone();
                 Box::new(move |routine: &Routine| {
                     routine
                         .compiled_skill_path
                         .iter()
                         .any(|step| removed.contains(step))
+                        || routine.compiled_steps.iter().any(|cs| match cs {
+                            CompiledStep::Skill { skill_id, .. } => removed.contains(skill_id),
+                            _ => false,
+                        })
                 })
             }
             InvalidationReason::ConfidenceDropped { threshold } => {
@@ -287,8 +314,7 @@ impl RoutineStore for DefaultRoutineStore {
                 Box::new(|_: &Routine| true)
             }
             InvalidationReason::ResourceSchemaChanged { resource_id } => {
-                // Invalidate routines that reference the affected resource in their
-                // expected_effect target_resource or compiled_skill_path.
+                // Invalidate routines that reference the affected resource.
                 let rid = resource_id.clone();
                 Box::new(move |routine: &Routine| {
                     routine
@@ -299,6 +325,12 @@ impl RoutineStore for DefaultRoutineStore {
                             .compiled_skill_path
                             .iter()
                             .any(|step| step.contains(rid.as_str()))
+                        || routine.compiled_steps.iter().any(|cs| match cs {
+                            CompiledStep::Skill { skill_id, .. } => {
+                                skill_id.contains(rid.as_str())
+                            }
+                            _ => false,
+                        })
                 })
             }
         };
@@ -360,11 +392,15 @@ mod tests {
                 description: format!("{match_key} = {match_val}"),
             }],
             compiled_skill_path: vec!["a".into(), "b".into()],
+            compiled_steps: vec![],
             guard_conditions: Vec::new(),
             expected_cost: 0.1,
             expected_effect: Vec::new(),
             confidence: 0.9,
             autonomous: false,
+            priority: 0,
+            exclusive: false,
+            policy_scope: None,
         }
     }
 
@@ -603,11 +639,15 @@ mod tests {
                 description: "domain = test".to_string(),
             }],
             compiled_skill_path: skills.iter().map(|s| s.to_string()).collect(),
+            compiled_steps: vec![],
             guard_conditions: Vec::new(),
             expected_cost: 0.1,
             expected_effect: Vec::new(),
             confidence,
             autonomous: false,
+            priority: 0,
+            exclusive: false,
+            policy_scope: None,
         }
     }
 
@@ -863,11 +903,15 @@ mod tests {
                 description: "CRM webhook active".to_string(),
             }],
             compiled_skill_path: vec!["handle_crm".into()],
+            compiled_steps: vec![],
             guard_conditions: Vec::new(),
             expected_cost: 0.1,
             expected_effect: Vec::new(),
             confidence: 0.9,
             autonomous: false,
+            priority: 0,
+            exclusive: false,
+            policy_scope: None,
         };
         store.register(r).unwrap();
 
@@ -905,11 +949,15 @@ mod tests {
                 },
             ],
             compiled_skill_path: vec!["process_lead".into()],
+            compiled_steps: vec![],
             guard_conditions: Vec::new(),
             expected_cost: 0.1,
             expected_effect: Vec::new(),
             confidence: 0.9,
             autonomous: false,
+            priority: 0,
+            exclusive: false,
+            policy_scope: None,
         };
         store.register(r).unwrap();
 
@@ -931,6 +979,144 @@ mod tests {
         assert!(store.find_matching(&ctx_none).is_empty());
     }
 
+    // --- compiled_steps tests ---
+
+    #[test]
+    fn test_compile_from_schema_produces_compiled_steps() {
+        let store = DefaultRoutineStore::new();
+        let schema = make_schema_for_compile(0.85);
+
+        let ep1 = make_episode_with_skills(&["open", "read", "close"]);
+        let ep2 = make_episode_with_skills(&["open", "read", "close"]);
+        let ep3 = make_episode_with_skills(&["open", "read", "close"]);
+        let refs: Vec<&Episode> = vec![&ep1, &ep2, &ep3];
+
+        let routine = store.compile_from_schema(&schema, &refs).unwrap();
+
+        // Both fields should be populated.
+        assert_eq!(routine.compiled_skill_path, vec!["open", "read", "close"]);
+        assert_eq!(routine.compiled_steps.len(), 3);
+
+        // compiled_steps should reference the same skill IDs in the same order.
+        for (i, expected_id) in ["open", "read", "close"].iter().enumerate() {
+            match &routine.compiled_steps[i] {
+                CompiledStep::Skill {
+                    skill_id,
+                    on_success,
+                    on_failure,
+                } => {
+                    assert_eq!(skill_id, expected_id);
+                    assert!(matches!(on_success, NextStep::Continue));
+                    assert!(matches!(on_failure, NextStep::Abandon));
+                }
+                other => panic!("expected Skill at index {}, got {:?}", i, other),
+            }
+        }
+    }
+
+    #[test]
+    fn test_invalidation_checks_compiled_steps() {
+        let mut store = DefaultRoutineStore::new();
+
+        // Routine with skills only in compiled_steps, empty compiled_skill_path.
+        let r = Routine {
+            routine_id: "r_steps_only".to_string(),
+            namespace: "test".to_string(),
+            origin: RoutineOrigin::SchemaCompiled,
+            match_conditions: vec![Precondition {
+                condition_type: "key_match".to_string(),
+                expression: serde_json::json!({ "domain": "test" }),
+                description: "domain = test".to_string(),
+            }],
+            compiled_skill_path: vec![],
+            compiled_steps: vec![
+                CompiledStep::Skill {
+                    skill_id: "ns.open".to_string(),
+                    on_success: NextStep::Continue,
+                    on_failure: NextStep::Abandon,
+                },
+                CompiledStep::Skill {
+                    skill_id: "ns.read".to_string(),
+                    on_success: NextStep::Continue,
+                    on_failure: NextStep::Abandon,
+                },
+            ],
+            guard_conditions: Vec::new(),
+            expected_cost: 0.1,
+            expected_effect: Vec::new(),
+            confidence: 0.9,
+            autonomous: false,
+            priority: 0,
+            exclusive: false,
+            policy_scope: None,
+        };
+        store.register(r).unwrap();
+
+        // A routine that does NOT reference the removed skill, for control.
+        store
+            .register(make_routine_with_skills("r_safe", &["ns.list"], 0.85))
+            .unwrap();
+
+        let reason = InvalidationReason::PackVersionBreak {
+            removed_skills: vec!["ns.read".to_string()],
+        };
+        let invalidated = store.invalidate_by_condition(&reason);
+
+        assert_eq!(invalidated.len(), 1);
+        assert!(invalidated.contains(&"r_steps_only".to_string()));
+        assert!(store.get("r_steps_only").is_none());
+        assert!(store.get("r_safe").is_some());
+    }
+
+    #[test]
+    fn test_invalidation_resource_checks_compiled_steps() {
+        let mut store = DefaultRoutineStore::new();
+
+        // Routine with skills only in compiled_steps that reference "users".
+        let r = Routine {
+            routine_id: "r_resource_steps".to_string(),
+            namespace: "test".to_string(),
+            origin: RoutineOrigin::SchemaCompiled,
+            match_conditions: vec![Precondition {
+                condition_type: "key_match".to_string(),
+                expression: serde_json::json!({ "domain": "test" }),
+                description: "domain = test".to_string(),
+            }],
+            compiled_skill_path: vec![],
+            compiled_steps: vec![
+                CompiledStep::Skill {
+                    skill_id: "ns.read_users".to_string(),
+                    on_success: NextStep::Continue,
+                    on_failure: NextStep::Abandon,
+                },
+            ],
+            guard_conditions: Vec::new(),
+            expected_cost: 0.1,
+            expected_effect: Vec::new(),
+            confidence: 0.9,
+            autonomous: false,
+            priority: 0,
+            exclusive: false,
+            policy_scope: None,
+        };
+        store.register(r).unwrap();
+
+        // Control: no reference to "users".
+        store
+            .register(make_routine_with_skills("r_orders", &["ns.list_orders"], 0.85))
+            .unwrap();
+
+        let reason = InvalidationReason::ResourceSchemaChanged {
+            resource_id: "users".to_string(),
+        };
+        let invalidated = store.invalidate_by_condition(&reason);
+
+        assert_eq!(invalidated.len(), 1);
+        assert!(invalidated.contains(&"r_resource_steps".to_string()));
+        assert!(store.get("r_resource_steps").is_none());
+        assert!(store.get("r_orders").is_some());
+    }
+
     #[test]
     fn test_world_state_existence_match() {
         let mut store = DefaultRoutineStore::new();
@@ -945,11 +1131,15 @@ mod tests {
                 description: "CRM webhook present".to_string(),
             }],
             compiled_skill_path: vec!["handle_crm".into()],
+            compiled_steps: vec![],
             guard_conditions: Vec::new(),
             expected_cost: 0.1,
             expected_effect: Vec::new(),
             confidence: 0.9,
             autonomous: false,
+            priority: 0,
+            exclusive: false,
+            policy_scope: None,
         };
         store.register(r).unwrap();
 
@@ -965,5 +1155,63 @@ mod tests {
         // Does not match: key absent.
         let ctx_missing = serde_json::json!({ "other": "data" });
         assert!(store.find_matching(&ctx_missing).is_empty());
+    }
+
+    #[test]
+    fn test_find_matching_sorted_by_priority() {
+        let mut store = DefaultRoutineStore::new();
+        let mut low = make_routine("r_low", "domain", "file");
+        low.priority = 1;
+        low.confidence = 0.9;
+        let mut high = make_routine("r_high", "domain", "file");
+        high.priority = 10;
+        high.confidence = 0.5;
+        store.register(low).unwrap();
+        store.register(high).unwrap();
+
+        let ctx = serde_json::json!({ "domain": "file" });
+        let results = store.find_matching(&ctx);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].routine_id, "r_high"); // higher priority first
+        assert_eq!(results[1].routine_id, "r_low");
+    }
+
+    #[test]
+    fn test_find_matching_tiebreak_by_confidence() {
+        let mut store = DefaultRoutineStore::new();
+        let mut a = make_routine("r_a", "domain", "file");
+        a.priority = 5;
+        a.confidence = 0.7;
+        let mut b = make_routine("r_b", "domain", "file");
+        b.priority = 5;
+        b.confidence = 0.95;
+        store.register(a).unwrap();
+        store.register(b).unwrap();
+
+        let ctx = serde_json::json!({ "domain": "file" });
+        let results = store.find_matching(&ctx);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].routine_id, "r_b"); // higher confidence first
+        assert_eq!(results[1].routine_id, "r_a");
+    }
+
+    #[test]
+    fn test_exclusive_routine_blocks_others() {
+        let mut store = DefaultRoutineStore::new();
+        let mut exclusive = make_routine("r_exclusive", "domain", "file");
+        exclusive.priority = 10;
+        exclusive.exclusive = true;
+        let mut normal = make_routine("r_normal", "domain", "file");
+        normal.priority = 1;
+        store.register(exclusive).unwrap();
+        store.register(normal).unwrap();
+
+        let ctx = serde_json::json!({ "domain": "file" });
+        let results = store.find_matching(&ctx);
+        // Both match, but the first (highest priority) is exclusive.
+        // The reactive monitor uses this: if first.exclusive, fire only first.
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].routine_id, "r_exclusive");
+        assert!(results[0].exclusive);
     }
 }

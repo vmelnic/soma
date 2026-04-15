@@ -614,11 +614,15 @@ mod tests {
             routine_id: "routine-1".to_string(),
             match_conditions: vec![],
             compiled_skill_path: vec!["skill.a".to_string()],
+            compiled_steps: vec![],
             guard_conditions: vec![],
             expected_cost: 1.0,
             expected_effect: vec![],
             confidence: 0.95,
             autonomous: false,
+            priority: 0,
+            exclusive: false,
+            policy_scope: None,
         };
         let result = exec.transfer_routine("peer-1", &routine);
         assert!(result.is_err());
@@ -1062,11 +1066,15 @@ mod tests {
             routine_id: "routine-1".to_string(),
             match_conditions: vec![],
             compiled_skill_path: vec!["skill.a".to_string()],
+            compiled_steps: vec![],
             guard_conditions: vec![],
             expected_cost: 1.0,
             expected_effect: vec![],
             confidence: 0.95,
             autonomous: false,
+            priority: 0,
+            exclusive: false,
+            policy_scope: None,
         };
 
         let result = exec.transfer_routine("peer-1", &routine);

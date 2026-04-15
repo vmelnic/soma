@@ -703,7 +703,7 @@ Format: Mach-O 64-bit executable arm64
 Size:   9 MB
 ```
 
-This is the full soma-next runtime — same as the macOS and Android builds: control loop, memory system, MCP server (19 tools), distributed transport, built-in ports, policy engine, Ed25519 auth, rate limiting.
+This is the full soma-next runtime — same as the macOS and Android builds: control loop, memory system, MCP server (29 tools), distributed transport, built-in ports, policy engine, Ed25519 auth, rate limiting.
 
 No cargo-ndk needed. No NDK. Just `rustup target add` + `cargo build --target`. Simpler than Android.
 
@@ -769,7 +769,7 @@ Standard iOS app sandbox. No jailbreak needed. Survives app updates (Documents d
 
 ## What This Proves
 
-1. **SOMA runs on iOS.** The same Rust runtime that runs on macOS and Android compiles for iOS with zero code changes. 9MB static library, all 19 MCP tools, full memory system.
+1. **SOMA runs on iOS.** The same Rust runtime that runs on macOS and Android compiles for iOS with zero code changes. 9MB static library, all 29 MCP tools, full memory system.
 
 2. **iOS as a perception peer.** iPhone has the best sensor hardware (LiDAR, U1 chip, barometer, HealthKit integration). It's the ideal perception node in a SOMA mesh — where Android handles actuation (SMS, calls), iPhone handles sensing (health, precise location, spatial awareness).
 
