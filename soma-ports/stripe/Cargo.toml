@@ -1,0 +1,13 @@
+[package]
+name = "soma-port-stripe"
+version = "0.1.0"
+edition = "2024"
+description = "SOMA port pack: Stripe payments (charges, customers, payment intents, balance)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soma-port-sdk = { path = "../sdk" }
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+serde_json = "1"

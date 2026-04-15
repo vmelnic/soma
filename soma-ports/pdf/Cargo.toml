@@ -1,0 +1,13 @@
+[package]
+name = "soma-port-pdf"
+version = "0.1.0"
+edition = "2024"
+description = "SOMA port pack: PDF document generation (create, add pages, text-to-PDF)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soma-port-sdk = { path = "../sdk" }
+printpdf = "0.7"
+serde_json = "1"

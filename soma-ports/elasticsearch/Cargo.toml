@@ -1,0 +1,15 @@
+[package]
+name = "soma-port-elasticsearch"
+version = "0.1.0"
+edition = "2024"
+description = "SOMA port pack for Elasticsearch search and indexing operations"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soma-port-sdk = { path = "../sdk" }
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"

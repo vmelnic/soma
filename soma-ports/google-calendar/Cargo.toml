@@ -1,0 +1,13 @@
+[package]
+name = "soma-port-google-calendar"
+version = "0.1.0"
+edition = "2024"
+description = "SOMA port: Google Calendar API (list, create, get, delete events)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soma-port-sdk = { path = "../sdk" }
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+serde_json = "1"
