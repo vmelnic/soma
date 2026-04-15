@@ -187,7 +187,7 @@ The runtime is where:
 
 - events are received (webhook listener, scheduler, world state patches)
 - state is updated (belief state, world state facts, episode store)
-- skills are invoked (port dispatch via 11 dynamically loaded adapters, 88 capabilities)
+- skills are invoked (port dispatch via 22 dynamically loaded adapters, 140+ capabilities)
 - policies are enforced (7 lifecycle hooks, per-routine policy scope)
 - routines are placed (load-aware `RoutineRouter` with 3 strategies)
 - priorities are resolved (`find_matching` sorts by priority DESC, `exclusive` blocks lower-priority matches)
@@ -377,7 +377,7 @@ The effective application program is the combination of:
 - routines (with composition, branching, priority, policy scope)
 - goals
 - belief/state model (world state facts, session beliefs)
-- ports (11 dynamically loaded adapters, 88 capabilities)
+- ports (22 dynamically loaded adapters, 140+ capabilities)
 - schemas (PrefixSpan-induced patterns)
 - skills (declared in pack manifests)
 - policies (lifecycle hooks, per-routine scope)

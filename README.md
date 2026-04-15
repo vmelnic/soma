@@ -22,7 +22,7 @@ The same architecture runs on microcontrollers. `soma-project-esp32` deploys a `
 | Component | What | Status |
 |---|---|---|
 | [soma-next](soma-next/) | Rust runtime binary. 1261 tests, zero warnings. 29 MCP tools. Cross-compiles to Android (aarch64-linux-android), iOS (aarch64-apple-ios), and browser (wasm32-unknown-unknown). | Production |
-| [soma-ports](soma-ports/) | 11 dynamically loaded port adapters + SDK | Production |
+| [soma-ports](soma-ports/) | 22 dynamically loaded port adapters + SDK | Production |
 | [soma-helperbook](soma-helperbook/) | Service marketplace — first real app (postgres + redis + auth) | Production |
 | [soma-project-smtp](soma-project-smtp/) | SMTP email delivery via SOMA MCP | Production |
 | [soma-project-s3](soma-project-s3/) | AWS S3 object storage via SOMA MCP | Production |
@@ -120,7 +120,7 @@ Consolidation cycle: episodes accumulate → HashEmbedder clusters by semantic s
 - [What SOMA Is Not](docs/what-soma-is-not.md) — Not a code generator, LLM wrapper, workflow engine, or chatbot
 - [Tradeoffs](docs/tradeoffs.md) — Where SOMA wins, where conventional apps win, architectural costs
 - [Neuroscience Architecture](docs/neuroscience-architecture.md) — How SOMA maps to biological neural systems
-- [Ports](docs/ports.md) — SDK, dynamic loading, all 12 ports (88 capabilities)
+- [Ports](docs/ports.md) — SDK, dynamic loading, all 22 ports (140+ capabilities)
 - [Distributed](docs/distributed.md) — Peer transport, delegation, sync
 - [Building Projects](docs/building-projects.md) — How to create soma-project-*
 - [HelperBook](docs/helperbook.md) — Service marketplace application

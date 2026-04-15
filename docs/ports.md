@@ -123,7 +123,7 @@ Every `PortSpec` has a `backend` field (defaults to `Dylib` for backward compati
 
 | Backend | How it loads | Use case |
 |---|---|---|
-| `Dylib` | `libloading` opens `libsoma_port_<port_id>.dylib`/`.so`, calls `soma_port_init`, wraps in `SdkPortAdapter`. | Native Rust ports — the 11 in `soma-ports/`. |
+| `Dylib` | `libloading` opens `libsoma_port_<port_id>.dylib`/`.so`, calls `soma_port_init`, wraps in `SdkPortAdapter`. | Native Rust ports — the 22 in `soma-ports/`. |
 | `McpClient` | Spawns a local subprocess (stdio) or connects to a remote URL (http), runs MCP `initialize` + `tools/list`, wraps in `McpClientPort`. | Ports written in any language with an MCP SDK (Node, Python, Bun, PHP, Go, Ruby, …) **and** consumption of remote MCP servers as ports. |
 
 The two `McpClient` transports share a single implementation (`soma-next/src/runtime/mcp_client_port.rs`) — only the transport layer differs:
@@ -188,6 +188,17 @@ Key rules:
 | `soma.smtp` | Messaging | 3 | `SOMA_SMTP_HOST`, `SOMA_SMTP_FROM`, `SOMA_SMTP_PORT`, `SOMA_SMTP_USERNAME`, `SOMA_SMTP_PASSWORD`, `SOMA_SMTP_STARTTLS` | Persistent transport config (OnceLock) |
 | `soma.push` | Messaging | 4 | -- | In-memory (device registry) |
 | `soma.timer` | Custom | 4 | -- | In-memory (timer state) |
+| `soma.stripe` | Payment | 5 | `SOMA_STRIPE_SECRET_KEY` | Stateless (HTTP per call) |
+| `soma.twilio` | Messaging | 4 | `SOMA_TWILIO_ACCOUNT_SID`, `SOMA_TWILIO_AUTH_TOKEN`, `SOMA_TWILIO_FROM_NUMBER` | Stateless (HTTP per call) |
+| `soma.slack` | Messaging | 4 | `SOMA_SLACK_BOT_TOKEN` | Stateless (HTTP per call) |
+| `soma.pdf` | Document | 3 | -- | Stateless |
+| `soma.google.calendar` | Cloud | 4 | `SOMA_GOOGLE_ACCESS_TOKEN` | Stateless (HTTP per call) |
+| `soma.google.drive` | Cloud | 5 | `SOMA_GOOGLE_ACCESS_TOKEN` | Stateless (HTTP per call) |
+| `soma.google.mail` | Cloud | 4 | `SOMA_GOOGLE_ACCESS_TOKEN` | Stateless (HTTP per call) |
+| `soma.mysql` | Database | 5 | `SOMA_MYSQL_URL` | Connection per call |
+| `soma.mongodb` | Database | 7 | `SOMA_MONGODB_URL`, `SOMA_MONGODB_DATABASE` | Persistent client |
+| `soma.elasticsearch` | Database | 6 | `SOMA_ELASTICSEARCH_URL` | Stateless (HTTP per call) |
+| `soma.calendar` | Utility | 4 | `SOMA_CALENDAR_DIR` | Filesystem-backed |
 
 ### filesystem (built-in)
 
@@ -408,6 +419,156 @@ Timer/scheduler with in-memory state machine. No external services.
 **Configuration**: none.
 
 **Notes**: timer entries are stored in a `Mutex<HashMap>` keyed by UUID. `delay_ms` must be positive. `cancel_timer` is idempotent. Trust level is BuiltIn.
+
+### stripe
+
+Payment processing via Stripe REST API.
+
+| capability_id | Purpose | Effect Class | Risk Class |
+|---|---|---|---|
+| `create_charge` | Create a charge | ExternalStateMutation | High |
+| `create_customer` | Create a customer | ExternalStateMutation | Medium |
+| `list_charges` | List charges | ReadOnly | Low |
+| `create_payment_intent` | Create a payment intent | ExternalStateMutation | High |
+| `get_balance` | Get account balance | ReadOnly | Low |
+
+**Configuration**: `SOMA_STRIPE_SECRET_KEY` or `STRIPE_SECRET_KEY`. Uses `reqwest::blocking::Client` with Bearer auth.
+
+### twilio
+
+SMS, WhatsApp, and voice calls via Twilio API.
+
+| capability_id | Purpose | Effect Class | Risk Class |
+|---|---|---|---|
+| `send_sms` | Send an SMS message | ExternalStateMutation | Medium |
+| `send_whatsapp` | Send a WhatsApp message | ExternalStateMutation | Medium |
+| `make_call` | Initiate a voice call | ExternalStateMutation | Medium |
+| `list_messages` | List sent/received messages | ReadOnly | Low |
+
+**Configuration**: `SOMA_TWILIO_ACCOUNT_SID`, `SOMA_TWILIO_AUTH_TOKEN`, `SOMA_TWILIO_FROM_NUMBER`. HTTP Basic auth.
+
+### slack
+
+Team messaging via Slack Web API.
+
+| capability_id | Purpose | Effect Class | Risk Class |
+|---|---|---|---|
+| `send_message` | Post a message to a channel | ExternalStateMutation | Low |
+| `list_channels` | List workspace channels | ReadOnly | Low |
+| `upload_file` | Upload file content to a channel | ExternalStateMutation | Low |
+| `add_reaction` | Add an emoji reaction | ExternalStateMutation | Negligible |
+
+**Configuration**: `SOMA_SLACK_BOT_TOKEN` or `SLACK_BOT_TOKEN`. Bearer auth.
+
+### pdf
+
+Local PDF document generation via `printpdf`.
+
+| capability_id | Purpose | Effect Class | Risk Class |
+|---|---|---|---|
+| `create_document` | Create a PDF with title and text content | LocalStateMutation | Low |
+| `add_page` | Write a text page to a PDF file | LocalStateMutation | Low |
+| `text_to_pdf` | Convert multi-page plain text to PDF | LocalStateMutation | Low |
+
+**Configuration**: none. No network access required.
+
+### google-calendar
+
+Google Calendar API (events CRUD).
+
+| capability_id | Purpose | Effect Class | Risk Class |
+|---|---|---|---|
+| `list_events` | List events in a calendar | ReadOnly | Low |
+| `create_event` | Create a calendar event | ExternalStateMutation | Medium |
+| `get_event` | Get event details | ReadOnly | Low |
+| `delete_event` | Delete a calendar event | Destructive | Medium |
+
+**Configuration**: `SOMA_GOOGLE_ACCESS_TOKEN` or `GOOGLE_ACCESS_TOKEN`. OAuth2 Bearer auth.
+
+### google-drive
+
+Google Drive API (files CRUD).
+
+| capability_id | Purpose | Effect Class | Risk Class |
+|---|---|---|---|
+| `list_files` | List files/folders | ReadOnly | Low |
+| `get_file` | Get file metadata | ReadOnly | Low |
+| `upload_file` | Upload a file | ExternalStateMutation | Medium |
+| `delete_file` | Delete a file | Destructive | High |
+| `create_folder` | Create a folder | ExternalStateMutation | Low |
+
+**Configuration**: `SOMA_GOOGLE_ACCESS_TOKEN` or `GOOGLE_ACCESS_TOKEN`. OAuth2 Bearer auth.
+
+### google-mail
+
+Gmail API (send, list, read emails).
+
+| capability_id | Purpose | Effect Class | Risk Class |
+|---|---|---|---|
+| `send_email` | Send an email (RFC 2822 base64url encoded) | ExternalStateMutation | Medium |
+| `list_messages` | List messages with optional query | ReadOnly | Low |
+| `get_message` | Get full message details | ReadOnly | Low |
+| `list_labels` | List Gmail labels | ReadOnly | Negligible |
+
+**Configuration**: `SOMA_GOOGLE_ACCESS_TOKEN` or `GOOGLE_ACCESS_TOKEN`. OAuth2 Bearer auth.
+
+### mysql
+
+MySQL database queries and mutations.
+
+| capability_id | Purpose | Effect Class | Risk Class |
+|---|---|---|---|
+| `query` | Execute SELECT, return rows as JSON | ReadOnly | Low |
+| `execute` | Execute INSERT/UPDATE/DELETE | ExternalStateMutation | Medium |
+| `insert` | Build INSERT from JSON object | ExternalStateMutation | Medium |
+| `update` | Build UPDATE with WHERE clause | ExternalStateMutation | Medium |
+| `delete` | Build DELETE with WHERE clause | Destructive | High |
+
+**Configuration**: `SOMA_MYSQL_URL` or `MYSQL_URL` (e.g., `mysql://user:pass@localhost/db`). Uses `mysql` crate.
+
+### mongodb
+
+MongoDB document operations.
+
+| capability_id | Purpose | Effect Class | Risk Class |
+|---|---|---|---|
+| `find` | Find documents with filter | ReadOnly | Low |
+| `find_one` | Find a single document | ReadOnly | Low |
+| `insert_one` | Insert one document | ExternalStateMutation | Low |
+| `insert_many` | Insert multiple documents | ExternalStateMutation | Medium |
+| `update_one` | Update one document | ExternalStateMutation | Medium |
+| `delete_one` | Delete one document | Destructive | Medium |
+| `count` | Count documents with filter | ReadOnly | Negligible |
+
+**Configuration**: `SOMA_MONGODB_URL` or `MONGODB_URL`, `SOMA_MONGODB_DATABASE`. Uses `mongodb` crate (sync feature).
+
+### elasticsearch
+
+Elasticsearch search and indexing via REST API.
+
+| capability_id | Purpose | Effect Class | Risk Class |
+|---|---|---|---|
+| `search` | Full-text search with query DSL | ReadOnly | Low |
+| `index_document` | Index (upsert) a document | ExternalStateMutation | Low |
+| `get_document` | Get a document by ID | ReadOnly | Low |
+| `delete_document` | Delete a document by ID | Destructive | Medium |
+| `create_index` | Create an index with optional mappings | ExternalStateMutation | Medium |
+| `delete_index` | Delete an entire index | Destructive | High |
+
+**Configuration**: `SOMA_ELASTICSEARCH_URL` or `ELASTICSEARCH_URL` (e.g., `http://localhost:9200`). Uses `reqwest::blocking::Client`.
+
+### calendar
+
+Local iCalendar (.ics) file management. No external API — pure filesystem.
+
+| capability_id | Purpose | Effect Class | Risk Class |
+|---|---|---|---|
+| `create_event` | Create a calendar event as .ics file | LocalStateMutation | Low |
+| `list_events` | List events with optional date range filter | ReadOnly | Negligible |
+| `delete_event` | Delete an event .ics file | Destructive | Low |
+| `list_calendars` | List available calendar directories | ReadOnly | Negligible |
+
+**Configuration**: `SOMA_CALENDAR_DIR` (default `~/.soma/calendars/`). Each calendar is a subdirectory containing .ics files.
 
 ## Building a Port
 

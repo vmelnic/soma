@@ -6,7 +6,7 @@
 
 ## Abstract
 
-SOMA (from Greek σῶμα, "body") is a computational architecture in which the runtime itself constitutes the program. No application source code is written, generated, compiled, or interpreted. A single Rust binary receives typed goals, maintains a structured belief state, selects skills from a ranked hierarchy, invokes external systems through dynamically loaded port adapters, observes results, patches beliefs, and iterates under policy constraints until the goal is satisfied or a budget is exhausted. The architecture implements a 16-step control loop with multi-objective skill selection, observation-grounded belief patching, rule-based critic evaluation, and an episodic learning pipeline that promotes observed execution patterns into reusable schemas and compiled routines. External intelligence — typically a large language model — drives the runtime through a 29-tool MCP interface; the runtime drives external systems through typed port libraries. The implementation comprises a ~10MB binary with 1261 tests and zero warnings, a workspace of 11 dynamically loaded port adapters covering databases, cryptography, email, object storage, authentication, geolocation, image processing, push notifications, and timers, and multiple deployed projects demonstrating end-to-end operation — including an embedded `no_std` leaf on ESP32 microcontrollers with 12 hardware ports, runtime-configurable pin assignments, and a driver-agnostic display port that renders live sensor data on an SSD1306 OLED under brain-side MCP control. We present the architecture, its formal properties, the episodic learning pipeline, the distributed execution model, and the embedded-leaf deployment path.
+SOMA (from Greek σῶμα, "body") is a computational architecture in which the runtime itself constitutes the program. No application source code is written, generated, compiled, or interpreted. A single Rust binary receives typed goals, maintains a structured belief state, selects skills from a ranked hierarchy, invokes external systems through dynamically loaded port adapters, observes results, patches beliefs, and iterates under policy constraints until the goal is satisfied or a budget is exhausted. The architecture implements a 16-step control loop with multi-objective skill selection, observation-grounded belief patching, rule-based critic evaluation, and an episodic learning pipeline that promotes observed execution patterns into reusable schemas and compiled routines. External intelligence — typically a large language model — drives the runtime through a 29-tool MCP interface; the runtime drives external systems through typed port libraries. The implementation comprises a ~10MB binary with 1261 tests and zero warnings, a workspace of 22 dynamically loaded port adapters covering databases (postgres, mysql, mongodb, elasticsearch), communication (smtp, twilio, slack), Google (calendar, drive, mail), payments (stripe), storage (s3), documents (pdf), calendar, cryptography, authentication, geolocation, image processing, push notifications, redis, and timers, and multiple deployed projects demonstrating end-to-end operation — including an embedded `no_std` leaf on ESP32 microcontrollers with 12 hardware ports, runtime-configurable pin assignments, and a driver-agnostic display port that renders live sensor data on an SSD1306 OLED under brain-side MCP control. We present the architecture, its formal properties, the episodic learning pipeline, the distributed execution model, and the embedded-leaf deployment path.
 
 ---
 
@@ -41,7 +41,7 @@ This paper makes the following contributions:
 3. A three-tier episodic learning pipeline (episodes → schema induction → routine compilation) that extracts reusable control structures from observed execution traces.
 4. A skill hierarchy (routines → schemas → composites → primitives) with tier-weighted multi-objective scoring and policy-gated selection.
 5. A policy system with seven lifecycle hooks providing fine-grained safety enforcement over a deliberative control loop.
-6. A working implementation: 1261 tests, 11 dynamically loaded server-side port adapters, multiple deployed projects, a distributed execution layer supporting TCP/TLS, WebSocket, and Unix socket transport with verified cross-instance skill delegation and routine transfer, and a `no_std` embedded deployment path proven on two distinct ESP32 chips with hardware-level I²C bus sharing between sensor and display ports.
+6. A working implementation: 1261 tests, 22 dynamically loaded server-side port adapters, multiple deployed projects, a distributed execution layer supporting TCP/TLS, WebSocket, and Unix socket transport with verified cross-instance skill delegation and routine transfer, and a `no_std` embedded deployment path proven on two distinct ESP32 chips with hardware-level I²C bus sharing between sensor and display ports.
 
 ---
 
@@ -352,7 +352,7 @@ Optional Ed25519 signature verification: when `require_signatures` is enabled, t
 
 ### 7.3 Port Catalog
 
-The current implementation provides 11 external ports plus an SDK:
+The current implementation provides 22 external ports plus an SDK:
 
 | Port | Capabilities | External System |
 |---|---|---|
@@ -614,7 +614,7 @@ Single Rust binary. ~56,000 lines across: runtime logic (session controller, bel
 
 ### 13.2 soma-ports
 
-Workspace of 11 port crates plus an SDK. Each port compiles to a `cdylib` shared library. Total: 88 capabilities across 11 ports. The SDK defines the `Port` trait, `PortSpec`, `PortCapabilitySpec`, `PortCallRecord`, and all classification enums.
+Workspace of 22 port crates plus an SDK. Each port compiles to a `cdylib` shared library. Total: 140+ capabilities across 22 ports. The SDK defines the `Port` trait, `PortSpec`, `PortCapabilitySpec`, `PortCallRecord`, and all classification enums.
 
 Ports with external system dependencies: postgres (`SOMA_POSTGRES_URL`), redis (`SOMA_REDIS_URL`), s3 (AWS SDK with `SOMA_S3_*` configuration), smtp (`SOMA_SMTP_*` configuration). Ports with no external dependency: auth, crypto, geo, image, push, timer (pure local logic or in-memory state).
 
@@ -754,7 +754,7 @@ Routines compiled from historical episodes may become stale as external system b
 
 SOMA is a computational architecture where the runtime is the program. A goal-driven control loop selects skills, invokes ports, observes outcomes, and adapts through an episodic learning pipeline — without generating, compiling, or interpreting application source code at any layer. The policy engine enforces safety at seven lifecycle hooks. The type system makes side effects, risk classes, trust levels, and determinism properties explicit and machine-evaluable. The distributed layer enables multi-instance delegation and knowledge transfer.
 
-The implementation — 1261 tests, 11 port adapters, 88 capabilities, 29 MCP tools, and eleven deployed projects spanning LLM-driven server operation (smtp, s3, postgres, mcp, mcp-bridge), the autonomous learning path (multistep), cross-instance communication (s2s), in-browser runtime (web), end-user conversational product (terminal), and embedded leaf firmware on real ESP32 hardware (esp32) — demonstrates that the architecture is operational, not theoretical. The episodic learning pipeline (episodes → schemas → routines) provides a concrete mechanism for experience-based adaptation. The pack manifest pattern provides a concrete answer to "what do developers write instead of code."
+The implementation — 1261 tests, 22 port adapters, 140+ capabilities, 29 MCP tools, and eleven deployed projects spanning LLM-driven server operation (smtp, s3, postgres, mcp, mcp-bridge), the autonomous learning path (multistep), cross-instance communication (s2s), in-browser runtime (web), end-user conversational product (terminal), and embedded leaf firmware on real ESP32 hardware (esp32) — demonstrates that the architecture is operational, not theoretical. The episodic learning pipeline (episodes → schemas → routines) provides a concrete mechanism for experience-based adaptation. The pack manifest pattern provides a concrete answer to "what do developers write instead of code."
 
 SOMA does not generate code. It eliminates the need for it.
 

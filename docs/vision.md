@@ -63,9 +63,11 @@ Unix sockets, mDNS LAN discovery). MCP server with 29 tools. CLI with 11 command
 (10 MB ELF) and `aarch64-apple-ios` (9 MB Mach-O). `--pack auto` discovers and
 loads all pack manifests under `packs/` automatically.
 
-**soma-ports** -- 11 dynamically loaded port adapters in a Rust workspace:
-postgres, redis, auth, smtp, s3, crypto, geo, image, push, timer, plus an SDK
-crate. Each port is a shared library exporting `soma_port_init`. Ed25519
+**soma-ports** -- 22 dynamically loaded port adapters in a Rust workspace:
+databases (postgres, mysql, mongodb, elasticsearch), communication (smtp, twilio,
+slack), Google (calendar, drive, mail), payments (stripe), storage (s3),
+documents (pdf), calendar, cryptography, authentication, geolocation, image
+processing, push notifications, redis, and timers, plus an SDK crate. Each port is a shared library exporting `soma_port_init`. Ed25519
 signature verification for untrusted ports.
 
 **soma-project-*** -- Self-contained proof projects. Server-side (smtp, s3,

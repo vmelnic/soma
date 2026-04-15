@@ -15,15 +15,26 @@ Current layout:
 
 - [`sdk`](sdk): shared SDK used by all external ports
 - [`auth`](auth): authentication flows
+- [`calendar`](calendar): local iCalendar (.ics) file management
 - [`crypto`](crypto): cryptographic primitives and token helpers
+- [`elasticsearch`](elasticsearch): Elasticsearch search and indexing
 - [`geo`](geo): geospatial math and geocoding stubs
+- [`google-calendar`](google-calendar): Google Calendar event management
+- [`google-drive`](google-drive): Google Drive file and folder management
+- [`google-mail`](google-mail): Gmail send and read
 - [`image`](image): image processing
+- [`mongodb`](mongodb): MongoDB document database operations
+- [`mysql`](mysql): MySQL database operations
+- [`pdf`](pdf): PDF document generation
 - [`postgres`](postgres): PostgreSQL access
 - [`push`](push): push notifications
 - [`redis`](redis): Redis access
 - [`s3`](s3): S3-compatible object storage
+- [`slack`](slack): Slack messaging
 - [`smtp`](smtp): SMTP email delivery
+- [`stripe`](stripe): Stripe payment processing
 - [`timer`](timer): timer and scheduler primitives
+- [`twilio`](twilio): Twilio SMS, WhatsApp, and voice calls
 
 Workspace membership is defined in [`Cargo.toml`](Cargo.toml). `redis` is
 intentionally excluded from the main workspace and carries its own lockfile, so
@@ -34,23 +45,39 @@ it must be built and tested separately.
 | Port | Crate | Output library | Capabilities | Notes |
 | --- | --- | --- | ---: | --- |
 | auth | `soma-port-auth` | `libsoma_port_auth.*` | 10 | OTP, sessions, TOTP, bearer tokens; uses in-memory stores |
+| calendar | `soma-port-calendar` | `libsoma_port_calendar.*` | 4 | Local iCalendar (.ics) file management; uses `SOMA_CALENDAR_DIR` |
 | crypto | `soma-port-crypto` | `libsoma_port_crypto.*` | 13 | Hashing, HMAC, bcrypt, AES-GCM, RSA, JWT, randomness |
+| elasticsearch | `soma-port-elasticsearch` | `libsoma_port_elasticsearch.*` | 6 | Search, document CRUD, index management; uses `SOMA_ELASTICSEARCH_URL` |
 | geo | `soma-port-geo` | `libsoma_port_geo.*` | 5 | Distance, radius filter, bounds check, geocode stubs |
+| google-calendar | `soma-port-google-calendar` | `libsoma_port_google_calendar.*` | 4 | Google Calendar events: list, create, get, delete; uses `SOMA_GOOGLE_ACCESS_TOKEN` |
+| google-drive | `soma-port-google-drive` | `libsoma_port_google_drive.*` | 5 | Google Drive: list, get, upload, delete files, create folders; uses `SOMA_GOOGLE_ACCESS_TOKEN` |
+| google-mail | `soma-port-google-mail` | `libsoma_port_google_mail.*` | 4 | Gmail: send email, list/get messages, list labels; uses `SOMA_GOOGLE_ACCESS_TOKEN` |
 | image | `soma-port-image` | `libsoma_port_image.*` | 5 | Thumbnail, resize, crop, format conversion, EXIF strip |
+| mongodb | `soma-port-mongodb` | `libsoma_port_mongodb.*` | 7 | Find, insert, update, delete, count documents; uses `SOMA_MONGODB_URL` |
+| mysql | `soma-port-mysql` | `libsoma_port_mysql.*` | 5 | Raw SQL, ORM-style CRUD; uses `SOMA_MYSQL_URL` |
+| pdf | `soma-port-pdf` | `libsoma_port_pdf.*` | 3 | Create documents, add pages, text-to-PDF via `printpdf` |
 | postgres | `soma-port-postgres` | `libsoma_port_postgres.*` | 15 | Raw SQL, CRUD, DDL, transactions; uses `SOMA_POSTGRES_URL` |
 | push | `soma-port-push` | `libsoma_port_push.*` | 4 | FCM, WebPush, device registration; in-memory registry |
 | redis | `soma-port-redis` | `libsoma_port_redis.*` | 13 | Strings, hashes, lists, pub/sub; uses `SOMA_REDIS_URL` |
 | s3 | `soma-port-s3` | `libsoma_port_s3.*` | 5 | Put/get/delete/presign/list via AWS SDK |
+| slack | `soma-port-slack` | `libsoma_port_slack.*` | 4 | Send messages, list channels, upload files, add reactions; uses `SOMA_SLACK_BOT_TOKEN` |
 | smtp | `soma-port-smtp` | `libsoma_port_smtp.*` | 3 | Plain, HTML, attachment email via `lettre` |
+| stripe | `soma-port-stripe` | `libsoma_port_stripe.*` | 5 | Charges, customers, payment intents, balance; uses `SOMA_STRIPE_SECRET_KEY` |
 | timer | `soma-port-timer` | `libsoma_port_timer.*` | 4 | Timeouts, intervals, cancellation, listing; in-memory state |
+| twilio | `soma-port-twilio` | `libsoma_port_twilio.*` | 4 | SMS, WhatsApp, voice calls; uses `SOMA_TWILIO_ACCOUNT_SID` |
 
 Notes:
 
-- `image`, `timer`, and most of `geo` are pure local logic with no service
-  dependency.
-- `postgres` creates a fresh connection per call.
+- `image`, `timer`, `pdf`, `calendar`, and most of `geo` are pure local logic
+  with no service dependency.
+- `postgres` and `mysql` create a fresh connection per call.
+- `mongodb` uses a lazily-initialized sync client.
 - `redis`, `s3`, and `smtp` bridge async clients into the synchronous `Port`
   trait with internal Tokio runtimes.
+- `stripe`, `twilio`, `slack`, `elasticsearch`, `google-calendar`,
+  `google-drive`, and `google-mail` use `reqwest::blocking::Client` for HTTP.
+- `google-calendar`, `google-drive`, and `google-mail` share the same OAuth2
+  token env var (`SOMA_GOOGLE_ACCESS_TOKEN`).
 - `auth`, `push`, and `timer` keep volatile in-memory state and are not durable
   across process restarts.
 

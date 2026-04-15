@@ -9,7 +9,7 @@ SOMA (Greek "soma" = body) — the runtime IS the program. Two production paths:
 
 Active deliverables:
 - **soma-next/** — Rust runtime. 1261 tests, zero warnings. Cross-compiles to `aarch64-linux-android` (10MB ELF) and `aarch64-apple-ios` (9MB Mach-O) with no code changes after the rustls/reqwest fix.
-- **soma-ports/** — 11 dynamically loaded port adapters + SDK.
+- **soma-ports/** — 22 dynamically loaded port adapters + SDK.
 - **soma-helperbook/** — Service marketplace app (postgres + redis + auth, Express frontend).
 - **soma-project-smtp/** — Email delivery proof.
 - **soma-project-s3/** — AWS S3 proof.
