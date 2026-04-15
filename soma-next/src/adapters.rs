@@ -748,7 +748,7 @@ impl PolicyEngineAdapter {
     }
 
     /// Derive the SideEffectClass from a skill's declared effects and rollback support.
-    fn derive_side_effect_class(skill: &SkillSpec) -> SideEffectClass {
+    pub fn derive_side_effect_class(skill: &SkillSpec) -> SideEffectClass {
         // If the skill has no expected effects, it's read-only.
         if skill.expected_effects.is_empty() {
             return SideEffectClass::ReadOnly;

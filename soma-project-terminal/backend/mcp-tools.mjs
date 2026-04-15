@@ -1,27 +1,14 @@
 // OpenAI function-tool definitions exposed to the chat brain.
 //
-// The chat brain has ONE tool: `invoke_port`. Every port capability
-// in the SOMA runtime is reachable through it. The brain doesn't
-// need separate `list_ports` / `list_skills` tools because the port
-// catalog is embedded directly in the system prompt
-// (see SomaMcpClient.getPortCatalogSummary() → buildSystemPrompt).
+// The brain has a focused set of tools that cover port invocation,
+// scheduling, routine lifecycle, world state, and distributed ops.
+// Port discovery tools (list_ports, list_skills, etc.) are NOT
+// exposed — the port catalog is embedded in the system prompt to
+// prevent the model from burning tool-call loops on rediscovery.
 //
-// Why one tool instead of many:
-//
-// - gpt-4o-mini on a fresh context was running list_ports +
-//   list_skills + invoke_port repeatedly, burning the MAX_TOOL_LOOPS
-//   budget on rediscovery every turn and never producing a final
-//   reply. Removing the discovery tools forces it to use what's
-//   already in the prompt instead of looping on introspection.
-// - ports don't change between turns — they're baked into the
-//   platform pack at startup. A dynamic discovery tool for static
-//   data is cargo-cult tool design.
-// - a single tool with a clear structured input is the minimum
-//   surface area the model has to get right.
-//
-// If the tool set grows later (e.g. a `search_memory` convenience
-// tool), it grows HERE, as code WE own, not by exposing more MCP
-// introspection endpoints to the LLM.
+// All tools beyond invoke_port route through MCP callTool pass-through
+// to the soma-next subprocess. Adding a tool = adding it here + the
+// corresponding handler in soma-next's MCP server.
 
 export const DEFAULT_CHAT_TOOLS = Object.freeze([
   {
@@ -161,7 +148,7 @@ export const DEFAULT_CHAT_TOOLS = Object.freeze([
     type: "function",
     function: {
       name: "set_routine_autonomous",
-      description: "Mark a compiled routine to fire automatically when its conditions match the world state.",
+      description: "Mark a compiled routine to fire automatically when its conditions match the world state. Verify the routine is safe before enabling.",
       parameters: {
         type: "object",
         properties: {
@@ -169,6 +156,152 @@ export const DEFAULT_CHAT_TOOLS = Object.freeze([
           autonomous: { type: "boolean", description: "Enable or disable autonomous execution" },
         },
         required: ["routine_id", "autonomous"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "author_routine",
+      description:
+        "Create or update a routine from a structured definition. Re-authoring an existing routine_id bumps the version. Provide match_conditions, steps, and optionally guard_conditions, priority, exclusive, policy_scope, autonomous.",
+      parameters: {
+        type: "object",
+        properties: {
+          routine_id: { type: "string", description: "Unique identifier for the routine" },
+          match_conditions: {
+            type: "array",
+            description: "Conditions that trigger this routine (goal_fingerprint or world_state)",
+            items: {
+              type: "object",
+              properties: {
+                condition_type: { type: "string" },
+                expression: { description: "JSON expression to match against context" },
+                description: { type: "string" },
+              },
+              required: ["condition_type", "expression", "description"],
+            },
+          },
+          steps: {
+            type: "array",
+            description: "Ordered execution steps",
+            items: {
+              type: "object",
+              properties: {
+                type: { type: "string", enum: ["skill", "sub_routine"] },
+                skill_id: { type: "string", description: "For skill steps" },
+                routine_id: { type: "string", description: "For sub_routine steps" },
+                on_success: { type: "object", description: "Action on success (default: continue)" },
+                on_failure: { type: "object", description: "Action on failure (default: abandon)" },
+              },
+              required: ["type"],
+            },
+          },
+          guard_conditions: { type: "array", description: "Optional conditions that must ALL pass" },
+          priority: { type: "integer", description: "Higher fires first (default 0)" },
+          exclusive: { type: "boolean", description: "If true, blocks lower-priority matches (default false)" },
+          policy_scope: { type: "string", description: "Optional policy namespace override" },
+          autonomous: { type: "boolean", description: "If true, reactive monitor fires this automatically (default false)" },
+        },
+        required: ["routine_id", "match_conditions", "steps"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_routine_versions",
+      description: "List all versions of a routine, including history and current. Check before re-authoring.",
+      parameters: {
+        type: "object",
+        properties: {
+          routine_id: { type: "string", description: "The routine ID to list versions for" },
+        },
+        required: ["routine_id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "rollback_routine",
+      description: "Roll back a routine to a previous version from its history.",
+      parameters: {
+        type: "object",
+        properties: {
+          routine_id: { type: "string", description: "The routine ID to roll back" },
+          target_version: { type: "integer", description: "The version number to roll back to" },
+        },
+        required: ["routine_id", "target_version"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "replicate_routine",
+      description: "Replicate a compiled routine to remote peers. Omit peer_ids to replicate to all known peers.",
+      parameters: {
+        type: "object",
+        properties: {
+          routine_id: { type: "string", description: "The routine ID to replicate" },
+          peer_ids: {
+            type: "array",
+            items: { type: "string" },
+            description: "Target peer IDs (optional, defaults to all known peers)",
+          },
+        },
+        required: ["routine_id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "review_routine",
+      description: "Review a routine's safety profile before marking it autonomous. Returns what the routine does, which skills it touches, side effects, and a recommendation.",
+      parameters: {
+        type: "object",
+        properties: {
+          routine_id: { type: "string", description: "The routine to review" },
+        },
+        required: ["routine_id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "sync_beliefs",
+      description: "Synchronize world state facts with a remote peer. Sends current facts and merges the result.",
+      parameters: {
+        type: "object",
+        properties: {
+          peer_id: { type: "string", description: "The peer identifier to sync beliefs with" },
+        },
+        required: ["peer_id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "migrate_session",
+      description: "Migrate an active session to a remote peer. Transfers goal, working memory, belief, observations, budget, trace, and policy context atomically.",
+      parameters: {
+        type: "object",
+        properties: {
+          session_id: { type: "string", description: "The session UUID to migrate" },
+          peer_id: { type: "string", description: "The target peer identifier" },
+        },
+        required: ["session_id", "peer_id"],
         additionalProperties: false,
       },
     },

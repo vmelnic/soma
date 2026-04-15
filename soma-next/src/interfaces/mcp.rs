@@ -303,6 +303,7 @@ impl McpServer {
             "rollback_routine" => self.handle_rollback_routine(request.id, request.params),
             "sync_beliefs" => self.handle_sync_beliefs(request.id, request.params),
             "migrate_session" => self.handle_migrate_session(request.id, request.params),
+            "review_routine" => self.handle_review_routine(request.id, request.params),
 
             _ => Ok(Self::error_response(
                 request.id,
@@ -399,6 +400,7 @@ impl McpServer {
             "rollback_routine" => self.handle_rollback_routine(inner_id, arguments),
             "sync_beliefs" => self.handle_sync_beliefs(inner_id, arguments),
             "migrate_session" => self.handle_migrate_session(inner_id, arguments),
+            "review_routine" => self.handle_review_routine(inner_id, arguments),
             _ => {
                 return Ok(Self::error_response(
                     id,
@@ -3347,6 +3349,257 @@ impl McpServer {
         }
     }
 
+    fn handle_review_routine(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: routine_id (string)".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let routine_id = params
+            .get("routine_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if routine_id.is_empty() {
+            return Ok(Self::error_response(
+                id,
+                INVALID_PARAMS,
+                "routine_id must be a non-empty string".to_string(),
+                None,
+            ));
+        }
+
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => {
+                return Ok(Self::success_response(
+                    id,
+                    serde_json::json!({
+                        "routine_id": routine_id,
+                        "safety": "unknown",
+                        "recommendation": "needs_review",
+                        "note": "stub mode"
+                    }),
+                ));
+            }
+        };
+
+        // Look up the routine.
+        let rs = rt.routine_store.lock().unwrap();
+        let routine = match rs.get(&routine_id) {
+            Some(r) => r.clone(),
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    format!("routine not found: {routine_id}"),
+                    None,
+                ));
+            }
+        };
+        drop(rs);
+
+        // Collect all skill IDs and sub-routine IDs from the effective steps.
+        let effective_steps = routine.effective_steps();
+        let mut all_skill_ids: Vec<String> = Vec::new();
+        let mut sub_routine_ids: Vec<String> = Vec::new();
+
+        for step in &effective_steps {
+            match step {
+                crate::types::routine::CompiledStep::Skill { skill_id, .. } => {
+                    if !all_skill_ids.contains(skill_id) {
+                        all_skill_ids.push(skill_id.clone());
+                    }
+                }
+                crate::types::routine::CompiledStep::SubRoutine { routine_id: sub_id, .. } => {
+                    if !sub_routine_ids.contains(sub_id) {
+                        sub_routine_ids.push(sub_id.clone());
+                    }
+                }
+            }
+        }
+
+        // Resolve sub-routine skill IDs.
+        let rs = rt.routine_store.lock().unwrap();
+        for sub_id in &sub_routine_ids {
+            if let Some(sub_routine) = rs.get(sub_id) {
+                for step in sub_routine.effective_steps() {
+                    if let crate::types::routine::CompiledStep::Skill { skill_id, .. } = &step {
+                        if !all_skill_ids.contains(skill_id) {
+                            all_skill_ids.push(skill_id.clone());
+                        }
+                    }
+                }
+            }
+        }
+        drop(rs);
+
+        // Check each skill's side effect class via the skill runtime.
+        let skill_rt = rt.skill_runtime.lock().unwrap();
+        let mut destructive_skills: Vec<String> = Vec::new();
+        let mut unknown_skills: Vec<String> = Vec::new();
+        let mut skill_safety_details: Vec<Value> = Vec::new();
+
+        for sid in &all_skill_ids {
+            if let Some(spec) = skill_rt.get_skill(sid) {
+                let side_effect = crate::adapters::PolicyEngineAdapter::derive_side_effect_class(spec);
+                let class_str = format!("{:?}", side_effect);
+                let is_destructive = matches!(
+                    side_effect,
+                    crate::types::common::SideEffectClass::Destructive
+                        | crate::types::common::SideEffectClass::Irreversible
+                );
+                if is_destructive {
+                    destructive_skills.push(sid.clone());
+                }
+                skill_safety_details.push(serde_json::json!({
+                    "skill_id": sid,
+                    "side_effect_class": class_str,
+                    "destructive": is_destructive,
+                }));
+            } else {
+                unknown_skills.push(sid.clone());
+                skill_safety_details.push(serde_json::json!({
+                    "skill_id": sid,
+                    "side_effect_class": "unknown",
+                    "destructive": false,
+                    "note": "skill not found in registry"
+                }));
+            }
+        }
+        drop(skill_rt);
+
+        // Build step summaries.
+        let step_summaries: Vec<Value> = effective_steps
+            .iter()
+            .enumerate()
+            .map(|(i, step)| {
+                let format_next = |ns: &crate::types::routine::NextStep| -> String {
+                    match ns {
+                        crate::types::routine::NextStep::Continue => "continue".to_string(),
+                        crate::types::routine::NextStep::Goto { step_index } => {
+                            format!("goto step {step_index}")
+                        }
+                        crate::types::routine::NextStep::CallRoutine { routine_id } => {
+                            format!("call routine {routine_id}")
+                        }
+                        crate::types::routine::NextStep::Complete => "complete".to_string(),
+                        crate::types::routine::NextStep::Abandon => "abandon".to_string(),
+                    }
+                };
+
+                match step {
+                    crate::types::routine::CompiledStep::Skill {
+                        skill_id,
+                        on_success,
+                        on_failure,
+                    } => serde_json::json!({
+                        "step": i,
+                        "type": "skill",
+                        "skill_id": skill_id,
+                        "summary": format!(
+                            "Step {i}: invoke skill {skill_id}, on success → {}, on failure → {}",
+                            format_next(on_success),
+                            format_next(on_failure)
+                        ),
+                    }),
+                    crate::types::routine::CompiledStep::SubRoutine {
+                        routine_id: sub_id,
+                        on_success,
+                        on_failure,
+                    } => serde_json::json!({
+                        "step": i,
+                        "type": "sub_routine",
+                        "routine_id": sub_id,
+                        "summary": format!(
+                            "Step {i}: call sub-routine {sub_id}, on success → {}, on failure → {}",
+                            format_next(on_success),
+                            format_next(on_failure)
+                        ),
+                    }),
+                }
+            })
+            .collect();
+
+        // Summarize match conditions.
+        let match_summaries: Vec<String> = routine
+            .match_conditions
+            .iter()
+            .map(|c| {
+                format!(
+                    "[{}] {}",
+                    c.condition_type, c.description
+                )
+            })
+            .collect();
+
+        // Summarize guard conditions.
+        let guard_summaries: Vec<String> = routine
+            .guard_conditions
+            .iter()
+            .map(|c| {
+                format!(
+                    "[{}] {}",
+                    c.condition_type, c.description
+                )
+            })
+            .collect();
+
+        // Determine safety.
+        let safety = if !unknown_skills.is_empty() {
+            "unknown"
+        } else if !destructive_skills.is_empty() {
+            "review_required"
+        } else {
+            "safe"
+        };
+
+        // Determine recommendation.
+        let recommendation = if routine.confidence > 0.7 && safety == "safe" {
+            "ready_for_autonomous"
+        } else {
+            "needs_review"
+        };
+
+        let origin_str = format!("{:?}", routine.origin);
+
+        Ok(Self::success_response(
+            id,
+            serde_json::json!({
+                "routine_id": routine.routine_id,
+                "version": routine.version,
+                "origin": origin_str,
+                "confidence": routine.confidence,
+                "autonomous": routine.autonomous,
+                "priority": routine.priority,
+                "exclusive": routine.exclusive,
+                "policy_scope": routine.policy_scope,
+                "match_conditions": match_summaries,
+                "guard_conditions": guard_summaries,
+                "steps": step_summaries,
+                "sub_routines": sub_routine_ids,
+                "all_skill_ids": all_skill_ids,
+                "skill_safety": skill_safety_details,
+                "destructive_skills": destructive_skills,
+                "unknown_skills": unknown_skills,
+                "safety": safety,
+                "recommendation": recommendation,
+            }),
+        ))
+    }
+
     /// Parse an `on_success` or `on_failure` action object into a `NextStep`.
     /// Returns `NextStep::Continue` when the value is absent or unparseable.
     fn parse_authored_next_step(
@@ -4273,6 +4526,20 @@ impl McpServer {
                     "required": ["session_id", "peer_id"]
                 }),
             },
+            McpTool {
+                name: "review_routine".to_string(),
+                description: "Review a routine's safety profile before marking it autonomous. Returns a human-readable summary of what the routine does, which ports/skills it touches, side effect assessment, and a recommendation.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "routine_id": {
+                            "type": "string",
+                            "description": "The routine to review"
+                        }
+                    },
+                    "required": ["routine_id"]
+                }),
+            },
         ]
     }
 }
@@ -4318,7 +4585,7 @@ mod tests {
     fn test_list_tools_count() {
         let server = McpServer::new_stub();
         let tools = server.list_tools();
-        assert_eq!(tools.len(), 33);
+        assert_eq!(tools.len(), 34);
     }
 
     #[test]
@@ -4352,6 +4619,7 @@ mod tests {
         assert!(names.contains(&"rollback_routine".to_string()));
         assert!(names.contains(&"sync_beliefs".to_string()));
         assert!(names.contains(&"migrate_session".to_string()));
+        assert!(names.contains(&"review_routine".to_string()));
     }
 
     #[test]
@@ -4859,7 +5127,7 @@ mod tests {
     #[test]
     fn test_default_impl() {
         let server = McpServer::default();
-        assert_eq!(server.list_tools().len(), 33);
+        assert_eq!(server.list_tools().len(), 34);
     }
 
     /// Build a real RuntimeHandle from a bootstrapped runtime (no packs).
@@ -5575,5 +5843,123 @@ mod tests {
         let result = resp.result.unwrap();
         let inner = unwrap_tool_result(&result);
         assert_eq!(inner["outcome"], "failure");
+    }
+
+    #[test]
+    fn test_review_routine_stub() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "review_routine",
+            Some(serde_json::json!({ "routine_id": "test-routine-1" })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["routine_id"], "test-routine-1");
+        assert_eq!(result["safety"], "unknown");
+        assert_eq!(result["recommendation"], "needs_review");
+    }
+
+    #[test]
+    fn test_review_routine_missing_id() {
+        let server = McpServer::new_stub();
+        let req = make_request("review_routine", Some(serde_json::json!({})));
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_review_routine_no_params() {
+        let server = McpServer::new_stub();
+        let req = make_request("review_routine", None);
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn test_review_routine_via_tools_call() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "review_routine",
+                "arguments": { "routine_id": "test-routine-1" }
+            })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        let inner = unwrap_tool_result(&result);
+        assert_eq!(inner["routine_id"], "test-routine-1");
+        assert_eq!(inner["safety"], "unknown");
+        assert_eq!(inner["recommendation"], "needs_review");
+    }
+
+    #[test]
+    fn test_review_routine_wired_not_found() {
+        let server = make_wired_server();
+        let req = make_request(
+            "review_routine",
+            Some(serde_json::json!({ "routine_id": "nonexistent" })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
+        assert!(resp.error.unwrap().message.contains("routine not found"));
+    }
+
+    #[test]
+    fn test_review_routine_wired_with_routine() {
+        let server = make_wired_server();
+        // Register a routine into the store.
+        {
+            let rt = server.runtime.as_ref().unwrap();
+            let mut rs = rt.routine_store.lock().unwrap();
+            rs.register(crate::types::routine::Routine {
+                routine_id: "review-test".to_string(),
+                namespace: "test".to_string(),
+                origin: crate::types::routine::RoutineOrigin::PackAuthored,
+                match_conditions: vec![crate::types::common::Precondition {
+                    condition_type: "goal_fingerprint".to_string(),
+                    expression: serde_json::json!({"goal": "test"}),
+                    description: "matches test goals".to_string(),
+                }],
+                compiled_skill_path: vec!["skill_a".to_string(), "skill_b".to_string()],
+                compiled_steps: vec![],
+                guard_conditions: vec![],
+                expected_cost: 0.5,
+                expected_effect: vec![],
+                confidence: 0.85,
+                autonomous: false,
+                priority: 1,
+                exclusive: false,
+                policy_scope: None,
+                version: 0,
+            })
+            .unwrap();
+        }
+
+        let req = make_request(
+            "review_routine",
+            Some(serde_json::json!({ "routine_id": "review-test" })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["routine_id"], "review-test");
+        assert_eq!(result["version"], 0);
+        assert_eq!(result["origin"], "PackAuthored");
+        assert_eq!(result["confidence"], 0.85);
+        assert_eq!(result["autonomous"], false);
+        assert_eq!(result["priority"], 1);
+        assert!(result["steps"].is_array());
+        assert_eq!(result["steps"].as_array().unwrap().len(), 2);
+        assert!(result["all_skill_ids"].is_array());
+        assert_eq!(result["all_skill_ids"].as_array().unwrap().len(), 2);
+        // Skills not in registry, so they show as unknown.
+        assert_eq!(result["safety"], "unknown");
+        assert_eq!(result["recommendation"], "needs_review");
+        assert!(result["unknown_skills"].as_array().unwrap().len() > 0);
     }
 }
