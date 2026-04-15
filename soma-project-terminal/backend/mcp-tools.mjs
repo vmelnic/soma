@@ -198,7 +198,19 @@ export const DEFAULT_CHAT_TOOLS = Object.freeze([
               required: ["type"],
             },
           },
-          guard_conditions: { type: "array", description: "Optional conditions that must ALL pass" },
+          guard_conditions: {
+            type: "array",
+            description: "Optional conditions that must ALL pass",
+            items: {
+              type: "object",
+              properties: {
+                condition_type: { type: "string" },
+                expression: { description: "JSON expression to match against context" },
+                description: { type: "string" },
+              },
+              required: ["condition_type", "expression", "description"],
+            },
+          },
           priority: { type: "integer", description: "Higher fires first (default 0)" },
           exclusive: { type: "boolean", description: "If true, blocks lower-priority matches (default false)" },
           policy_scope: { type: "string", description: "Optional policy namespace override" },
