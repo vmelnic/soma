@@ -280,6 +280,11 @@ Several ports read configuration from environment variables:
 
 - `SOMA_POSTGRES_URL` for [`postgres`](postgres)
 - `SOMA_REDIS_URL` for [`redis`](redis)
+- `SOMA_MYSQL_URL` / `MYSQL_URL` for [`mysql`](mysql)
+- `SOMA_MONGODB_URL` / `MONGODB_URL` for [`mongodb`](mongodb);
+  `SOMA_MONGODB_DATABASE` for database name (default: `soma`)
+- `SOMA_ELASTICSEARCH_URL` / `ELASTICSEARCH_URL` for
+  [`elasticsearch`](elasticsearch)
 - [`s3`](s3): `SOMA_S3_DEFAULT_BUCKET` (default: `soma-uploads`),
   `SOMA_S3_REGION` (falls back to `AWS_REGION`, `AWS_DEFAULT_REGION`),
   `SOMA_S3_ENDPOINT` (falls back to `AWS_ENDPOINT_URL_S3`)
@@ -289,9 +294,18 @@ Several ports read configuration from environment variables:
   `SOMA_SMTP_USERNAME` / `SMTP_USERNAME`,
   `SOMA_SMTP_PASSWORD` / `SMTP_PASSWORD`,
   `SOMA_SMTP_STARTTLS` / `SMTP_STARTTLS` (default: true)
+- `SOMA_STRIPE_SECRET_KEY` / `STRIPE_SECRET_KEY` for [`stripe`](stripe)
+- [`twilio`](twilio): `SOMA_TWILIO_ACCOUNT_SID` / `TWILIO_ACCOUNT_SID`,
+  `SOMA_TWILIO_AUTH_TOKEN` / `TWILIO_AUTH_TOKEN`,
+  `SOMA_TWILIO_FROM_NUMBER` / `TWILIO_FROM_NUMBER`
+- `SOMA_SLACK_BOT_TOKEN` / `SLACK_BOT_TOKEN` for [`slack`](slack)
+- `SOMA_GOOGLE_ACCESS_TOKEN` / `GOOGLE_ACCESS_TOKEN` for
+  [`google-calendar`](google-calendar), [`google-drive`](google-drive),
+  [`google-mail`](google-mail)
+- `SOMA_CALENDAR_DIR` for [`calendar`](calendar) (default:
+  `~/.soma/calendars/`)
 
-Everything else is configured through call inputs or library-default client
-behavior.
+`pdf`, `image`, `timer`, and most of `geo` require no environment variables.
 
 ## Adding a new port
 
@@ -312,12 +326,23 @@ Recommended checklist:
 - [`Cargo.toml`](Cargo.toml): workspace membership
 - [`sdk/src/lib.rs`](sdk/src/lib.rs): SDK types and trait
 - [`auth/src/lib.rs`](auth/src/lib.rs): auth adapter
+- [`calendar/src/lib.rs`](calendar/src/lib.rs): calendar adapter
 - [`crypto/src/lib.rs`](crypto/src/lib.rs): crypto adapter
+- [`elasticsearch/src/lib.rs`](elasticsearch/src/lib.rs): elasticsearch adapter
 - [`geo/src/lib.rs`](geo/src/lib.rs): geo adapter
+- [`google-calendar/src/lib.rs`](google-calendar/src/lib.rs): google-calendar adapter
+- [`google-drive/src/lib.rs`](google-drive/src/lib.rs): google-drive adapter
+- [`google-mail/src/lib.rs`](google-mail/src/lib.rs): google-mail adapter
 - [`image/src/lib.rs`](image/src/lib.rs): image adapter
+- [`mongodb/src/lib.rs`](mongodb/src/lib.rs): mongodb adapter
+- [`mysql/src/lib.rs`](mysql/src/lib.rs): mysql adapter
+- [`pdf/src/lib.rs`](pdf/src/lib.rs): pdf adapter
 - [`postgres/src/lib.rs`](postgres/src/lib.rs): postgres adapter
 - [`push/src/lib.rs`](push/src/lib.rs): push adapter
 - [`redis/src/lib.rs`](redis/src/lib.rs): redis adapter
 - [`s3/src/lib.rs`](s3/src/lib.rs): s3 adapter
+- [`slack/src/lib.rs`](slack/src/lib.rs): slack adapter
 - [`smtp/src/lib.rs`](smtp/src/lib.rs): smtp adapter
+- [`stripe/src/lib.rs`](stripe/src/lib.rs): stripe adapter
 - [`timer/src/lib.rs`](timer/src/lib.rs): timer adapter
+- [`twilio/src/lib.rs`](twilio/src/lib.rs): twilio adapter
