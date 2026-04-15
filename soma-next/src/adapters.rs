@@ -64,9 +64,40 @@ impl SimpleBeliefSource {
 }
 
 impl BeliefSource for SimpleBeliefSource {
-    fn build_initial_belief(&self, _goal: &GoalSpec) -> Result<BeliefState> {
+    fn build_initial_belief(&self, goal: &GoalSpec) -> Result<BeliefState> {
         let session_id = Uuid::new_v4();
-        self.belief_runtime.create_belief(session_id)
+        let mut belief = self.belief_runtime.create_belief(session_id)?;
+
+        // Extract bindings from goal.objective.structured (JSON key-value → bindings).
+        if let Some(ref structured) = goal.objective.structured {
+            if let Some(obj) = structured.as_object() {
+                for (key, value) in obj {
+                    belief.active_bindings.push(crate::types::belief::Binding {
+                        name: key.clone(),
+                        value: value.clone(),
+                        source: "goal".to_string(),
+                        confidence: 1.0,
+                    });
+                }
+            }
+        }
+
+        // Extract filesystem paths from the goal description text.
+        if let Some(path) = crate::interfaces::goal_utils::extract_path(
+            &goal.objective.description,
+        ) {
+            // Only add if not already present from structured data.
+            if !belief.active_bindings.iter().any(|b| b.name == "path") {
+                belief.active_bindings.push(crate::types::belief::Binding {
+                    name: "path".to_string(),
+                    value: serde_json::json!(path),
+                    source: "goal".to_string(),
+                    confidence: 1.0,
+                });
+            }
+        }
+
+        Ok(belief)
     }
 
     fn apply_patch(&self, belief: &mut BeliefState, patch: &BeliefPatch) -> Result<()> {

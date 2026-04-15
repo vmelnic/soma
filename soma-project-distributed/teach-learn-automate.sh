@@ -82,7 +82,7 @@ for i in 1 2 3; do
     echo "  --- Demonstration $i/3 ---"
 
     # Simulate the trigger: patch world state with an event
-    echo '{"jsonrpc":"2.0","id":'$((100+i))',"method":"tools/call","params":{"name":"patch_world_state","arguments":{"add_facts":[{"fact_id":"file_check_event","subject":"event","predicate":"file_check","value":"triggered","confidence":1.0,"provenance":"observed","timestamp":"2026-04-15T00:00:00Z"}]}}}' >&3; sleep 0.5
+    echo '{"jsonrpc":"2.0","id":'$((100+i))',"method":"tools/call","params":{"name":"patch_world_state","arguments":{"add_facts":[{"fact_id":"file_check_event","subject":"event","predicate":"file_check","value":"triggered","confidence":1.0,"provenance":"observed","timestamp":"2026-04-15T00:00:00Z"},{"fact_id":"file_check_path","subject":"file_check","predicate":"path","value":"/tmp","confidence":1.0,"provenance":"observed","timestamp":"2026-04-15T00:00:00Z"}]}}}' >&3; sleep 0.5
 
     # Operator's manual response: create_goal to stat+readdir
     # NOTE: world state fact stays DURING goal execution so the episode
@@ -223,7 +223,7 @@ run_check "Routine marked autonomous" 600 "i=json.loads(r['result']['content'][0
 echo ""
 echo "  Patching world state with file_check event..."
 echo "  Waiting 3s for reactive monitor to fire..."
-echo '{"jsonrpc":"2.0","id":601,"method":"tools/call","params":{"name":"patch_world_state","arguments":{"add_facts":[{"fact_id":"file_check_event","subject":"event","predicate":"file_check","value":"triggered","confidence":1.0,"provenance":"observed","timestamp":"2026-04-15T00:00:00Z"}]}}}' >&3
+echo '{"jsonrpc":"2.0","id":601,"method":"tools/call","params":{"name":"patch_world_state","arguments":{"add_facts":[{"fact_id":"file_check_event","subject":"event","predicate":"file_check","value":"triggered","confidence":1.0,"provenance":"observed","timestamp":"2026-04-15T00:00:00Z"},{"fact_id":"file_check_path","subject":"file_check","predicate":"path","value":"/tmp","confidence":1.0,"provenance":"observed","timestamp":"2026-04-15T00:00:00Z"}]}}}' >&3
 sleep 4
 
 # Check world state for routine execution facts

@@ -222,6 +222,30 @@ pub fn start_reactive_monitor(
                             session.working_memory.plan_step = 0;
                             session.working_memory.used_plan_following = true;
 
+                            // Inject bindings from the world state snapshot.
+                            // The snapshot keys are "subject.predicate" and values
+                            // are the fact values. This lets autonomously fired
+                            // routines access the triggering context.
+                            if let Some(obj) = snapshot.as_object() {
+                                for (key, value) in obj {
+                                    // Use the last segment as the binding name
+                                    // (e.g. "event.file_check" → "file_check").
+                                    let binding_name = key.rsplit('.').next()
+                                        .unwrap_or(key).to_string();
+                                    if !session.working_memory.active_bindings.iter()
+                                        .any(|b| b.name == binding_name)
+                                    {
+                                        session.working_memory.active_bindings.push(
+                                            crate::types::session::WorkingBinding {
+                                                name: binding_name,
+                                                value: value.clone(),
+                                                source: crate::types::session::BindingSource::WorkingMemory,
+                                            },
+                                        );
+                                    }
+                                }
+                            }
+
                             let mut final_success = false;
                             loop {
                                 use crate::runtime::session::StepResult;
