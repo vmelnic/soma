@@ -89,6 +89,8 @@ pub struct Routine {
     pub exclusive: bool,
     #[serde(default)]
     pub policy_scope: Option<String>,
+    #[serde(default)]
+    pub version: u32,
 }
 
 impl Routine {
@@ -142,6 +144,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
+            version: 0,
         }
     }
 

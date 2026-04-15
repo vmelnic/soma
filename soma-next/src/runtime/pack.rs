@@ -3374,6 +3374,7 @@ mod tests {
                 priority: 0,
                 exclusive: false,
                 policy_scope: None,
+                version: 0,
             })
             .unwrap();
 
@@ -3398,6 +3399,7 @@ mod tests {
                 priority: 0,
                 exclusive: false,
                 policy_scope: None,
+                version: 0,
             })
             .unwrap();
 
@@ -3448,6 +3450,7 @@ mod tests {
                 priority: 0,
                 exclusive: false,
                 policy_scope: None,
+                version: 0,
             })
             .unwrap();
 
@@ -3493,6 +3496,7 @@ mod tests {
                 priority: 0,
                 exclusive: false,
                 policy_scope: None,
+                version: 0,
             })
             .unwrap();
 

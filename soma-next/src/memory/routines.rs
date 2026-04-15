@@ -51,18 +51,42 @@ pub trait RoutineStore {
     /// Set the `autonomous` flag on a routine. Returns Ok(true) if the
     /// routine was found and updated, Ok(false) if not found.
     fn set_autonomous(&mut self, routine_id: &str, autonomous: bool) -> Result<bool>;
+
+    /// List all versions of a routine (history + current), ordered by version.
+    fn list_versions(&self, _routine_id: &str) -> Vec<&Routine> {
+        vec![]
+    }
+
+    /// Roll back a routine to a previous version from history.
+    fn rollback(&mut self, routine_id: &str, _target_version: u32) -> Result<()> {
+        Err(SomaError::Memory(format!(
+            "rollback not supported for {routine_id}"
+        )))
+    }
 }
 
 /// Default in-memory routine store backed by Vec<Routine>.
 pub struct DefaultRoutineStore {
     routines: Vec<Routine>,
+    history: Vec<Routine>,
 }
 
 impl DefaultRoutineStore {
     pub fn new() -> Self {
         Self {
             routines: Vec::new(),
+            history: Vec::new(),
         }
+    }
+
+    /// Access the history entries directly (used by DiskRoutineStore for persistence).
+    pub fn history(&self) -> &[Routine] {
+        &self.history
+    }
+
+    /// Replace the history entries (used by DiskRoutineStore when loading from disk).
+    pub fn set_history(&mut self, history: Vec<Routine>) {
+        self.history = history;
     }
 }
 
@@ -110,13 +134,16 @@ fn precondition_matches(precondition: &Precondition, context: &serde_json::Value
 }
 
 impl RoutineStore for DefaultRoutineStore {
-    fn register(&mut self, routine: Routine) -> Result<()> {
+    fn register(&mut self, mut routine: Routine) -> Result<()> {
         // Replace if routine_id already exists, otherwise append.
         if let Some(existing) = self
             .routines
             .iter_mut()
             .find(|r| r.routine_id == routine.routine_id)
         {
+            let old = existing.clone();
+            routine.version = old.version + 1;
+            self.history.push(old);
             *existing = routine;
         } else {
             self.routines.push(routine);
@@ -271,6 +298,7 @@ impl RoutineStore for DefaultRoutineStore {
             priority: 0,
             exclusive: false,
             policy_scope: None,
+            version: 0,
         };
 
         Some(routine)
@@ -359,6 +387,42 @@ impl RoutineStore for DefaultRoutineStore {
             Ok(false)
         }
     }
+
+    fn list_versions(&self, routine_id: &str) -> Vec<&Routine> {
+        let mut versions: Vec<&Routine> = self
+            .history
+            .iter()
+            .filter(|r| r.routine_id == routine_id)
+            .collect();
+        if let Some(current) = self.routines.iter().find(|r| r.routine_id == routine_id) {
+            versions.push(current);
+        }
+        versions.sort_by_key(|r| r.version);
+        versions
+    }
+
+    fn rollback(&mut self, routine_id: &str, target_version: u32) -> Result<()> {
+        let idx = self
+            .history
+            .iter()
+            .position(|r| r.routine_id == routine_id && r.version == target_version)
+            .ok_or_else(|| {
+                SomaError::Memory(format!(
+                    "version {target_version} not found in history for {routine_id}"
+                ))
+            })?;
+        let old = self.history.remove(idx);
+        if let Some(current) = self
+            .routines
+            .iter_mut()
+            .find(|r| r.routine_id == routine_id)
+        {
+            *current = old;
+        } else {
+            self.routines.push(old);
+        }
+        Ok(())
+    }
 }
 
 /// Check if `needle` is a subsequence of `haystack`.
@@ -401,6 +465,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
+            version: 0,
         }
     }
 
@@ -648,6 +713,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
+            version: 0,
         }
     }
 
@@ -912,6 +978,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
+            version: 0,
         };
         store.register(r).unwrap();
 
@@ -958,6 +1025,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
+            version: 0,
         };
         store.register(r).unwrap();
 
@@ -1049,6 +1117,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
+            version: 0,
         };
         store.register(r).unwrap();
 
@@ -1098,6 +1167,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
+            version: 0,
         };
         store.register(r).unwrap();
 
@@ -1140,6 +1210,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
+            version: 0,
         };
         store.register(r).unwrap();
 
@@ -1213,5 +1284,68 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].routine_id, "r_exclusive");
         assert!(results[0].exclusive);
+    }
+
+    // --- Versioning tests ---
+
+    #[test]
+    fn test_register_increments_version() {
+        let mut store = DefaultRoutineStore::new();
+        let r = make_routine("r1", "domain", "file");
+        store.register(r).unwrap();
+        assert_eq!(store.get("r1").unwrap().version, 0);
+
+        let r2 = Routine {
+            confidence: 0.99,
+            ..make_routine("r1", "domain", "file")
+        };
+        store.register(r2).unwrap();
+        assert_eq!(store.get("r1").unwrap().version, 1);
+    }
+
+    #[test]
+    fn test_register_preserves_history() {
+        let mut store = DefaultRoutineStore::new();
+        store.register(make_routine("r1", "domain", "file")).unwrap();
+        store.register(Routine { confidence: 0.8, ..make_routine("r1", "domain", "file") }).unwrap();
+        store.register(Routine { confidence: 0.7, ..make_routine("r1", "domain", "file") }).unwrap();
+
+        // History should have 2 entries (v0 and v1), current is v2.
+        assert_eq!(store.history().len(), 2);
+        assert_eq!(store.get("r1").unwrap().version, 2);
+    }
+
+    #[test]
+    fn test_rollback_to_previous_version() {
+        let mut store = DefaultRoutineStore::new();
+        let r0 = Routine { confidence: 0.9, ..make_routine("r1", "domain", "file") };
+        store.register(r0).unwrap();
+        assert_eq!(store.get("r1").unwrap().version, 0);
+
+        let r1 = Routine { confidence: 0.5, ..make_routine("r1", "domain", "file") };
+        store.register(r1).unwrap();
+        assert_eq!(store.get("r1").unwrap().version, 1);
+        assert!((store.get("r1").unwrap().confidence - 0.5).abs() < f64::EPSILON);
+
+        // Rollback to v0.
+        store.rollback("r1", 0).unwrap();
+        let current = store.get("r1").unwrap();
+        assert_eq!(current.version, 0);
+        assert!((current.confidence - 0.9).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_list_versions_returns_all() {
+        let mut store = DefaultRoutineStore::new();
+        store.register(make_routine("r1", "domain", "file")).unwrap();
+        store.register(Routine { confidence: 0.8, ..make_routine("r1", "domain", "file") }).unwrap();
+        store.register(Routine { confidence: 0.7, ..make_routine("r1", "domain", "file") }).unwrap();
+
+        let versions = store.list_versions("r1");
+        // 2 history + 1 current = 3 total.
+        assert_eq!(versions.len(), 3);
+        assert_eq!(versions[0].version, 0);
+        assert_eq!(versions[1].version, 1);
+        assert_eq!(versions[2].version, 2);
     }
 }

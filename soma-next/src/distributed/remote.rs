@@ -623,6 +623,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
+            version: 0,
         };
         let result = exec.transfer_routine("peer-1", &routine);
         assert!(result.is_err());
@@ -1075,6 +1076,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
+            version: 0,
         };
 
         let result = exec.transfer_routine("peer-1", &routine);

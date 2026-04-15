@@ -81,6 +81,42 @@ const fn default_blacklist_threshold() -> u32 {
     50
 }
 
+const fn default_heartbeat_interval_ms() -> u64 {
+    5000
+}
+
+const fn default_heartbeat_max_missed() -> u32 {
+    3
+}
+
+const fn default_heartbeat_timeout_ms() -> u64 {
+    2000
+}
+
+const fn default_clustering_threshold() -> f64 {
+    0.8
+}
+
+const fn default_min_support() -> f64 {
+    0.7
+}
+
+const fn default_min_episodes() -> usize {
+    3
+}
+
+const fn default_embedder_dimensions() -> usize {
+    128
+}
+
+const fn default_max_pattern_length() -> usize {
+    20
+}
+
+const fn default_max_results() -> usize {
+    1000
+}
+
 // ---------------------------------------------------------------------------
 // Config sections
 // ---------------------------------------------------------------------------
@@ -98,6 +134,8 @@ pub struct SomaConfig {
     pub ports: PortsSection,
     #[serde(default)]
     pub distributed: DistributedSection,
+    #[serde(default)]
+    pub learning: LearningSection,
 }
 
 /// Instance identity and logging (`[soma]` section).
@@ -234,6 +272,18 @@ pub struct DistributedSection {
     /// Whether the blacklist mechanism is active. When false, peers are never banned.
     #[serde(default = "default_true")]
     pub blacklist_enabled: bool,
+
+    /// Interval between heartbeat rounds, in milliseconds.
+    #[serde(default = "default_heartbeat_interval_ms")]
+    pub heartbeat_interval_ms: u64,
+
+    /// Number of consecutive missed heartbeats before marking a peer unavailable.
+    #[serde(default = "default_heartbeat_max_missed")]
+    pub heartbeat_max_missed: u32,
+
+    /// Per-peer ping timeout in milliseconds (connect + response).
+    #[serde(default = "default_heartbeat_timeout_ms")]
+    pub heartbeat_timeout_ms: u64,
 }
 
 impl Default for DistributedSection {
@@ -248,6 +298,9 @@ impl Default for DistributedSection {
             blacklist_threshold: default_blacklist_threshold(),
             rate_limit_enabled: true,
             blacklist_enabled: true,
+            heartbeat_interval_ms: default_heartbeat_interval_ms(),
+            heartbeat_max_missed: default_heartbeat_max_missed(),
+            heartbeat_timeout_ms: default_heartbeat_timeout_ms(),
         }
     }
 }
@@ -321,6 +374,50 @@ impl Default for PortsSection {
     }
 }
 
+/// Learning pipeline settings (`[learning]` section).
+///
+/// Controls how the memory system induces schemas from episodes and mines
+/// frequent skill subsequences via PrefixSpan.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LearningSection {
+    /// Cosine similarity threshold for embedding-based episode clustering.
+    #[serde(default = "default_clustering_threshold")]
+    pub clustering_threshold: f64,
+
+    /// Minimum support ratio for PrefixSpan pattern mining (0.0 to 1.0).
+    #[serde(default = "default_min_support")]
+    pub min_support: f64,
+
+    /// Minimum number of successful episodes required to induce a schema.
+    #[serde(default = "default_min_episodes")]
+    pub min_episodes: usize,
+
+    /// Dimensionality of the HashEmbedder output vectors.
+    #[serde(default = "default_embedder_dimensions")]
+    pub embedder_dimensions: usize,
+
+    /// Maximum pattern length for PrefixSpan mining.
+    #[serde(default = "default_max_pattern_length")]
+    pub max_pattern_length: usize,
+
+    /// Maximum number of frequent patterns returned by PrefixSpan.
+    #[serde(default = "default_max_results")]
+    pub max_results: usize,
+}
+
+impl Default for LearningSection {
+    fn default() -> Self {
+        Self {
+            clustering_threshold: default_clustering_threshold(),
+            min_support: default_min_support(),
+            min_episodes: default_min_episodes(),
+            embedder_dimensions: default_embedder_dimensions(),
+            max_pattern_length: default_max_pattern_length(),
+            max_results: default_max_results(),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Loading
 // ---------------------------------------------------------------------------
@@ -379,6 +476,56 @@ impl SomaConfig {
                 default_resource_budget()
             );
             self.runtime.default_resource_budget = default_resource_budget();
+        }
+
+        if self.learning.clustering_threshold < 0.0 || self.learning.clustering_threshold > 1.0 {
+            tracing::warn!(
+                "learning.clustering_threshold must be in [0.0, 1.0] (was {}), clamping to {}",
+                self.learning.clustering_threshold,
+                default_clustering_threshold()
+            );
+            self.learning.clustering_threshold = default_clustering_threshold();
+        }
+
+        if self.learning.min_support < 0.0 || self.learning.min_support > 1.0 {
+            tracing::warn!(
+                "learning.min_support must be in [0.0, 1.0] (was {}), clamping to {}",
+                self.learning.min_support,
+                default_min_support()
+            );
+            self.learning.min_support = default_min_support();
+        }
+
+        if self.learning.min_episodes == 0 {
+            tracing::warn!(
+                "learning.min_episodes must be > 0 (was 0), clamping to {}",
+                default_min_episodes()
+            );
+            self.learning.min_episodes = default_min_episodes();
+        }
+
+        if self.learning.embedder_dimensions == 0 {
+            tracing::warn!(
+                "learning.embedder_dimensions must be > 0 (was 0), clamping to {}",
+                default_embedder_dimensions()
+            );
+            self.learning.embedder_dimensions = default_embedder_dimensions();
+        }
+
+        if self.learning.max_pattern_length == 0 {
+            tracing::warn!(
+                "learning.max_pattern_length must be > 0 (was 0), clamping to {}",
+                default_max_pattern_length()
+            );
+            self.learning.max_pattern_length = default_max_pattern_length();
+        }
+
+        if self.learning.max_results == 0 {
+            tracing::warn!(
+                "learning.max_results must be > 0 (was 0), clamping to {}",
+                default_max_results()
+            );
+            self.learning.max_results = default_max_results();
         }
 
         let valid_levels = ["trace", "debug", "info", "warn", "error"];
@@ -451,6 +598,42 @@ impl SomaConfig {
             && let Ok(b) = v.parse::<bool>() {
                 self.distributed.blacklist_enabled = b;
             }
+        if let Ok(v) = std::env::var("SOMA_DISTRIBUTED_HEARTBEAT_INTERVAL_MS")
+            && let Ok(n) = v.parse::<u64>() {
+                self.distributed.heartbeat_interval_ms = n;
+            }
+        if let Ok(v) = std::env::var("SOMA_DISTRIBUTED_HEARTBEAT_MAX_MISSED")
+            && let Ok(n) = v.parse::<u32>() {
+                self.distributed.heartbeat_max_missed = n;
+            }
+        if let Ok(v) = std::env::var("SOMA_DISTRIBUTED_HEARTBEAT_TIMEOUT_MS")
+            && let Ok(n) = v.parse::<u64>() {
+                self.distributed.heartbeat_timeout_ms = n;
+            }
+        if let Ok(v) = std::env::var("SOMA_LEARNING_CLUSTERING_THRESHOLD")
+            && let Ok(n) = v.parse::<f64>() {
+                self.learning.clustering_threshold = n;
+            }
+        if let Ok(v) = std::env::var("SOMA_LEARNING_MIN_SUPPORT")
+            && let Ok(n) = v.parse::<f64>() {
+                self.learning.min_support = n;
+            }
+        if let Ok(v) = std::env::var("SOMA_LEARNING_MIN_EPISODES")
+            && let Ok(n) = v.parse::<usize>() {
+                self.learning.min_episodes = n;
+            }
+        if let Ok(v) = std::env::var("SOMA_LEARNING_EMBEDDER_DIMENSIONS")
+            && let Ok(n) = v.parse::<usize>() {
+                self.learning.embedder_dimensions = n;
+            }
+        if let Ok(v) = std::env::var("SOMA_LEARNING_MAX_PATTERN_LENGTH")
+            && let Ok(n) = v.parse::<usize>() {
+                self.learning.max_pattern_length = n;
+            }
+        if let Ok(v) = std::env::var("SOMA_LEARNING_MAX_RESULTS")
+            && let Ok(n) = v.parse::<usize>() {
+                self.learning.max_results = n;
+            }
         if let Ok(v) = std::env::var("SOMA_PORTS_REQUIRE_SIGNATURES")
             && let Ok(b) = v.parse::<bool>() {
                 self.ports.require_signatures = b;
@@ -485,6 +668,14 @@ mod tests {
         assert!(!cfg.mcp.enabled);
         assert!(cfg.ports.filesystem_enabled);
         assert!(cfg.ports.http_enabled);
+
+        // Learning defaults
+        assert!((cfg.learning.clustering_threshold - 0.8).abs() < f64::EPSILON);
+        assert!((cfg.learning.min_support - 0.7).abs() < f64::EPSILON);
+        assert_eq!(cfg.learning.min_episodes, 3);
+        assert_eq!(cfg.learning.embedder_dimensions, 128);
+        assert_eq!(cfg.learning.max_pattern_length, 20);
+        assert_eq!(cfg.learning.max_results, 1000);
     }
 
     #[test]

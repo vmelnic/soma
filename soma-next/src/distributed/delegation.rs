@@ -320,6 +320,7 @@ impl DelegationManager for DefaultDelegationManager {
                         priority: 0,
                         exclusive: false,
                         policy_scope: None,
+                        version: 0,
                     };
                     executor.transfer_routine(peer_id, &routine)?;
                 } else {

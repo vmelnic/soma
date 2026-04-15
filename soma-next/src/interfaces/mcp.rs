@@ -286,6 +286,8 @@ impl McpServer {
             "set_routine_autonomous" => self.handle_set_routine_autonomous(request.id, request.params),
             "replicate_routine" => self.handle_replicate_routine(request.id, request.params),
             "author_routine" => self.handle_author_routine(request.id, request.params),
+            "list_routine_versions" => self.handle_list_routine_versions(request.id, request.params),
+            "rollback_routine" => self.handle_rollback_routine(request.id, request.params),
 
             _ => Ok(Self::error_response(
                 request.id,
@@ -378,6 +380,8 @@ impl McpServer {
             "set_routine_autonomous" => self.handle_set_routine_autonomous(inner_id, arguments),
             "replicate_routine" => self.handle_replicate_routine(inner_id, arguments),
             "author_routine" => self.handle_author_routine(inner_id, arguments),
+            "list_routine_versions" => self.handle_list_routine_versions(inner_id, arguments),
+            "rollback_routine" => self.handle_rollback_routine(inner_id, arguments),
             _ => {
                 return Ok(Self::error_response(
                     id,
@@ -1806,6 +1810,7 @@ impl McpServer {
                     priority: routine.priority,
                     exclusive: routine.exclusive,
                     policy_scope: routine.policy_scope.clone(),
+                    version: routine.version,
                 };
 
                 match exec.transfer_routine(&peer_id, &transfer) {
@@ -1967,6 +1972,7 @@ impl McpServer {
                         priority: routine.priority,
                         exclusive: routine.exclusive,
                         policy_scope: routine.policy_scope.clone(),
+                        version: routine.version,
                     };
                     let _ = exec.transfer_routine(&peer_id, &transfer);
                     let skill_ids: Vec<String> = routine.effective_steps().iter().filter_map(|s| {
@@ -2693,6 +2699,7 @@ impl McpServer {
             priority: routine.priority,
             exclusive: routine.exclusive,
             policy_scope: routine.policy_scope.clone(),
+            version: routine.version,
         };
 
         let mut successes = Vec::new();
@@ -2900,6 +2907,7 @@ impl McpServer {
             priority,
             exclusive,
             policy_scope,
+            version: 0,
         };
 
         let rt = match &self.runtime {
@@ -2935,6 +2943,142 @@ impl McpServer {
                 "routine_id": routine_id,
             }),
         ))
+    }
+
+    fn handle_list_routine_versions(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: routine_id (string)".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let routine_id = params
+            .get("routine_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if routine_id.is_empty() {
+            return Ok(Self::error_response(
+                id,
+                INVALID_PARAMS,
+                "routine_id must be a non-empty string".to_string(),
+                None,
+            ));
+        }
+
+        if let Some(rt) = &self.runtime {
+            let store = rt.routine_store.lock().unwrap();
+            let versions = store.list_versions(&routine_id);
+            let entries: Vec<Value> = versions
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "routine_id": r.routine_id,
+                        "version": r.version,
+                        "confidence": r.confidence,
+                        "origin": r.origin,
+                        "autonomous": r.autonomous,
+                    })
+                })
+                .collect();
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({ "versions": entries }),
+            ))
+        } else {
+            // Stub mode
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({ "versions": [] }),
+            ))
+        }
+    }
+
+    fn handle_rollback_routine(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: routine_id (string), target_version (integer)".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let routine_id = params
+            .get("routine_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if routine_id.is_empty() {
+            return Ok(Self::error_response(
+                id,
+                INVALID_PARAMS,
+                "routine_id must be a non-empty string".to_string(),
+                None,
+            ));
+        }
+
+        let target_version = match params.get("target_version").and_then(|v| v.as_u64()) {
+            Some(v) => v as u32,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "target_version must be a non-negative integer".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        if let Some(rt) = &self.runtime {
+            let mut store = rt.routine_store.lock().unwrap();
+            match store.rollback(&routine_id, target_version) {
+                Ok(()) => Ok(Self::success_response(
+                    id,
+                    serde_json::json!({
+                        "rolled_back": true,
+                        "routine_id": routine_id,
+                        "version": target_version,
+                    }),
+                )),
+                Err(e) => Ok(Self::error_response(
+                    id,
+                    INTERNAL_ERROR,
+                    format!("rollback failed: {e}"),
+                    None,
+                )),
+            }
+        } else {
+            // Stub mode
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({
+                    "rolled_back": true,
+                    "routine_id": routine_id,
+                    "version": target_version,
+                    "note": "stub mode"
+                }),
+            ))
+        }
     }
 
     /// Parse an `on_success` or `on_failure` action object into a `NextStep`.
@@ -3797,6 +3941,40 @@ impl McpServer {
                     "required": ["routine_id", "match_conditions", "steps"]
                 }),
             },
+            McpTool {
+                name: "list_routine_versions".to_string(),
+                description: "List all versions of a routine, including history and current."
+                    .to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "routine_id": {
+                            "type": "string",
+                            "description": "The routine ID to list versions for"
+                        }
+                    },
+                    "required": ["routine_id"]
+                }),
+            },
+            McpTool {
+                name: "rollback_routine".to_string(),
+                description: "Roll back a routine to a previous version from its history."
+                    .to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "routine_id": {
+                            "type": "string",
+                            "description": "The routine ID to roll back"
+                        },
+                        "target_version": {
+                            "type": "integer",
+                            "description": "The version number to roll back to"
+                        }
+                    },
+                    "required": ["routine_id", "target_version"]
+                }),
+            },
         ]
     }
 }
@@ -3842,7 +4020,7 @@ mod tests {
     fn test_list_tools_count() {
         let server = McpServer::new_stub();
         let tools = server.list_tools();
-        assert_eq!(tools.len(), 29);
+        assert_eq!(tools.len(), 31);
     }
 
     #[test]
@@ -3872,6 +4050,8 @@ mod tests {
         assert!(names.contains(&"set_routine_autonomous".to_string()));
         assert!(names.contains(&"replicate_routine".to_string()));
         assert!(names.contains(&"author_routine".to_string()));
+        assert!(names.contains(&"list_routine_versions".to_string()));
+        assert!(names.contains(&"rollback_routine".to_string()));
     }
 
     #[test]
@@ -4053,6 +4233,34 @@ mod tests {
         let req = make_request("author_routine", None);
         let resp = server.handle_request(req).unwrap();
         assert!(resp.error.is_some());
+    }
+
+    #[test]
+    fn test_list_routine_versions_stub() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "list_routine_versions",
+            Some(serde_json::json!({ "routine_id": "test_routine" })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert!(result["versions"].is_array());
+    }
+
+    #[test]
+    fn test_rollback_routine_stub() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "rollback_routine",
+            Some(serde_json::json!({ "routine_id": "test_routine", "target_version": 0 })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["rolled_back"], true);
+        assert_eq!(result["routine_id"], "test_routine");
+        assert_eq!(result["version"], 0);
     }
 
     #[test]
@@ -4351,7 +4559,7 @@ mod tests {
     #[test]
     fn test_default_impl() {
         let server = McpServer::default();
-        assert_eq!(server.list_tools().len(), 29);
+        assert_eq!(server.list_tools().len(), 31);
     }
 
     /// Build a real RuntimeHandle from a bootstrapped runtime (no packs).

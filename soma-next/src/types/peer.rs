@@ -177,6 +177,8 @@ pub struct RoutineTransfer {
     pub exclusive: bool,
     #[serde(default)]
     pub policy_scope: Option<String>,
+    #[serde(default)]
+    pub version: u32,
 }
 
 /// Observation in a distributed stream — 10 required fields from distributed.md.

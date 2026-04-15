@@ -704,6 +704,25 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
         eprintln!("MCP: reactive monitor started ({}s interval)", interval);
     }
 
+    // Start heartbeat thread when peers are configured.
+    if has_peers {
+        let hb_config = soma_next::distributed::heartbeat::HeartbeatConfig {
+            interval_ms: config.distributed.heartbeat_interval_ms,
+            max_missed: config.distributed.heartbeat_max_missed,
+            timeout_ms: config.distributed.heartbeat_timeout_ms,
+        };
+        let hb_registry: Arc<Mutex<dyn soma_next::distributed::peer::PeerRegistry>> =
+            Arc::new(Mutex::new(soma_next::distributed::peer::DefaultPeerRegistry::new()));
+        let hb_world_state = webhook_world_state.as_ref().map(Arc::clone);
+        let _heartbeat_handle = soma_next::distributed::heartbeat::start_heartbeat_thread(
+            hb_config,
+            hb_registry,
+            Arc::clone(&tcp_peer_map),
+            hb_world_state,
+        );
+        eprintln!("MCP: heartbeat thread started");
+    }
+
     // Start webhook HTTP listener if requested.
     if let Some(addr) = distributed.webhook_listen {
         if let Some(ref ws) = webhook_world_state {

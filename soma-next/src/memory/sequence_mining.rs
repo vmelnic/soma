@@ -17,11 +17,17 @@ pub struct FrequentSequence {
 /// used instead of uniform counting to determine whether a pattern meets the minimum support
 /// threshold. When `None`, behavior is identical to uniform (weight-1.0) counting.
 ///
+/// `max_pattern_length` caps the maximum length of discovered patterns.
+///
+/// `max_results` caps the total number of patterns returned.
+///
 /// Returns all frequent subsequences sorted by pattern (alphabetically, then by length).
 pub fn prefix_span(
     sequences: &[Vec<String>],
     min_support: f64,
     weights: Option<&[f64]>,
+    max_pattern_length: usize,
+    max_results: usize,
 ) -> Vec<FrequentSequence> {
     if sequences.is_empty() {
         return Vec::new();
@@ -64,8 +70,7 @@ pub fn prefix_span(
         .collect();
     frequent_items.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let max_pattern_len: usize = 20;
-    let max_results: usize = 1000;
+    let max_pattern_len = max_pattern_length;
 
     for (item, _weighted_count, support) in &frequent_items {
         if results.len() >= max_results {
@@ -102,8 +107,10 @@ pub fn longest_frequent_subsequence(
     sequences: &[Vec<String>],
     min_support: f64,
     weights: Option<&[f64]>,
+    max_pattern_length: usize,
+    max_results: usize,
 ) -> Option<FrequentSequence> {
-    let results = prefix_span(sequences, min_support, weights);
+    let results = prefix_span(sequences, min_support, weights, max_pattern_length, max_results);
     results.into_iter().max_by(|a, b| {
         a.pattern
             .len()
@@ -213,7 +220,7 @@ mod tests {
     #[test]
     fn basic_frequent_patterns() {
         let sequences = vec![s(&["a", "b", "c"]), s(&["a", "b"]), s(&["a", "c", "b"])];
-        let results = prefix_span(&sequences, 0.66, None);
+        let results = prefix_span(&sequences, 0.66, None, 20, 1000);
 
         let patterns: Vec<Vec<&str>> = results.iter().map(|r| pattern_strs(r)).collect();
 
@@ -230,7 +237,7 @@ mod tests {
             s(&["x", "y", "z"]),
             s(&["x", "y", "z"]),
         ];
-        let results = prefix_span(&sequences, 1.0, None);
+        let results = prefix_span(&sequences, 1.0, None, 20, 1000);
 
         let patterns: Vec<Vec<&str>> = results.iter().map(|r| pattern_strs(r)).collect();
 
@@ -248,14 +255,14 @@ mod tests {
 
     #[test]
     fn empty_input() {
-        let results = prefix_span(&[], 0.5, None);
+        let results = prefix_span(&[], 0.5, None, 20, 1000);
         assert!(results.is_empty());
     }
 
     #[test]
     fn single_element_sequences() {
         let sequences = vec![s(&["a"]), s(&["a"]), s(&["b"])];
-        let results = prefix_span(&sequences, 0.66, None);
+        let results = prefix_span(&sequences, 0.66, None, 20, 1000);
 
         let patterns: Vec<Vec<&str>> = results.iter().map(|r| pattern_strs(r)).collect();
 
@@ -274,7 +281,7 @@ mod tests {
             s(&["a", "b"]),
             s(&["a", "c", "b"]),
         ];
-        let results = prefix_span(&sequences, 1.0, None);
+        let results = prefix_span(&sequences, 1.0, None, 20, 1000);
 
         // Only patterns present in ALL 3 sequences should appear
         for r in &results {
@@ -289,7 +296,7 @@ mod tests {
     #[test]
     fn support_counts_correct() {
         let sequences = vec![s(&["a", "b", "c"]), s(&["a", "b"]), s(&["a", "c", "b"])];
-        let results = prefix_span(&sequences, 0.5, None);
+        let results = prefix_span(&sequences, 0.5, None, 20, 1000);
 
         for r in &results {
             // support_ratio must equal support / total
@@ -319,7 +326,7 @@ mod tests {
             s(&["a", "b", "c"]),
             s(&["a", "b", "c"]),
         ];
-        let longest = longest_frequent_subsequence(&sequences, 1.0, None);
+        let longest = longest_frequent_subsequence(&sequences, 1.0, None, 20, 1000);
         assert!(longest.is_some());
         let longest = longest.unwrap();
         assert_eq!(pattern_strs(&longest), vec!["a", "b", "c"]);
@@ -331,7 +338,7 @@ mod tests {
         // Create sequences of length 30 with repeating elements across all sequences
         let long_seq: Vec<String> = (0..30).map(|i| format!("item{:02}", i)).collect();
         let sequences = vec![long_seq.clone(), long_seq.clone(), long_seq.clone()];
-        let results = prefix_span(&sequences, 1.0, None);
+        let results = prefix_span(&sequences, 1.0, None, 20, 1000);
 
         // No pattern should exceed length 20
         for r in &results {
@@ -349,7 +356,7 @@ mod tests {
     fn no_frequent_items() {
         // All unique items, each appears in only 1 of 4 sequences
         let sequences = vec![s(&["a"]), s(&["b"]), s(&["c"]), s(&["d"])];
-        let results = prefix_span(&sequences, 0.5, None);
+        let results = prefix_span(&sequences, 0.5, None, 20, 1000);
         assert!(results.is_empty());
     }
 
@@ -365,7 +372,7 @@ mod tests {
             })
             .collect();
 
-        let results = prefix_span(&sequences, 0.3, None);
+        let results = prefix_span(&sequences, 0.3, None, 20, 1000);
         // Should complete without hanging and produce some results
         assert!(
             !results.is_empty(),
@@ -386,9 +393,9 @@ mod tests {
             s(&["b", "c"]),
         ];
 
-        let results_none = prefix_span(&sequences, 0.5, None);
+        let results_none = prefix_span(&sequences, 0.5, None, 20, 1000);
         let uniform_weights: Vec<f64> = vec![1.0; sequences.len()];
-        let results_uniform = prefix_span(&sequences, 0.5, Some(&uniform_weights));
+        let results_uniform = prefix_span(&sequences, 0.5, Some(&uniform_weights), 20, 1000);
 
         assert_eq!(
             results_none.len(),
@@ -418,7 +425,7 @@ mod tests {
             s(&["c", "d"]),
         ];
         // With uniform weights at 0.5, both ["a","b"] and ["c","d"] should be frequent
-        let results_uniform = prefix_span(&sequences, 0.5, None);
+        let results_uniform = prefix_span(&sequences, 0.5, None, 20, 1000);
         let ab_uniform = results_uniform.iter().any(|r| r.pattern == s(&["a", "b"]));
         let cd_uniform = results_uniform.iter().any(|r| r.pattern == s(&["c", "d"]));
         assert!(ab_uniform, "uniform: a,b should be frequent");
@@ -427,7 +434,7 @@ mod tests {
         // With weights [3.0, 3.0, 0.1, 0.1], total = 6.2, min_count = 3.1.
         // "a" weighted count = 6.0 >= 3.1 (frequent), "c" weighted count = 0.2 < 3.1 (not frequent)
         let weights = vec![3.0, 3.0, 0.1, 0.1];
-        let results_weighted = prefix_span(&sequences, 0.5, Some(&weights));
+        let results_weighted = prefix_span(&sequences, 0.5, Some(&weights), 20, 1000);
         let ab_weighted = results_weighted.iter().any(|r| r.pattern == s(&["a", "b"]));
         let cd_weighted = results_weighted.iter().any(|r| r.pattern == s(&["c", "d"]));
         assert!(ab_weighted, "weighted: a,b should be frequent (high salience)");
@@ -444,7 +451,7 @@ mod tests {
         ];
         // All weight 0.0: total_weight = 0.0, min_weighted_count = 0.0 -> empty
         let weights = vec![0.0, 0.0, 0.0];
-        let results = prefix_span(&sequences, 0.5, Some(&weights));
+        let results = prefix_span(&sequences, 0.5, Some(&weights), 20, 1000);
         assert!(results.is_empty(), "all-zero weights should yield no patterns");
     }
 
@@ -465,7 +472,7 @@ mod tests {
         let weights = vec![5.0, 5.0, 5.0, 0.1, 0.1, 0.1];
         // total = 15.3, min_count at 0.5 = 7.65
         // "a" weighted = 15.0 >= 7.65, "x" weighted = 0.3 < 7.65
-        let longest = longest_frequent_subsequence(&sequences, 0.5, Some(&weights));
+        let longest = longest_frequent_subsequence(&sequences, 0.5, Some(&weights), 20, 1000);
         assert!(longest.is_some());
         let longest = longest.unwrap();
         assert_eq!(pattern_strs(&longest), vec!["a", "b", "c"]);

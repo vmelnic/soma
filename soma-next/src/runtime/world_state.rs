@@ -255,6 +255,23 @@ pub fn start_reactive_monitor(
                             (final_success, step_count)
                         }
                         Err(e) => {
+                            // Emit failure fact for session creation failure.
+                            if let Ok(mut ws) = world_state.lock() {
+                                let fact = crate::types::belief::Fact {
+                                    fact_id: format!("routine_failure_{routine_id}"),
+                                    subject: "routine".to_string(),
+                                    predicate: format!("{routine_id}.last_failure"),
+                                    value: serde_json::json!({
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                        "error": format!("session creation failed: {e}"),
+                                        "steps": 0,
+                                    }),
+                                    confidence: 1.0,
+                                    provenance: crate::types::common::FactProvenance::Observed,
+                                    timestamp: chrono::Utc::now(),
+                                };
+                                let _ = ws.add_fact(fact);
+                            }
                             let event = serde_json::json!({
                                 "_reactive_event": true,
                                 "routine_id": routine_id,
@@ -274,6 +291,44 @@ pub fn start_reactive_monitor(
 
                 // Mark as fired so we don't re-trigger on the same world state.
                 fired_set.insert(routine_id.clone());
+
+                // Emit success/failure facts to world state for declarative alerting.
+                if let Ok(mut ws) = world_state.lock() {
+                    if success {
+                        let fact = crate::types::belief::Fact {
+                            fact_id: format!("routine_success_{routine_id}"),
+                            subject: "routine".to_string(),
+                            predicate: format!("{routine_id}.last_success"),
+                            value: serde_json::json!({
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                "steps": steps,
+                            }),
+                            confidence: 1.0,
+                            provenance: crate::types::common::FactProvenance::Observed,
+                            timestamp: chrono::Utc::now(),
+                        };
+                        let _ = ws.add_fact(fact);
+                        // Clear any prior failure fact.
+                        let _ = ws.remove_fact(&format!("routine_failure_{routine_id}"));
+                    } else {
+                        let fact = crate::types::belief::Fact {
+                            fact_id: format!("routine_failure_{routine_id}"),
+                            subject: "routine".to_string(),
+                            predicate: format!("{routine_id}.last_failure"),
+                            value: serde_json::json!({
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                "steps": steps,
+                                "error": "execution failed",
+                            }),
+                            confidence: 1.0,
+                            provenance: crate::types::common::FactProvenance::Observed,
+                            timestamp: chrono::Utc::now(),
+                        };
+                        let _ = ws.add_fact(fact);
+                        // Clear any prior success fact.
+                        let _ = ws.remove_fact(&format!("routine_success_{routine_id}"));
+                    }
+                }
 
                 // Emit structured event to stderr for SSE consumers.
                 let event = serde_json::json!({

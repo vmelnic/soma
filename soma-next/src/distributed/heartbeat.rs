@@ -202,6 +202,7 @@ impl HeartbeatManager {
 ///
 /// The `registry` is behind an `Arc<Mutex<>>` so the heartbeat can take a
 /// write lock for updates while other code reads the registry concurrently.
+#[allow(dead_code)]
 pub fn start_heartbeat_task(
     config: HeartbeatConfig,
     registry: Arc<Mutex<dyn PeerRegistry>>,
@@ -243,6 +244,56 @@ pub fn start_heartbeat_task(
             manager.tick(&mut *reg, &executor);
         }
     })
+}
+
+/// Start a background OS thread that runs heartbeat cycles at the configured
+/// interval. Returns a `JoinHandle` for the spawned thread.
+///
+/// This is the non-tokio equivalent of `start_heartbeat_task`, suitable for use
+/// in `main.rs` where no async runtime is running.
+pub fn start_heartbeat_thread(
+    config: HeartbeatConfig,
+    registry: Arc<Mutex<dyn PeerRegistry>>,
+    peer_addresses: PeerAddressMap,
+    world_state: Option<Arc<Mutex<dyn crate::runtime::world_state::WorldStateStore + Send>>>,
+) -> std::thread::JoinHandle<()> {
+    let interval_ms = config.interval_ms;
+
+    std::thread::Builder::new()
+        .name("soma-heartbeat".to_string())
+        .spawn(move || {
+            let mut manager = HeartbeatManager::new(config);
+
+            // Wire the on_peer_offline callback to emit world state facts.
+            if let Some(ws) = world_state {
+                manager.on_peer_offline = Some(Box::new(move |peer_id: &str| {
+                    if let Ok(mut store) = ws.lock() {
+                        let fact = crate::types::belief::Fact {
+                            fact_id: format!("peer_offline_{peer_id}"),
+                            subject: "peer".to_string(),
+                            predicate: format!("{peer_id}.status"),
+                            value: serde_json::json!("offline"),
+                            confidence: 1.0,
+                            provenance: crate::types::common::FactProvenance::Inferred,
+                            timestamp: chrono::Utc::now(),
+                        };
+                        let _ = store.add_fact(fact);
+                        info!(peer_id = %peer_id, "emitted peer offline fact to world state");
+                    }
+                }));
+            }
+
+            let executor = TcpRemoteExecutor::new(peer_addresses);
+
+            info!(interval_ms = interval_ms, "heartbeat thread started");
+
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(interval_ms));
+                let mut reg = registry.lock().unwrap();
+                manager.tick(&mut *reg, &executor);
+            }
+        })
+        .expect("failed to spawn heartbeat thread")
 }
 
 // ---------------------------------------------------------------------------

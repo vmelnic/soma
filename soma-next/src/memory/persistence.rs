@@ -204,6 +204,34 @@ impl DiskSchemaStore {
         })
     }
 
+    /// Create a new DiskSchemaStore with a custom learning config,
+    /// loading any existing schemas from disk.
+    pub fn with_learning_config(
+        data_dir: &Path,
+        config: super::schemas::LearningConfig,
+    ) -> Result<Self> {
+        let path = data_dir.join("schemas.json");
+        let schemas: Vec<Schema> = load_from_disk(&path)?;
+
+        let mut inner = DefaultSchemaStore::with_learning_config(config);
+        for schema in &schemas {
+            inner.register(schema.clone())?;
+        }
+
+        let count = schemas.len();
+        tracing::info!(
+            path = %path.display(),
+            count,
+            "loaded schemas from disk (with learning config)"
+        );
+
+        Ok(Self {
+            inner,
+            path,
+            schemas,
+        })
+    }
+
     fn flush(&self) -> Result<()> {
         save_to_disk(&self.path, &self.schemas)
     }
@@ -261,6 +289,7 @@ impl SchemaStore for DiskSchemaStore {
 pub struct DiskRoutineStore {
     inner: DefaultRoutineStore,
     path: PathBuf,
+    history_path: PathBuf,
     /// Snapshot of all routines for serialization. Kept in sync with inner.
     routines: Vec<Routine>,
 }
@@ -269,23 +298,31 @@ impl DiskRoutineStore {
     /// Create a new DiskRoutineStore, loading any existing routines from disk.
     pub fn new(data_dir: &Path) -> Result<Self> {
         let path = data_dir.join("routines.json");
+        let history_path = data_dir.join("routine_history.json");
         let routines: Vec<Routine> = load_from_disk(&path)?;
+        let history: Vec<Routine> = load_from_disk(&history_path)?;
 
         let mut inner = DefaultRoutineStore::new();
         for routine in &routines {
             inner.register(routine.clone())?;
         }
+        // Load history into the inner store (after register so versioning
+        // from register doesn't re-add history entries).
+        inner.set_history(history);
 
         let count = routines.len();
+        let hist_count = inner.history().len();
         tracing::info!(
             path = %path.display(),
             count,
+            history = hist_count,
             "loaded routines from disk"
         );
 
         Ok(Self {
             inner,
             path,
+            history_path,
             routines,
         })
     }
@@ -293,24 +330,33 @@ impl DiskRoutineStore {
     fn flush(&self) -> Result<()> {
         save_to_disk(&self.path, &self.routines)
     }
+
+    fn flush_history(&self) -> Result<()> {
+        save_to_disk(&self.history_path, self.inner.history())
+    }
 }
 
 impl RoutineStore for DiskRoutineStore {
     fn register(&mut self, routine: Routine) -> Result<()> {
-        self.inner.register(routine.clone())?;
+        let routine_id = routine.routine_id.clone();
+        self.inner.register(routine)?;
 
-        // Update local snapshot: replace if exists, otherwise append.
-        if let Some(existing) = self
-            .routines
-            .iter_mut()
-            .find(|r| r.routine_id == routine.routine_id)
-        {
-            *existing = routine;
-        } else {
-            self.routines.push(routine);
+        // Re-read the current version from inner (version may have been incremented).
+        let updated = self.inner.get(&routine_id).cloned();
+        if let Some(updated) = updated {
+            if let Some(existing) = self
+                .routines
+                .iter_mut()
+                .find(|r| r.routine_id == routine_id)
+            {
+                *existing = updated;
+            } else {
+                self.routines.push(updated);
+            }
         }
 
-        self.flush()
+        self.flush()?;
+        self.flush_history()
     }
 
     fn find_matching(&self, context: &serde_json::Value) -> Vec<&Routine> {
@@ -359,6 +405,27 @@ impl RoutineStore for DiskRoutineStore {
             tracing::error!(error = %e, "failed to flush routines after set_autonomous");
         }
         Ok(found)
+    }
+
+    fn list_versions(&self, routine_id: &str) -> Vec<&Routine> {
+        self.inner.list_versions(routine_id)
+    }
+
+    fn rollback(&mut self, routine_id: &str, target_version: u32) -> Result<()> {
+        self.inner.rollback(routine_id, target_version)?;
+
+        // Update local snapshot from inner.
+        if let Some(current) = self.inner.get(routine_id).cloned()
+            && let Some(existing) = self
+                .routines
+                .iter_mut()
+                .find(|r| r.routine_id == routine_id)
+        {
+            *existing = current;
+        }
+
+        self.flush()?;
+        self.flush_history()
     }
 }
 
@@ -518,6 +585,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
+            version: 0,
         }
     }
 

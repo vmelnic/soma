@@ -39,15 +39,64 @@ pub trait SchemaStore {
     fn list_all(&self) -> Vec<&Schema>;
 }
 
+/// Configuration for the learning pipeline, controlling schema induction
+/// and PrefixSpan pattern mining parameters.
+#[derive(Debug, Clone)]
+pub struct LearningConfig {
+    /// Cosine similarity threshold for embedding-based episode clustering.
+    pub clustering_threshold: f64,
+    /// Minimum support ratio for PrefixSpan pattern mining (0.0 to 1.0).
+    pub min_support: f64,
+    /// Minimum number of successful episodes required to induce a schema.
+    pub min_episodes: usize,
+    /// Maximum pattern length for PrefixSpan mining.
+    pub max_pattern_length: usize,
+    /// Maximum number of frequent patterns returned by PrefixSpan.
+    pub max_results: usize,
+}
+
+impl Default for LearningConfig {
+    fn default() -> Self {
+        Self {
+            clustering_threshold: 0.8,
+            min_support: 0.7,
+            min_episodes: 3,
+            max_pattern_length: 20,
+            max_results: 1000,
+        }
+    }
+}
+
+impl From<&crate::config::LearningSection> for LearningConfig {
+    fn from(section: &crate::config::LearningSection) -> Self {
+        Self {
+            clustering_threshold: section.clustering_threshold,
+            min_support: section.min_support,
+            min_episodes: section.min_episodes,
+            max_pattern_length: section.max_pattern_length,
+            max_results: section.max_results,
+        }
+    }
+}
+
 /// Default in-memory schema store backed by Vec<Schema>.
 pub struct DefaultSchemaStore {
     schemas: Vec<Schema>,
+    learning_config: LearningConfig,
 }
 
 impl DefaultSchemaStore {
     pub fn new() -> Self {
         Self {
             schemas: Vec::new(),
+            learning_config: LearningConfig::default(),
+        }
+    }
+
+    pub fn with_learning_config(config: LearningConfig) -> Self {
+        Self {
+            schemas: Vec::new(),
+            learning_config: config,
         }
     }
 }
@@ -174,8 +223,8 @@ impl SchemaStore for DefaultSchemaStore {
             return Vec::new();
         }
 
-        // Cluster episodes by embedding similarity (greedy, cosine threshold 0.8).
-        let embedding_threshold = 0.8;
+        // Cluster episodes by embedding similarity (greedy, cosine threshold from config).
+        let embedding_threshold = self.learning_config.clustering_threshold;
         let mut clusters: Vec<(Vec<f32>, Vec<usize>)> = Vec::new(); // (centroid, episode_indices)
         let mut fingerprint_groups: HashMap<String, Vec<usize>> = HashMap::new();
 
@@ -210,14 +259,14 @@ impl SchemaStore for DefaultSchemaStore {
         let mut schemas = Vec::new();
 
         for (_centroid, members) in &clusters {
-            // Need at least 3 successful episodes.
+            // Need at least min_episodes successful episodes.
             let successful_indices: Vec<usize> = members
                 .iter()
                 .copied()
                 .filter(|&i| episodes[i].success)
                 .collect();
 
-            if successful_indices.len() < 3 {
+            if successful_indices.len() < self.learning_config.min_episodes {
                 continue;
             }
 
@@ -243,8 +292,10 @@ impl SchemaStore for DefaultSchemaStore {
             if let Some(freq) =
                 crate::memory::sequence_mining::longest_frequent_subsequence(
                     &skill_sequences,
-                    0.7,
+                    self.learning_config.min_support,
                     Some(&weights),
+                    self.learning_config.max_pattern_length,
+                    self.learning_config.max_results,
                 )
             {
                 let candidate_ordering = freq.pattern;

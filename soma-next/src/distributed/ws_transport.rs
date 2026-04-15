@@ -570,6 +570,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
+            version: 0,
         };
 
         let result = executor.transfer_routine("ws-peer-1", &routine);

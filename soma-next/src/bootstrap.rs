@@ -185,6 +185,8 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
 
     let port_runtime = Arc::new(Mutex::new(port_runtime));
 
+    let learning_config = crate::memory::schemas::LearningConfig::from(&config.learning);
+
     let data_dir = resolve_data_dir(&config.soma.data_dir);
     let (episode_store, schema_store, routine_store, world_state): (
         SharedEpisodeStore,
@@ -194,7 +196,7 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
     ) = if data_dir.as_os_str().is_empty() {
         (
             Arc::new(Mutex::new(DefaultEpisodeStore::new())),
-            Arc::new(Mutex::new(DefaultSchemaStore::new())),
+            Arc::new(Mutex::new(DefaultSchemaStore::with_learning_config(learning_config))),
             Arc::new(Mutex::new(DefaultRoutineStore::new())),
             Arc::new(Mutex::new(crate::runtime::world_state::DefaultWorldStateStore::new())),
         )
@@ -202,14 +204,14 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
         tracing::info!(data_dir = %data_dir.display(), "using disk-backed memory stores");
         (
             Arc::new(Mutex::new(DiskEpisodeStore::new(&data_dir)?)),
-            Arc::new(Mutex::new(DiskSchemaStore::new(&data_dir)?)),
+            Arc::new(Mutex::new(DiskSchemaStore::with_learning_config(&data_dir, learning_config)?)),
             Arc::new(Mutex::new(DiskRoutineStore::new(&data_dir)?)),
             Arc::new(Mutex::new(DiskWorldStateStore::new(&data_dir)?)),
         )
     };
 
     let embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync> = Arc::new(
-        crate::memory::embedder::HashEmbedder::new(),
+        crate::memory::embedder::HashEmbedder::with_dimensions(config.learning.embedder_dimensions),
     );
 
     let skill_registry = SkillRegistryAdapter::new(&skill_runtime);
@@ -353,6 +355,8 @@ pub fn bootstrap_with_remote(
 
     let port_runtime = Arc::new(Mutex::new(port_runtime));
 
+    let learning_config = crate::memory::schemas::LearningConfig::from(&config.learning);
+
     let data_dir = resolve_data_dir(&config.soma.data_dir);
     let (episode_store, schema_store, routine_store, world_state): (
         SharedEpisodeStore,
@@ -362,7 +366,7 @@ pub fn bootstrap_with_remote(
     ) = if data_dir.as_os_str().is_empty() {
         (
             Arc::new(Mutex::new(DefaultEpisodeStore::new())),
-            Arc::new(Mutex::new(DefaultSchemaStore::new())),
+            Arc::new(Mutex::new(DefaultSchemaStore::with_learning_config(learning_config))),
             Arc::new(Mutex::new(DefaultRoutineStore::new())),
             Arc::new(Mutex::new(crate::runtime::world_state::DefaultWorldStateStore::new())),
         )
@@ -370,14 +374,14 @@ pub fn bootstrap_with_remote(
         tracing::info!(data_dir = %data_dir.display(), "using disk-backed memory stores (remote bootstrap)");
         (
             Arc::new(Mutex::new(DiskEpisodeStore::new(&data_dir)?)),
-            Arc::new(Mutex::new(DiskSchemaStore::new(&data_dir)?)),
+            Arc::new(Mutex::new(DiskSchemaStore::with_learning_config(&data_dir, learning_config)?)),
             Arc::new(Mutex::new(DiskRoutineStore::new(&data_dir)?)),
             Arc::new(Mutex::new(DiskWorldStateStore::new(&data_dir)?)),
         )
     };
 
     let embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync> = Arc::new(
-        crate::memory::embedder::HashEmbedder::new(),
+        crate::memory::embedder::HashEmbedder::with_dimensions(config.learning.embedder_dimensions),
     );
 
     let skill_registry = SkillRegistryAdapter::new(&skill_runtime);
@@ -520,12 +524,13 @@ pub fn bootstrap_from_specs(
     // In-memory stores only: disk-persistence is unavailable on wasm
     // and pointless for bootstrap-from-specs usage anyway (the caller
     // doesn't want side effects in ~/.soma/data from a browser tab).
+    let learning_config = crate::memory::schemas::LearningConfig::from(&config.learning);
     let episode_store: SharedEpisodeStore = Arc::new(Mutex::new(DefaultEpisodeStore::new()));
-    let schema_store: SharedSchemaStore = Arc::new(Mutex::new(DefaultSchemaStore::new()));
+    let schema_store: SharedSchemaStore = Arc::new(Mutex::new(DefaultSchemaStore::with_learning_config(learning_config)));
     let routine_store: SharedRoutineStore = Arc::new(Mutex::new(DefaultRoutineStore::new()));
 
     let embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync> = Arc::new(
-        crate::memory::embedder::HashEmbedder::new(),
+        crate::memory::embedder::HashEmbedder::with_dimensions(config.learning.embedder_dimensions),
     );
 
     let skill_registry = SkillRegistryAdapter::new(&skill_runtime);
@@ -679,6 +684,8 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
 
     let port_runtime = Arc::new(Mutex::new(port_runtime));
 
+    let learning_config = crate::memory::schemas::LearningConfig::from(&config.learning);
+
     let data_dir = resolve_data_dir(&config.soma.data_dir);
     let (episode_store, schema_store, routine_store, world_state): (
         SharedEpisodeStore,
@@ -688,7 +695,7 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
     ) = if data_dir.as_os_str().is_empty() {
         (
             Arc::new(Mutex::new(DefaultEpisodeStore::new())),
-            Arc::new(Mutex::new(DefaultSchemaStore::new())),
+            Arc::new(Mutex::new(DefaultSchemaStore::with_learning_config(learning_config))),
             Arc::new(Mutex::new(DefaultRoutineStore::new())),
             Arc::new(Mutex::new(crate::runtime::world_state::DefaultWorldStateStore::new())),
         )
@@ -696,14 +703,14 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
         tracing::info!(data_dir = %data_dir.display(), "auto: using disk-backed memory stores");
         (
             Arc::new(Mutex::new(DiskEpisodeStore::new(&data_dir)?)),
-            Arc::new(Mutex::new(DiskSchemaStore::new(&data_dir)?)),
+            Arc::new(Mutex::new(DiskSchemaStore::with_learning_config(&data_dir, learning_config)?)),
             Arc::new(Mutex::new(DiskRoutineStore::new(&data_dir)?)),
             Arc::new(Mutex::new(DiskWorldStateStore::new(&data_dir)?)),
         )
     };
 
     let embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync> = Arc::new(
-        crate::memory::embedder::HashEmbedder::new(),
+        crate::memory::embedder::HashEmbedder::with_dimensions(config.learning.embedder_dimensions),
     );
 
     let skill_registry = SkillRegistryAdapter::new(&skill_runtime);
