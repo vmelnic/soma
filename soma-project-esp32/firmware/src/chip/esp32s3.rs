@@ -78,6 +78,13 @@ pub const DEFAULT_ADC_PIN: u8 = 2;
 pub const DEFAULT_PWM_PIN: u8 = 16;
 pub const DEFAULT_UART1_TX: u8 = 17;
 pub const DEFAULT_UART1_RX: u8 = 18;
+// Display (ST7789 on SPI2) — Sunton ESP32-S3-1732S019 schematic.
+pub const DEFAULT_DISPLAY_SCLK: u8 = 12;
+pub const DEFAULT_DISPLAY_MOSI: u8 = 11;
+pub const DEFAULT_DISPLAY_CS: u8 = 10;
+pub const DEFAULT_DISPLAY_DC: u8 = 4;
+pub const DEFAULT_DISPLAY_RST: u8 = 1;
+pub const DEFAULT_DISPLAY_BL: u8 = 14;
 
 /// GPIO pin number reserved for gpio.write/read/toggle and used by the
 /// boot self-test routine. Read dynamically at boot but exposed as a
@@ -137,6 +144,12 @@ pub struct PinConfig {
     pub pwm_pin: u8,
     pub uart1_tx: u8,
     pub uart1_rx: u8,
+    pub display_sclk: u8,
+    pub display_mosi: u8,
+    pub display_cs: u8,
+    pub display_dc: u8,
+    pub display_rst: u8,
+    pub display_bl: u8,
 }
 
 impl PinConfig {
@@ -160,6 +173,12 @@ impl PinConfig {
             pwm_pin: parse(store, "pins.pwm.pin", DEFAULT_PWM_PIN),
             uart1_tx: parse(store, "pins.uart1.tx", DEFAULT_UART1_TX),
             uart1_rx: parse(store, "pins.uart1.rx", DEFAULT_UART1_RX),
+            display_sclk: parse(store, "pins.display.sclk", DEFAULT_DISPLAY_SCLK),
+            display_mosi: parse(store, "pins.display.mosi", DEFAULT_DISPLAY_MOSI),
+            display_cs: parse(store, "pins.display.cs", DEFAULT_DISPLAY_CS),
+            display_dc: parse(store, "pins.display.dc", DEFAULT_DISPLAY_DC),
+            display_rst: parse(store, "pins.display.rst", DEFAULT_DISPLAY_RST),
+            display_bl: parse(store, "pins.display.bl", DEFAULT_DISPLAY_BL),
         }
     }
 
@@ -176,6 +195,12 @@ impl PinConfig {
             ("pins.pwm.pin", self.pwm_pin),
             ("pins.uart1.tx", self.uart1_tx),
             ("pins.uart1.rx", self.uart1_rx),
+            ("pins.display.sclk", self.display_sclk),
+            ("pins.display.mosi", self.display_mosi),
+            ("pins.display.cs", self.display_cs),
+            ("pins.display.dc", self.display_dc),
+            ("pins.display.rst", self.display_rst),
+            ("pins.display.bl", self.display_bl),
         ]
     }
 }
@@ -314,13 +339,13 @@ pub fn register_all_ports(
         }
     }
 
-    // ----- i2c + display ports (shared I2C0 bus) -----
+    // ----- i2c port (standalone on I2C0) -----
     //
-    // Identical pattern to chip/esp32.rs: one leaked `&'static RefCell`
-    // owns the bus, and each consumer (i2c port, display port) takes
-    // its own `RefCellDevice` handle. See the esp32 module for the
-    // full rationale.
-    #[cfg(any(feature = "i2c", feature = "display"))]
+    // On the ESP32-S3 with the Sunton 1732S019, the display lives on
+    // SPI2 (ST7789) — not on I²C — so the i2c port no longer shares the
+    // bus with the display. The esp32 LX6 chip module keeps the shared
+    // I²C-OLED pattern (see chip/esp32.rs).
+    #[cfg(feature = "i2c")]
     {
         use esp_hal::i2c::master::{Config as I2cConfig, I2c};
         match I2c::new(peripherals.I2C0, I2cConfig::default()) {
@@ -328,29 +353,26 @@ pub fn register_all_ports(
                 let i2c = i2c
                     .with_sda(any_output_pin(pin_cfg.i2c0_sda, DEFAULT_I2C_SDA))
                     .with_scl(any_output_pin(pin_cfg.i2c0_scl, DEFAULT_I2C_SCL));
-
-                #[cfg(feature = "display")]
-                {
-                    register_i2c_and_display(
-                        composite,
-                        i2c,
-                        pin_cfg.i2c0_sda,
-                        pin_cfg.i2c0_scl,
-                    );
-                }
-
-                #[cfg(all(feature = "i2c", not(feature = "display")))]
-                {
-                    let i2c_port = soma_esp32_port_i2c::I2cPort::new(i2c);
-                    composite.register(Box::new(i2c_port));
-                    println!(
-                        "[port] registered: i2c (I2C0 on GPIO{}/GPIO{})",
-                        pin_cfg.i2c0_sda, pin_cfg.i2c0_scl
-                    );
-                }
+                let i2c_port = soma_esp32_port_i2c::I2cPort::new(i2c);
+                composite.register(Box::new(i2c_port));
+                println!(
+                    "[port] registered: i2c (I2C0 on GPIO{}/GPIO{})",
+                    pin_cfg.i2c0_sda, pin_cfg.i2c0_scl
+                );
             }
-            Err(e) => println!("[port] i2c/display init failed: {:?}", e),
+            Err(e) => println!("[port] i2c init failed: {:?}", e),
         }
+    }
+
+    // ----- display port (ST7789 on SPI2) -----
+    //
+    // The Sunton 1732S019 wires an ST7789 170x320 IPS TFT to dedicated
+    // SPI pins. Driver: mipidsi + display-interface-spi. Pins per the
+    // Sunton schematic:
+    //   SCLK=12, MOSI=11, CS=10, DC=4, RST=1, BL=14
+    #[cfg(feature = "display")]
+    {
+        register_spi2_st7789(composite, peripherals.SPI2, &pin_cfg);
     }
 
     // ----- spi port (SPI3) -----
@@ -670,10 +692,10 @@ fn probe_i2c_impl(candidates: &[(u8, u8)]) -> Vec<soma_esp32_port_board::ProbeRe
     results
 }
 
-/// Shared-bus path for the i2c + display ports on ESP32-S3.
-///
-/// Identical to the esp32 module's helper. Kept local to each chip
-/// module so adding a new chip only means dropping one file.
+/// Legacy I²C + SSD1306 path. Not used on the Sunton 1732S019 (which
+/// has an ST7789 on SPI), but kept for reference. The Sunton board
+/// uses `register_spi2_st7789` below instead.
+#[allow(dead_code)]
 #[cfg(feature = "display")]
 fn register_i2c_and_display(
     composite: &mut CompositeDispatcher,
@@ -857,5 +879,228 @@ fn register_i2c_and_display(
     println!(
         "[port] registered: display (ssd1306 128x64 @ 0x{:02x} on GPIO{}/GPIO{})",
         PANEL_I2C_ADDR, sda_gpio, scl_gpio
+    );
+}
+
+/// ST7789 display on SPI2 for the Sunton ESP32-S3-1732S019 board.
+///
+/// All pins come from `PinConfig` (runtime-configurable via
+/// FlashKvStore). Defaults match the Sunton 1732S019 schematic.
+///
+/// Panel: 170x320 IPS TFT (rotated 90°, landscape = 320x170 effective).
+/// Driver: `mipidsi::interface::SpiInterface` over `ExclusiveDevice`
+/// (SPI2 is dedicated to the display, no bus sharing).
+#[cfg(feature = "display")]
+fn register_spi2_st7789(
+    composite: &mut CompositeDispatcher,
+    spi2: esp_hal::peripherals::SPI2,
+    pin_cfg: &PinConfig,
+) {
+    use core::cell::RefCell;
+    use embedded_graphics::{
+        mono_font::{ascii::FONT_10X20, MonoTextStyleBuilder},
+        pixelcolor::Rgb565,
+        prelude::*,
+        primitives::{PrimitiveStyleBuilder, Rectangle},
+        text::{Baseline, Text},
+    };
+    use embedded_hal_bus::spi::ExclusiveDevice;
+    use esp_hal::{
+        delay::Delay,
+        gpio::{Level, Output},
+        spi::master::{Config as SpiConfig, Spi},
+    };
+    use mipidsi::{interface::SpiInterface, models::ST7789, Builder};
+
+    let sclk_gpio = pin_cfg.display_sclk;
+    let mosi_gpio = pin_cfg.display_mosi;
+    let cs_gpio = pin_cfg.display_cs;
+    let dc_gpio = pin_cfg.display_dc;
+    let rst_gpio = pin_cfg.display_rst;
+    let bl_gpio = pin_cfg.display_bl;
+
+    // Panel is physically 170x320 portrait. Rotate to landscape 320x170
+    // for readable left-to-right text.
+    const PANEL_WIDTH: u16 = 320;
+    const PANEL_HEIGHT: u16 = 170;
+    const FONT_WIDTH_PX: u16 = 10;
+    const FONT_HEIGHT_PX: u16 = 20;
+
+    // Backlight on. Leak so it lives forever (ST7789 needs BL kept high).
+    let bl_out = Output::new(any_output_pin(bl_gpio, DEFAULT_DISPLAY_BL), Level::High);
+    core::mem::forget(bl_out);
+
+    // Build SPI2.
+    let spi_cfg = SpiConfig::default();
+    let spi = match Spi::new(spi2, spi_cfg) {
+        Ok(s) => s,
+        Err(e) => {
+            println!("[port] display SPI2 init failed: {:?}", e);
+            return;
+        }
+    };
+    let spi = spi
+        .with_sck(any_output_pin(sclk_gpio, DEFAULT_DISPLAY_SCLK))
+        .with_mosi(any_output_pin(mosi_gpio, DEFAULT_DISPLAY_MOSI));
+
+    let cs = Output::new(any_output_pin(cs_gpio, DEFAULT_DISPLAY_CS), Level::High);
+    let dc = Output::new(any_output_pin(dc_gpio, DEFAULT_DISPLAY_DC), Level::Low);
+    let rst = Output::new(any_output_pin(rst_gpio, DEFAULT_DISPLAY_RST), Level::High);
+
+    let mut delay = Delay::new();
+
+    // ExclusiveDevice wraps the SPI bus + CS. SPI2 is dedicated — no bus
+    // sharing, so no need for `RefCellDevice`.
+    let spi_device = match ExclusiveDevice::new(spi, cs, delay) {
+        Ok(d) => d,
+        Err(e) => {
+            println!("[port] display SPI ExclusiveDevice failed: {:?}", e);
+            return;
+        }
+    };
+
+    // mipidsi's SpiInterface wants a scratch buffer for pixel batching.
+    // 1 KB is enough for a text-row update and keeps memory modest.
+    let buffer: &'static mut [u8] = Box::leak(Box::new([0u8; 1024]));
+    let di = SpiInterface::new(spi_device, dc, buffer);
+
+    let display = match Builder::new(ST7789, di)
+        .reset_pin(rst)
+        .display_size(170, 320)
+        .orientation(
+            mipidsi::options::Orientation::new()
+                .rotate(mipidsi::options::Rotation::Deg90),
+        )
+        .init(&mut delay)
+    {
+        Ok(d) => d,
+        Err(e) => {
+            println!("[port] display ST7789 init failed: {:?}", e);
+            return;
+        }
+    };
+
+    let disp_static: &'static RefCell<_> = Box::leak(Box::new(RefCell::new(display)));
+
+    // Clear to black.
+    {
+        let mut d = disp_static.borrow_mut();
+        let _ = d.clear(Rgb565::BLACK);
+    }
+
+    let info_fn: soma_esp32_port_display::InfoFn =
+        Box::new(move || soma_esp32_port_display::DisplayInfo {
+            width: PANEL_WIDTH,
+            height: PANEL_HEIGHT,
+            driver: "st7789",
+            i2c_addr: 0, // N/A — this is SPI
+        });
+
+    let clear_fn: soma_esp32_port_display::ClearFn = Box::new(move || {
+        let mut d = disp_static.borrow_mut();
+        d.clear(Rgb565::BLACK)
+            .map_err(|e| alloc::format!("display clear: {:?}", e))
+    });
+
+    let draw_text_line_fn: soma_esp32_port_display::DrawTextLineFn =
+        Box::new(move |text: &str, line: u8, column: u8, invert: bool| {
+            let mut d = disp_static.borrow_mut();
+            let y_px = (line as u16).saturating_mul(FONT_HEIGHT_PX);
+            let x_px = (column as u16).saturating_mul(FONT_WIDTH_PX);
+
+            if y_px < PANEL_HEIGHT {
+                let h = FONT_HEIGHT_PX.min(PANEL_HEIGHT - y_px);
+                let w = PANEL_WIDTH.saturating_sub(x_px);
+                let clear_rect = Rectangle::new(
+                    Point::new(x_px as i32, y_px as i32),
+                    Size::new(w as u32, h as u32),
+                );
+                let clear_style = PrimitiveStyleBuilder::new()
+                    .fill_color(Rgb565::BLACK)
+                    .build();
+                let _ = clear_rect.into_styled(clear_style).draw(&mut *d);
+            }
+
+            let (fg, bg) = if invert {
+                (Rgb565::BLACK, Rgb565::WHITE)
+            } else {
+                (Rgb565::WHITE, Rgb565::BLACK)
+            };
+            let text_style = MonoTextStyleBuilder::new()
+                .font(&FONT_10X20)
+                .text_color(fg)
+                .background_color(bg)
+                .build();
+            Text::with_baseline(
+                text,
+                Point::new(x_px as i32, y_px as i32),
+                text_style,
+                Baseline::Top,
+            )
+            .draw(&mut *d)
+            .map(|_| ())
+            .map_err(|e| alloc::format!("display draw_text: {:?}", e))
+        });
+
+    let draw_text_xy_fn: soma_esp32_port_display::DrawTextXyFn =
+        Box::new(move |text: &str, x: u16, y: u16, invert: bool| {
+            let mut d = disp_static.borrow_mut();
+            let (fg, bg) = if invert {
+                (Rgb565::BLACK, Rgb565::WHITE)
+            } else {
+                (Rgb565::WHITE, Rgb565::BLACK)
+            };
+            let text_style = MonoTextStyleBuilder::new()
+                .font(&FONT_10X20)
+                .text_color(fg)
+                .background_color(bg)
+                .build();
+            Text::with_baseline(
+                text,
+                Point::new(x as i32, y as i32),
+                text_style,
+                Baseline::Top,
+            )
+            .draw(&mut *d)
+            .map(|_| ())
+            .map_err(|e| alloc::format!("display draw_text_xy: {:?}", e))
+        });
+
+    let fill_rect_fn: soma_esp32_port_display::FillRectFn =
+        Box::new(move |x: u16, y: u16, width: u16, height: u16, on: bool| {
+            let mut d = disp_static.borrow_mut();
+            let color = if on { Rgb565::WHITE } else { Rgb565::BLACK };
+            let rect = Rectangle::new(
+                Point::new(x as i32, y as i32),
+                Size::new(width as u32, height as u32),
+            );
+            let style = PrimitiveStyleBuilder::new().fill_color(color).build();
+            rect.into_styled(style)
+                .draw(&mut *d)
+                .map(|_| ())
+                .map_err(|e| alloc::format!("display fill_rect: {:?}", e))
+        });
+
+    // ST7789 brightness isn't software-controllable on this wiring
+    // (backlight is tied to GPIO14 as on/off). set_contrast is a no-op.
+    let set_contrast_fn: soma_esp32_port_display::SetContrastFn =
+        Box::new(move |_value: u8| Ok(()));
+
+    // ST7789 writes frame data immediately — no buffered flush needed.
+    let flush_fn: soma_esp32_port_display::FlushFn = Box::new(move || Ok(()));
+
+    let display_port = soma_esp32_port_display::DisplayPort::new(
+        info_fn,
+        clear_fn,
+        draw_text_line_fn,
+        draw_text_xy_fn,
+        fill_rect_fn,
+        set_contrast_fn,
+        flush_fn,
+    );
+    composite.register(Box::new(display_port));
+    println!(
+        "[port] registered: display (st7789 {}x{} on SPI2, sclk=GPIO{} mosi=GPIO{} cs=GPIO{} dc=GPIO{} rst=GPIO{} bl=GPIO{})",
+        PANEL_WIDTH, PANEL_HEIGHT, sclk_gpio, mosi_gpio, cs_gpio, dc_gpio, rst_gpio, bl_gpio
     );
 }

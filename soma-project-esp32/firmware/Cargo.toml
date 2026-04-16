@@ -88,7 +88,7 @@ board = ["dep:soma-esp32-port-board"]
 # so both the i2c port and the display port can share the bus via
 # RefCellDevice. Disable if you want to save ~30KB of flash or use the
 # bus exclusively from the i2c port.
-display = ["dep:soma-esp32-port-display", "dep:ssd1306", "dep:embedded-graphics", "dep:embedded-hal-bus"]
+display = ["dep:soma-esp32-port-display", "dep:ssd1306", "dep:embedded-graphics", "dep:embedded-hal-bus", "dep:mipidsi"]
 
 [dependencies]
 soma-esp32-leaf = { path = "../leaf" }
@@ -113,6 +113,9 @@ soma-esp32-port-display = { path = "../ports/display", optional = true }
 ssd1306 = { version = "0.10", optional = true, default-features = false, features = ["graphics"] }
 embedded-graphics = { version = "0.8", optional = true }
 embedded-hal-bus = { version = "0.3", optional = true }
+# ST7789 driver for boards like the Sunton 1732S019 (ESP32-S3 with on-board
+# SPI TFT). Kept alongside ssd1306 — each chip module picks what it needs.
+mipidsi = { version = "0.9", optional = true }
 
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 nb = "1"
