@@ -85,6 +85,15 @@ pub enum TransportMessage {
     RemoveRoutine {
         routine_id: String,
     },
+    /// Push a completed episode from a peer (typically the executor of a
+    /// delegated skill) to the recipient (typically the originator). The
+    /// recipient merges the episode into its local episode store so
+    /// learning accumulates across the cluster, not per-node. Receiver
+    /// responds with `EpisodeAccepted`.
+    EpisodeReport {
+        peer_id: String,
+        episode: crate::types::episode::Episode,
+    },
 }
 
 /// Envelope for all responses on the wire.
@@ -149,6 +158,13 @@ pub enum TransportResponse {
     /// Acknowledge that a stored routine has been removed from the peer.
     RoutineRemoved {
         routine_id: String,
+    },
+    /// Acknowledge an `EpisodeReport`. `merged` is true when the episode was
+    /// stored locally; false when the receiver dropped it (no store, dup,
+    /// out-of-quota, etc.).
+    EpisodeAccepted {
+        episode_id: Uuid,
+        merged: bool,
     },
 }
 
@@ -347,6 +363,31 @@ impl TcpRemoteExecutor {
         let msg = TransportMessage::Ping { nonce };
         self.send_request(peer_id, &msg)
     }
+
+    /// Push a completed episode to the given peer (typically the originator
+    /// of a delegated session). Returns whether the recipient merged it.
+    pub fn report_episode(
+        &self,
+        peer_id: &str,
+        episode: &crate::types::episode::Episode,
+    ) -> Result<bool> {
+        let msg = TransportMessage::EpisodeReport {
+            peer_id: peer_id.to_string(),
+            episode: episode.clone(),
+        };
+        let resp = self.send_request(peer_id, &msg)?;
+        match resp {
+            TransportResponse::EpisodeAccepted { merged, .. } => Ok(merged),
+            TransportResponse::Error { details } => Err(SomaError::Distributed {
+                failure: DistributedFailure::TransportFailure,
+                details,
+            }),
+            other => Err(SomaError::Distributed {
+                failure: DistributedFailure::TransportFailure,
+                details: format!("unexpected response for report_episode: {:?}", other),
+            }),
+        }
+    }
 }
 
 impl RemoteExecutor for TcpRemoteExecutor {
@@ -508,6 +549,8 @@ pub struct LocalDispatchHandler {
     schema_store: Option<Arc<Mutex<dyn crate::memory::schemas::SchemaStore + Send>>>,
     /// Routine store for receiving transferred routines.
     routine_store: Option<Arc<Mutex<dyn crate::memory::routines::RoutineStore + Send>>>,
+    /// Episode store for receiving cross-peer episode reports.
+    episode_store: Option<Arc<Mutex<dyn crate::memory::episodes::EpisodeStore + Send>>>,
 }
 
 impl LocalDispatchHandler {
@@ -517,6 +560,7 @@ impl LocalDispatchHandler {
             chunked_receivers: Mutex::new(HashMap::new()),
             schema_store: None,
             routine_store: None,
+            episode_store: None,
         }
     }
 
@@ -531,7 +575,18 @@ impl LocalDispatchHandler {
             chunked_receivers: Mutex::new(HashMap::new()),
             schema_store: Some(schema_store),
             routine_store: Some(routine_store),
+            episode_store: None,
         }
+    }
+
+    /// Attach an episode store so the handler accepts cross-peer
+    /// `EpisodeReport` messages and merges them into local memory.
+    pub fn with_episode_store(
+        mut self,
+        episode_store: Arc<Mutex<dyn crate::memory::episodes::EpisodeStore + Send>>,
+    ) -> Self {
+        self.episode_store = Some(episode_store);
+        self
     }
 }
 
@@ -878,6 +933,50 @@ impl IncomingHandler for LocalDispatchHandler {
                     TransportResponse::RoutineRemoved {
                         routine_id: routine_id.clone(),
                     }
+                }
+            }
+            TransportMessage::EpisodeReport { peer_id, episode } => {
+                let episode_id = episode.episode_id;
+                let Some(ref store) = self.episode_store else {
+                    debug!(
+                        peer = %peer_id,
+                        episode_id = %episode_id,
+                        "episode report received but no local store attached; dropping"
+                    );
+                    return TransportResponse::EpisodeAccepted {
+                        episode_id,
+                        merged: false,
+                    };
+                };
+                let mut s = match store.lock() {
+                    Ok(s) => s,
+                    Err(_) => {
+                        return TransportResponse::Error {
+                            details: "local episode store lock poisoned".to_string(),
+                        };
+                    }
+                };
+                match s.store(episode) {
+                    Ok(evicted) => {
+                        if let Some(e) = evicted {
+                            debug!(
+                                evicted = %e.episode_id,
+                                "evicted episode from ring buffer to make room for peer report"
+                            );
+                        }
+                        info!(
+                            peer = %peer_id,
+                            episode_id = %episode_id,
+                            "merged episode report from peer"
+                        );
+                        TransportResponse::EpisodeAccepted {
+                            episode_id,
+                            merged: true,
+                        }
+                    }
+                    Err(e) => TransportResponse::Error {
+                        details: format!("failed to merge peer episode: {}", e),
+                    },
                 }
             }
         }
@@ -1578,8 +1677,83 @@ mod tests {
                 TransportMessage::RemoveRoutine { routine_id } => {
                     TransportResponse::RoutineRemoved { routine_id }
                 }
+                TransportMessage::EpisodeReport { episode, .. } => {
+                    TransportResponse::EpisodeAccepted {
+                        episode_id: episode.episode_id,
+                        merged: false,
+                    }
+                }
             }
         }
+    }
+
+    /// Handler that exposes a local episode store so we can verify
+    /// EpisodeReport delivery end-to-end.
+    struct EpisodeMergingHandler {
+        store: Arc<Mutex<dyn crate::memory::episodes::EpisodeStore + Send>>,
+    }
+
+    impl IncomingHandler for EpisodeMergingHandler {
+        fn handle(&self, msg: TransportMessage) -> TransportResponse {
+            match msg {
+                TransportMessage::EpisodeReport { episode, .. } => {
+                    let id = episode.episode_id;
+                    let mut s = self.store.lock().unwrap();
+                    let _ = s.store(episode);
+                    TransportResponse::EpisodeAccepted {
+                        episode_id: id,
+                        merged: true,
+                    }
+                }
+                _ => TransportResponse::Error {
+                    details: "unsupported".to_string(),
+                },
+            }
+        }
+    }
+
+    fn make_test_episode() -> crate::types::episode::Episode {
+        use crate::types::episode::EpisodeOutcome;
+        crate::types::episode::Episode {
+            episode_id: Uuid::new_v4(),
+            goal_fingerprint: "test_fp".to_string(),
+            initial_belief_summary: serde_json::json!({}),
+            steps: Vec::new(),
+            observations: Vec::new(),
+            outcome: EpisodeOutcome::Success,
+            total_cost: 0.0,
+            success: true,
+            tags: vec![],
+            embedding: None,
+            created_at: Utc::now(),
+            salience: 1.0,
+            world_state_context: serde_json::json!({}),
+        }
+    }
+
+    #[test]
+    fn episode_report_roundtrip_merges_remote_episode() {
+        let port = free_port();
+        let addr: SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
+        let store: Arc<Mutex<dyn crate::memory::episodes::EpisodeStore + Send>> =
+            Arc::new(Mutex::new(crate::memory::episodes::DefaultEpisodeStore::new()));
+        let handler: Arc<dyn IncomingHandler> = Arc::new(EpisodeMergingHandler {
+            store: Arc::clone(&store),
+        });
+
+        let _listener_handle = start_listener_background(addr, handler);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        let peer_map: PeerAddressMap = Arc::new(Mutex::new(HashMap::new()));
+        peer_map.lock().unwrap().insert("peer-1".to_string(), addr);
+        let executor = TcpRemoteExecutor::new(peer_map);
+
+        let episode = make_test_episode();
+        let merged = executor.report_episode("peer-1", &episode).unwrap();
+        assert!(merged, "remote handler should merge episode");
+
+        let s = store.lock().unwrap();
+        assert_eq!(s.count(), 1, "remote store should now hold one episode");
     }
 
     /// Find an available port on localhost.

@@ -109,6 +109,23 @@ pub struct RuntimeHandle {
     pub observation_streaming: Arc<Mutex<dyn crate::distributed::streaming::ObservationStreaming + Send>>,
     /// Delegation manager for routing skills/sessions to remote peers.
     pub delegation_manager: Option<Arc<dyn crate::distributed::delegation::DelegationManager>>,
+    /// Shared session checkpoint store used for mid-run persistence and
+    /// resume-on-boot.
+    pub checkpoint_store: Arc<crate::memory::checkpoint::SessionCheckpointStore>,
+    /// How often (in control-loop steps) to write mid-run checkpoints.
+    /// Zero disables mid-run checkpointing.
+    pub checkpoint_every_n_steps: u32,
+    /// Registry of in-flight asynchronous goals submitted via
+    /// `create_goal_async`. Each entry carries a shared session handle and
+    /// a cancel flag; the background thread updates status on termination.
+    pub goal_registry: Arc<crate::runtime::goal_registry::GoalRegistry>,
+    /// Per-skill EMA stats accumulated from completed episodes; updated
+    /// by `goal_executor::finalize_episode` and read for `inspect_skills`.
+    pub skill_stats: crate::memory::skill_stats::SharedSkillStats,
+    /// Plugin search paths for the dynamic dylib loader. Used by
+    /// `reload_pack` to rebuild a `DynamicPortLoader` on demand.
+    pub plugin_search_paths: Vec<std::path::PathBuf>,
+    pub require_port_signatures: bool,
 }
 
 impl RuntimeHandle {
@@ -139,6 +156,12 @@ impl RuntimeHandle {
                 crate::distributed::streaming::DefaultObservationStreaming::new(),
             )),
             delegation_manager: None,
+            checkpoint_store: runtime.checkpoint_store,
+            checkpoint_every_n_steps: runtime.checkpoint_every_n_steps,
+            goal_registry: Arc::new(crate::runtime::goal_registry::GoalRegistry::new()),
+            skill_stats: runtime.skill_stats,
+            plugin_search_paths: runtime.plugin_search_paths,
+            require_port_signatures: runtime.require_port_signatures,
         }
     }
 
@@ -164,6 +187,77 @@ impl RuntimeHandle {
         self.remote_executor = Some(Arc::from(executor));
         self.peer_ids = peer_ids;
         self
+    }
+
+    /// Build a closure that launches async goals via this handle. Used by
+    /// the webhook listener so incoming POSTs can trigger full-blown
+    /// autonomous runs without re-doing the plumbing. The returned
+    /// launcher clones the Arcs it needs, so the handle can still be
+    /// consumed by `McpServer::new`.
+    pub fn build_webhook_launcher(
+        &self,
+    ) -> crate::distributed::webhook_listener::WebhookGoalLauncher {
+        let session_controller = Arc::clone(&self.session_controller);
+        let goal_runtime = Arc::clone(&self.goal_runtime);
+        let goal_registry = Arc::clone(&self.goal_registry);
+        let checkpoint_store = Arc::clone(&self.checkpoint_store);
+        let checkpoint_every_n = self.checkpoint_every_n_steps;
+        let episode_store = Arc::clone(&self.episode_store);
+        let schema_store = Arc::clone(&self.schema_store);
+        let routine_store = Arc::clone(&self.routine_store);
+        let embedder = Arc::clone(&self.embedder);
+        let world_state = Arc::clone(&self.world_state);
+        let skill_stats = Arc::clone(&self.skill_stats);
+
+        Arc::new(move |objective: String, max_steps: Option<u32>| {
+            let input = crate::runtime::goal::GoalInput::NaturalLanguage {
+                text: objective.clone(),
+                source: crate::types::goal::GoalSource {
+                    source_type: crate::types::goal::GoalSourceType::Api,
+                    identity: Some("webhook".into()),
+                    session_id: None,
+                    peer_id: None,
+                },
+            };
+            let mut goal = {
+                let goal_rt = goal_runtime.lock().unwrap();
+                goal_rt.parse_goal(input)?
+            };
+            {
+                let goal_rt = goal_runtime.lock().unwrap();
+                goal_rt.normalize_goal(&mut goal);
+                goal_rt.validate_goal(&goal)?;
+            }
+            if let Some(ms) = max_steps {
+                goal.max_steps = Some(ms);
+            }
+            let goal_id = goal.goal_id;
+            let session = {
+                let mut ctrl = session_controller.lock().unwrap();
+                ctrl.create_session(goal)?
+            };
+            let _ = &objective;
+            let entry = Arc::new(
+                crate::runtime::goal_registry::AsyncGoalEntry::new(goal_id, session),
+            );
+            goal_registry.insert(Arc::clone(&entry));
+            let ctx = crate::runtime::goal_registry::OwnedEpisodeContext {
+                episode_store: Arc::clone(&episode_store),
+                schema_store: Arc::clone(&schema_store),
+                routine_store: Arc::clone(&routine_store),
+                embedder: Arc::clone(&embedder),
+                world_state: Arc::clone(&world_state),
+                skill_stats: Some(Arc::clone(&skill_stats)),
+            };
+            crate::runtime::goal_registry::spawn_async_goal(
+                Arc::clone(&entry),
+                Arc::clone(&session_controller),
+                Arc::clone(&checkpoint_store),
+                checkpoint_every_n,
+                ctx,
+            );
+            Ok(goal_id)
+        })
     }
 }
 
@@ -271,6 +365,10 @@ impl McpServer {
 
             // Direct tool methods (for clients that invoke tools as methods)
             "create_goal" => self.handle_create_goal(request.id, request.params),
+            "create_goal_async" => self.handle_create_goal_async(request.id, request.params),
+            "get_goal_status" => self.handle_get_goal_status(request.id, request.params),
+            "stream_goal_observations" => self.handle_stream_goal_observations(request.id, request.params),
+            "cancel_goal" => self.handle_cancel_goal(request.id, request.params),
             "inspect_session" => self.handle_inspect_session(request.id, request.params),
             "inspect_belief" => self.handle_inspect_belief(request.id, request.params),
             "inspect_resources" => self.handle_inspect_resources(request.id, request.params),
@@ -286,6 +384,7 @@ impl McpServer {
             "dump_state" => self.handle_dump_state(request.id, request.params),
             "invoke_port" => self.handle_invoke_port(request.id, request.params),
             "list_ports" => self.handle_list_ports(request.id, request.params),
+            "list_capabilities" => self.handle_list_capabilities(request.id, request.params),
             "list_peers" => self.handle_list_peers(request.id, request.params),
             "invoke_remote_skill" => self.handle_invoke_remote_skill(request.id, request.params),
             "transfer_routine" => self.handle_transfer_routine(request.id, request.params),
@@ -295,6 +394,9 @@ impl McpServer {
             "trigger_consolidation" => self.handle_trigger_consolidation(request.id, request.params),
             "execute_routine" => self.handle_execute_routine(request.id, request.params),
             "patch_world_state" => self.handle_patch_world_state(request.id, request.params),
+            "expire_world_facts" => self.handle_expire_world_facts(request.id, request.params),
+            "reload_pack" => self.handle_reload_pack(request.id, request.params),
+            "unload_pack" => self.handle_unload_pack(request.id, request.params),
             "dump_world_state" => self.handle_dump_world_state(request.id, request.params),
             "set_routine_autonomous" => self.handle_set_routine_autonomous(request.id, request.params),
             "replicate_routine" => self.handle_replicate_routine(request.id, request.params),
@@ -368,6 +470,10 @@ impl McpServer {
         let inner_id = serde_json::json!(0);
         let inner = match tool_name {
             "create_goal" => self.handle_create_goal(inner_id, arguments),
+            "create_goal_async" => self.handle_create_goal_async(inner_id, arguments),
+            "get_goal_status" => self.handle_get_goal_status(inner_id, arguments),
+            "stream_goal_observations" => self.handle_stream_goal_observations(inner_id, arguments),
+            "cancel_goal" => self.handle_cancel_goal(inner_id, arguments),
             "inspect_session" => self.handle_inspect_session(inner_id, arguments),
             "inspect_belief" => self.handle_inspect_belief(inner_id, arguments),
             "inspect_resources" => self.handle_inspect_resources(inner_id, arguments),
@@ -383,6 +489,7 @@ impl McpServer {
             "dump_state" => self.handle_dump_state(inner_id, arguments),
             "invoke_port" => self.handle_invoke_port(inner_id, arguments),
             "list_ports" => self.handle_list_ports(inner_id, arguments),
+            "list_capabilities" => self.handle_list_capabilities(inner_id, arguments),
             "list_peers" => self.handle_list_peers(inner_id, arguments),
             "invoke_remote_skill" => self.handle_invoke_remote_skill(inner_id, arguments),
             "transfer_routine" => self.handle_transfer_routine(inner_id, arguments),
@@ -392,6 +499,9 @@ impl McpServer {
             "trigger_consolidation" => self.handle_trigger_consolidation(inner_id, arguments),
             "execute_routine" => self.handle_execute_routine(inner_id, arguments),
             "patch_world_state" => self.handle_patch_world_state(inner_id, arguments),
+            "expire_world_facts" => self.handle_expire_world_facts(inner_id, arguments),
+            "reload_pack" => self.handle_reload_pack(inner_id, arguments),
+            "unload_pack" => self.handle_unload_pack(inner_id, arguments),
             "dump_world_state" => self.handle_dump_world_state(inner_id, arguments),
             "set_routine_autonomous" => self.handle_set_routine_autonomous(inner_id, arguments),
             "replicate_routine" => self.handle_replicate_routine(inner_id, arguments),
@@ -453,6 +563,11 @@ impl McpServer {
             ));
         }
 
+        let max_steps_override = params
+            .get("max_steps")
+            .and_then(|v| v.as_u64())
+            .and_then(|v| u32::try_from(v).ok());
+
         let rt = match &self.runtime {
             Some(rt) => rt,
             None => {
@@ -512,6 +627,10 @@ impl McpServer {
             }
         }
 
+        if let Some(ms) = max_steps_override {
+            goal.max_steps = Some(ms);
+        }
+
         let goal_id = goal.goal_id;
 
         // Create a session and run to completion (or first non-continue state).
@@ -529,90 +648,73 @@ impl McpServer {
         };
 
         let session_id = session.session_id;
+        let _ = &objective;
 
-        // Extract filesystem paths from goal text and inject them as
-        // working memory bindings so the skill executor finds them
-        // during bind_inputs.
-        super::goal_utils::inject_path_bindings(&mut session, &objective);
-
-        // Run the control loop until it reaches a non-Continue state.
-        let final_status;
-        let mut result_data = serde_json::Value::Null;
-        loop {
-            match ctrl.run_step(&mut session) {
-                Ok(StepResult::Continue) => continue,
+        // Run the control loop until it reaches a non-Continue state, then
+        // finalize (store episode + attempt learning) for every terminal
+        // outcome including errors. Mid-run checkpoints (when enabled via
+        // `runtime.checkpoint_every_n_steps`) let interrupted sessions be
+        // resumed on a later boot.
+        let checkpoint_store_ref = rt.checkpoint_store.as_ref();
+        let (final_status, result_data) =
+            match crate::runtime::goal_executor::run_loop_with_checkpoint(
+                &mut ctrl,
+                &mut session,
+                Some(checkpoint_store_ref),
+                rt.checkpoint_every_n_steps,
+            ) {
                 Ok(StepResult::Completed) => {
-                    final_status = "completed".to_string();
-                    // Extract the last observation's structured result if available.
-                    if let Some(last_step) = session.trace.steps.last() {
-                        result_data = serde_json::json!({
+                    let data = if let Some(last_step) = session.trace.steps.last() {
+                        serde_json::json!({
                             "steps": session.trace.steps.len(),
                             "last_skill": last_step.selected_skill,
-                        });
-                    }
-                    break;
+                            "last_selection_reason": last_step.selection_reason,
+                        })
+                    } else {
+                        serde_json::Value::Null
+                    };
+                    ("completed".to_string(), data)
                 }
-                Ok(StepResult::Failed(reason)) => {
-                    final_status = "failed".to_string();
-                    result_data = serde_json::json!({ "reason": reason });
-                    break;
+                Ok(StepResult::Failed(reason)) => (
+                    "failed".to_string(),
+                    serde_json::json!({ "reason": reason }),
+                ),
+                Ok(StepResult::Aborted) => ("aborted".to_string(), serde_json::Value::Null),
+                Ok(StepResult::WaitingForInput(msg)) => (
+                    "waiting_for_input".to_string(),
+                    serde_json::json!({ "waiting_for": msg }),
+                ),
+                Ok(StepResult::WaitingForRemote(msg)) => (
+                    "waiting_for_remote".to_string(),
+                    serde_json::json!({ "waiting_for": msg }),
+                ),
+                Ok(StepResult::Continue) => {
+                    // run_loop never returns Continue; treat as error for safety.
+                    (
+                        "error".to_string(),
+                        serde_json::json!({ "error": "run_loop returned Continue" }),
+                    )
                 }
-                Ok(StepResult::Aborted) => {
-                    final_status = "aborted".to_string();
-                    break;
-                }
-                Ok(StepResult::WaitingForInput(msg)) => {
-                    final_status = "waiting_for_input".to_string();
-                    result_data = serde_json::json!({ "waiting_for": msg });
-                    break;
-                }
-                Ok(StepResult::WaitingForRemote(msg)) => {
-                    final_status = "waiting_for_remote".to_string();
-                    result_data = serde_json::json!({ "waiting_for": msg });
-                    break;
-                }
-                Err(e) => {
-                    final_status = "error".to_string();
-                    result_data = serde_json::json!({ "error": e.to_string() });
-                    break;
-                }
-            }
-        }
+                Err(e) => (
+                    "error".to_string(),
+                    serde_json::json!({ "error": e.to_string() }),
+                ),
+            };
 
-        // Store episode and attempt learning if the session reached a terminal state.
-        // Skip storage when the session used plan-following and succeeded —
-        // the routine already captures this behavior, so the episode is noise.
         let is_terminal = matches!(
             final_status.as_str(),
             "completed" | "failed" | "aborted" | "error"
         );
-        let used_routine = session.working_memory.used_plan_following;
-        let succeeded = final_status == "completed";
-        let should_store = !used_routine || !succeeded;
-        if is_terminal && should_store {
-            let mut episode = crate::interfaces::cli::build_episode_from_session(
-                &session,
-                Some(&*rt.embedder),
-            );
-            episode.world_state_context = rt.world_state.lock().ok()
-                .map(|ws| ws.snapshot())
-                .unwrap_or(serde_json::json!({}));
-            let fingerprint = episode.goal_fingerprint.clone();
-            let adapter = crate::adapters::EpisodeMemoryAdapter::new(
-                Arc::clone(&rt.episode_store),
-                Arc::clone(&rt.embedder),
-            );
-            if let Err(e) = adapter.store(episode) {
-                tracing::warn!(error = %e, "failed to store episode from MCP goal");
-            } else {
-                crate::interfaces::cli::attempt_learning(
-                    &rt.episode_store,
-                    &rt.schema_store,
-                    &rt.routine_store,
-                    &fingerprint,
-                    &*rt.embedder,
-                );
-            }
+        if is_terminal {
+            let ctx = crate::runtime::goal_executor::EpisodeContext {
+                episode_store: &rt.episode_store,
+                schema_store: &rt.schema_store,
+                routine_store: &rt.routine_store,
+                embedder: &rt.embedder,
+                world_state: &rt.world_state,
+                skill_stats: Some(&rt.skill_stats),
+            };
+            crate::runtime::goal_executor::finalize_episode(&session, &ctx);
         }
 
         Ok(Self::success_response(
@@ -625,6 +727,394 @@ impl McpServer {
                 "result": result_data
             }),
         ))
+    }
+
+    fn handle_create_goal_async(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "params required: objective (string)".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let objective = params
+            .get("objective")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if objective.is_empty() {
+            return Ok(Self::error_response(
+                id,
+                INVALID_PARAMS,
+                "objective must be a non-empty string".to_string(),
+                None,
+            ));
+        }
+        let max_steps_override = params
+            .get("max_steps")
+            .and_then(|v| v.as_u64())
+            .and_then(|v| u32::try_from(v).ok());
+
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => {
+                let goal_id = Uuid::new_v4();
+                return Ok(Self::success_response(
+                    id,
+                    serde_json::json!({
+                        "goal_id": goal_id.to_string(),
+                        "status": "pending",
+                        "objective": objective,
+                    }),
+                ));
+            }
+        };
+
+        let input = GoalInput::NaturalLanguage {
+            text: objective.clone(),
+            source: GoalSource {
+                source_type: crate::types::goal::GoalSourceType::Mcp,
+                identity: None,
+                session_id: None,
+                peer_id: None,
+            },
+        };
+
+        let mut goal = {
+            let goal_rt = rt.goal_runtime.lock().unwrap();
+            match goal_rt.parse_goal(input) {
+                Ok(g) => g,
+                Err(e) => {
+                    return Ok(Self::error_response(
+                        id,
+                        INTERNAL_ERROR,
+                        format!("goal parse failed: {e}"),
+                        None,
+                    ));
+                }
+            }
+        };
+        {
+            let goal_rt = rt.goal_runtime.lock().unwrap();
+            goal_rt.normalize_goal(&mut goal);
+            if let Err(e) = goal_rt.validate_goal(&goal) {
+                return Ok(Self::error_response(
+                    id,
+                    INTERNAL_ERROR,
+                    format!("goal validation failed: {e}"),
+                    None,
+                ));
+            }
+        }
+        if let Some(ms) = max_steps_override {
+            goal.max_steps = Some(ms);
+        }
+        if let Some(ms) = params
+            .get("latency_budget_ms")
+            .and_then(|v| v.as_u64())
+        {
+            goal.latency_budget_ms = ms;
+        }
+        if let Some(expl) = params.get("exploration") {
+            match serde_json::from_value::<crate::types::goal::ExplorationStrategy>(
+                expl.clone(),
+            ) {
+                Ok(s) => goal.exploration = s,
+                Err(e) => {
+                    return Ok(Self::error_response(
+                        id,
+                        INVALID_PARAMS,
+                        format!("invalid exploration strategy: {e}"),
+                        None,
+                    ));
+                }
+            }
+        }
+        let goal_id = goal.goal_id;
+
+        // Create the session inside a short critical section, then release
+        // the controller lock so the background thread can re-acquire it
+        // per step.
+        let session = {
+            let mut ctrl = rt.session_controller.lock().unwrap();
+            match ctrl.create_session(goal) {
+                Ok(s) => s,
+                Err(e) => {
+                    return Ok(Self::error_response(
+                        id,
+                        INTERNAL_ERROR,
+                        format!("session creation failed: {e}"),
+                        None,
+                    ));
+                }
+            }
+        };
+        let session_id = session.session_id;
+
+        let entry = std::sync::Arc::new(
+            crate::runtime::goal_registry::AsyncGoalEntry::new(goal_id, session),
+        );
+        rt.goal_registry.insert(std::sync::Arc::clone(&entry));
+
+        let ctx = crate::runtime::goal_registry::OwnedEpisodeContext {
+            episode_store: std::sync::Arc::clone(&rt.episode_store),
+            schema_store: std::sync::Arc::clone(&rt.schema_store),
+            routine_store: std::sync::Arc::clone(&rt.routine_store),
+            embedder: std::sync::Arc::clone(&rt.embedder),
+            world_state: std::sync::Arc::clone(&rt.world_state),
+            skill_stats: Some(std::sync::Arc::clone(&rt.skill_stats)),
+        };
+
+        crate::runtime::goal_registry::spawn_async_goal(
+            std::sync::Arc::clone(&entry),
+            std::sync::Arc::clone(&rt.session_controller),
+            std::sync::Arc::clone(&rt.checkpoint_store),
+            rt.checkpoint_every_n_steps,
+            ctx,
+        );
+
+        Ok(Self::success_response(
+            id,
+            serde_json::json!({
+                "goal_id": goal_id.to_string(),
+                "session_id": session_id.to_string(),
+                "status": "pending",
+                "objective": objective,
+            }),
+        ))
+    }
+
+    fn handle_get_goal_status(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let goal_id = match Self::extract_uuid(&params, "goal_id") {
+            Some(v) => v,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "goal_id required (uuid string)".to_string(),
+                    None,
+                ));
+            }
+        };
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => {
+                return Ok(Self::success_response(
+                    id,
+                    serde_json::json!({ "goal_id": goal_id.to_string(), "status": "unknown" }),
+                ));
+            }
+        };
+        let entry = match rt.goal_registry.get(&goal_id) {
+            Some(e) => e,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    format!("no async goal with id {}", goal_id),
+                    None,
+                ));
+            }
+        };
+        let status = entry.current_status();
+        let error = entry.last_error();
+        let (session_id, step_count, last_skill) = {
+            let s = entry.session.lock().unwrap();
+            (
+                s.session_id.to_string(),
+                s.trace.steps.len(),
+                s.trace.steps.last().map(|ts| ts.selected_skill.clone()),
+            )
+        };
+        Ok(Self::success_response(
+            id,
+            serde_json::json!({
+                "goal_id": goal_id.to_string(),
+                "session_id": session_id,
+                "status": status,
+                "steps": step_count,
+                "last_skill": last_skill,
+                "error": error,
+            }),
+        ))
+    }
+
+    /// Pull observations produced by an async goal since `after_step`.
+    ///
+    /// Each event mirrors a TraceStep but only the brain-relevant fields:
+    /// step_index, selected_skill, selection_reason, success, latency_ms,
+    /// observation summary, critic_decision. The brain polls this with the
+    /// last seen step_index to get a near-real-time view of long-running
+    /// async goals — proprioception over what would otherwise be a
+    /// poll-the-final-status black box.
+    fn handle_stream_goal_observations(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let goal_id = match Self::extract_uuid(&params, "goal_id") {
+            Some(v) => v,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "goal_id required (uuid string)".to_string(),
+                    None,
+                ));
+            }
+        };
+        let after_step = params
+            .as_ref()
+            .and_then(|p| p.get("after_step"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(-1);
+        let limit = params
+            .as_ref()
+            .and_then(|p| p.get("limit"))
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(100);
+
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => {
+                return Ok(Self::success_response(
+                    id,
+                    serde_json::json!({
+                        "goal_id": goal_id.to_string(),
+                        "events": [],
+                        "terminal": true
+                    }),
+                ));
+            }
+        };
+        let entry = match rt.goal_registry.get(&goal_id) {
+            Some(e) => e,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    format!("no async goal with id {}", goal_id),
+                    None,
+                ));
+            }
+        };
+
+        let status = entry.current_status();
+        let terminal = matches!(
+            status,
+            crate::runtime::goal_registry::AsyncGoalStatus::Completed
+                | crate::runtime::goal_registry::AsyncGoalStatus::Failed
+                | crate::runtime::goal_registry::AsyncGoalStatus::Aborted
+                | crate::runtime::goal_registry::AsyncGoalStatus::Error
+        );
+
+        let session = entry.session.lock().unwrap();
+        let events: Vec<Value> = session
+            .trace
+            .steps
+            .iter()
+            .filter(|s| (s.step_index as i64) > after_step)
+            .take(limit)
+            .map(|s| {
+                serde_json::json!({
+                    "step_index": s.step_index,
+                    "selected_skill": s.selected_skill,
+                    "selection_reason": s.selection_reason,
+                    "candidate_skills": s.candidate_skills,
+                    "predicted_scores": s.predicted_scores.iter().map(|c| {
+                        serde_json::json!({"skill_id": c.skill_id, "score": c.score})
+                    }).collect::<Vec<_>>(),
+                    "critic_decision": s.critic_decision,
+                    "progress_delta": s.progress_delta,
+                    "termination_reason": s.termination_reason.as_ref().map(|t| format!("{:?}", t)),
+                    "rollback_invoked": s.rollback_invoked,
+                    "observation_success": s.port_calls.iter().all(|p| p.success),
+                    "failure_detail": s.failure_detail,
+                    "timestamp": s.timestamp.to_rfc3339(),
+                    "port_calls": s.port_calls.iter().map(|p| {
+                        serde_json::json!({
+                            "port_id": p.port_id,
+                            "capability_id": p.capability_id,
+                            "success": p.success,
+                            "latency_ms": p.latency_ms
+                        })
+                    }).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+
+        let last_step = session
+            .trace
+            .steps
+            .last()
+            .map(|s| s.step_index as i64)
+            .unwrap_or(-1);
+
+        Ok(Self::success_response(
+            id,
+            serde_json::json!({
+                "goal_id": goal_id.to_string(),
+                "status": status,
+                "events": events,
+                "last_step": last_step,
+                "terminal": terminal,
+            }),
+        ))
+    }
+
+    fn handle_cancel_goal(&self, id: Value, params: Option<Value>) -> Result<McpResponse> {
+        let goal_id = match Self::extract_uuid(&params, "goal_id") {
+            Some(v) => v,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "goal_id required (uuid string)".to_string(),
+                    None,
+                ));
+            }
+        };
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => {
+                return Ok(Self::success_response(
+                    id,
+                    serde_json::json!({ "goal_id": goal_id.to_string(), "cancelled": true }),
+                ));
+            }
+        };
+        match rt.goal_registry.get(&goal_id) {
+            Some(entry) => {
+                entry.request_cancel();
+                Ok(Self::success_response(
+                    id,
+                    serde_json::json!({
+                        "goal_id": goal_id.to_string(),
+                        "cancel_requested": true,
+                    }),
+                ))
+            }
+            None => Ok(Self::error_response(
+                id,
+                INVALID_PARAMS,
+                format!("no async goal with id {}", goal_id),
+                None,
+            )),
+        }
     }
 
     fn handle_inspect_session(&self, id: Value, params: Option<Value>) -> Result<McpResponse> {
@@ -855,6 +1345,7 @@ impl McpServer {
             let skills: Vec<Value> = all_skills
                 .iter()
                 .map(|s| {
+                    let stats = rt.skill_stats.get(&s.skill_id);
                     serde_json::json!({
                         "skill_id": s.skill_id,
                         "name": s.name,
@@ -866,6 +1357,13 @@ impl McpServer {
                         "determinism": format!("{:?}", s.determinism),
                         "inputs": s.inputs.schema,
                         "outputs": s.outputs.schema,
+                        "observed": stats.map(|st| serde_json::json!({
+                            "n": st.n_observed,
+                            "ema_latency_ms": st.ema_latency_ms,
+                            "ema_resource_cost": st.ema_resource_cost,
+                            "ema_success_rate": st.ema_success_rate,
+                            "calibrated": st.is_calibrated(),
+                        })),
                     })
                 })
                 .collect();
@@ -933,6 +1431,7 @@ impl McpServer {
                             serde_json::json!({
                                 "step_index": step.step_index,
                                 "selected_skill": step.selected_skill,
+                                "selection_reason": step.selection_reason,
                                 "observation_id": step.observation_id.to_string(),
                                 "candidate_skills": step.candidate_skills,
                                 "predicted_scores": step.predicted_scores.iter().map(|s| {
@@ -952,6 +1451,7 @@ impl McpServer {
                                     })
                                 }).collect::<Vec<_>>(),
                                 "termination_reason": step.termination_reason.as_ref().map(|t| format!("{:?}", t)),
+                                "failure_detail": step.failure_detail,
                                 "rollback_invoked": step.rollback_invoked,
                                 "timestamp": step.timestamp.to_rfc3339(),
                             })
@@ -1071,6 +1571,7 @@ impl McpServer {
                 ));
             }
         };
+        let payload = params.as_ref().and_then(|p| p.get("payload")).cloned();
 
         if let Some(rt) = &self.runtime {
             let uuid = match Uuid::parse_str(&session_id_str) {
@@ -1085,34 +1586,118 @@ impl McpServer {
                 }
             };
 
-            let mut ctrl = rt.session_controller.lock().unwrap();
-            let mut session = match ctrl.get_session(&uuid).cloned() {
-                Some(s) => s,
-                None => {
+            // Async-goal sessions live inside an `AsyncGoalEntry` whose
+            // own Mutex<ControlSession> is the one we need to mutate.
+            let async_entry = rt
+                .goal_registry
+                .list()
+                .into_iter()
+                .filter_map(|gid| rt.goal_registry.get(&gid))
+                .find(|e| e.session_id == uuid);
+
+            let injected_count;
+            let new_status_str;
+            if let Some(entry) = async_entry.as_ref() {
+                let mut session = entry.session.lock().unwrap();
+                injected_count = if let Some(ref p) = payload {
+                    match crate::runtime::session::SessionController::inject_resume_payload(
+                        &mut session,
+                        p,
+                    ) {
+                        Ok(n) => n,
+                        Err(e) => {
+                            return Ok(Self::error_response(
+                                id,
+                                INVALID_PARAMS,
+                                format!("invalid payload: {e}"),
+                                None,
+                            ));
+                        }
+                    }
+                } else {
+                    0
+                };
+                let mut ctrl = rt.session_controller.lock().unwrap();
+                if let Err(e) = ctrl.resume(&mut session) {
                     return Ok(Self::error_response(
                         id,
-                        INVALID_PARAMS,
-                        format!("session not found: {session_id_str}"),
+                        INTERNAL_ERROR,
+                        format!("resume failed: {e}"),
                         None,
                     ));
                 }
-            };
+                drop(session);
+                drop(ctrl);
 
-            match ctrl.resume(&mut session) {
-                Ok(()) => Ok(Self::success_response(
-                    id,
-                    serde_json::json!({
-                        "session_id": session_id_str,
-                        "status": format!("{:?}", session.status)
-                    }),
-                )),
-                Err(e) => Ok(Self::error_response(
-                    id,
-                    INTERNAL_ERROR,
-                    format!("resume failed: {e}"),
-                    None,
-                )),
+                // The background thread for the async goal exited when the
+                // session entered WaitingFor*; respawn it now that the
+                // payload has been delivered.
+                let ctx = crate::runtime::goal_registry::OwnedEpisodeContext {
+                    episode_store: Arc::clone(&rt.episode_store),
+                    schema_store: Arc::clone(&rt.schema_store),
+                    routine_store: Arc::clone(&rt.routine_store),
+                    embedder: Arc::clone(&rt.embedder),
+                    world_state: Arc::clone(&rt.world_state),
+                    skill_stats: Some(Arc::clone(&rt.skill_stats)),
+                };
+                crate::runtime::goal_registry::spawn_async_goal(
+                    Arc::clone(entry),
+                    Arc::clone(&rt.session_controller),
+                    Arc::clone(&rt.checkpoint_store),
+                    rt.checkpoint_every_n_steps,
+                    ctx,
+                );
+                new_status_str = "Running".to_string();
+            } else {
+                let mut ctrl = rt.session_controller.lock().unwrap();
+                let mut session = match ctrl.get_session(&uuid).cloned() {
+                    Some(s) => s,
+                    None => {
+                        return Ok(Self::error_response(
+                            id,
+                            INVALID_PARAMS,
+                            format!("session not found: {session_id_str}"),
+                            None,
+                        ));
+                    }
+                };
+                injected_count = if let Some(ref p) = payload {
+                    match crate::runtime::session::SessionController::inject_resume_payload(
+                        &mut session,
+                        p,
+                    ) {
+                        Ok(n) => n,
+                        Err(e) => {
+                            return Ok(Self::error_response(
+                                id,
+                                INVALID_PARAMS,
+                                format!("invalid payload: {e}"),
+                                None,
+                            ));
+                        }
+                    }
+                } else {
+                    0
+                };
+                if let Err(e) = ctrl.resume(&mut session) {
+                    return Ok(Self::error_response(
+                        id,
+                        INTERNAL_ERROR,
+                        format!("resume failed: {e}"),
+                        None,
+                    ));
+                }
+                new_status_str = format!("{:?}", session.status);
             }
+
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({
+                    "session_id": session_id_str,
+                    "status": new_status_str,
+                    "injected_bindings": injected_count,
+                }),
+            ))
         } else {
             Ok(Self::success_response(
                 id,
@@ -1372,6 +1957,7 @@ impl McpServer {
                                 serde_json::json!({
                                     "step_index": step.step_index,
                                     "selected_skill": step.selected_skill,
+                                    "selection_reason": step.selection_reason,
                                     "observation_id": step.observation_id.to_string(),
                                     "critic_decision": step.critic_decision,
                                     "progress_delta": step.progress_delta,
@@ -1637,6 +2223,131 @@ impl McpServer {
                 serde_json::json!({ "ports": [] }),
             ))
         }
+    }
+
+    /// Capability catalog: what the brain is allowed to invoke right now.
+    ///
+    /// Inputs (all optional):
+    ///   - `goal_id` / `session_id`: scope by an active goal/session so the
+    ///     answer reflects its `permissions_scope` and remaining budget.
+    ///
+    /// Output groups skills + ports into `allowed` and `denied` based on the
+    /// goal's `permissions_scope`. When no goal is supplied, every loaded
+    /// skill/port is reported as allowed and budget is null.
+    fn handle_list_capabilities(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let Some(rt) = &self.runtime else {
+            return Ok(Self::success_response(
+                id,
+                serde_json::json!({
+                    "allowed": {"skills": [], "ports": []},
+                    "denied": {"skills": [], "ports": []},
+                    "remaining_budget": null,
+                    "permissions_scope": []
+                }),
+            ));
+        };
+
+        let goal_id = params
+            .as_ref()
+            .and_then(|p| p.get("goal_id"))
+            .and_then(|v| v.as_str())
+            .and_then(|s| Uuid::parse_str(s).ok());
+        let session_id = params
+            .as_ref()
+            .and_then(|p| p.get("session_id"))
+            .and_then(|v| v.as_str())
+            .and_then(|s| Uuid::parse_str(s).ok());
+
+        let mut scope: Vec<String> = Vec::new();
+        let mut budget: Option<Value> = None;
+
+        if let Some(sid) = session_id {
+            let ctrl = rt.session_controller.lock().unwrap();
+            if let Some(s) = ctrl.get_session(&sid) {
+                scope = s.goal.permissions_scope.clone();
+                budget = Some(serde_json::json!({
+                    "risk_remaining": s.budget_remaining.risk_remaining,
+                    "latency_remaining_ms": s.budget_remaining.latency_remaining_ms,
+                    "resource_remaining": s.budget_remaining.resource_remaining,
+                    "steps_remaining": s.budget_remaining.steps_remaining
+                }));
+            }
+        } else if let Some(gid) = goal_id
+            && let Some(entry) = rt.goal_registry.get(&gid)
+        {
+            let s = entry.session.lock().unwrap();
+            scope = s.goal.permissions_scope.clone();
+            budget = Some(serde_json::json!({
+                "risk_remaining": s.budget_remaining.risk_remaining,
+                "latency_remaining_ms": s.budget_remaining.latency_remaining_ms,
+                "resource_remaining": s.budget_remaining.resource_remaining,
+                "steps_remaining": s.budget_remaining.steps_remaining
+            }));
+        }
+
+        // A capability is allowed when the goal's permissions_scope is empty
+        // (== unrestricted) or contains the skill/port pack-or-namespace tag.
+        let scope_allows = |tags: &[&str]| -> bool {
+            if scope.is_empty() {
+                return true;
+            }
+            tags.iter().any(|t| scope.iter().any(|s| s == t))
+        };
+
+        let mut allowed_skills: Vec<Value> = Vec::new();
+        let mut denied_skills: Vec<Value> = Vec::new();
+        {
+            let skill_rt = rt.skill_runtime.lock().unwrap();
+            for s in skill_rt.list_skills(None) {
+                let entry = serde_json::json!({
+                    "skill_id": s.skill_id,
+                    "pack": s.pack,
+                    "namespace": s.namespace,
+                    "risk_class": format!("{:?}", s.risk_class),
+                    "capability_requirements": s.capability_requirements,
+                });
+                if scope_allows(&[s.pack.as_str(), s.namespace.as_str()]) {
+                    allowed_skills.push(entry);
+                } else {
+                    denied_skills.push(entry);
+                }
+            }
+        }
+
+        let mut allowed_ports: Vec<Value> = Vec::new();
+        let mut denied_ports: Vec<Value> = Vec::new();
+        {
+            let port_rt = rt.port_runtime.lock().unwrap();
+            for p in port_rt.list_ports(None) {
+                let entry = serde_json::json!({
+                    "port_id": p.port_id,
+                    "namespace": p.namespace,
+                    "kind": format!("{:?}", p.kind),
+                    "capabilities": p.capabilities.iter()
+                        .map(|c| c.capability_id.clone())
+                        .collect::<Vec<_>>(),
+                });
+                if scope_allows(&[p.port_id.as_str(), p.namespace.as_str()]) {
+                    allowed_ports.push(entry);
+                } else {
+                    denied_ports.push(entry);
+                }
+            }
+        }
+
+        Ok(Self::success_response(
+            id,
+            serde_json::json!({
+                "allowed": {"skills": allowed_skills, "ports": allowed_ports},
+                "denied": {"skills": denied_skills, "ports": denied_ports},
+                "remaining_budget": budget,
+                "permissions_scope": scope
+            }),
+        ))
     }
 
     // -----------------------------------------------------------------------
@@ -2185,6 +2896,7 @@ impl McpServer {
                 confidence: if succeeded { 1.0 } else { 0.5 },
                 provenance: crate::types::common::FactProvenance::Observed,
                 timestamp: chrono::Utc::now(),
+                            ttl_ms: None,
             };
             let _ = ws.add_fact(fact);
         }
@@ -2308,6 +3020,7 @@ impl McpServer {
             interval_ms,
             cron_expr,
             action,
+            goal_trigger: None,
             message,
             max_fires,
             fire_count: 0,
@@ -2533,6 +3246,282 @@ impl McpServer {
                 "removed": removed,
                 "snapshot_hash": ws.snapshot_hash(),
             }),
+        ))
+    }
+
+    /// Unload a pack: drop every skill it registered (by `pack` field) and
+    /// every port whose `port_id` appears in its manifest. Returns counts.
+    fn handle_unload_pack(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let pack_id = match params
+            .as_ref()
+            .and_then(|p| p.get("pack_id"))
+            .and_then(|v| v.as_str())
+        {
+            Some(p) => p.to_string(),
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "pack_id required".to_string(),
+                    None,
+                ));
+            }
+        };
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => {
+                return Ok(Self::success_response(
+                    id,
+                    serde_json::json!({"removed_skills": 0, "removed_ports": 0, "note": "stub mode"}),
+                ));
+            }
+        };
+        let (removed_skills, removed_ports, removed_pack) =
+            Self::do_unload_pack(rt, &pack_id)?;
+        Ok(Self::success_response(
+            id,
+            serde_json::json!({
+                "pack_id": pack_id,
+                "removed_pack": removed_pack,
+                "removed_skills": removed_skills,
+                "removed_ports": removed_ports,
+            }),
+        ))
+    }
+
+    /// Reload a pack from a manifest path. Drops the previous registration
+    /// (if any) and re-registers ports + skills from the fresh spec. Lets
+    /// the brain swap a port adapter or update a skill manifest without
+    /// restarting the runtime.
+    fn handle_reload_pack(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let manifest_path = match params
+            .as_ref()
+            .and_then(|p| p.get("manifest_path"))
+            .and_then(|v| v.as_str())
+        {
+            Some(p) => p.to_string(),
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "manifest_path required".to_string(),
+                    None,
+                ));
+            }
+        };
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => {
+                return Ok(Self::success_response(
+                    id,
+                    serde_json::json!({"loaded": false, "note": "stub mode"}),
+                ));
+            }
+        };
+
+        // Read + parse the new manifest.
+        let manifest_content = match std::fs::read_to_string(&manifest_path) {
+            Ok(s) => s,
+            Err(e) => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    format!("failed to read manifest '{manifest_path}': {e}"),
+                    None,
+                ));
+            }
+        };
+        let new_spec: crate::types::pack::PackSpec =
+            match serde_json::from_str(&manifest_content) {
+                Ok(s) => s,
+                Err(e) => {
+                    return Ok(Self::error_response(
+                        id,
+                        INVALID_PARAMS,
+                        format!("manifest parse failed: {e}"),
+                        None,
+                    ));
+                }
+            };
+
+        let pack_id = new_spec.id.clone();
+        let (removed_skills, removed_ports, _removed_pack) =
+            Self::do_unload_pack(rt, &pack_id)?;
+
+        // Register new ports via the real adapter factory used by
+        // bootstrap. Builtin ports (filesystem/http) load directly;
+        // dylib-backed ports go through DynamicPortLoader using the
+        // search paths captured at bootstrap time.
+        let mut added_ports = 0u64;
+        let mut added_skills = 0u64;
+        let mut errors: Vec<String> = Vec::new();
+        {
+            #[cfg(feature = "dylib-ports")]
+            let mut loader =
+                crate::runtime::dynamic_port::DynamicPortLoader::with_signature_policy(
+                    rt.plugin_search_paths.clone(),
+                    rt.require_port_signatures,
+                );
+            let mut port_rt = rt.port_runtime.lock().unwrap();
+            for port_spec in &new_spec.ports {
+                let result = crate::bootstrap::create_port_adapter(
+                    port_spec,
+                    #[cfg(feature = "dylib-ports")]
+                    &mut loader,
+                );
+                match result {
+                    Ok((adapter, effective_spec)) => {
+                        let spec_to_register =
+                            effective_spec.unwrap_or_else(|| port_spec.clone());
+                        let port_id = spec_to_register.port_id.clone();
+                        if let Err(e) =
+                            port_rt.register_port(spec_to_register, adapter)
+                        {
+                            errors.push(format!(
+                                "port {} register failed: {e}",
+                                port_id
+                            ));
+                            continue;
+                        }
+                        if let Err(e) = port_rt.activate(&port_id) {
+                            errors.push(format!(
+                                "port {} activate failed: {e}",
+                                port_id
+                            ));
+                            continue;
+                        }
+                        added_ports += 1;
+                    }
+                    Err(e) => {
+                        errors.push(format!(
+                            "port {} adapter creation failed: {e}",
+                            port_spec.port_id
+                        ));
+                    }
+                }
+            }
+        }
+        {
+            let mut skill_rt = rt.skill_runtime.lock().unwrap();
+            for skill_spec in &new_spec.skills {
+                match skill_rt.register_skill(skill_spec.clone()) {
+                    Ok(_) => added_skills += 1,
+                    Err(e) => errors.push(format!(
+                        "skill {} register failed: {e}",
+                        skill_spec.skill_id
+                    )),
+                }
+            }
+        }
+        {
+            let mut packs = rt.pack_specs.lock().unwrap();
+            packs.retain(|p| p.id != pack_id);
+            packs.push(new_spec);
+        }
+
+        // Rebuild the session controller's skill registry so newly-loaded
+        // skills become visible to subsequent run_step calls. The
+        // controller's SkillRegistryAdapter snapshots skills at
+        // construction; without this, hot-reloaded skills would be invisible
+        // until restart.
+        {
+            let skill_rt = rt.skill_runtime.lock().unwrap();
+            let new_registry =
+                Box::new(crate::adapters::SkillRegistryAdapter::new(&skill_rt));
+            let mut ctrl = rt.session_controller.lock().unwrap();
+            ctrl.replace_skill_registry(new_registry);
+        }
+
+        Ok(Self::success_response(
+            id,
+            serde_json::json!({
+                "pack_id": pack_id,
+                "removed_skills": removed_skills,
+                "removed_ports": removed_ports,
+                "added_skills": added_skills,
+                "added_ports": added_ports,
+                "warnings": errors,
+            }),
+        ))
+    }
+
+    /// Shared unload helper used by both `unload_pack` and `reload_pack`.
+    /// Walks the registered pack's skill_ids and port_ids and removes
+    /// them from the live runtimes. Returns (skills_removed, ports_removed,
+    /// pack_was_present).
+    fn do_unload_pack(
+        rt: &RuntimeHandle,
+        pack_id: &str,
+    ) -> Result<(u64, u64, bool)> {
+        let (skill_ids, port_ids, was_present) = {
+            let packs = rt.pack_specs.lock().unwrap();
+            match packs.iter().find(|p| p.id == pack_id) {
+                Some(p) => (
+                    p.skills.iter().map(|s| s.skill_id.clone()).collect::<Vec<_>>(),
+                    p.ports.iter().map(|pt| pt.port_id.clone()).collect::<Vec<_>>(),
+                    true,
+                ),
+                None => (Vec::new(), Vec::new(), false),
+            }
+        };
+        let mut removed_skills = 0u64;
+        let mut removed_ports = 0u64;
+        {
+            let mut skill_rt = rt.skill_runtime.lock().unwrap();
+            for sid in &skill_ids {
+                if matches!(skill_rt.unregister_skill(sid), Ok(true)) {
+                    removed_skills += 1;
+                }
+            }
+        }
+        {
+            let mut port_rt = rt.port_runtime.lock().unwrap();
+            for pid in &port_ids {
+                if matches!(port_rt.remove_port(pid), Ok(true)) {
+                    removed_ports += 1;
+                }
+            }
+        }
+        if was_present {
+            let mut packs = rt.pack_specs.lock().unwrap();
+            packs.retain(|p| p.id != pack_id);
+        }
+        Ok((removed_skills, removed_ports, was_present))
+    }
+
+    /// Force-evict expired facts from world state. Facts with TTL set are
+    /// already filtered out of `snapshot()` automatically — this tool
+    /// physically removes them so the underlying store doesn't grow
+    /// unbounded between reactive ticks.
+    fn handle_expire_world_facts(
+        &self,
+        id: Value,
+        _params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => {
+                return Ok(Self::success_response(
+                    id,
+                    serde_json::json!({"removed": 0, "note": "stub mode"}),
+                ));
+            }
+        };
+        let removed = {
+            let mut ws = rt.world_state.lock().unwrap();
+            ws.prune_expired_facts() as u64
+        };
+        Ok(Self::success_response(
+            id,
+            serde_json::json!({"removed": removed}),
         ))
     }
 
@@ -3673,6 +4662,14 @@ impl McpServer {
             .map(|s| s.to_string())
     }
 
+    fn extract_uuid(params: &Option<Value>, field: &str) -> Option<Uuid> {
+        params
+            .as_ref()
+            .and_then(|p| p.get(field))
+            .and_then(|v| v.as_str())
+            .and_then(|s| Uuid::parse_str(s).ok())
+    }
+
     fn success_response(id: Value, result: Value) -> McpResponse {
         McpResponse {
             jsonrpc: "2.0".to_string(),
@@ -3806,6 +4803,7 @@ impl McpServer {
                     confidence: if obs.success { 1.0 } else { 0.5 },
                     provenance: crate::types::common::FactProvenance::Observed,
                     timestamp: chrono::Utc::now(),
+                                    ttl_ms: None,
                 };
                 let _ = ws.add_fact(fact);
             }
@@ -3854,6 +4852,7 @@ impl McpServer {
                     effect_patch: pcr.effect_patch.clone(),
                     success: pcr.success,
                     failure_class: None,
+                    failure_detail: None,
                     latency_ms: pcr.latency_ms,
                     resource_cost: crate::types::observation::default_cost_profile(),
                     confidence: pcr.confidence,
@@ -3994,9 +4993,85 @@ impl McpServer {
                             "type": "array",
                             "items": { "type": "string" },
                             "description": "Required permission scopes"
+                        },
+                        "max_steps": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Per-goal override for the session step budget. Defaults to the runtime's configured max_steps (100)."
                         }
                     },
                     "required": ["objective"]
+                }),
+            },
+            McpTool {
+                name: "create_goal_async".to_string(),
+                description: "Submit a goal and return immediately with a goal_id. The runtime drives the control loop on a background thread; poll get_goal_status to watch it finish.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "objective": {
+                            "type": "string",
+                            "description": "The goal objective description"
+                        },
+                        "max_steps": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Per-goal override for the session step budget."
+                        }
+                    },
+                    "required": ["objective"]
+                }),
+            },
+            McpTool {
+                name: "get_goal_status".to_string(),
+                description: "Return the live status of a goal started with create_goal_async.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "goal_id": {
+                            "type": "string",
+                            "description": "The goal_id returned by create_goal_async"
+                        }
+                    },
+                    "required": ["goal_id"]
+                }),
+            },
+            McpTool {
+                name: "stream_goal_observations".to_string(),
+                description: "Pull observations produced by an async goal since a given step. Brain polls this with the last seen step_index for near-real-time visibility into long-running async goals (proprioception). Returns events plus a `terminal` flag — once true, no further events will arrive.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "goal_id": {
+                            "type": "string",
+                            "description": "The goal_id returned by create_goal_async"
+                        },
+                        "after_step": {
+                            "type": "integer",
+                            "description": "Return events with step_index > this value. Pass -1 (or omit) for all events.",
+                            "default": -1
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of events to return. Defaults to 100.",
+                            "default": 100
+                        }
+                    },
+                    "required": ["goal_id"]
+                }),
+            },
+            McpTool {
+                name: "cancel_goal".to_string(),
+                description: "Request cancellation of an async goal. The background thread checks the cancel flag between control-loop steps and transitions the session to Aborted.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "goal_id": {
+                            "type": "string",
+                            "description": "The goal_id returned by create_goal_async"
+                        }
+                    },
+                    "required": ["goal_id"]
                 }),
             },
             McpTool {
@@ -4114,13 +5189,17 @@ impl McpServer {
             },
             McpTool {
                 name: "resume_session".to_string(),
-                description: "Resume a paused session.".to_string(),
+                description: "Resume a paused/waiting session. If the session is in WaitingForInput or WaitingForRemote, supply `payload` to deliver the requested data — each key becomes a belief binding. For async goals (started via create_goal_async), the background worker is automatically respawned.".to_string(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
                         "session_id": {
                             "type": "string",
                             "description": "The session UUID"
+                        },
+                        "payload": {
+                            "type": "object",
+                            "description": "Optional JSON object whose top-level keys are merged into belief bindings before resume. Use this to satisfy a WaitingForInput or WaitingForRemote request."
                         }
                     },
                     "required": ["session_id"]
@@ -4232,6 +5311,23 @@ impl McpServer {
                         "namespace": {
                             "type": "string",
                             "description": "Optional namespace filter"
+                        }
+                    }
+                }),
+            },
+            McpTool {
+                name: "list_capabilities".to_string(),
+                description: "List skills and ports the brain can invoke right now, partitioned into allowed/denied by permissions_scope. Optionally pass goal_id or session_id to scope the answer and include remaining budget. Without either, returns the full unfiltered catalog.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "goal_id": {
+                            "type": "string",
+                            "description": "Optional async goal id to scope the catalog"
+                        },
+                        "session_id": {
+                            "type": "string",
+                            "description": "Optional session id to scope the catalog"
                         }
                     }
                 }),
@@ -4383,8 +5479,41 @@ impl McpServer {
                 }),
             },
             McpTool {
+                name: "expire_world_facts".to_string(),
+                description: "Force-evict world-state facts whose TTL has elapsed. Snapshot reads already filter expired facts; call this to physically free memory.".to_string(),
+                input_schema: serde_json::json!({"type": "object", "properties": {}}),
+            },
+            McpTool {
+                name: "reload_pack".to_string(),
+                description: "Re-register a pack from a manifest file. Drops the previous pack's skills (and any ports the runtime can free), then re-registers from the fresh spec. Lets the brain hot-swap skill metadata without restarting. Port adapter swap is limited: dynamic dylib reload requires the dylib loader path which is not yet wired into this tool.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "manifest_path": {
+                            "type": "string",
+                            "description": "Filesystem path to the pack manifest JSON"
+                        }
+                    },
+                    "required": ["manifest_path"]
+                }),
+            },
+            McpTool {
+                name: "unload_pack".to_string(),
+                description: "Drop every skill and port that the named pack registered. Used to prune obsolete packs at runtime.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "pack_id": {
+                            "type": "string",
+                            "description": "Pack id (matches the `id` field in the manifest)"
+                        }
+                    },
+                    "required": ["pack_id"]
+                }),
+            },
+            McpTool {
                 name: "patch_world_state".to_string(),
-                description: "Add or remove facts in the world state. Facts are the runtime's persistent beliefs about the external environment. Changes may trigger autonomous routines on the next monitor tick.".to_string(),
+                description: "Add or remove facts in the world state. Each fact may carry an optional `ttl_ms` after which it is auto-expired. Changes may trigger autonomous routines on the next monitor tick.".to_string(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -4650,7 +5779,7 @@ mod tests {
     fn test_list_tools_count() {
         let server = McpServer::new_stub();
         let tools = server.list_tools();
-        assert_eq!(tools.len(), 34);
+        assert_eq!(tools.len(), 42);
     }
 
     #[test]
@@ -5192,7 +6321,7 @@ mod tests {
     #[test]
     fn test_default_impl() {
         let server = McpServer::default();
-        assert_eq!(server.list_tools().len(), 34);
+        assert_eq!(server.list_tools().len(), 42);
     }
 
     /// Build a real RuntimeHandle from a bootstrapped runtime (no packs).
@@ -5224,6 +6353,46 @@ mod tests {
 
         let handle = RuntimeHandle::from_runtime(runtime);
         McpServer::new(handle)
+    }
+
+    #[test]
+    fn test_async_goal_returns_goal_id_without_running_to_completion() {
+        let server = make_wired_server();
+        let req = make_request(
+            "create_goal_async",
+            Some(serde_json::json!({
+                "objective": "list files in /tmp",
+                "max_steps": 3,
+            })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+        let result = resp.result.unwrap();
+        let goal_id = result["goal_id"].as_str().unwrap().to_string();
+        assert_eq!(result["status"], "pending");
+
+        // Poll briefly — the stub runtime has no skills so the background
+        // thread terminates quickly but the MCP response came back first.
+        let poll = make_request(
+            "get_goal_status",
+            Some(serde_json::json!({ "goal_id": goal_id })),
+        );
+        let poll_resp = server.handle_request(poll).unwrap();
+        assert!(poll_resp.error.is_none());
+        let poll_result = poll_resp.result.unwrap();
+        assert_eq!(poll_result["goal_id"].as_str().unwrap(), goal_id);
+        assert!(poll_result["session_id"].is_string());
+    }
+
+    #[test]
+    fn test_cancel_nonexistent_goal_errors() {
+        let server = make_wired_server();
+        let req = make_request(
+            "cancel_goal",
+            Some(serde_json::json!({ "goal_id": Uuid::new_v4().to_string() })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_some());
     }
 
     #[test]
@@ -5466,6 +6635,61 @@ mod tests {
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert!(result["ports"].is_array());
+    }
+
+    #[test]
+    fn test_unload_pack_unknown_returns_zero() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "unload_pack",
+            Some(serde_json::json!({"pack_id": "does-not-exist"})),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        // Stub mode short-circuits to 0/0.
+        assert_eq!(result["removed_skills"], serde_json::json!(0));
+        assert_eq!(result["removed_ports"], serde_json::json!(0));
+    }
+
+    #[test]
+    fn test_reload_pack_missing_manifest_errors() {
+        let server = McpServer::new_stub();
+        let req = make_request(
+            "reload_pack",
+            Some(serde_json::json!({"manifest_path": "/no/such/path.json"})),
+        );
+        let resp = server.handle_request(req).unwrap();
+        // Stub mode bypasses the read; returns success with note.
+        assert!(resp.error.is_none());
+    }
+
+    #[test]
+    fn test_stream_goal_observations_unknown_goal_in_stub() {
+        let server = McpServer::new_stub();
+        let goal_id = Uuid::new_v4().to_string();
+        let req = make_request(
+            "stream_goal_observations",
+            Some(serde_json::json!({ "goal_id": goal_id })),
+        );
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert!(result["events"].is_array());
+        assert_eq!(result["terminal"], serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn test_list_capabilities_stub() {
+        let server = McpServer::new_stub();
+        let req = make_request("list_capabilities", None);
+        let resp = server.handle_request(req).unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert!(result["allowed"]["skills"].is_array());
+        assert!(result["allowed"]["ports"].is_array());
+        assert!(result["denied"]["skills"].is_array());
+        assert!(result["denied"]["ports"].is_array());
     }
 
     #[test]

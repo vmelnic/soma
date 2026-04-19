@@ -96,6 +96,16 @@ pub trait SkillRuntime {
     /// Rejects duplicates (same `skill_id`).
     fn register_skill(&mut self, spec: SkillSpec) -> Result<()>;
 
+    /// Remove a skill from the catalog by id. Returns Ok(false) if the
+    /// skill was not registered. Used during pack hot-reload to drop the
+    /// old pack's skills before registering the new ones.
+    fn unregister_skill(&mut self, skill_id: &str) -> Result<bool> {
+        let _ = skill_id;
+        Err(crate::errors::SomaError::Skill(
+            "unregister_skill not implemented".to_string(),
+        ))
+    }
+
     /// Static validation of a skill spec (Section 13.1 of skill-spec.md).
     fn validate_skill(&self, spec: &SkillSpec) -> Result<()>;
 
@@ -911,6 +921,10 @@ impl SkillRuntime for DefaultSkillRuntime {
 
     fn get_skill(&self, skill_id: &str) -> Option<&SkillSpec> {
         self.skills.get(skill_id)
+    }
+
+    fn unregister_skill(&mut self, skill_id: &str) -> Result<bool> {
+        Ok(self.skills.remove(skill_id).is_some())
     }
 
     fn list_skills(&self, namespace: Option<&str>) -> Vec<&SkillSpec> {

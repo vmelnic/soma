@@ -47,6 +47,14 @@ pub trait WorldStateStore: Send {
     /// SHA-256 hex digest of the serialized snapshot. Used by the reactive
     /// monitor to detect world-state changes between ticks.
     fn snapshot_hash(&self) -> String;
+
+    /// Physically remove every fact whose TTL has elapsed. Returns the
+    /// number evicted. Distinct from `list_facts()` which filters expired
+    /// facts on read but leaves them in storage. Default implementation is
+    /// a no-op; stores that hold facts in mutable state should override.
+    fn prune_expired_facts(&mut self) -> usize {
+        0
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -71,10 +79,27 @@ impl Default for DefaultWorldStateStore {
     }
 }
 
+impl DefaultWorldStateStore {
+    /// Drop expired facts in-place. Returns the number evicted.
+    pub fn prune_expired(&mut self) -> usize {
+        let now = chrono::Utc::now();
+        let before = self.facts.len();
+        self.facts.retain(|_, f| !f.is_expired(now));
+        before - self.facts.len()
+    }
+}
+
 impl WorldStateStore for DefaultWorldStateStore {
     fn snapshot(&self) -> serde_json::Value {
+        // Filter expired facts from the snapshot without mutating storage —
+        // the reactive monitor calls snapshot() on every tick, which gives
+        // us natural pruning without needing a mut reference here.
+        let now = chrono::Utc::now();
         let mut map = serde_json::Map::new();
         for fact in self.facts.values() {
+            if fact.is_expired(now) {
+                continue;
+            }
             let key = format!("{}.{}", fact.subject, fact.predicate);
             map.insert(key, fact.value.clone());
         }
@@ -96,7 +121,11 @@ impl WorldStateStore for DefaultWorldStateStore {
     }
 
     fn list_facts(&self) -> Vec<&Fact> {
-        self.facts.values().collect()
+        let now = chrono::Utc::now();
+        self.facts
+            .values()
+            .filter(|f| !f.is_expired(now))
+            .collect()
     }
 
     fn snapshot_hash(&self) -> String {
@@ -104,6 +133,10 @@ impl WorldStateStore for DefaultWorldStateStore {
         let serialized = serde_json::to_string(&snapshot).unwrap_or_default();
         let hash = Sha256::digest(serialized.as_bytes());
         format!("{hash:x}")
+    }
+
+    fn prune_expired_facts(&mut self) -> usize {
+        self.prune_expired()
     }
 }
 
@@ -300,6 +333,7 @@ pub fn start_reactive_monitor(
                                     confidence: 1.0,
                                     provenance: crate::types::common::FactProvenance::Observed,
                                     timestamp: chrono::Utc::now(),
+                                                                    ttl_ms: None,
                                 };
                                 let _ = ws.add_fact(fact);
                             }
@@ -337,6 +371,7 @@ pub fn start_reactive_monitor(
                             confidence: 1.0,
                             provenance: crate::types::common::FactProvenance::Observed,
                             timestamp: chrono::Utc::now(),
+                                                    ttl_ms: None,
                         };
                         let _ = ws.add_fact(fact);
                         // Clear any prior failure fact.
@@ -354,6 +389,7 @@ pub fn start_reactive_monitor(
                             confidence: 1.0,
                             provenance: crate::types::common::FactProvenance::Observed,
                             timestamp: chrono::Utc::now(),
+                                                    ttl_ms: None,
                         };
                         let _ = ws.add_fact(fact);
                         // Clear any prior success fact.
@@ -430,6 +466,7 @@ mod tests {
             confidence: 1.0,
             provenance: FactProvenance::Observed,
             timestamp: Utc::now(),
+            ttl_ms: None,
         }
     }
 
@@ -541,6 +578,32 @@ mod tests {
     }
 
     #[test]
+    fn test_ttl_expires_facts_from_snapshot() {
+        let mut store = DefaultWorldStateStore::new();
+        // Insert a fact with a TTL already in the past.
+        let mut f = make_fact("expired", "sensor", "old", serde_json::json!(1));
+        f.timestamp = chrono::Utc::now() - chrono::Duration::seconds(60);
+        f.ttl_ms = Some(1_000);
+        store.add_fact(f).unwrap();
+        // And a live fact with no TTL.
+        store
+            .add_fact(make_fact("live", "sensor", "new", serde_json::json!(2)))
+            .unwrap();
+
+        let snap = store.snapshot();
+        let obj = snap.as_object().unwrap();
+        assert!(obj.get("sensor.old").is_none(), "expired fact must drop out of snapshot");
+        assert!(obj.get("sensor.new").is_some(), "live fact must remain");
+        assert_eq!(store.list_facts().len(), 1);
+
+        // prune_expired physically removes the expired fact.
+        let removed = store.prune_expired();
+        assert_eq!(removed, 1);
+        // Use the inherent (private-field) accessor for live count via list_facts.
+        assert_eq!(store.list_facts().len(), 1);
+    }
+
+    #[test]
     fn test_add_fact_upserts_on_same_id() {
         let mut store = DefaultWorldStateStore::new();
         store
@@ -558,3 +621,4 @@ mod tests {
         );
     }
 }
+

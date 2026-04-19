@@ -76,9 +76,96 @@ pub struct Runtime {
     pub routine_router: Arc<dyn crate::distributed::routing::RoutineRouter>,
     /// Instant when the runtime was created, used for uptime and CPU tracking.
     pub start_time: Instant,
+    /// Disk-backed session checkpoint store. Shared so MCP, CLI, and
+    /// background executors can write mid-run checkpoints without racing
+    /// each other's state.
+    pub checkpoint_store: Arc<crate::memory::checkpoint::SessionCheckpointStore>,
+    /// How often (in control-loop steps) to write mid-run checkpoints.
+    /// Zero disables mid-run checkpointing; terminal checkpoints still fire
+    /// where callers already do them explicitly.
+    pub checkpoint_every_n_steps: u32,
+    /// Per-skill EMA stats (latency / cost / success rate) accumulated
+    /// from finalized episodes. Populated on each call to
+    /// `goal_executor::finalize_episode` so the runtime self-calibrates.
+    pub skill_stats: crate::memory::skill_stats::SharedSkillStats,
+    /// Plugin search paths captured from `config.ports.plugin_path` so
+    /// runtime tools (e.g. MCP `reload_pack`) can rebuild a
+    /// `DynamicPortLoader` on demand without re-reading config.
+    pub plugin_search_paths: Vec<PathBuf>,
+    /// Whether dylib signature checking is required when loading port
+    /// libraries via the dynamic loader.
+    pub require_port_signatures: bool,
 }
 
 impl Runtime {
+    /// Load every non-terminal session from the checkpoint store, re-insert
+    /// it into the controller, and drive each one to completion via the
+    /// shared goal executor. Used on boot when
+    /// `runtime.resume_sessions_on_boot = true` so sessions that were
+    /// interrupted (SIGKILL, crash, restart) pick up exactly where they
+    /// left off.
+    ///
+    /// Runs synchronously — the caller returns only after every resumed
+    /// session has terminated. Sessions that error out are logged and
+    /// skipped; their checkpoints remain on disk for inspection.
+    pub fn resume_pending_sessions(&mut self) -> Result<Vec<uuid::Uuid>> {
+        use crate::runtime::session::SessionRuntime;
+        let pending = self.checkpoint_store.load_all_active()?;
+        let mut resumed_ids = Vec::with_capacity(pending.len());
+        for session in pending {
+            let sid = session.session_id;
+            let bytes = match serde_json::to_vec(&session) {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(session_id = %sid, error = %e, "skipping unserializable session");
+                    continue;
+                }
+            };
+            let mut restored = match self.session_controller.restore(&bytes) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(session_id = %sid, error = %e, "failed to restore session");
+                    continue;
+                }
+            };
+            tracing::info!(
+                session_id = %sid,
+                steps_so_far = restored.trace.steps.len(),
+                "resuming interrupted session from checkpoint"
+            );
+            let ctx = crate::runtime::goal_executor::EpisodeContext {
+                episode_store: &self.episode_store,
+                schema_store: &self.schema_store,
+                routine_store: &self.routine_store,
+                embedder: &self.embedder,
+                world_state: &self.world_state,
+                skill_stats: Some(&self.skill_stats),
+            };
+            let checkpoint_store = Arc::clone(&self.checkpoint_store);
+            let every_n = self.checkpoint_every_n_steps;
+            let result = crate::runtime::goal_executor::run_loop_with_checkpoint(
+                &mut self.session_controller,
+                &mut restored,
+                Some(checkpoint_store.as_ref()),
+                every_n,
+            );
+            if let Err(e) = result {
+                tracing::warn!(
+                    session_id = %sid,
+                    error = %e,
+                    "resumed session produced a run_step error; marking Failed"
+                );
+                restored.status = crate::types::session::SessionStatus::Failed;
+                // Persist the terminal status so a subsequent resume-on-boot
+                // does not keep retrying the same broken session.
+                let _ = checkpoint_store.save(&restored);
+            }
+            crate::runtime::goal_executor::finalize_episode(&restored, &ctx);
+            resumed_ids.push(sid);
+        }
+        Ok(resumed_ids)
+    }
+
     /// Take a proprioception snapshot of this runtime's current state.
     ///
     /// Gathers resource usage (RSS, CPU), session counts, loaded capability
@@ -261,6 +348,10 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
     let session_controller = SessionController::new(deps, Arc::clone(&metrics));
     let goal_runtime = DefaultGoalRuntime::new();
 
+    let checkpoint_store = Arc::new(
+        crate::memory::checkpoint::SessionCheckpointStore::new(&data_dir),
+    );
+
     Ok(Runtime {
         session_controller,
         goal_runtime,
@@ -276,6 +367,16 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
         world_state,
         routine_router: Arc::new(crate::distributed::routing::DefaultRoutineRouter::new()),
         start_time: Instant::now(),
+        checkpoint_store,
+        checkpoint_every_n_steps: config.runtime.checkpoint_every_n_steps,
+        skill_stats: Arc::new(crate::memory::skill_stats::SkillStatsStore::new()),
+        plugin_search_paths: config
+            .ports
+            .plugin_path
+            .iter()
+            .map(PathBuf::from)
+            .collect(),
+        require_port_signatures: config.ports.require_signatures,
     })
 }
 
@@ -430,6 +531,10 @@ pub fn bootstrap_with_remote(
     let session_controller = SessionController::new(deps, Arc::clone(&metrics));
     let goal_runtime = DefaultGoalRuntime::new();
 
+    let checkpoint_store = Arc::new(
+        crate::memory::checkpoint::SessionCheckpointStore::new(&data_dir),
+    );
+
     Ok(Runtime {
         session_controller,
         goal_runtime,
@@ -445,6 +550,16 @@ pub fn bootstrap_with_remote(
         world_state,
         routine_router: Arc::new(crate::distributed::routing::DefaultRoutineRouter::new()),
         start_time: Instant::now(),
+        checkpoint_store,
+        checkpoint_every_n_steps: config.runtime.checkpoint_every_n_steps,
+        skill_stats: Arc::new(crate::memory::skill_stats::SkillStatsStore::new()),
+        plugin_search_paths: config
+            .ports
+            .plugin_path
+            .iter()
+            .map(PathBuf::from)
+            .collect(),
+        require_port_signatures: config.ports.require_signatures,
     })
 }
 
@@ -580,6 +695,15 @@ pub fn bootstrap_from_specs(
     let session_controller = SessionController::new(deps, Arc::clone(&metrics));
     let goal_runtime = DefaultGoalRuntime::new();
 
+    // On wasm there is no host filesystem for checkpoints. A store rooted
+    // at an ephemeral path keeps the Runtime shape uniform; it is never
+    // touched as long as `checkpoint_every_n_steps` stays zero.
+    let checkpoint_store = Arc::new(
+        crate::memory::checkpoint::SessionCheckpointStore::new(
+            &std::path::PathBuf::from("."),
+        ),
+    );
+
     Ok(Runtime {
         session_controller,
         goal_runtime,
@@ -595,6 +719,16 @@ pub fn bootstrap_from_specs(
         world_state: Arc::new(Mutex::new(crate::runtime::world_state::DefaultWorldStateStore::new())),
         routine_router: Arc::new(crate::distributed::routing::DefaultRoutineRouter::new()),
         start_time: Instant::now(),
+        checkpoint_store,
+        checkpoint_every_n_steps: config.runtime.checkpoint_every_n_steps,
+        skill_stats: Arc::new(crate::memory::skill_stats::SkillStatsStore::new()),
+        plugin_search_paths: config
+            .ports
+            .plugin_path
+            .iter()
+            .map(PathBuf::from)
+            .collect(),
+        require_port_signatures: config.ports.require_signatures,
     })
 }
 
@@ -748,6 +882,10 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
     let session_controller = SessionController::new(deps, Arc::clone(&metrics));
     let goal_runtime = DefaultGoalRuntime::new();
 
+    let checkpoint_store = Arc::new(
+        crate::memory::checkpoint::SessionCheckpointStore::new(&data_dir),
+    );
+
     Ok(Runtime {
         session_controller,
         goal_runtime,
@@ -763,6 +901,16 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
         world_state,
         routine_router: Arc::new(crate::distributed::routing::DefaultRoutineRouter::new()),
         start_time: Instant::now(),
+        checkpoint_store,
+        checkpoint_every_n_steps: config.runtime.checkpoint_every_n_steps,
+        skill_stats: Arc::new(crate::memory::skill_stats::SkillStatsStore::new()),
+        plugin_search_paths: config
+            .ports
+            .plugin_path
+            .iter()
+            .map(PathBuf::from)
+            .collect(),
+        require_port_signatures: config.ports.require_signatures,
     })
 }
 
@@ -866,7 +1014,7 @@ fn register_default_safety_policies(
 /// returned as a `SomaError::Port` and the caller logs + skips them. This
 /// keeps pack loading going for any remaining ports that *can* be loaded.
 #[allow(unused_variables)]
-fn create_port_adapter(
+pub fn create_port_adapter(
     spec: &PortSpec,
     #[cfg(feature = "dylib-ports")] loader: &mut DynamicPortLoader,
 ) -> Result<(Box<dyn Port>, Option<PortSpec>)> {

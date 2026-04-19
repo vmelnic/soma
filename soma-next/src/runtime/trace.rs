@@ -305,6 +305,8 @@ mod tests {
             precondition_results: vec![],
             termination_reason: None,
             rollback_invoked: false,
+            selection_reason: crate::types::session::SelectionReason::HighestScore,
+            failure_detail: None,
             timestamp: Utc::now(),
         }
     }

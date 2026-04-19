@@ -79,10 +79,11 @@ pub const DEFAULT_PWM_PIN: u8 = 16;
 pub const DEFAULT_UART1_TX: u8 = 17;
 pub const DEFAULT_UART1_RX: u8 = 18;
 // Display (ST7789 on SPI2) — Sunton ESP32-S3-1732S019 schematic.
+// Override any pin at runtime via `board.configure_pin` + reboot.
 pub const DEFAULT_DISPLAY_SCLK: u8 = 12;
-pub const DEFAULT_DISPLAY_MOSI: u8 = 11;
+pub const DEFAULT_DISPLAY_MOSI: u8 = 13;
 pub const DEFAULT_DISPLAY_CS: u8 = 10;
-pub const DEFAULT_DISPLAY_DC: u8 = 4;
+pub const DEFAULT_DISPLAY_DC: u8 = 11;
 pub const DEFAULT_DISPLAY_RST: u8 = 1;
 pub const DEFAULT_DISPLAY_BL: u8 = 14;
 
@@ -966,7 +967,13 @@ fn register_spi2_st7789(
 
     let display = match Builder::new(ST7789, di)
         .reset_pin(rst)
+        // Physical panel is 170x320. Framebuffer is 240x320 so 35
+        // columns are unused — offset is in NATIVE (pre-rotation)
+        // coordinates, so (35, 0) even though we rotate to landscape.
         .display_size(170, 320)
+        .display_offset(35, 0)
+        // IPS panels on the Sunton 1732S019 need color inversion.
+        .invert_colors(mipidsi::options::ColorInversion::Inverted)
         .orientation(
             mipidsi::options::Orientation::new()
                 .rotate(mipidsi::options::Rotation::Deg90),

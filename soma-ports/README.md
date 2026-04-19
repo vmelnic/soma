@@ -140,13 +140,13 @@ After a release build, copy the relevant `.dylib` files to each project's pack
 directory:
 
 ```bash
-# Postgres port → soma-project-postgres, soma-project-llm, soma-helperbook
+# Postgres port → soma-project-postgres, soma-project-llm, soma-project-helperbook
 cp target/release/libsoma_port_postgres.dylib ../soma-project-postgres/packs/postgres/
 cp target/release/libsoma_port_postgres.dylib ../soma-project-llm/packs/postgres/
-cp target/release/libsoma_port_postgres.dylib ../soma-helperbook/packs/postgres/
+cp target/release/libsoma_port_postgres.dylib ../soma-project-helperbook/packs/postgres/
 
-# Redis port → soma-helperbook
-cp redis/target/release/libsoma_port_redis.dylib ../soma-helperbook/packs/redis/
+# Redis port → soma-project-helperbook
+cp redis/target/release/libsoma_port_redis.dylib ../soma-project-helperbook/packs/redis/
 
 # SMTP port → soma-project-smtp
 cp target/release/libsoma_port_smtp.dylib ../soma-project-smtp/packs/smtp/
@@ -154,8 +154,8 @@ cp target/release/libsoma_port_smtp.dylib ../soma-project-smtp/packs/smtp/
 # S3 port → soma-project-s3
 cp target/release/libsoma_port_s3.dylib ../soma-project-s3/packs/s3/
 
-# Auth port → soma-helperbook
-cp target/release/libsoma_port_auth.dylib ../soma-helperbook/packs/auth/
+# Auth port → soma-project-helperbook
+cp target/release/libsoma_port_auth.dylib ../soma-project-helperbook/packs/auth/
 ```
 
 ### macOS post-copy

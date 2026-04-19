@@ -6,7 +6,6 @@ use uuid::Uuid;
 
 use std::path::PathBuf;
 
-use crate::adapters::EpisodeMemoryAdapter;
 use crate::bootstrap::Runtime;
 use crate::errors::{Result, SomaError};
 use crate::memory::checkpoint::SessionCheckpointStore;
@@ -323,99 +322,35 @@ impl DefaultCliRunner {
 
         // Create session
         let mut session = rt.session_controller.create_session(goal)?;
+        let _ = goal_text;
 
-        // Extract filesystem paths from goal text and inject them as
-        // working memory bindings so the skill executor finds them
-        // during bind_inputs.
-        super::goal_utils::inject_path_bindings(&mut session, goal_text);
+        // Run the session loop until terminal. Errors from run_step bubble
+        // back to the CLI caller (preserving existing CLI semantics).
+        // Mid-run checkpointing is driven by `runtime.checkpoint_every_n_steps`.
+        let checkpoint_store = std::sync::Arc::clone(&rt.checkpoint_store);
+        let checkpoint_every_n = rt.checkpoint_every_n_steps;
+        let final_step = crate::runtime::goal_executor::run_loop_with_checkpoint(
+            &mut rt.session_controller,
+            &mut session,
+            Some(checkpoint_store.as_ref()),
+            checkpoint_every_n,
+        )?;
+        let last_result = Some(final_step);
 
-        // Run the session loop until terminal
-        let max_steps = 100;
-        let mut step_count = 0;
-        let mut last_result = None;
-
-        loop {
-            if step_count >= max_steps {
-                break;
-            }
-            step_count += 1;
-
-            match rt.session_controller.run_step(&mut session) {
-                Ok(step_result) => {
-                    match &step_result {
-                        StepResult::Completed => {
-                            last_result = Some(step_result);
-                            break;
-                        }
-                        StepResult::Failed(_reason) => {
-                            last_result = Some(step_result);
-                            break;
-                        }
-                        StepResult::Aborted => {
-                            last_result = Some(step_result);
-                            break;
-                        }
-                        StepResult::WaitingForInput(_) | StepResult::WaitingForRemote(_) => {
-                            last_result = Some(step_result);
-                            break;
-                        }
-                        StepResult::Continue => {
-                            last_result = Some(step_result);
-                            continue;
-                        }
-                    }
-                }
-                Err(e) => {
-                    return Err(e);
-                }
-            }
-        }
-
-        // Store episode after session completion, then attempt learning.
-        // Skip storage when the session used plan-following and succeeded —
-        // the routine already captures this behavior, so the episode is noise.
         let is_terminal = matches!(
             session.status,
             SessionStatus::Completed | SessionStatus::Failed | SessionStatus::Aborted
         );
-        let used_routine = session.working_memory.used_plan_following;
-        let succeeded = session.status == SessionStatus::Completed;
-        let should_store = !used_routine || !succeeded;
-        if is_terminal && should_store {
-            let mut episode = build_episode_from_session(&session, Some(rt.embedder.as_ref()));
-            episode.world_state_context = rt.world_state.lock().ok()
-                .map(|ws| ws.snapshot())
-                .unwrap_or(serde_json::json!({}));
-            let fingerprint = episode.goal_fingerprint.clone();
-            let adapter = EpisodeMemoryAdapter::new(
-                std::sync::Arc::clone(&rt.episode_store),
-                std::sync::Arc::clone(&rt.embedder),
-            );
-            if let Err(e) = adapter.store(episode) {
-                tracing::warn!(error = %e, "failed to store episode");
-            }
-
-            // Learning loop: attempt schema induction and routine compilation
-            // from accumulated episodes sharing the same goal fingerprint.
-            attempt_learning(
-                &rt.episode_store,
-                &rt.schema_store,
-                &rt.routine_store,
-                &fingerprint,
-                rt.embedder.as_ref(),
-            );
-
-            // Auto-checkpoint: persist session state to disk so it can be
-            // inspected or restored later.
-            let data_dir = checkpoint_data_dir();
-            let store = SessionCheckpointStore::new(&data_dir);
-            if let Err(e) = store.save(&session) {
-                tracing::warn!(
-                    session_id = %session.session_id,
-                    error = %e,
-                    "failed to auto-checkpoint session"
-                );
-            }
+        if is_terminal {
+            let ctx = crate::runtime::goal_executor::EpisodeContext {
+                episode_store: &rt.episode_store,
+                schema_store: &rt.schema_store,
+                routine_store: &rt.routine_store,
+                embedder: &rt.embedder,
+                world_state: &rt.world_state,
+                skill_stats: Some(&rt.skill_stats),
+            };
+            crate::runtime::goal_executor::finalize_episode(&session, &ctx);
         }
 
         // Format output from session trace
@@ -780,6 +715,7 @@ pub fn build_episode_from_session(
                 effect_patch: None,
                 success: ts.port_calls.iter().all(|pc| pc.success),
                 failure_class: None,
+                failure_detail: None,
                 latency_ms: ts.port_calls.iter().map(|pc| pc.latency_ms).sum(),
                 resource_cost: crate::types::observation::default_cost_profile(),
                 confidence: 1.0,
@@ -1823,6 +1759,7 @@ mod tests {
                     effect_patch: None,
                     success,
                     failure_class: None,
+                    failure_detail: None,
                     latency_ms: 10,
                     resource_cost: crate::types::observation::default_cost_profile(),
                     confidence: 0.9,

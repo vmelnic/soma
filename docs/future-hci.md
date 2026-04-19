@@ -1,10 +1,10 @@
 # Future HCI: Research Notes and Architectural Framing
 
 **Status.** Research notes plus an architectural thesis and a proposed phase
-plan. Not implemented. Snapshot dated 2026-04-11. Belongs in the same
-category as `memory-fusion.md` and `semantic-memory.md`: a design direction,
-not a commitment. The "industry state" section will go stale — the framing
-section should age better.
+plan. Belongs in the same category as `memory-fusion.md` and `semantic-memory.md`:
+a design direction, not a commitment. The industry-context section is a
+time-bound snapshot of where the field stood when this was written; the
+architectural framing is meant to outlast it.
 
 **Context.** The question this document answers: should SOMA pursue the
 frontend / future-web-interaction direction, and if so what does the
@@ -14,7 +14,7 @@ several converging surfaces, and the right framing is **SOMA as a universal
 runtime for intent-driven human-computer interaction** — with the web as one
 output modality among several.
 
-## Industry state (Q2 2026)
+## Industry context
 
 Four convergent trends plus one open problem.
 
@@ -22,7 +22,7 @@ Four convergent trends plus one open problem.
 
 Generative UI (GenUI) — where parts of the interface are composed by an AI
 agent at runtime rather than hard-coded — has moved from experimental demos
-to production in 2026. Three reference points from the research:
+to production. Three reference points from the research:
 
 - **Google A2UI** — agents describe the UI they need (forms, tables,
   multi-step flows) as structured JSONL; the host framework renders it.
@@ -42,10 +42,9 @@ preference for generative UI output over static LLM-generated equivalents.
 
 ### 2. Zero UI / ambient computing is entering consumer hardware
 
-OpenAI is shipping a screenless ambient AI gadget in Fall 2026 — the entire
-device forces a shift to high-intent voice interaction, explicitly designed
-around moving away from scrolling and tapping. The design thesis everyone's
-writing about:
+Screenless ambient AI gadgets are beginning to ship, forcing a shift to
+high-intent voice interaction, explicitly designed around moving away from
+scrolling and tapping. The design thesis:
 
 > **"Interaction → intention."** Not "press button to do thing," but
 > "state what you want and let the system figure out the steps."
@@ -56,26 +55,23 @@ that replace explicit UI elements entirely.
 
 ### 3. Adaptive UI from user patterns
 
-Jakob Nielsen's 2026 predictions call this out as the major shift. LLMs
-observe user behavior, predict intent from recent actions and context, and
-**generate bespoke micro-interfaces featuring only the relevant details for
-the current task**. Production reports cite ~30% engagement lift and
-measurable latency reductions when predictive personalization loops are
+LLMs observe user behavior, predict intent from recent actions and context,
+and **generate bespoke micro-interfaces featuring only the relevant details
+for the current task**. Production reports cite double-digit engagement lifts
+and measurable latency reductions when predictive personalization loops are
 integrated into front-end adaptation. Key idea: every user's UI should be
 different because every user's task is different.
 
 ### 4. Input modalities are fragmenting
 
-- **Eye tracking** is production today. Apple Vision Pro uses gaze + pinch
-  as its primary paradigm, ~1.1° gaze accuracy, with a deliberate privacy
-  rule that gaze data is only exposed to apps when the user intentionally
-  confirms with a gesture.
-- **Voice + text** is the hinge modality — production today, usable
-  alongside screens, bridge toward the screenless future.
-- **BCI** is clinical, not consumer. Neuralink has three N1 implant
-  recipients (quadriplegic / ALS). Synchron demoed iPad control in
-  August 2025. Analyst consensus puts consumer-grade BCI launch around
-  2030.
+- **Eye tracking** is production. Apple Vision Pro uses gaze + pinch as its
+  primary paradigm, with a deliberate privacy rule that gaze data is only
+  exposed to apps when the user intentionally confirms with a gesture.
+- **Voice + text** is the hinge modality — usable alongside screens, bridge
+  toward the screenless future.
+- **BCI** is clinical, not consumer. Neuralink and Synchron have early
+  human implant recipients; analyst consensus puts consumer-grade BCI
+  launch roughly a half-decade out.
 
 None of these displace the others. The future is multi-modal: the same
 "application" must route the same intent through voice, gaze, text, touch,
@@ -147,9 +143,9 @@ abstraction**. Same manifest, different output ports, different renderings.
 
 ### 3. No universal contract
 
-Every framework invents its own JSON schema. SOMA now consumes MCP
-(via `McpClientPort`, see the 2026-04-11 commit), which is becoming the
-de facto universal brain↔body contract.
+Every framework invents its own JSON schema. SOMA consumes MCP
+(via `McpClientPort`), which is becoming the de facto universal
+brain↔body contract.
 
 **Strategic position: don't invent a UI schema, make MCP the UI schema.**
 Any MCP-speaking brain (Claude, GPT, local model, future agents) can drive
@@ -184,176 +180,106 @@ out of the brain/body split.
 
 Four pieces of existing evidence:
 
-1. The **ESP32 thermistor → display loop** (proven, 2026-03) — sensors and
-   renderers are indistinguishable to the brain.
-2. The **`McpClient` port backend** (proven, 2026-04-11) — any MCP server
-   in any language is a port; MCP is a universal contract.
-3. The **multistep routine pipeline** (proven, 2026-04) — repeated
-   interactions compile to plans that walk without the LLM.
-4. **soma-next running in a browser tab** (proven, 2026-04-11, `soma-project-web`)
-   — the core runtime compiles to `wasm32-unknown-unknown` via a feature-flag
+1. The **ESP32 thermistor → display loop** — sensors and renderers are
+   indistinguishable to the brain.
+2. The **`McpClient` port backend** — any MCP server in any language is a
+   port; MCP is a universal contract.
+3. The **multistep routine pipeline** — repeated interactions compile to
+   plans that walk without the LLM.
+4. **soma-next running in a browser tab** (`soma-project-web`) — the core
+   runtime compiles to `wasm32-unknown-unknown` via a feature-flag
    restructure, registers in-tab `dom` / `audio` / `voice` ports through the
    same `DefaultPortRuntime` pipeline native proof projects use, executes
    autonomous goals through `SessionController::run_step`, follows injected
    routines through the plan-following dispatch path, and accepts LLM-composed
-   plans over a mockable HTTP brain protocol. 18 Playwright tests pass in
-   ~5 seconds.
+   plans over a mockable HTTP brain protocol.
 
 Each one is saying the same thing: the body part and the brain part are
 separable, the body is modality-agnostic, the brain can be any LLM, and
 intent is the contract between them.
 
-## Phase plan — status and what's next
+## Phase plan
 
 Earlier drafts of this plan were web-centric. The research pushed toward a
-wider scoping where the browser is one of several surfaces. Phase 1 is now
-done; phase 2 starts the showcases across other bodies.
+wider scoping where the browser is one of several surfaces. For authoritative
+status of each phase, read the code in `soma-project-web/` and neighbouring
+proof projects; the summary below describes what each phase IS, not when it
+landed.
 
-### Phase 0 — `soma-next` in WASM  ✅ shipped 2026-04-11 (`e47a005`)
+### Phase 1 — The browser as a first-class SOMA body
 
-Feature-flag restructure of `soma-next` so the core runtime compiles cleanly
-for `wasm32-unknown-unknown` with `default = ["native"]` keeping every native
-build byte-for-byte equivalent. `web-time` drop-in replaces `std::time::Instant`
-(which aborts on wasm). Every previously-unconditional dep that was
-incompatible with wasm — `reqwest`, `libloading`, `tokio::net`, `mdns-sd`,
-`hostname`, `libc`, `rustls` — moved behind `native`, `distributed`,
+`soma-next` compiles cleanly for `wasm32-unknown-unknown` via a feature-flag
+restructure: `default = ["native"]` keeps every native build equivalent, and
+every wasm-incompatible dep (`reqwest`, `libloading`, `tokio::net`, `mdns-sd`,
+`hostname`, `libc`, `rustls`) sits behind `native`, `distributed`,
 `dylib-ports`, `native-http`, `native-hostname`, `native-filesystem`
-features. `cargo build --no-default-features --lib --target
-wasm32-unknown-unknown` produces a working `libsoma_next.rlib`.
+features. `web-time` replaces `std::time::Instant`, which aborts on wasm.
 
-### Phase 1a — WASM entry point + `DomPort`  ✅ shipped 2026-04-11 (`b68ec32`)
+On that foundation, the browser gains:
 
-`src/wasm/mod.rs` with wasm-bindgen entry. `DomPort` implementing the
-`Port` trait via `web-sys::Document`. ~132 KB `wasm-bindgen`-bundled blob
-(pre-Runtime-linking). First visible proof: a red `<h1>` rendered in the
-browser from a `Port::invoke` call.
+- **In-tab ports** — `DomPort` (`append_heading`, `append_paragraph`,
+  `set_title`, `clear_soma`), `AudioPort` (`say_text` via `speechSynthesis`),
+  `VoicePort` (Web Speech API `SpeechRecognition`, transcripts drained from
+  an async event buffer through synchronous `Port::invoke`).
+- **Full `Runtime` booted in-tab** — a `bootstrap_from_specs` entry point
+  wires the real `DefaultPortRuntime` pipeline (lifecycle, policy, auth,
+  sandbox, input-schema) instead of a hand-rolled registry.
+  `soma_invoke_port(port_id, capability_id, input_json)` is the single JS
+  entry; every `PortCallRecord` carries the full auth / policy / sandbox
+  result.
+- **Autonomous goal execution** — `soma_run_goal(objective)` runs the same
+  selection → prediction → criticism → learning loop used natively, against
+  a minimal in-tab pack.
+- **Plan-following via injected routine** — `soma_inject_routine(...)`
+  registers a routine whose `match_conditions` target a goal's
+  `goal_fingerprint`; the follow-up run trips the plan-following fast path.
+- **LLM brain via fetch** — the brain lives outside the tab. JavaScript
+  POSTs the prompt plus the runtime's port catalog to a configurable
+  endpoint; the endpoint returns `{plan, explanation}` and the harness walks
+  the plan through `soma_invoke_port`. A tiny Node proxy forwards prompts to
+  whichever LLM is configured; swapping providers is a proxy body swap,
+  the wire contract stays fixed.
 
-### Phase 1b — Widened DomPort + AudioPort + generic dispatch  ✅ shipped 2026-04-11 (`dab9aa6`)
+### Phase 2 — Showcases across other bodies
 
-`DomPort` gained `append_heading` / `append_paragraph` / `set_title` /
-`clear_soma` capabilities. `AudioPort` added with `say_text` via
-`speechSynthesis`. `soma_invoke_port(port_id, capability_id, input_json)`
-replaced the phase-1a one-shot demo function. Thread-local port registry
-as the first implementation of the in-tab port catalog.
+Phase 1 proves the browser surface. Phase 2 points the same runtime and
+brain protocol at other SOMA bodies to demonstrate the modality-agnostic
+thesis end to end.
 
-### Phase 1c — VoicePort + three-port composition  ✅ shipped 2026-04-11 (`01a6f0c`)
-
-`VoicePort` using the Web Speech API `SpeechRecognition`. Transcripts
-accumulate in a `thread_local<RefCell<VoiceInner>>` buffer via Rust
-`Closure` event handlers — sync `Port::invoke` reads drain an asynchronous
-event stream. Closure-lifetime bug fixed (synchronous `end` delivery during
-`stop_listening` was re-entering the onend closure inside an active mut
-borrow). Three-port composition demo: voice → dom → audio from one JS
-click.
-
-### Phase 1d — Full `Runtime` booted in the browser  ✅ shipped 2026-04-11 (`09b71c2`)
-
-New `bootstrap_from_specs(config, Vec<PackSpec>)` in `bootstrap.rs` — the
-file-I/O-free variant of `bootstrap()` used by the wasm entry. The phase
-1a–c thread-local `HashMap` port registry gets replaced with the real
-`Runtime` struct, and `soma_invoke_port` dispatches through
-`DefaultPortRuntime::invoke` — the full lifecycle / policy / auth / sandbox
-/ input-schema pipeline. Every `PortCallRecord` returned to JS now has the
-`auth_result` / `policy_result` / `sandbox_result` fields populated; earlier
-phases left them `null` because the hand-rolled registry skipped the
-runtime pipeline.
-
-Also introduces a Playwright browser test harness running against headless
-Chromium. 6 tests cover boot, runtime summary, port listing, and DOM /
-audio dispatch. Bundle size jumps 265 KB → 1.1 MB because dead-code
-elimination can't strip subsystems the `Runtime` struct instantiates —
-`SessionController`, `DefaultSkillRuntime`, memory stores, adapters,
-policy runtime, proprioception, metrics.
-
-### Phase 1e — Autonomous goal execution  ✅ shipped 2026-04-11 (`50478b7`)
-
-`soma_run_goal(objective)` wasm entry. Parses natural-language goals via
-`DefaultGoalRuntime`, creates a session, injects a working-memory binding
-from the objective text (same workaround `soma-project-multistep` uses),
-loops `SessionController::run_step` until terminal, stores the resulting
-episode, and fires `attempt_learning` — the same helpers the native MCP
-handler uses. A minimal browser pack (`packs/hello/manifest.json`)
-declares a `say_hello` skill that maps to `port:dom/append_heading`. The
-phase 1e Playwright spec submits five identical goals and asserts episode
-accumulation.
-
-### Phase 1f — Plan-following via injected routine  ✅ shipped 2026-04-11 (`be273a2`)
-
-`soma_inject_routine(routine_json)` wasm entry for direct
-`RoutineStore::register`. Baseline run → deliberation path. Inject a
-routine whose `match_conditions` target the goal's `goal_fingerprint` →
-follow-up run triggers plan-following in `SessionController::run_step`,
-reported as `plan_following: true` by inspecting
-`TraceStep.retrieved_routines` across the session trace (not
-`WorkingMemory.active_plan`, which is cleared by the session controller
-at the end of the plan's last step). The test with a different-objective
-goal confirms the `goal_fingerprint` precondition actually discriminates.
-
-### Phase 1g — LLM brain via fetch  ✅ shipped 2026-04-11 (`4194963`, proxy 2026-04-11)
-
-The brain lives outside the wasm tab. JavaScript POSTs a prompt plus the
-runtime's port catalog to a configurable endpoint (persisted in
-`localStorage.soma.brain.endpoint`); the endpoint returns
-`{plan, explanation}` and the harness walks the plan via
-`soma_invoke_port`. Four Playwright tests use `page.route()` fixtures
-(hermetic); two more Playwright tests spawn the actual Node brain proxy
-as a subprocess and drive it over real HTTP.
-
-The brain proxy (`scripts/brain-proxy.mjs`) is a ~270-line Node HTTP
-server that forwards prompts to OpenAI `gpt-5-mini` with
-`reasoning_effort: "low"` and `response_format: {type: "json_object"}`.
-Supports `--fake` mode for running without an API key. CORS-enabled,
-SIGTERM-clean, single-file. Changing the brain from OpenAI → Claude →
-local model is a proxy body swap — the wire contract stays fixed.
-
-**Phase 1 complete. 18 Playwright tests, ~5 seconds. Full native build
-unchanged at 1261/1261, zero clippy warnings, zero regressions across
-every proof project.**
-
-### Phase 2 — Showcases across other bodies  (next)
-
-Phase 1 proved the browser surface. Phase 2 takes the same runtime and
-the same brain protocol and points them at the other SOMA bodies, to
-demonstrate the modality-agnostic thesis end to end.
-
-- **Cross-device HCI.** Browser SOMA as brain, ESP32 SOMA as body. A
-  voice command into a laptop mic becomes an `invoke_remote_skill`
-  against the WROOM-32D's `display.draw_text`. The existing
-  `soma-project-esp32` wire protocol is already compatible — phase 2a
-  is wiring the browser's `brain` call path to a WebSocket or
-  fetch-to-proxy transport that speaks the distributed message format.
+- **Cross-device HCI.** Browser SOMA as brain, ESP32 SOMA as body. A voice
+  command into a laptop mic becomes an `invoke_remote_skill` against the
+  leaf's `display.draw_text`. The `soma-project-esp32` wire protocol is
+  already compatible; the remaining piece is routing the browser's brain
+  call path to a transport that speaks the distributed message format.
 - **Native mobile surfaces.** Wire `soma-project-android` /
-  `soma-project-ios` as additional bodies. The `aarch64-linux-android`
-  and `aarch64-apple-ios` cross-compiles already work; the missing
-  piece is the platform-specific UI shell (Kotlin / Swift) that hosts
-  the runtime and exposes its own in-process ports (mic, camera,
-  haptics, sensors).
-- **Real-brain proxies.** Replace `gpt-5-mini` with Claude, with a
-  local-LLM proxy (Ollama / vLLM / llama.cpp), with the Claude Agent
-  SDK. Same wire contract, different `scripts/brain-proxy.mjs` body.
+  `soma-project-ios` as additional bodies. The `aarch64-linux-android` and
+  `aarch64-apple-ios` cross-compiles already work; the missing piece is the
+  platform-specific UI shell (Kotlin / Swift) that hosts the runtime and
+  exposes its own in-process ports (mic, camera, haptics, sensors).
+- **Real-brain proxies.** Same wire contract, different proxy body: Claude,
+  a local-LLM proxy (Ollama / vLLM / llama.cpp), the Claude Agent SDK.
 
-### Phase 3 — Organic multi-step learning  (deferred)
+### Phase 3 — Organic multi-step learning (deferred)
 
-Phase 1f proved the plan-following DISPATCH path works by injecting a
-routine. Phase 3 proves the LEARNING path can produce that routine
-from organic episodes — a gap `soma-project-multistep` already called
-out on native. Needs multi-step skills (chains that the selector/
-critic walks across multiple steps of one session) and possibly
-lower PrefixSpan min-support thresholds. Not blocking phase 2.
+Phase 1 proves the plan-following DISPATCH path by injecting a routine.
+Phase 3 proves the LEARNING path can produce that routine from organic
+episodes — a gap `soma-project-multistep` already calls out natively. Needs
+multi-step skills that the selector / critic walks across multiple steps of
+one session, and possibly lower PrefixSpan min-support thresholds. Not
+blocking phase 2.
 
-### Phase 4 — Manifest as canonical semantic layer  (deferred)
+### Phase 4 — Manifest as canonical semantic layer (deferred)
 
-Add rendering ports that take current belief/manifest and emit audio
-narration and braille cells. Prove the same runtime serves sighted,
-blind, and deaf users from one manifest. The wasm side of this is
-already most of the way there — `audio.say_text` exists, a
-`braille.render` port would be ~200 lines of web-sys + Unicode braille
-patterns.
+Add rendering ports that take current belief / manifest and emit audio
+narration and braille cells. Prove the same runtime serves sighted, blind,
+and deaf users from one manifest. The wasm side is already most of the way
+there — `audio.say_text` exists, a `braille.render` port is a small
+web-sys + Unicode braille job.
 
 ### Deferred (not a phase)
 
-- **BCI input.** When consumer SDKs appear (~2030 estimate) it is just
-  another input port. The runtime does not need to change.
+- **BCI input.** When consumer SDKs appear it is just another input port.
+  The runtime does not need to change.
 - **Gaze input.** Same shape as BCI — port.
 - **Server-side pre-render for SEO.** Symmetric with phase 1: the server
   runs the same SOMA runtime and feeds `dom` output into a string instead
@@ -361,7 +287,6 @@ patterns.
 
 The test of whether the architecture is right: **if adding a future input
 modality later means "only writing a port," the architecture passed.**
-Phase 1 has passed that test four times.
 
 ## What this does NOT commit to
 

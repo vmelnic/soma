@@ -54,37 +54,37 @@ This means:
 
 ## How It Works Today
 
-**soma-next** -- Rust runtime (~15K lines, single binary). Goal-driven control
-loop with selection, prediction, criticism, and policy enforcement. Typed skills
-and ports. Belief state and resource tracking. Episode memory with persistence.
-Session checkpoints and restore. Distributed peer transport (TCP, TLS, WebSocket,
-Unix sockets, mDNS LAN discovery). MCP server with 29 tools. CLI with 11 commands.
-1261 tests, zero warnings. Cross-compiles unchanged to `aarch64-linux-android`
-(10 MB ELF) and `aarch64-apple-ios` (9 MB Mach-O). `--pack auto` discovers and
+**soma-next** -- Rust runtime, single binary. Goal-driven control loop with
+selection, prediction, criticism, and policy enforcement. Typed skills and ports.
+Belief state and resource tracking. Episode memory with persistence. Session
+checkpoints and restore. Distributed peer transport (TCP, TLS, WebSocket, Unix
+sockets, mDNS LAN discovery). MCP server and CLI. Cross-compiles unchanged to
+`aarch64-linux-android` and `aarch64-apple-ios`. `--pack auto` discovers and
 loads all pack manifests under `packs/` automatically.
 
-**soma-ports** -- 22 dynamically loaded port adapters in a Rust workspace:
+**soma-ports** -- Dynamically loaded port adapters in a Rust workspace:
 databases (postgres, mysql, mongodb, elasticsearch), communication (smtp, twilio,
 slack), Google (calendar, drive, mail), payments (stripe), storage (s3),
 documents (pdf), calendar, cryptography, authentication, geolocation, image
-processing, push notifications, redis, and timers, plus an SDK crate. Each port is a shared library exporting `soma_port_init`. Ed25519
-signature verification for untrusted ports.
+processing, push notifications, redis, and timers, plus an SDK crate. Each port
+is a shared library exporting `soma_port_init`. Ed25519 signature verification
+for untrusted ports. See `soma-ports/` for the current catalog.
 
 **soma-project-*** -- Self-contained proof projects. Server-side (smtp, s3,
 postgres, llm, mcp, s2s, multistep) each prove that a real-world integration
 works end-to-end through the SOMA paradigm. Embedded (`soma-project-esp32`)
 proves the same paradigm on microcontrollers: a `no_std` leaf firmware with
-12 hardware ports deployed to ESP32-S3 and ESP32 LX6 chips, runtime-configurable
+hardware ports deployed to ESP32-S3 and ESP32 LX6 chips, runtime-configurable
 pins, mDNS auto-discovery, and an SSD1306 OLED display port sharing the I²C bus
-with the i2c port via `embedded-hal-bus`. A brain-side 5-second loop reading
-the thermistor and writing the temperature to the OLED was verified on the
-physical panel — the leaf has no concept of "every 5 seconds" or "read sensor,
-show on screen"; both are the brain's composition of two primitive invocations.
+with the i2c port via `embedded-hal-bus`. A brain-side loop reading the
+thermistor and writing the temperature to the OLED runs on the physical panel —
+the leaf has no concept of "every N seconds" or "read sensor, show on screen";
+both are the brain's composition of two primitive invocations.
 
 **soma-helperbook** -- First real application. Service marketplace with a
-19-table PostgreSQL schema, Redis sessions, Express frontend, and three loaded
-ports. Users, connections, messages, appointments, reviews -- all managed through
-SOMA goals, not application code.
+PostgreSQL schema, Redis sessions, Express frontend, and multiple loaded ports.
+Users, connections, messages, appointments, reviews -- all managed through SOMA
+goals, not application code.
 
 **The brain/body split in action.** The embedded leaf deployment is the
 cleanest demonstration in the codebase of the architecture's central thesis.
@@ -103,9 +103,9 @@ understand what the application does. It loses context across sessions. It
 hallucinates about code it hasn't read. Every new session starts from scratch.
 
 SOMA approach: an LLM calls `dump_state` and receives complete runtime context
-in ~5KB. Loaded ports, registered skills, active sessions, recent episodes,
-current metrics, belief state. Zero context loss across sessions. Any LLM, any
-session, full understanding in one call.
+in a single response. Loaded ports, registered skills, active sessions, recent
+episodes, current metrics, belief state. Zero context loss across sessions. Any
+LLM, any session, full understanding in one call.
 
 This is not a side benefit. It is the enabling mechanism. SOMA applications are
 operable by LLMs precisely because the runtime is self-describing. The runtime

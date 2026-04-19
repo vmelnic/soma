@@ -42,7 +42,7 @@ package-lock.json
 *.egg-info/
 
 # SOMA checkpoints
-soma-helperbook/checkpoints/
+soma-project-helperbook/checkpoints/
 soma-next/target/
 soma-next/data/
 soma-ports/target/

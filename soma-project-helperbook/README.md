@@ -1,4 +1,4 @@
-# soma-helperbook
+# soma-project-helperbook
 
 First real-world application built with SOMA — a service marketplace where clients find and book service providers (hairdressers, plumbers, tutors, cleaners, personal trainers, etc.).
 

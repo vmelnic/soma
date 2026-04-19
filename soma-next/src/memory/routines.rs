@@ -526,6 +526,7 @@ mod tests {
                     effect_patch: None,
                     success: true,
                     failure_class: None,
+                    failure_detail: None,
                     latency_ms: 10,
                     resource_cost: crate::types::observation::default_cost_profile(),
                     confidence: 0.9,

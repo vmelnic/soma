@@ -274,6 +274,7 @@ mod tests {
             confidence: 0.9,
             provenance: FactProvenance::Asserted,
             timestamp: Utc::now(),
+            ttl_ms: None,
         }
     }
 
@@ -615,6 +616,7 @@ mod tests {
                 confidence: 0.95,
                 provenance: FactProvenance::Observed,
                 timestamp: Utc::now(),
+                ttl_ms: None,
             },
             Fact {
                 fact_id: "f2".to_string(),
@@ -624,6 +626,7 @@ mod tests {
                 confidence: 0.7,
                 provenance: FactProvenance::Inferred,
                 timestamp: Utc::now(),
+                ttl_ms: None,
             },
             Fact {
                 fact_id: "f3".to_string(),
@@ -633,6 +636,7 @@ mod tests {
                 confidence: 1.0,
                 provenance: FactProvenance::Asserted,
                 timestamp: Utc::now(),
+                ttl_ms: None,
             },
             Fact {
                 fact_id: "f4".to_string(),
@@ -642,6 +646,7 @@ mod tests {
                 confidence: 0.3,
                 provenance: FactProvenance::Stale,
                 timestamp: Utc::now(),
+                ttl_ms: None,
             },
             Fact {
                 fact_id: "f5".to_string(),
@@ -651,6 +656,7 @@ mod tests {
                 confidence: 0.8,
                 provenance: FactProvenance::Remote,
                 timestamp: Utc::now(),
+                ttl_ms: None,
             },
         ];
 

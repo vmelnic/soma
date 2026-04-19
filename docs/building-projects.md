@@ -236,7 +236,7 @@ The MCP client pattern: spawn `run-mcp.sh`, send a JSON-RPC `initialize` request
 | `soma-project-postgres` | postgres | Database queries against HelperBook schema |
 | `soma-project-llm` | postgres | Ollama local LLM generates SQL, SOMA executes via postgres port |
 | `soma-project-mcp` | (any) | Claude Code MCP integration — SOMA registered as an MCP server |
-| `soma-project-s2s` | filesystem | SOMA-to-SOMA delegation and routine transfer (42 tests) |
+| `soma-project-s2s` | filesystem | SOMA-to-SOMA delegation and routine transfer |
 | `soma-project-multistep` | filesystem (reference pack) | End-to-end proof of multi-step autonomous routine learning |
 
 ### Embedded (compile-time ports, no dylib)

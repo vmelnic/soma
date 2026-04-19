@@ -1,27 +1,4 @@
 //! Shared utilities for goal text processing.
-//!
-//! Both the CLI and MCP interfaces need to extract filesystem paths from
-//! natural-language goal text and inject them as working memory bindings
-//! before session execution begins. This module provides a single source
-//! of truth for that logic.
-
-use crate::types::session::{BindingSource, ControlSession, WorkingBinding};
-
-/// Scan `text` for filesystem paths and inject matching entries into the
-/// session's working memory as GoalField bindings.
-///
-/// Recognized patterns:
-/// - Preposition phrases: "in /path", "from /path", "to /path", "at /path"
-/// - Bare absolute paths anywhere in the text
-pub fn inject_path_bindings(session: &mut ControlSession, goal_text: &str) {
-    if let Some(path) = extract_path(goal_text) {
-        session.working_memory.active_bindings.push(WorkingBinding {
-            name: "path".to_string(),
-            value: serde_json::json!(path),
-            source: BindingSource::GoalField,
-        });
-    }
-}
 
 /// Extract a filesystem path from natural-language goal text.
 ///

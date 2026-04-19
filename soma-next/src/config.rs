@@ -57,6 +57,14 @@ const fn default_reactive_monitor_interval_secs() -> u64 {
     0
 }
 
+const fn default_checkpoint_every_n_steps() -> u32 {
+    0
+}
+
+const fn default_resume_on_boot() -> bool {
+    false
+}
+
 fn default_mcp_transport() -> String {
     "stdio".to_string()
 }
@@ -136,6 +144,10 @@ pub struct SomaConfig {
     pub distributed: DistributedSection,
     #[serde(default)]
     pub learning: LearningSection,
+    #[serde(default)]
+    pub webhooks: WebhooksSection,
+    #[serde(default)]
+    pub scheduler: SchedulerSection,
 }
 
 /// Instance identity and logging (`[soma]` section).
@@ -195,6 +207,19 @@ pub struct RuntimeSection {
     /// match conditions are satisfied.
     #[serde(default = "default_reactive_monitor_interval_secs")]
     pub reactive_monitor_interval_secs: u64,
+
+    /// Write a mid-run session checkpoint every N control-loop steps.
+    /// Set to 0 to disable mid-run checkpointing (terminal checkpoints
+    /// from the CLI path still fire). Mid-run checkpoints let an
+    /// interrupted session resume on boot without losing progress.
+    #[serde(default = "default_checkpoint_every_n_steps")]
+    pub checkpoint_every_n_steps: u32,
+
+    /// When true, on boot the runtime loads non-terminal session
+    /// checkpoints from disk and marks them for resumption. Requires a
+    /// non-zero `checkpoint_every_n_steps` to be useful in practice.
+    #[serde(default = "default_resume_on_boot")]
+    pub resume_sessions_on_boot: bool,
 }
 
 impl Default for RuntimeSection {
@@ -206,6 +231,8 @@ impl Default for RuntimeSection {
             default_resource_budget: default_resource_budget(),
             consolidation_interval_secs: default_consolidation_interval_secs(),
             reactive_monitor_interval_secs: default_reactive_monitor_interval_secs(),
+            checkpoint_every_n_steps: default_checkpoint_every_n_steps(),
+            resume_sessions_on_boot: default_resume_on_boot(),
         }
     }
 }
@@ -418,6 +445,54 @@ impl Default for LearningSection {
     }
 }
 
+/// Webhook action configuration (`[webhooks]` section).
+///
+/// Each entry under `[webhooks.trigger_goal.<name>]` turns an incoming
+/// POST to `/<name>` into an async goal whose objective is rendered from
+/// the request payload via `{{field.path}}` placeholders. Hooks that are
+/// not listed here fall back to the default `deposit_fact` behavior.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct WebhooksSection {
+    #[serde(default)]
+    pub trigger_goal: std::collections::HashMap<String, WebhookGoalTrigger>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebhookGoalTrigger {
+    /// Goal objective template. Supports `{{path.to.field}}` substitution
+    /// against the POST body (interpreted as JSON).
+    pub objective_template: String,
+    /// Optional per-hook override for the session step budget.
+    #[serde(default)]
+    pub max_steps: Option<u32>,
+}
+
+/// Scheduler configuration (`[scheduler]` section). Operators declare
+/// cron-style or interval-style recurring goals here; on boot the runtime
+/// materializes each entry into a `Schedule` with `goal_trigger` set.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SchedulerSection {
+    #[serde(default)]
+    pub goal: std::collections::HashMap<String, ScheduledGoal>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScheduledGoal {
+    /// Goal objective to launch each time this schedule fires.
+    pub objective: String,
+    /// Cron expression (seconds-granularity, `cron` crate format).
+    /// Mutually exclusive with `interval_ms`.
+    #[serde(default)]
+    pub cron_expr: Option<String>,
+    /// Recurring interval in milliseconds. Mutually exclusive with
+    /// `cron_expr`.
+    #[serde(default)]
+    pub interval_ms: Option<u64>,
+    /// Optional per-goal override for the session step budget.
+    #[serde(default)]
+    pub max_steps: Option<u32>,
+}
+
 // ---------------------------------------------------------------------------
 // Loading
 // ---------------------------------------------------------------------------
@@ -570,6 +645,14 @@ impl SomaConfig {
         if let Ok(v) = std::env::var("SOMA_RUNTIME_REACTIVE_MONITOR_INTERVAL_SECS")
             && let Ok(n) = v.parse::<u64>() {
                 self.runtime.reactive_monitor_interval_secs = n;
+            }
+        if let Ok(v) = std::env::var("SOMA_RUNTIME_CHECKPOINT_EVERY_N_STEPS")
+            && let Ok(n) = v.parse::<u32>() {
+                self.runtime.checkpoint_every_n_steps = n;
+            }
+        if let Ok(v) = std::env::var("SOMA_RUNTIME_RESUME_SESSIONS_ON_BOOT")
+            && let Ok(b) = v.parse::<bool>() {
+                self.runtime.resume_sessions_on_boot = b;
             }
         if let Ok(v) = std::env::var("SOMA_MCP_TRANSPORT") {
             self.mcp.transport = v;

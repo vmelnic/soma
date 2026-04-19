@@ -146,6 +146,12 @@ pub struct InvocationContext {
     /// calling pack has declared the target pack as a dependency
     /// before allowing cross-pack capability access.
     pub calling_pack_id: Option<String>,
+    /// Hard upper bound on this invocation's wall-clock duration. The port
+    /// runtime kills the in-flight call when this elapses and reports a
+    /// `Timeout` failure. `None` disables the cap (legacy behavior).
+    /// Caller computes it as `min(skill.max_latency_ms,
+    /// session.budget_remaining.latency_remaining_ms)`.
+    pub deadline_ms: Option<u64>,
 }
 
 impl InvocationContext {
@@ -164,6 +170,7 @@ impl InvocationContext {
             remote_caller: false,
             pack_id: None,
             calling_pack_id: None,
+            deadline_ms: None,
         }
     }
 
@@ -176,7 +183,14 @@ impl InvocationContext {
             remote_caller: true,
             pack_id: None,
             calling_pack_id: None,
+            deadline_ms: None,
         }
+    }
+
+    /// Builder-style: attach a hard deadline (ms) to the context.
+    pub fn with_deadline(mut self, deadline_ms: u64) -> Self {
+        self.deadline_ms = Some(deadline_ms);
+        self
     }
 }
 

@@ -65,7 +65,7 @@ target named `soma` from [`src/main.rs`](src/main.rs).
 cd soma-next
 
 cargo build                              # debug binary → target/debug/soma (~32 MB)
-cargo test                               # 1261+ tests, all must pass
+cargo test                               # full unit-test suite, all must pass
 cargo clippy --all-targets --all-features # must be zero warnings
 ```
 
@@ -85,7 +85,7 @@ The release binary is what gets deployed to project directories:
 
 ```bash
 cp target/release/soma ../soma-project-postgres/bin/soma
-cp target/release/soma ../soma-helperbook/bin/soma
+cp target/release/soma ../soma-project-helperbook/bin/soma
 cp target/release/soma ../soma-project-llm/bin/soma
 ```
 
@@ -196,7 +196,7 @@ cargo run -- --mcp --pack packs/reference/manifest.json
 SOMA_PORTS_PLUGIN_PATH=../soma-ports/target/release cargo run -- --mcp --pack auto
 ```
 
-The server exposes 29 runtime tools:
+The server exposes these runtime tools:
 
 **16 core tools:**
 
@@ -205,6 +205,12 @@ The server exposes 29 runtime tools:
 - `pause_session`, `resume_session`, `abort_session`, `list_sessions`
 - `query_metrics`, `query_policy`, `dump_state`
 - `invoke_port`, `list_ports`
+
+**3 async goal tools:**
+
+- `create_goal_async` — fire and forget; returns `goal_id` + `session_id` immediately
+- `get_goal_status` — live poll `{status, steps, last_skill, error}`
+- `cancel_goal` — flip cancel flag; thread aborts at next step boundary
 
 **3 scheduler tools:**
 
@@ -228,6 +234,12 @@ The server exposes 29 runtime tools:
 - `execute_routine` — run a compiled routine by ID with pre-loaded plan
 - `trigger_consolidation` — manually trigger the episode → schema → routine pipeline
 - `author_routine` — create or update a routine from a structured definition (LLM translates behavioral intent into compiled routine with steps, branching, priority, and policy scope)
+
+**5 other tools:**
+
+- `list_routine_versions`, `rollback_routine`, `sync_beliefs`, `migrate_session`, `review_routine`
+
+In addition, two autonomy features are driven from `soma.toml` rather than MCP tools: webhook-triggered async goals (`[webhooks.trigger_goal.<name>]`) and cron-scheduled async goals (`[scheduler.goal.<label>]`). Both land in the same `GoalRegistry` as `create_goal_async` and are observable via `get_goal_status`.
 
 Implementation lives in [`src/interfaces/mcp.rs`](src/interfaces/mcp.rs).
 
@@ -287,6 +299,17 @@ max_steps = 100
 default_risk_budget = 0.5
 default_latency_budget_ms = 30000
 default_resource_budget = 100.0
+# checkpoint_every_n_steps = 5       # write mid-run session checkpoint every N steps (0 = off)
+# resume_sessions_on_boot = false    # on boot, drive non-terminal checkpoints to completion
+
+# [webhooks.trigger_goal.orders]
+# objective_template = "fulfill order {{order_id}}"
+# max_steps = 500
+
+# [scheduler.goal.nightly_backup]
+# objective = "backup all databases"
+# cron_expr = "0 0 2 * * *"
+# max_steps = 1000
 
 [ports]
 plugin_path = ["../soma-ports/target/debug"]

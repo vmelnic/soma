@@ -359,7 +359,7 @@ Adding `entity_flow` to `Schema` and `Routine` is a wire protocol break:
 - **Field versioning.** `serde(default)` lets new code read old data, but old code reading new data drops the field silently. Across peers, this means routine semantics differ — receiver sees a routine without entity flow even though sender uses entity flow. The receiver may execute the routine without entity matching, producing incorrect results.
 - **Capability negotiation.** Peers must announce protocol version on connect, refuse incompatible routines, or downgrade gracefully (transfer the procedural part, drop the entity flow).
 - **Migration.** Existing on-disk routines and schemas need to load with empty `entity_flow` and either be re-derived (if the originating episodes survive) or marked as legacy (no entity matching).
-- **Wire test coverage.** Every serialization round-trip needs tests for old↔new compatibility. The s2s test suite (currently 42 tests) grows substantially.
+- **Wire test coverage.** Every serialization round-trip needs tests for old↔new compatibility. The s2s test suite grows substantially.
 
 This is a multi-month engineering item, not a small wire change.
 

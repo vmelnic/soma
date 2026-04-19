@@ -9,7 +9,7 @@ cd "$PROJECT_DIR"
 docker compose up -d --wait postgres
 
 echo "Truncating all tables..."
-docker exec soma-helperbook-postgres-1 psql -U soma -d helperbook -c "
+docker exec soma-project-helperbook-postgres-1 psql -U soma -d helperbook -c "
 DO \$\$
 DECLARE
     r RECORD;

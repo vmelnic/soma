@@ -100,8 +100,8 @@ requiring line-by-line code review, traditional code is more auditable.
 The JavaScript/Python ecosystems have libraries for everything. Need
 Stripe integration? `npm install stripe`. Need PDF generation?
 `pip install reportlab`. SOMA integrates via ports, which must be
-written or found. The port ecosystem (22 ports, 140+ capabilities) is
-growing but cannot match npm's 2 million packages.
+written or found. The port ecosystem is growing but cannot match
+the scale of npm or PyPI.
 
 ### Performance-critical paths
 

@@ -8,6 +8,7 @@
 //! std::net. Webhooks are simple: read body, parse JSON, patch state,
 //! respond 200.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
@@ -15,17 +16,121 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use chrono::Utc;
+use uuid::Uuid;
 
 use crate::errors::Result;
 use crate::runtime::world_state::WorldStateStore;
 use crate::types::belief::Fact;
 use crate::types::common::FactProvenance;
 
+/// What the listener should do when a given webhook fires.
+#[derive(Clone, Debug)]
+pub enum WebhookAction {
+    /// Deposit the incoming payload as a world-state fact (the original
+    /// behavior). Reactive routines can still fire off that fact.
+    DepositFact,
+    /// Launch an async goal whose objective is built from the payload.
+    TriggerGoal {
+        objective_template: String,
+        max_steps: Option<u32>,
+    },
+}
+
+/// Registry mapping webhook name → action. Lookups default to
+/// `DepositFact` when a hook is not registered, preserving backward
+/// compatibility with callers that don't configure the registry.
+#[derive(Default)]
+pub struct WebhookRegistry {
+    hooks: Mutex<HashMap<String, WebhookAction>>,
+}
+
+impl WebhookRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register(&self, hook_name: impl Into<String>, action: WebhookAction) {
+        self.hooks.lock().unwrap().insert(hook_name.into(), action);
+    }
+
+    pub fn lookup(&self, hook_name: &str) -> WebhookAction {
+        self.hooks
+            .lock()
+            .unwrap()
+            .get(hook_name)
+            .cloned()
+            .unwrap_or(WebhookAction::DepositFact)
+    }
+
+    pub fn list_registered(&self) -> Vec<String> {
+        self.hooks.lock().unwrap().keys().cloned().collect()
+    }
+}
+
+/// Called by the listener to launch an async goal. Returning the goal_id
+/// lets the HTTP response echo it back to the caller so webhook-driven
+/// orchestration can correlate requests with goals.
+pub type WebhookGoalLauncher =
+    Arc<dyn Fn(String, Option<u32>) -> Result<Uuid> + Send + Sync>;
+
+/// Render `template` by substituting `{{path.to.field}}` placeholders
+/// against `payload`. Missing paths render as empty strings. This is
+/// deliberately minimal — it exists so the runtime can quote payload
+/// fields into a goal objective without pulling in a templating crate.
+pub fn render_template(template: &str, payload: &serde_json::Value) -> String {
+    let mut out = String::with_capacity(template.len());
+    let bytes = template.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + 1 < bytes.len()
+            && bytes[i] == b'{'
+            && bytes[i + 1] == b'{'
+            && let Some(end) = template[i + 2..].find("}}")
+        {
+            let key = template[i + 2..i + 2 + end].trim();
+            out.push_str(&lookup_payload_value(payload, key));
+            i += 2 + end + 2;
+            continue;
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+fn lookup_payload_value(payload: &serde_json::Value, path: &str) -> String {
+    let mut current = payload;
+    for segment in path.split('.') {
+        current = match current.get(segment) {
+            Some(v) => v,
+            None => return String::new(),
+        };
+    }
+    match current {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
 /// Start a background thread running a minimal HTTP server that accepts
-/// webhook POST requests and patches world state.
+/// webhook POST requests and either patches world state or launches an
+/// async goal. Supplying `None` for `registry` and `launcher` gives the
+/// original fact-only behavior.
 pub fn start_webhook_listener(
     bind_addr: SocketAddr,
     world_state: Arc<Mutex<dyn WorldStateStore + Send>>,
+) -> JoinHandle<()> {
+    start_webhook_listener_with_actions(bind_addr, world_state, None, None)
+}
+
+/// Same as `start_webhook_listener` but lets the caller supply a
+/// per-hook action registry and a launcher for TriggerGoal actions.
+pub fn start_webhook_listener_with_actions(
+    bind_addr: SocketAddr,
+    world_state: Arc<Mutex<dyn WorldStateStore + Send>>,
+    registry: Option<Arc<WebhookRegistry>>,
+    launcher: Option<WebhookGoalLauncher>,
 ) -> JoinHandle<()> {
     thread::Builder::new()
         .name("soma-webhook-http".to_string())
@@ -45,8 +150,10 @@ pub fn start_webhook_listener(
                     Err(_) => continue,
                 };
                 let ws = Arc::clone(&world_state);
+                let reg = registry.clone();
+                let launch = launcher.clone();
                 thread::spawn(move || {
-                    if let Err(e) = handle_webhook_request(stream, &ws) {
+                    if let Err(e) = handle_webhook_request(stream, &ws, reg.as_deref(), launch.as_ref()) {
                         eprintln!("[webhook-http] error: {}", e);
                     }
                 });
@@ -78,6 +185,8 @@ fn send_response(stream: &mut TcpStream, status_code: u16, status_text: &str, bo
 fn handle_webhook_request(
     mut stream: TcpStream,
     world_state: &Arc<Mutex<dyn WorldStateStore + Send>>,
+    registry: Option<&WebhookRegistry>,
+    launcher: Option<&WebhookGoalLauncher>,
 ) -> Result<()> {
     // Set a read timeout so a slow/stalled client doesn't block the thread forever.
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
@@ -160,44 +269,105 @@ fn handle_webhook_request(
         serde_json::Value::Null
     };
 
-    // 8. Build a Fact and add to world state.
+    // 8. Route by configured action. Default action = DepositFact.
+    let action = registry
+        .map(|r| r.lookup(&hook_name))
+        .unwrap_or(WebhookAction::DepositFact);
     let now = Utc::now();
-    let timestamp_ms = now.timestamp_millis();
-    let fact = Fact {
-        fact_id: format!("webhook.{}.{}", hook_name, timestamp_ms),
-        subject: "webhook".to_string(),
-        predicate: hook_name.clone(),
-        value: payload.clone(),
-        confidence: 1.0,
-        provenance: FactProvenance::Observed,
-        timestamp: now,
-    };
 
-    {
-        let mut ws = world_state.lock().unwrap();
-        ws.add_fact(fact)?;
+    match action {
+        WebhookAction::DepositFact => {
+            let timestamp_ms = now.timestamp_millis();
+            let fact = Fact {
+                fact_id: format!("webhook.{}.{}", hook_name, timestamp_ms),
+                subject: "webhook".to_string(),
+                predicate: hook_name.clone(),
+                value: payload.clone(),
+                confidence: 1.0,
+                provenance: FactProvenance::Observed,
+                timestamp: now,
+                            ttl_ms: None,
+            };
+            {
+                let mut ws = world_state.lock().unwrap();
+                ws.add_fact(fact)?;
+            }
+            let event = serde_json::json!({
+                "_webhook_event": true,
+                "name": hook_name,
+                "payload": payload,
+                "received_at": now.to_rfc3339(),
+            });
+            eprintln!("{}", serde_json::to_string(&event).unwrap_or_default());
+
+            let response_body = serde_json::json!({
+                "status": "ok",
+                "hook": hook_name,
+                "action": "deposit_fact",
+            });
+            send_response(
+                &mut stream,
+                200,
+                "OK",
+                &serde_json::to_string(&response_body).unwrap_or_default(),
+            );
+        }
+        WebhookAction::TriggerGoal {
+            objective_template,
+            max_steps,
+        } => {
+            let objective = render_template(&objective_template, &payload);
+            let event = serde_json::json!({
+                "_webhook_event": true,
+                "name": hook_name,
+                "action": "trigger_goal",
+                "objective": objective,
+                "payload": payload,
+                "received_at": now.to_rfc3339(),
+            });
+            eprintln!("{}", serde_json::to_string(&event).unwrap_or_default());
+
+            let response_body = match launcher {
+                Some(launch) => match launch(objective.clone(), max_steps) {
+                    Ok(goal_id) => serde_json::json!({
+                        "status": "ok",
+                        "hook": hook_name,
+                        "action": "trigger_goal",
+                        "goal_id": goal_id.to_string(),
+                        "objective": objective,
+                    }),
+                    Err(e) => {
+                        let body = serde_json::json!({
+                            "status": "error",
+                            "hook": hook_name,
+                            "action": "trigger_goal",
+                            "error": e.to_string(),
+                        });
+                        send_response(
+                            &mut stream,
+                            500,
+                            "Internal Server Error",
+                            &serde_json::to_string(&body).unwrap_or_default(),
+                        );
+                        return Ok(());
+                    }
+                },
+                None => serde_json::json!({
+                    "status": "error",
+                    "hook": hook_name,
+                    "action": "trigger_goal",
+                    "error": "no goal launcher configured",
+                }),
+            };
+            let code = if response_body["status"] == "ok" { 200 } else { 503 };
+            send_response(
+                &mut stream,
+                code,
+                if code == 200 { "OK" } else { "Service Unavailable" },
+                &serde_json::to_string(&response_body).unwrap_or_default(),
+            );
+        }
     }
-
-    // 9. Emit structured event to stderr for SSE consumers.
-    let event = serde_json::json!({
-        "_webhook_event": true,
-        "name": hook_name,
-        "payload": payload,
-        "received_at": now.to_rfc3339(),
-    });
-    eprintln!("{}", serde_json::to_string(&event).unwrap_or_default());
-
-    // 10. Respond 200.
-    let response_body = serde_json::json!({
-        "status": "ok",
-        "hook": hook_name,
-    });
-    send_response(
-        &mut stream,
-        200,
-        "OK",
-        &serde_json::to_string(&response_body).unwrap_or_default(),
-    );
 
     Ok(())
 }
@@ -225,7 +395,7 @@ mod tests {
             .spawn(move || {
                 // Accept exactly one connection, then stop.
                 if let Some(Ok(stream)) = listener.incoming().next() {
-                    let _ = handle_webhook_request(stream, &ws);
+                    let _ = handle_webhook_request(stream, &ws, None, None);
                 }
             })
             .unwrap();
@@ -297,6 +467,104 @@ mod tests {
         assert!(response.contains("200 OK"), "expected 200 OK, got: {}", response);
         assert!(response.contains("soma-webhook"), "expected health check body");
 
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_render_template_substitutes_keys() {
+        let payload = serde_json::json!({
+            "order_id": "abc-123",
+            "customer": { "email": "a@b.com" },
+        });
+        let out = render_template(
+            "fulfill order {{order_id}} for {{customer.email}}",
+            &payload,
+        );
+        assert_eq!(out, "fulfill order abc-123 for a@b.com");
+    }
+
+    #[test]
+    fn test_render_template_missing_keys_empty() {
+        let payload = serde_json::json!({ "a": 1 });
+        let out = render_template("x={{missing}} y={{a}}", &payload);
+        assert_eq!(out, "x= y=1");
+    }
+
+    #[test]
+    fn test_registry_defaults_to_deposit_fact() {
+        let reg = WebhookRegistry::new();
+        assert!(matches!(
+            reg.lookup("unknown"),
+            WebhookAction::DepositFact
+        ));
+        reg.register(
+            "orders",
+            WebhookAction::TriggerGoal {
+                objective_template: "process {{order_id}}".to_string(),
+                max_steps: Some(20),
+            },
+        );
+        assert!(matches!(
+            reg.lookup("orders"),
+            WebhookAction::TriggerGoal { .. }
+        ));
+    }
+
+    #[test]
+    fn test_trigger_goal_calls_launcher_and_returns_goal_id() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let ws: Arc<Mutex<dyn WorldStateStore + Send>> =
+            Arc::new(Mutex::new(DefaultWorldStateStore::new()));
+        let reg = Arc::new(WebhookRegistry::new());
+        reg.register(
+            "orders",
+            WebhookAction::TriggerGoal {
+                objective_template: "process order {{order_id}}".to_string(),
+                max_steps: Some(7),
+            },
+        );
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let fixed_goal_id = Uuid::new_v4();
+        let count_for_closure = Arc::clone(&call_count);
+        let launcher: WebhookGoalLauncher = Arc::new(move |objective, max_steps| {
+            count_for_closure.fetch_add(1, Ordering::Relaxed);
+            assert_eq!(objective, "process order abc-123");
+            assert_eq!(max_steps, Some(7));
+            Ok(fixed_goal_id)
+        });
+
+        // Run a single-request listener that uses registry + launcher.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let ws_clone = Arc::clone(&ws);
+        let reg_clone = Arc::clone(&reg);
+        let launcher_clone = Arc::clone(&launcher);
+        let handle = thread::Builder::new()
+            .name("test-webhook-trigger".into())
+            .spawn(move || {
+                if let Some(Ok(stream)) = listener.incoming().next() {
+                    let _ = handle_webhook_request(
+                        stream,
+                        &ws_clone,
+                        Some(reg_clone.as_ref()),
+                        Some(&launcher_clone),
+                    );
+                }
+            })
+            .unwrap();
+
+        let body = r#"{"order_id":"abc-123"}"#;
+        let request = format!(
+            "POST /orders HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let response = send_raw_request(addr, &request);
+        assert!(response.contains("200 OK"));
+        assert!(response.contains(&fixed_goal_id.to_string()));
+        assert_eq!(call_count.load(Ordering::Relaxed), 1);
+        // No fact deposited — we took the trigger_goal branch.
+        assert!(ws.lock().unwrap().list_facts().is_empty());
         handle.join().unwrap();
     }
 

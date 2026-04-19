@@ -123,6 +123,38 @@ impl SessionCheckpointStore {
         Ok(ids)
     }
 
+    /// Load every checkpoint whose session is in a non-terminal state.
+    /// Used on boot to find sessions that were interrupted mid-execution
+    /// and should be resumed. Skips files that fail to parse (logged at
+    /// `warn`).
+    pub fn load_all_active(&self) -> Result<Vec<ControlSession>> {
+        let ids = self.list()?;
+        let mut out = Vec::new();
+        for id in ids {
+            match self.load(&id) {
+                Ok(session) => {
+                    let terminal = matches!(
+                        session.status,
+                        crate::types::session::SessionStatus::Completed
+                            | crate::types::session::SessionStatus::Failed
+                            | crate::types::session::SessionStatus::Aborted
+                    );
+                    if !terminal {
+                        out.push(session);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        session_id = %id,
+                        error = %e,
+                        "skipping unreadable checkpoint during load_all_active"
+                    );
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Delete the checkpoint file for a session.
     pub fn delete(&self, session_id: &Uuid) -> Result<()> {
         let path = self.path_for(session_id);
@@ -176,6 +208,8 @@ mod tests {
                 deadline: None,
                 permissions_scope: Vec::new(),
                 priority: Priority::Normal,
+                max_steps: None,
+                exploration: crate::types::goal::ExplorationStrategy::Greedy,
             },
             belief: BeliefState {
                 belief_id: Uuid::new_v4(),
@@ -313,6 +347,36 @@ mod tests {
         store.save(&session).unwrap();
         let loaded2 = store.load(&sid).unwrap();
         assert_eq!(loaded2.status, SessionStatus::Failed);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_all_active_returns_only_non_terminal() {
+        let dir = std::env::temp_dir().join("soma_checkpoint_test_active");
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = SessionCheckpointStore::new(&dir);
+
+        let mut running = test_session();
+        running.status = SessionStatus::Running;
+        let mut completed = test_session();
+        completed.status = SessionStatus::Completed;
+        let mut failed = test_session();
+        failed.status = SessionStatus::Failed;
+        let mut paused = test_session();
+        paused.status = SessionStatus::Paused;
+
+        store.save(&running).unwrap();
+        store.save(&completed).unwrap();
+        store.save(&failed).unwrap();
+        store.save(&paused).unwrap();
+
+        let active = store.load_all_active().unwrap();
+        let active_ids: Vec<_> = active.iter().map(|s| s.session_id).collect();
+        assert!(active_ids.contains(&running.session_id));
+        assert!(active_ids.contains(&paused.session_id));
+        assert!(!active_ids.contains(&completed.session_id));
+        assert!(!active_ids.contains(&failed.session_id));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -19,7 +19,7 @@ User question → Ollama (gemma4:e2b) → SQL → SOMA invoke_port("postgres","q
 ## Prerequisites
 
 - Docker (for Ollama)
-- HelperBook database running (`cd ../soma-helperbook && docker compose up -d postgres && scripts/setup-db.sh && scripts/seed-db.sh`)
+- HelperBook database running (`cd ../soma-project-helperbook && docker compose up -d postgres && scripts/setup-db.sh && scripts/seed-db.sh`)
 - Node.js 18+
 
 ## Setup

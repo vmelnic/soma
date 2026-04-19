@@ -5,6 +5,8 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use uuid::Uuid;
+
 use soma_next::bootstrap;
 use soma_next::config::SomaConfig;
 use soma_next::distributed::transport::{
@@ -279,7 +281,7 @@ fn main() {
         bootstrap::bootstrap(&config, &pack_paths)
     };
 
-    let runtime = match bootstrap_result {
+    let mut runtime = match bootstrap_result {
         Ok(rt) => rt,
         Err(e) => {
             if pack_paths.is_empty() {
@@ -294,6 +296,23 @@ fn main() {
             }
         }
     };
+
+    if config.runtime.resume_sessions_on_boot {
+        match runtime.resume_pending_sessions() {
+            Ok(ids) if !ids.is_empty() => {
+                eprintln!(
+                    "resumed {} interrupted session(s) from checkpoint",
+                    ids.len()
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("warning: resume_pending_sessions failed: {e}");
+            }
+        }
+    }
+
+    let runtime = runtime;
 
     // If any listener flag is specified, start transport listeners in
     // background threads. All listeners share the same runtime handler.
@@ -588,7 +607,19 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
 
     type WorldStateArc = Arc<Mutex<dyn soma_next::runtime::world_state::WorldStateStore + Send>>;
 
-    let make_server = |runtime: crate::bootstrap::Runtime| -> (McpServer, Option<SchedulerArcs>, Option<ConsolidationArcs>, Option<ReactiveMonitorArcs>, Option<WorldStateArc>) {
+    type WebhookLauncher =
+        soma_next::distributed::webhook_listener::WebhookGoalLauncher;
+
+    type McpServerBundle = (
+        McpServer,
+        Option<SchedulerArcs>,
+        Option<ConsolidationArcs>,
+        Option<ReactiveMonitorArcs>,
+        Option<WorldStateArc>,
+        Option<WebhookLauncher>,
+    );
+
+    let make_server = |runtime: crate::bootstrap::Runtime| -> McpServerBundle {
         let sched = (
             Arc::clone(&runtime.schedule_store),
             Arc::clone(&runtime.port_runtime),
@@ -619,10 +650,11 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
         } else {
             handle
         };
-        (McpServer::new(handle), Some(sched), Some(consolidation), Some(monitor), Some(world_state_for_webhook))
+        let launcher = handle.build_webhook_launcher();
+        (McpServer::new(handle), Some(sched), Some(consolidation), Some(monitor), Some(world_state_for_webhook), Some(launcher))
     };
 
-    let (server, scheduler_arcs, consolidation_arcs, monitor_arcs, webhook_world_state) = if mcp_is_auto {
+    let (server, scheduler_arcs, consolidation_arcs, monitor_arcs, webhook_world_state, webhook_launcher) = if mcp_is_auto {
         eprintln!("MCP: auto-discovering ports from plugin search paths");
         match bootstrap::bootstrap_auto(&config) {
             Ok(runtime) => make_server(runtime),
@@ -642,7 +674,7 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             Ok(runtime) => make_server(runtime),
             Err(e) => {
                 eprintln!("warning: failed to bootstrap runtime: {e}");
-                (McpServer::new_stub(), None, None, None, None)
+                (McpServer::new_stub(), None, None, None, None, None)
             }
         }
     } else {
@@ -657,10 +689,71 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
 
     // Start the scheduler background thread.
     if let Some((sched_store, port_rt, ws)) = scheduler_arcs {
-        let _scheduler_handle = soma_next::runtime::scheduler::start_scheduler_thread(
+        // Materialize any scheduled goals declared in config. Cron
+        // expressions are evaluated at fire time; entries without a
+        // computable next fire are rejected up front.
+        if !config.scheduler.goal.is_empty() {
+            let now_ms = soma_next::runtime::scheduler::now_epoch_ms();
+            let mut store = sched_store.lock().unwrap();
+            for (label, g) in &config.scheduler.goal {
+                let next_fire_epoch_ms = if let Some(interval) = g.interval_ms {
+                    now_ms + interval
+                } else if let Some(ref expr) = g.cron_expr {
+                    match soma_next::runtime::scheduler::next_fire_from_cron(expr, now_ms) {
+                        Some(v) => v,
+                        None => {
+                            eprintln!(
+                                "warning: scheduled goal '{}' has invalid cron_expr '{}', skipping",
+                                label, expr
+                            );
+                            continue;
+                        }
+                    }
+                } else {
+                    eprintln!(
+                        "warning: scheduled goal '{}' has neither cron_expr nor interval_ms, skipping",
+                        label
+                    );
+                    continue;
+                };
+                let schedule = soma_next::runtime::scheduler::Schedule {
+                    id: Uuid::new_v4(),
+                    label: label.clone(),
+                    delay_ms: None,
+                    interval_ms: g.interval_ms,
+                    cron_expr: g.cron_expr.clone(),
+                    action: None,
+                    goal_trigger: Some(soma_next::runtime::scheduler::ScheduleGoalAction {
+                        objective: g.objective.clone(),
+                        max_steps: g.max_steps,
+                    }),
+                    message: None,
+                    max_fires: None,
+                    fire_count: 0,
+                    brain: false,
+                    next_fire_epoch_ms,
+                    created_at_epoch_ms: now_ms,
+                    enabled: true,
+                };
+                if let Err(e) = store.add(schedule) {
+                    eprintln!("warning: failed to register scheduled goal '{}': {}", label, e);
+                } else {
+                    eprintln!(
+                        "MCP: scheduled goal '{}' registered ({})",
+                        label,
+                        g.cron_expr.as_deref().map(String::from)
+                            .or_else(|| g.interval_ms.map(|v| format!("every {}ms", v)))
+                            .unwrap_or_default()
+                    );
+                }
+            }
+        }
+
+        let _scheduler_handle = soma_next::runtime::scheduler::start_scheduler_thread_with_launcher(
             sched_store,
             port_rt,
             Some(ws),
+            webhook_launcher.clone(),
         );
         eprintln!("MCP: scheduler started (1s tick)");
     }
@@ -754,13 +847,38 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
         eprintln!("MCP: heartbeat thread started ({peer_count} peers registered)");
     }
 
-    // Start webhook HTTP listener if requested.
+    // Start webhook HTTP listener if requested. Any hooks declared under
+    // [webhooks.trigger_goal.<name>] in soma.toml become full async goal
+    // launches; everything else keeps the fact-deposit behavior.
     if let Some(addr) = distributed.webhook_listen {
         if let Some(ref ws) = webhook_world_state {
+            let registry = if config.webhooks.trigger_goal.is_empty() {
+                None
+            } else {
+                let reg = Arc::new(
+                    soma_next::distributed::webhook_listener::WebhookRegistry::new(),
+                );
+                for (name, trigger) in &config.webhooks.trigger_goal {
+                    reg.register(
+                        name.clone(),
+                        soma_next::distributed::webhook_listener::WebhookAction::TriggerGoal {
+                            objective_template: trigger.objective_template.clone(),
+                            max_steps: trigger.max_steps,
+                            },
+                    );
+                    eprintln!(
+                        "MCP: webhook /{} registered to trigger goal: {}",
+                        name, trigger.objective_template
+                    );
+                }
+                Some(reg)
+            };
             let _webhook_handle =
-                soma_next::distributed::webhook_listener::start_webhook_listener(
+                soma_next::distributed::webhook_listener::start_webhook_listener_with_actions(
                     addr,
                     Arc::clone(ws),
+                    registry,
+                    webhook_launcher.clone(),
                 );
             eprintln!("MCP: webhook listener on http://{}", addr);
         } else {

@@ -226,6 +226,17 @@ pub trait PortRuntime: Send + Sync {
     ///
     /// Retired ports MUST be removed from normal dispatch.
     fn retire(&mut self, port_id: &str) -> Result<()>;
+
+    /// Physically drop a port from the runtime, releasing its adapter
+    /// (and its dylib handle, when applicable). Used by pack hot-reload
+    /// to make room for a fresh registration with the same port_id.
+    /// Returns Ok(false) when the port was not registered.
+    fn remove_port(&mut self, port_id: &str) -> Result<bool> {
+        let _ = port_id;
+        Err(crate::errors::SomaError::Port(
+            "remove_port not implemented".to_string(),
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1141,28 +1152,39 @@ impl PortRuntime for DefaultPortRuntime {
                 // elapsed time measured by the runtime.
                 let elapsed = start.elapsed().as_millis() as u64;
 
-                // Post-hoc timeout check: if time_limit_ms is declared and
-                // elapsed time exceeds it, replace this result with a Timeout
-                // failure record. Preemptive cancellation requires async adapters;
-                // this check enforces the contract boundary after the fact.
-                if let Some(limit_ms) = entry.spec.sandbox_requirements.time_limit_ms
+                // Post-hoc timeout check: enforce the *tightest* limit between
+                // the port's declared time_limit_ms and the session-supplied
+                // deadline_ms. Preemptive cancellation of sync port adapters
+                // is not yet possible — this check guarantees the session's
+                // budget accounting (resource_cost, latency_ms) reflects the
+                // declared cap rather than the runaway elapsed time.
+                let effective_limit = match (
+                    entry.spec.sandbox_requirements.time_limit_ms,
+                    ctx.deadline_ms,
+                ) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (Some(a), None) => Some(a),
+                    (None, Some(b)) => Some(b),
+                    (None, None) => None,
+                };
+                if let Some(limit_ms) = effective_limit
                     && elapsed >= limit_ms {
                         let mut timeout_record = Self::failure_record(
                             port_id,
                             capability_id,
                             PortFailureClass::Timeout,
                             &format!(
-                                "port invocation exceeded declared time_limit_ms ({} >= {})",
+                                "port invocation exceeded effective time limit ({} >= {})",
                                 elapsed, limit_ms,
                             ),
-                            elapsed,
+                            limit_ms,
                             input_hash,
                             ctx,
                             Some(policy_outcome),
                         );
                         timeout_record.auth_result = Some(auth_result);
                         timeout_record.sandbox_result = Some(SandboxOutcome::Violated {
-                            dimension: "time_limit_ms".to_string(),
+                            dimension: "deadline_ms".to_string(),
                             reason: format!("elapsed {}ms exceeded limit {}ms", elapsed, limit_ms),
                         });
                         return Ok(timeout_record);
@@ -1557,6 +1579,14 @@ impl PortRuntime for DefaultPortRuntime {
                 port_id, other,
             ))),
         }
+    }
+
+    fn remove_port(&mut self, port_id: &str) -> Result<bool> {
+        let removed = self.ports.remove(port_id).is_some();
+        if removed {
+            warn!(port_id, "port removed (hot-reload)");
+        }
+        Ok(removed)
     }
 
     fn retire(&mut self, port_id: &str) -> Result<()> {

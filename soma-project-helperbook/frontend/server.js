@@ -130,7 +130,7 @@ async function ensureInitialized() {
       params: {
         protocolVersion: '2024-11-05',
         capabilities: {},
-        clientInfo: { name: 'soma-helperbook', version: '0.1.0' }
+        clientInfo: { name: 'soma-project-helperbook', version: '0.1.0' }
       }
     });
     soma.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');

@@ -103,6 +103,8 @@ impl GoalRuntime for DefaultGoalRuntime {
                     deadline: None,
                     permissions_scope: vec!["default".to_string()],
                     priority: Priority::Normal,
+                    max_steps: None,
+                    exploration: crate::types::goal::ExplorationStrategy::Greedy,
                 };
                 Ok(goal)
             }
@@ -232,6 +234,8 @@ mod tests {
             deadline: None,
             permissions_scope: vec!["filesystem".to_string()],
             priority: Priority::Normal,
+            max_steps: None,
+            exploration: crate::types::goal::ExplorationStrategy::Greedy,
         }
     }
 

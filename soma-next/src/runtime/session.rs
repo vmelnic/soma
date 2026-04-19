@@ -145,6 +145,19 @@ pub trait SkillExecutor: Send + Sync {
         session_id: Uuid,
     ) -> Result<Observation>;
 
+    /// Execute with an optional hard deadline (ms wall-clock). Implementations
+    /// that talk to ports should pass this through `InvocationContext.deadline_ms`
+    /// so the port runtime can enforce it. Default falls back to `execute`.
+    fn execute_with_deadline(
+        &self,
+        skill: &SkillSpec,
+        bindings: &[WorkingBinding],
+        session_id: Uuid,
+        _deadline_ms: Option<u64>,
+    ) -> Result<Observation> {
+        self.execute(skill, bindings, session_id)
+    }
+
     /// Attempt to invoke the skill's declared compensation or rollback action.
     /// Returns None if the skill is irreversible or has no compensation skill.
     fn invoke_rollback(
@@ -345,6 +358,44 @@ impl SessionController {
         }
     }
 
+    /// Replace the live skill registry. Used by pack hot-reload (MCP
+    /// `reload_pack`) so newly-registered skills become visible to the
+    /// next `run_step` without restarting the runtime.
+    pub fn replace_skill_registry(&mut self, registry: Box<dyn SkillRegistry>) {
+        self.skill_registry = registry;
+    }
+
+    /// Inject a `payload` into a session that is waiting for input/remote
+    /// data. Each top-level key of the JSON object is added to belief
+    /// `active_bindings` so the next step's input-binding pass can find it.
+    /// Bindings inserted this way overwrite any prior binding with the same
+    /// name. Caller is responsible for transitioning the session out of
+    /// `WaitingFor*` (typically by calling `resume`).
+    ///
+    /// Returns the number of bindings injected.
+    pub fn inject_resume_payload(
+        session: &mut ControlSession,
+        payload: &serde_json::Value,
+    ) -> Result<usize> {
+        let obj = payload.as_object().ok_or_else(|| {
+            SomaError::Session(
+                "resume payload must be a JSON object".to_string(),
+            )
+        })?;
+        let mut count = 0;
+        for (k, v) in obj {
+            session.belief.active_bindings.retain(|b| b.name != *k);
+            session.belief.active_bindings.push(crate::types::belief::Binding {
+                name: k.clone(),
+                value: v.clone(),
+                source: "resume_payload".to_string(),
+                confidence: 1.0,
+            });
+            count += 1;
+        }
+        Ok(count)
+    }
+
     /// List all sessions as (session_id, status_string) pairs.
     pub fn list_sessions(&self) -> Vec<(Uuid, String)> {
         self.sessions
@@ -448,9 +499,16 @@ impl SessionController {
             + cost_class_value(cost.io_cost_class) * 0.2
             + cost_class_value(cost.network_cost_class) * 0.2
             + cost_class_value(cost.energy_cost_class) * 0.1;
+        // Risk grows with cost magnitude and with failed observations.
+        let risk_spent = if observation.success {
+            scalar_cost * 0.05
+        } else {
+            scalar_cost * 0.15 + 0.01
+        };
+
         let delta = BudgetDelta {
             step: step_index,
-            risk_spent: 0.0, // Risk accounting is deferred to the policy engine.
+            risk_spent,
             latency_spent_ms: observation.latency_ms,
             resource_spent: scalar_cost,
         };
@@ -463,10 +521,22 @@ impl SessionController {
         if session.budget_remaining.resource_remaining < 0.0 {
             session.budget_remaining.resource_remaining = 0.0;
         }
+        session.budget_remaining.risk_remaining -= risk_spent;
+        if session.budget_remaining.risk_remaining < 0.0 {
+            session.budget_remaining.risk_remaining = 0.0;
+        }
         session.budget_remaining.steps_remaining =
             session.budget_remaining.steps_remaining.saturating_sub(1);
 
         session.working_memory.budget_deltas.push(delta);
+    }
+
+    /// True if any budget dimension is exhausted after deduction.
+    fn budget_exhausted(budget: &Budget) -> bool {
+        budget.latency_remaining_ms == 0
+            || budget.resource_remaining <= 0.0
+            || budget.risk_remaining <= 0.0
+            || budget.steps_remaining == 0
     }
 
     /// Apply a NextStep action from a compiled routine step's on_success/on_failure.
@@ -637,6 +707,7 @@ impl SessionController {
             confidence: observation.confidence,
             provenance: FactProvenance::Observed,
             timestamp: observation.timestamp,
+                    ttl_ms: None,
         });
 
         BeliefPatch {
@@ -662,6 +733,7 @@ impl SessionController {
         candidates: &[SkillSpec],
         scores: &[CandidateScore],
         selected_skill: &str,
+        selection_reason: crate::types::session::SelectionReason,
         observation: &Observation,
         belief_patch: &BeliefPatch,
         progress_delta: f64,
@@ -681,6 +753,8 @@ impl SessionController {
             candidate_skills: candidates.iter().map(|c| c.skill_id.clone()).collect(),
             predicted_scores: scores.to_vec(),
             selected_skill: selected_skill.to_string(),
+            selection_reason,
+            failure_detail: observation.failure_detail.clone(),
             port_calls: observation.port_calls.clone(),
             observation_id: observation.observation_id,
             belief_patch: serde_json::to_value(belief_patch).unwrap_or_default(),
@@ -838,6 +912,9 @@ impl SessionController {
                         effect_patch: None,
                         success: false,
                         failure_class: Some(crate::types::common::SkillFailureClass::Unknown),
+                        failure_detail: Some(crate::types::observation::FailureDetail::Other {
+                            message: e.to_string(),
+                        }),
                         latency_ms: 0,
                         resource_cost: crate::types::observation::default_cost_profile(),
                         confidence: 0.0,
@@ -911,6 +988,13 @@ impl SessionController {
             effect_patch: None,
             success: all_succeeded,
             failure_class: first_failure_class,
+            failure_detail: if all_succeeded {
+                None
+            } else {
+                Some(crate::types::observation::FailureDetail::Other {
+                    message: "one or more substeps failed".to_string(),
+                })
+            },
             latency_ms: total_latency_ms,
             resource_cost: crate::types::observation::default_cost_profile(),
             confidence: if substep_observations.is_empty() {
@@ -1250,6 +1334,14 @@ impl SessionController {
                             } else {
                                 Some(crate::types::common::SkillFailureClass::RemoteFailure)
                             },
+                            failure_detail: if resp.success {
+                                None
+                            } else {
+                                Some(crate::types::observation::FailureDetail::RemoteFailure {
+                                    peer_id: Some(endpoint.to_string()),
+                                    message: "remote returned non-success".to_string(),
+                                })
+                            },
                             latency_ms: resp.latency_ms,
                             resource_cost: crate::types::observation::default_cost_profile(),
                             confidence: if resp.success { 1.0 } else { 0.0 },
@@ -1274,6 +1366,10 @@ impl SessionController {
                             effect_patch: None,
                             success: false,
                             failure_class: Some(crate::types::common::SkillFailureClass::RemoteFailure),
+                            failure_detail: Some(crate::types::observation::FailureDetail::RemoteFailure {
+                                peer_id: Some(endpoint.to_string()),
+                                message: e.to_string(),
+                            }),
                             latency_ms: 0,
                             resource_cost: crate::types::observation::default_cost_profile(),
                             confidence: 0.0,
@@ -1313,6 +1409,9 @@ impl SessionController {
                             effect_patch: None,
                             success: false,
                             failure_class: Some(crate::types::common::SkillFailureClass::Unknown),
+                            failure_detail: Some(crate::types::observation::FailureDetail::Other {
+                                message: e.to_string(),
+                            }),
                             latency_ms: 0,
                             resource_cost: crate::types::observation::default_cost_profile(),
                             confidence: 0.0,
@@ -1322,10 +1421,22 @@ impl SessionController {
                 }
             }
         } else {
-            match self.skill_executor.execute(
+            // Cap this call's wall-clock at min(skill.max_latency,
+            // session.budget_remaining.latency_remaining_ms). Either side
+            // hitting zero produces a Timeout failure record instead of
+            // letting the call burn through the session budget.
+            let deadline = Some(
+                chosen_skill
+                    .cost_prior
+                    .latency
+                    .max_latency_ms
+                    .min(session.budget_remaining.latency_remaining_ms),
+            );
+            match self.skill_executor.execute_with_deadline(
                 chosen_skill,
                 &bindings,
                 session.session_id,
+                deadline,
             ) {
                 Ok(obs) => obs,
                 Err(e) => {
@@ -1344,7 +1455,28 @@ impl SessionController {
                         structured_result: serde_json::json!({ "error": e.to_string() }),
                         effect_patch: None,
                         success: false,
-                        failure_class: Some(crate::types::common::SkillFailureClass::Unknown),
+                        failure_class: Some(match &e {
+                            SomaError::Skill(msg) if msg.contains("required input") => {
+                                crate::types::common::SkillFailureClass::BindingFailure
+                            }
+                            _ => crate::types::common::SkillFailureClass::Unknown,
+                        }),
+                        failure_detail: Some(match &e {
+                            SomaError::Skill(msg) if msg.contains("required input") => {
+                                let binding_name = msg
+                                    .split('\'')
+                                    .nth(1)
+                                    .unwrap_or("?")
+                                    .to_string();
+                                crate::types::observation::FailureDetail::BindingMissing {
+                                    binding_name,
+                                    message: msg.clone(),
+                                }
+                            }
+                            _ => crate::types::observation::FailureDetail::Other {
+                                message: e.to_string(),
+                            },
+                        }),
                         latency_ms: 0,
                         resource_cost: crate::types::observation::default_cost_profile(),
                         confidence: 0.0,
@@ -1656,7 +1788,7 @@ impl SessionRuntime for SessionController {
             risk_remaining: goal.risk_budget,
             latency_remaining_ms: goal.latency_budget_ms,
             resource_remaining: goal.resource_budget,
-            steps_remaining: self.default_max_steps,
+            steps_remaining: goal.max_steps.unwrap_or(self.default_max_steps),
         };
 
         let session = ControlSession {
@@ -2014,7 +2146,14 @@ impl SessionRuntime for SessionController {
             selected
         };
 
-        let (scores, chosen_skill) = if let Some((skill_id, skill)) = plan_selected {
+        use crate::types::session::SelectionReason;
+        let backtrack_active = session
+            .working_memory
+            .current_branch_state
+            .as_ref()
+            .and_then(|v| v.get("backtrack_from_step"))
+            .is_some();
+        let (scores, chosen_skill, mut selection_reason) = if let Some((skill_id, skill)) = plan_selected {
             let plan_score = CandidateScore {
                 skill_id,
                 score: 1.0,
@@ -2023,7 +2162,12 @@ impl SessionRuntime for SessionController {
                 predicted_latency_ms: 10,
                 information_gain: 0.0,
             };
-            (vec![plan_score], skill)
+            let reason = if !routines.is_empty() {
+                SelectionReason::RoutineMatch
+            } else {
+                SelectionReason::PlanFollowing
+            };
+            (vec![plan_score], skill, reason)
         } else {
             // Normal deliberation path: score, rank, choose.
             let scores = self.predictor.score(
@@ -2074,6 +2218,36 @@ impl SessionRuntime for SessionController {
             }
             // end brain fallback
 
+            // Exploration: with probability ε, pick uniformly from top_scores
+            // instead of the greedy top-1. Reported via SelectionReason so
+            // the brain can audit which steps were exploratory and discount
+            // them when learning.
+            let mut explored = false;
+            if let crate::types::goal::ExplorationStrategy::EpsilonGreedy { epsilon } =
+                session.goal.exploration
+                && epsilon > 0.0
+                && top_scores.len() > 1
+            {
+                use std::time::SystemTime;
+                let nanos = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.subsec_nanos())
+                    .unwrap_or(0);
+                // Cheap uniform: nanos as f64 / 1e9 ∈ [0,1).
+                let roll = (nanos as f64) / 1_000_000_000.0;
+                if roll < epsilon {
+                    let idx = (nanos as usize) % top_scores.len();
+                    chosen_score = &top_scores[idx];
+                    explored = true;
+                    debug!(
+                        session_id = %session.session_id,
+                        epsilon,
+                        chosen = %chosen_score.skill_id,
+                        "exploration: sampled candidate from top-K"
+                    );
+                }
+            }
+
             let chosen_skill = match self.skill_registry.get_skill(&chosen_score.skill_id) {
                 Some(skill) => skill.clone(),
                 None => {
@@ -2082,8 +2256,20 @@ impl SessionRuntime for SessionController {
                     return Err(SomaError::SkillNotFound(chosen_score.skill_id.clone()));
                 }
             };
-            (scores, chosen_skill)
+            let reason = if explored {
+                SelectionReason::Exploration
+            } else if candidates.len() == 1 {
+                SelectionReason::SoleCandidate
+            } else if scores.is_empty() {
+                SelectionReason::Fallback
+            } else {
+                SelectionReason::HighestScore
+            };
+            (scores, chosen_skill, reason)
         };
+        if backtrack_active {
+            selection_reason = SelectionReason::AfterBacktrack;
+        }
 
         // ---------------------------------------------------------------
         // Policy check before execution
@@ -2115,7 +2301,11 @@ impl SessionRuntime for SessionController {
                     structured_result: serde_json::Value::Null,
                     effect_patch: None,
                     success: false,
-                    failure_class: None,
+                    failure_class: Some(crate::types::common::SkillFailureClass::PolicyDenial),
+                    failure_detail: Some(crate::types::observation::FailureDetail::PolicyDenied {
+                        rule: format!("execute:{}", chosen_skill.skill_id),
+                        message: policy_result.reason.clone(),
+                    }),
                     latency_ms: 0,
                     resource_cost: crate::types::observation::default_cost_profile(),
                     confidence: 0.0,
@@ -2132,6 +2322,7 @@ impl SessionRuntime for SessionController {
                     &candidates,
                     &scores,
                     &chosen_skill.skill_id,
+                    selection_reason.clone(),
                     &empty_obs,
                     &patch,
                     0.0,
@@ -2177,6 +2368,86 @@ impl SessionRuntime for SessionController {
                     error = %e,
                     "skill lifecycle failed before execution"
                 );
+                // Build a synthetic failure observation so the brain sees a
+                // structured failure_detail in the trace instead of an
+                // opaque WaitingForInput. This is the body's way of saying
+                // "I couldn't even start the skill, here's why".
+                let detail = match &e {
+                    SomaError::PolicyDenied { action, reason } => {
+                        crate::types::observation::FailureDetail::PolicyDenied {
+                            rule: action.clone(),
+                            message: reason.clone(),
+                        }
+                    }
+                    SomaError::Skill(msg) if msg.contains("required input") => {
+                        let binding_name = msg
+                            .split('\'')
+                            .nth(1)
+                            .unwrap_or("?")
+                            .to_string();
+                        crate::types::observation::FailureDetail::BindingMissing {
+                            binding_name,
+                            message: msg.clone(),
+                        }
+                    }
+                    SomaError::Skill(msg) if msg.contains("cannot bind inputs") => {
+                        // Outer wrapper from execute_skill_lifecycle — peel
+                        // it to surface the underlying binding name when
+                        // present.
+                        let inner = msg.splitn(2, ':').nth(1).unwrap_or(msg);
+                        let binding_name = inner
+                            .split('\'')
+                            .nth(1)
+                            .unwrap_or("?")
+                            .to_string();
+                        crate::types::observation::FailureDetail::BindingMissing {
+                            binding_name,
+                            message: msg.clone(),
+                        }
+                    }
+                    _ => crate::types::observation::FailureDetail::Other {
+                        message: e.to_string(),
+                    },
+                };
+                let synthetic_obs = Observation {
+                    observation_id: Uuid::new_v4(),
+                    session_id: session.session_id,
+                    skill_id: Some(chosen_skill.skill_id.clone()),
+                    port_calls: Vec::new(),
+                    raw_result: serde_json::json!({"error": e.to_string()}),
+                    structured_result: serde_json::Value::Null,
+                    effect_patch: None,
+                    success: false,
+                    failure_class: Some(detail.class()),
+                    failure_detail: Some(detail.clone()),
+                    latency_ms: 0,
+                    resource_cost:
+                        crate::types::observation::default_cost_profile(),
+                    confidence: 0.0,
+                    timestamp: Utc::now(),
+                };
+                let patch = Self::build_belief_patch(&synthetic_obs);
+                Self::record_trace_step(
+                    session,
+                    step_index,
+                    belief_summary_before,
+                    &episodes,
+                    &schemas,
+                    &routines,
+                    &candidates,
+                    &scores,
+                    &chosen_skill.skill_id,
+                    selection_reason,
+                    &synthetic_obs,
+                    &patch,
+                    0.0,
+                    CriticDecision::Stop,
+                    policy_entries,
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    false,
+                );
                 match &e {
                     SomaError::PolicyDenied { .. } => {
                         session.status = SessionStatus::BlockedByPolicy;
@@ -2184,9 +2455,6 @@ impl SessionRuntime for SessionController {
                         return Err(e);
                     }
                     _ => {
-                        // Binding and precondition failures are recoverable —
-                        // the session waits for external input or a different
-                        // candidate rather than terminating with an error.
                         session.status = SessionStatus::WaitingForInput;
                         session.updated_at = Utc::now();
                         return Ok(StepResult::WaitingForInput(e.to_string()));
@@ -2439,6 +2707,24 @@ impl SessionRuntime for SessionController {
             self.metrics.port_call(&pc.port_id, pc.latency_ms);
         }
 
+        // Override terminal decision when post-deduction budget is exhausted.
+        let mut termination_reason = termination_reason;
+        let mut step_result = step_result;
+        if matches!(step_result, StepResult::Continue)
+            && Self::budget_exhausted(&session.budget_remaining)
+        {
+            warn!(
+                session_id = %session.session_id,
+                latency = session.budget_remaining.latency_remaining_ms,
+                resource = session.budget_remaining.resource_remaining,
+                risk = session.budget_remaining.risk_remaining,
+                steps = session.budget_remaining.steps_remaining,
+                "budget exhausted post-step; terminating"
+            );
+            step_result = StepResult::Completed;
+            termination_reason = Some(TerminationType::BudgetExhaustion);
+        }
+
         // Update session status based on step result.
         match &step_result {
             StepResult::Completed => {
@@ -2478,6 +2764,7 @@ impl SessionRuntime for SessionController {
             &candidates,
             &scores,
             &chosen_skill.skill_id,
+            selection_reason,
             &observation,
             &belief_patch,
             progress_delta,
@@ -2524,11 +2811,17 @@ impl SessionRuntime for SessionController {
     }
 
     fn resume(&mut self, session: &mut ControlSession) -> Result<()> {
-        if session.status != SessionStatus::Paused {
-            return Err(SomaError::Session(format!(
-                "cannot resume session {} in state {:?}; expected Paused",
-                session.session_id, session.status
-            )));
+        match session.status {
+            SessionStatus::Paused
+            | SessionStatus::WaitingForInput
+            | SessionStatus::WaitingForRemote => {}
+            _ => {
+                return Err(SomaError::Session(format!(
+                    "cannot resume session {} in state {:?}; expected Paused, \
+                     WaitingForInput, or WaitingForRemote",
+                    session.session_id, session.status
+                )));
+            }
         }
         session.status = SessionStatus::Running;
         session.updated_at = Utc::now();
@@ -2720,6 +3013,7 @@ impl SkillExecutor for NoopSkillExecutor {
             effect_patch: None,
             success: true,
             failure_class: None,
+            failure_detail: None,
             latency_ms: 1,
             resource_cost: crate::types::observation::default_cost_profile(),
             confidence: 1.0,
@@ -2855,6 +3149,8 @@ mod tests {
             deadline: None,
             permissions_scope: Vec::new(),
             priority: Priority::Normal,
+            max_steps: None,
+            exploration: crate::types::goal::ExplorationStrategy::Greedy,
         }
     }
 
@@ -3059,6 +3355,26 @@ mod tests {
     }
 
     #[test]
+    fn test_goal_max_steps_override_honored() {
+        let skill = test_skill("test:echo");
+        let mut ctrl = make_controller_with_skills(vec![skill]);
+        let mut goal = test_goal();
+        goal.max_steps = Some(7);
+        let session = ctrl.create_session(goal).unwrap();
+        assert_eq!(session.budget_remaining.steps_remaining, 7);
+    }
+
+    #[test]
+    fn test_goal_max_steps_none_uses_default() {
+        let skill = test_skill("test:echo");
+        let mut ctrl = make_controller_with_skills(vec![skill]);
+        let mut goal = test_goal();
+        goal.max_steps = None;
+        let session = ctrl.create_session(goal).unwrap();
+        assert_eq!(session.budget_remaining.steps_remaining, 100);
+    }
+
+    #[test]
     fn test_pause_resume() {
         let skill = test_skill("test:echo");
         let mut ctrl = make_controller_with_skills(vec![skill]);
@@ -3148,6 +3464,155 @@ mod tests {
 
         assert_eq!(session.budget_remaining.steps_remaining, 95);
         assert_eq!(session.working_memory.recent_observations.len(), 5);
+    }
+
+    #[test]
+    fn test_budget_exhaustion_terminates_post_step() {
+        let skill = test_skill("test:echo");
+        let mut ctrl = make_controller_with_skills(vec![skill]);
+        let goal = test_goal();
+        let mut session = ctrl.create_session(goal).unwrap();
+
+        session.budget_remaining.latency_remaining_ms = 0;
+        let result = ctrl.run_step(&mut session);
+        assert!(matches!(result, Err(SomaError::BudgetExhausted(_))));
+        assert_eq!(session.status, SessionStatus::Failed);
+    }
+
+    #[test]
+    fn test_inject_resume_payload_adds_bindings() {
+        let mut ctrl = make_stub_controller();
+        let goal = test_goal();
+        let mut session = ctrl.create_session(goal).unwrap();
+        let payload = serde_json::json!({"approval_token": "abc", "value": 42});
+        let n = SessionController::inject_resume_payload(&mut session, &payload).unwrap();
+        assert_eq!(n, 2);
+        assert!(
+            session
+                .belief
+                .active_bindings
+                .iter()
+                .any(|b| b.name == "approval_token"
+                    && b.value == serde_json::json!("abc"))
+        );
+        assert!(
+            session
+                .belief
+                .active_bindings
+                .iter()
+                .any(|b| b.name == "value" && b.value == serde_json::json!(42))
+        );
+    }
+
+    #[test]
+    fn test_inject_resume_payload_overwrites_existing() {
+        let mut ctrl = make_stub_controller();
+        let goal = test_goal();
+        let mut session = ctrl.create_session(goal).unwrap();
+        session
+            .belief
+            .active_bindings
+            .push(crate::types::belief::Binding {
+                name: "k".to_string(),
+                value: serde_json::json!("old"),
+                source: "test".to_string(),
+                confidence: 1.0,
+            });
+        SessionController::inject_resume_payload(
+            &mut session,
+            &serde_json::json!({"k": "new"}),
+        )
+        .unwrap();
+        let count = session
+            .belief
+            .active_bindings
+            .iter()
+            .filter(|b| b.name == "k")
+            .count();
+        assert_eq!(count, 1);
+        assert_eq!(
+            session
+                .belief
+                .active_bindings
+                .iter()
+                .find(|b| b.name == "k")
+                .unwrap()
+                .value,
+            serde_json::json!("new")
+        );
+    }
+
+    #[test]
+    fn test_resume_from_waiting_for_input() {
+        let mut ctrl = make_stub_controller();
+        let goal = test_goal();
+        let mut session = ctrl.create_session(goal).unwrap();
+        session.status = SessionStatus::WaitingForInput;
+        ctrl.resume(&mut session).unwrap();
+        assert_eq!(session.status, SessionStatus::Running);
+    }
+
+    #[test]
+    fn test_epsilon_greedy_exploration_marks_step() {
+        let skills = vec![
+            test_skill("test:a"),
+            test_skill("test:b"),
+            test_skill("test:c"),
+        ];
+        let mut ctrl = make_controller_with_skills(skills);
+        let mut goal = test_goal();
+        // ε=1.0 forces every selection to be exploratory.
+        goal.exploration = crate::types::goal::ExplorationStrategy::EpsilonGreedy {
+            epsilon: 1.0,
+        };
+        let mut session = ctrl.create_session(goal).unwrap();
+        let _ = ctrl.run_step(&mut session).unwrap();
+        let last = session.trace.steps.last().unwrap();
+        assert_eq!(
+            last.selection_reason,
+            crate::types::session::SelectionReason::Exploration,
+            "ε=1.0 must always trigger exploration, got {:?}",
+            last.selection_reason
+        );
+    }
+
+    #[test]
+    fn test_greedy_default_does_not_explore() {
+        let skills = vec![test_skill("test:a"), test_skill("test:b")];
+        let mut ctrl = make_controller_with_skills(skills);
+        let goal = test_goal();
+        let mut session = ctrl.create_session(goal).unwrap();
+        let _ = ctrl.run_step(&mut session).unwrap();
+        let last = session.trace.steps.last().unwrap();
+        assert_ne!(
+            last.selection_reason,
+            crate::types::session::SelectionReason::Exploration,
+        );
+    }
+
+    #[test]
+    fn test_steps_budget_exhaustion_post_deduction() {
+        let skill = test_skill("test:echo");
+        let mut ctrl = make_controller_with_skills(vec![skill]);
+        let goal = test_goal();
+        let mut session = ctrl.create_session(goal).unwrap();
+
+        // One step left: after deduction it hits zero and the run loop should
+        // terminate via the post-step budget check rather than waiting until
+        // the next iteration's pre-step guard.
+        session.budget_remaining.steps_remaining = 1;
+        let result = ctrl.run_step(&mut session).unwrap();
+        assert!(
+            matches!(result, StepResult::Completed),
+            "exhausted steps budget should terminate after deduction, got {:?}",
+            result
+        );
+        assert_eq!(session.status, SessionStatus::Completed);
+        let last = session.trace.steps.last().expect("trace step recorded");
+        assert_eq!(
+            last.termination_reason,
+            Some(TerminationType::BudgetExhaustion)
+        );
     }
 
     #[test]
@@ -3341,6 +3806,7 @@ mod tests {
                     effect_patch: None,
                     success: true,
                     failure_class: None,
+                    failure_detail: None,
                     latency_ms: 1,
                     resource_cost: crate::types::observation::default_cost_profile(),
                     confidence: 1.0,
@@ -3380,8 +3846,12 @@ mod tests {
         let result = ctrl.run_step(&mut session).unwrap();
         assert!(matches!(result, StepResult::WaitingForInput(_)));
         assert_eq!(session.status, SessionStatus::WaitingForInput);
-        // No trace step should have been recorded because we returned early.
-        assert!(session.trace.steps.is_empty());
+        // A synthetic trace step is now recorded so the brain sees the
+        // structured failure_detail, not just an opaque WaitingForInput.
+        assert_eq!(session.trace.steps.len(), 1);
+        let step = &session.trace.steps[0];
+        assert!(!step.port_calls.iter().any(|p| p.success));
+        assert!(step.failure_detail.is_some());
     }
 
     // When a skill fails and has a compensation_skill set with non-Irreversible support,
@@ -3431,6 +3901,7 @@ mod tests {
                     effect_patch: None,
                     success: false,
                     failure_class: Some(crate::types::common::SkillFailureClass::Unknown),
+                    failure_detail: None,
                     latency_ms: 1,
                     resource_cost: crate::types::observation::default_cost_profile(),
                     confidence: 0.0,
@@ -3455,6 +3926,7 @@ mod tests {
                     effect_patch: None,
                     success: true,
                     failure_class: None,
+                    failure_detail: None,
                     latency_ms: 1,
                     resource_cost: crate::types::observation::default_cost_profile(),
                     confidence: 1.0,
@@ -3616,6 +4088,7 @@ mod tests {
                     effect_patch: None,
                     success: true,
                     failure_class: None,
+                    failure_detail: None,
                     latency_ms: 1,
                     resource_cost: crate::types::observation::default_cost_profile(),
                     confidence: 1.0,
@@ -4077,6 +4550,7 @@ mod tests {
             effect_patch: None,
             success: true,
             failure_class: None,
+            failure_detail: None,
             latency_ms: 1,
             resource_cost: crate::types::observation::default_cost_profile(),
             confidence: 0.9,

@@ -117,7 +117,16 @@ class SomaAPI {
    */
   static extractRows(response) {
     try {
-      const record = response?.result;
+      let record = response?.result;
+
+      // MCP wraps tool results in { content: [{ type: "text", text: "..." }] }
+      if (record?.content && Array.isArray(record.content)) {
+        const text = record.content.find(c => c.type === 'text')?.text;
+        if (text) {
+          try { record = JSON.parse(text); } catch (_) { return null; }
+        }
+      }
+
       if (!record || !record.success) return null;
 
       const sr = record.structured_result;

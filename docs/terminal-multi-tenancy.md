@@ -11,7 +11,7 @@ wrapper code per port" question.
 
 SOMA's core promise is: **the runtime IS the program**. The LLM
 picks a port from a catalog, calls it, SOMA executes it. HelperBook
-proves this end-to-end: three ports, 32 capabilities, zero wrapper
+proves this end-to-end: multiple ports, many capabilities, zero wrapper
 code in the application layer.
 
 `soma-project-terminal` breaks that promise today. The app has a
@@ -389,24 +389,9 @@ above is robust to a 3x error but not to a 30x one.
 
 ---
 
-## Current state (2026-04-12)
-
-- One shared `SomaMcpClient` handles all operators.
-- `BRIDGE_PORTS = { context_kv }` — handwritten wrapper, one port.
-- Chat and pack brains know about this and honestly flag other
-  stateful ports (postgres, smtp, http, filesystem) as
-  "future work via backend-port bridge".
-- `context_kv.set/get/delete/list` is sufficient to build
-  persistent todos, notes, timers, counters, drafts, key/value
-  caches — anything that fits a namespaced KV model.
-- **The terminal is usable for a single operator** and does NOT
-  meaningfully break multi-tenancy on the current wrapper path
-  because operator context-scoping is enforced by a
-  `contexts.user_id` join on every call. Cross-tenant leaks
-  are defended at the wrapper level today. The criticism is
-  architectural, not security: the wrapper approach scales
-  poorly as new ports are added.
-
 This doc captures the target state so the next iteration can
 open with a clear picture instead of re-deriving the tradeoff
-table from scratch.
+table from scratch. For the current implementation state of
+the terminal, read the code in `soma-project-terminal/` — the
+wrapper table, bridge route, and `BROWSER_PORTS` catalog make
+the shortcomings concrete and will evolve as the design lands.

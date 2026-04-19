@@ -226,6 +226,7 @@ pub fn start_heartbeat_task(
                         confidence: 1.0,
                         provenance: crate::types::common::FactProvenance::Inferred,
                         timestamp: chrono::Utc::now(),
+                                            ttl_ms: None,
                     };
                     let _ = store.add_fact(fact);
                     info!(peer_id = %peer_id, "emitted peer offline fact to world state");
@@ -276,6 +277,7 @@ pub fn start_heartbeat_thread(
                             confidence: 1.0,
                             provenance: crate::types::common::FactProvenance::Inferred,
                             timestamp: chrono::Utc::now(),
+                                                    ttl_ms: None,
                         };
                         let _ = store.add_fact(fact);
                         info!(peer_id = %peer_id, "emitted peer offline fact to world state");

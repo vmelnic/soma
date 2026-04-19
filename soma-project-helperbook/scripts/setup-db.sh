@@ -10,8 +10,8 @@ cd "$PROJECT_DIR"
 docker compose up -d --wait postgres
 
 echo "Applying schema..."
-PGPASSWORD=soma psql -h localhost -U soma -d helperbook -f "$PROJECT_DIR/schema.sql"
+cat "$PROJECT_DIR/schema.sql" | docker exec -i soma-project-helperbook-postgres-1 psql -U soma -d helperbook
 
 echo "Schema applied successfully."
 echo "Tables created:"
-PGPASSWORD=soma psql -h localhost -U soma -d helperbook -c "\dt" 2>/dev/null | grep -c "public" || echo "(check manually)"
+docker exec soma-project-helperbook-postgres-1 psql -U soma -d helperbook -c "\dt" 2>/dev/null | grep -c "public" || echo "(check manually)"

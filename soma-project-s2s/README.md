@@ -14,8 +14,8 @@ SOMA-to-SOMA communication proof. Two SOMA instances cooperate over TCP using th
 
 - SOMA binary built: `cd ../soma-next && cargo build --release`
 - Postgres port built: `cd ../soma-ports && cargo build --release`
-- HelperBook database running (for Level 2 postgres tests): `cd ../soma-helperbook && docker compose up -d postgres`
-- Database seeded: `cd ../soma-helperbook && scripts/setup-db.sh && scripts/seed-db.sh`
+- HelperBook database running (for Level 2 postgres tests): `cd ../soma-project-helperbook && docker compose up -d postgres`
+- Database seeded: `cd ../soma-project-helperbook && scripts/setup-db.sh && scripts/seed-db.sh`
 
 ## Setup
 

@@ -1,4 +1,4 @@
-name: soma-helperbook
+name: soma-project-helperbook
 
 services:
   postgres:

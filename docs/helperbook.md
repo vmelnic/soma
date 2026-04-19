@@ -28,18 +28,18 @@ Both PostgreSQL and Redis have health checks configured (5s interval, 5 retries)
 
 Three ports loaded via pack manifests:
 
-**postgres** (9 capabilities) -- all data persistence:
+**postgres** -- all data persistence:
 `query`, `execute`, `find`, `find_many`, `count`, `aggregate`, `insert`, `update`, `delete`
 
-**redis** (13 capabilities) -- caching and pub/sub:
+**redis** -- caching and pub/sub:
 `get`, `set`, `del`, `hget`, `hset`, `publish`, `subscribe`, `keys`, `lists`, and more
 
-**auth** (10 capabilities) -- OTP verification and session management:
+**auth** -- OTP verification and session management:
 `otp_generate`, `otp_verify`, `session_create`, `session_validate`, `token_generate`, and more
 
 ## Data Model
 
-19 tables, grouped by domain:
+Tables grouped by domain:
 
 **Identity** -- users, connections, blocked_users
 
@@ -60,7 +60,7 @@ Key design points:
 - Appointments track lifecycle: `pending`, `confirmed`, `completed`, `cancelled`, `no_show`
 - Reviews are linked to completed appointments with 1-5 ratings
 
-**Seed data** (`seed.sql`): 13 users (1 client + 12 providers across Bucharest), 6 provider profiles, 6 connections, 4 chats, 19 messages, 7 appointments, 4 reviews.
+**Seed data** (`seed.sql`): a small set of users (one client and a handful of providers across Bucharest), provider profiles, connections, chats, messages, appointments, and reviews — enough to exercise every flow without hand-crafting fixtures.
 
 ## Frontend
 
@@ -93,7 +93,7 @@ The Express server (`server.js`) spawns SOMA with three pack manifests and bridg
 # Start services
 docker compose up -d --wait
 
-# Apply schema (19 tables)
+# Apply schema
 scripts/setup-db.sh
 
 # Seed test data
@@ -132,23 +132,23 @@ SOMA_PORTS_REQUIRE_SIGNATURES=false
 
 ## Capabilities Checklist
 
-Two automated test suites verify the full runtime stack against a running HelperBook instance:
+Two automated harnesses verify the full runtime stack against a running HelperBook instance:
 
-**`capabilities-checklist/run.mjs`** -- 44 tests across 7 runtime layers:
+**`capabilities-checklist/run.mjs`** -- exercises the full runtime surface across seven layers:
 
 1. **Port Invocation** -- postgres query/insert/update/delete, redis get/set, auth OTP/session/token flows, error handling for missing ports and bad capabilities
-2. **State & Context** -- dump_state sections (ports, skills, packs, metrics, sessions, episodes, schemas, routines, belief), selective section queries
+2. **State & Context** -- `dump_state` sections (ports, skills, packs, metrics, sessions, episodes, schemas, routines, belief), selective section queries
 3. **Goal & Session Lifecycle** -- goal creation, session management, execution tracing, pause/resume
-4. **Memory Persistence** -- episodes, schemas, routines survive within a process, session counter increments
+4. **Memory Persistence** -- episodes, schemas, and routines survive within a process; session counter increments
 5. **Policy & Safety** -- SQL injection prevention, cross-tenant isolation, input sanitization
 6. **Proprioception** -- self-reporting, metrics counters, resource tracking
 7. **Observation & Tracing** -- execution traces, structured logging
 
 Run: `node capabilities-checklist/run.mjs`
 
-**`capabilities-checklist/persistence.mjs`** -- 3-phase memory persistence test:
+**`capabilities-checklist/persistence.mjs`** -- memory-persistence check:
 
-Spawns three separate SOMA processes sequentially, verifying that disk-backed stores (episodes, schemas, routines) survive process restarts while sessions correctly reset as ephemeral state. Also verifies external service persistence (Redis markers, Postgres data) across process lifetimes.
+Spawns separate SOMA processes sequentially, verifying that disk-backed stores (episodes, schemas, routines) survive process restarts while sessions correctly reset as ephemeral state. Also verifies external service persistence (Redis markers, Postgres data) across process lifetimes.
 
 Run: `node capabilities-checklist/persistence.mjs`
 

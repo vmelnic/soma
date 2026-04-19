@@ -72,17 +72,19 @@ Disk persistence uses JSON files in a configurable `data_dir`. Each `Disk*Store`
 | `dump` | Structured JSON dump for LLM context (sections: full, belief, episodes, schemas, routines, sessions, skills, ports, packs, metrics) |
 | `repl` | Interactive mode |
 
-**MCP Server** (29 tools, JSON-RPC 2.0):
+**MCP Server** (JSON-RPC 2.0). Tools are grouped by concern; for the
+authoritative current list, call `tools/list` or read `build_tools()` in
+`src/interfaces/mcp.rs`.
 
-*16 core*: `create_goal`, `inspect_session`, `inspect_belief`, `inspect_resources`, `inspect_packs`, `inspect_skills`, `inspect_trace`, `pause_session`, `resume_session`, `abort_session`, `list_sessions`, `query_metrics`, `query_policy`, `dump_state`, `invoke_port`, `list_ports`.
+*Core*: `create_goal`, `inspect_session`, `inspect_belief`, `inspect_resources`, `inspect_packs`, `inspect_skills`, `inspect_trace`, `pause_session`, `resume_session`, `abort_session`, `list_sessions`, `query_metrics`, `query_policy`, `dump_state`, `invoke_port`, `list_ports`.
 
-*4 distributed*: `list_peers`, `invoke_remote_skill`, `transfer_routine`, `replicate_routine`.
+*Distributed*: `list_peers`, `invoke_remote_skill`, `transfer_routine`, `replicate_routine`.
 
-*3 scheduler*: `schedule`, `list_schedules`, `cancel_schedule`.
+*Scheduler*: `schedule`, `list_schedules`, `cancel_schedule`.
 
-*3 world state*: `patch_world_state`, `dump_world_state`, `set_routine_autonomous`.
+*World state*: `patch_world_state`, `dump_world_state`, `set_routine_autonomous`.
 
-*3 execution*: `trigger_consolidation`, `execute_routine`, `author_routine`.
+*Execution*: `trigger_consolidation`, `execute_routine`, `author_routine`.
 
 Also supports the MCP protocol methods `initialize`, `tools/list`, and `tools/call`.
 

@@ -11,6 +11,8 @@ pub mod remote;
 #[cfg(feature = "dylib-ports")]
 pub mod port_verify;
 pub mod session;
+pub mod goal_executor;
+pub mod goal_registry;
 pub mod selector;
 pub mod predictor;
 pub mod critic;

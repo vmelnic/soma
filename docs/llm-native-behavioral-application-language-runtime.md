@@ -160,7 +160,7 @@ A system becomes LLM-native when its primary authoring surface is well matched t
 
 - The LLM **programs itself out of the critical path**. This is the deepest form of LLM-awareness: the system knows that LLM reasoning is expensive and unreliable at scale, so it compiles LLM-derived behavior into deterministic routines that bypass the LLM entirely.
 - The runtime is **fully self-describing**. `list_ports` reveals capabilities, `dump_state` reveals context, `dump_world_state` reveals current facts. The LLM builds its mental model from the runtime itself, not from external documentation that may be stale.
-- **29 MCP tools** form the instruction set the LLM executes against. The LLM doesn't write code — it calls tools. The tools are typed, self-documenting, and grounded in real execution results.
+- **MCP tools** form the instruction set the LLM executes against. The LLM doesn't write code — it calls tools. The tools are typed, self-documenting, and grounded in real execution results.
 - **Observation-grounded execution** prevents hallucination at the action layer. Every port call produces a typed `PortCallRecord`. The LLM can still hallucinate when reasoning, but the body's actions are always real.
 - **`author_routine`** lets the LLM directly translate intent into compiled behavior — the LLM is not just using the system, it is programming it.
 
@@ -187,7 +187,7 @@ The runtime is where:
 
 - events are received (webhook listener, scheduler, world state patches)
 - state is updated (belief state, world state facts, episode store)
-- skills are invoked (port dispatch via 22 dynamically loaded adapters, 140+ capabilities)
+- skills are invoked (port dispatch via dynamically loaded adapters)
 - policies are enforced (7 lifecycle hooks, per-routine policy scope)
 - routines are placed (load-aware `RoutineRouter` with 3 strategies)
 - priorities are resolved (`find_matching` sorts by priority DESC, `exclusive` blocks lower-priority matches)
@@ -377,7 +377,7 @@ The effective application program is the combination of:
 - routines (with composition, branching, priority, policy scope)
 - goals
 - belief/state model (world state facts, session beliefs)
-- ports (22 dynamically loaded adapters, 140+ capabilities)
+- ports (dynamically loaded adapters)
 - schemas (PrefixSpan-induced patterns)
 - skills (declared in pack manifests)
 - policies (lifecycle hooks, per-routine scope)
@@ -477,11 +477,10 @@ The claim succeeds if complex applications can be:
 
 **Current evidence**:
 
-- soma-helperbook: service marketplace (3 ports, 32 capabilities) operates entirely through `invoke_port` calls
+- soma-helperbook: service marketplace operating entirely through `invoke_port` calls
 - soma-project-terminal: multi-user platform where operators teach the system through conversation, routines compile from episodes, reactive monitor fires them autonomously on webhooks
 - soma-project-esp32: embedded leaf firmware driven entirely by brain-side routine composition
 - End-to-end proven: sub-routine composition (parent calls sub-routine, both execute, stack pops correctly), goto branching (step skipped via `on_success: Goto`), combined composition + branching (sub-routine with internal branching inside a parent routine)
-- 1261 tests verify the runtime substrate across all layers
 
 
 ## 17. Final Position

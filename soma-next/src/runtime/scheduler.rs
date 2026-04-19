@@ -22,6 +22,22 @@ pub struct ScheduleAction {
     pub input: serde_json::Value,
 }
 
+/// Alternative fire target: launch an async goal. Used for recurring
+/// autonomous runs ("nightly_backup", "hourly_health_check") driven by
+/// `interval_ms` or `cron_expr`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScheduleGoalAction {
+    pub objective: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_steps: Option<u32>,
+}
+
+/// Launcher closure shape used by the scheduler thread to spawn async
+/// goals when a `ScheduleGoalAction` fires. Same signature as the
+/// webhook launcher.
+pub type SchedulerGoalLauncher =
+    Arc<dyn Fn(String, Option<u32>) -> Result<Uuid> + Send + Sync>;
+
 /// A scheduled task. Either interval-based (recurring) or one-shot.
 /// `cron_expr` is accepted and stored but not evaluated yet — cron parsing
 /// is deferred to a future iteration.
@@ -46,6 +62,11 @@ pub struct Schedule {
     /// Port invocation to fire. None for message-only schedules.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<ScheduleAction>,
+    /// Goal to launch when this schedule fires. Alternative to `action`
+    /// and `message` — exactly one should be set. Requires a launcher
+    /// plumbed into the scheduler thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_trigger: Option<ScheduleGoalAction>,
     /// Plain message to emit (no port call). Shown directly in the
     /// operator's chat via SSE.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -142,6 +163,25 @@ pub fn now_epoch_ms() -> u64 {
         .as_millis() as u64
 }
 
+/// Parse a cron expression (the `cron` crate's 6- or 7-field form, with
+/// seconds) and return the next fire time after `after_epoch_ms`, or
+/// `None` if parsing fails or there is no next occurrence (e.g. a schedule
+/// with no valid future match).
+pub fn next_fire_from_cron(expr: &str, after_epoch_ms: u64) -> Option<u64> {
+    use std::str::FromStr;
+    let schedule = cron::Schedule::from_str(expr).ok()?;
+    let after = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(
+        after_epoch_ms as i64,
+    )?;
+    let next = schedule.after(&after).next()?;
+    let ms = next.timestamp_millis();
+    if ms < 0 {
+        None
+    } else {
+        Some(ms as u64)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Background scheduler thread
 // ---------------------------------------------------------------------------
@@ -155,6 +195,17 @@ pub fn start_scheduler_thread(
     schedule_store: Arc<Mutex<dyn ScheduleStore + Send>>,
     port_runtime: Arc<Mutex<DefaultPortRuntime>>,
     world_state: Option<Arc<Mutex<dyn crate::runtime::world_state::WorldStateStore + Send>>>,
+) -> JoinHandle<()> {
+    start_scheduler_thread_with_launcher(schedule_store, port_runtime, world_state, None)
+}
+
+/// Same as `start_scheduler_thread` but accepts a goal launcher so
+/// schedules with `goal_trigger` set can fire async goals.
+pub fn start_scheduler_thread_with_launcher(
+    schedule_store: Arc<Mutex<dyn ScheduleStore + Send>>,
+    port_runtime: Arc<Mutex<DefaultPortRuntime>>,
+    world_state: Option<Arc<Mutex<dyn crate::runtime::world_state::WorldStateStore + Send>>>,
+    goal_launcher: Option<SchedulerGoalLauncher>,
 ) -> JoinHandle<()> {
     thread::Builder::new()
         .name("soma-scheduler".to_string())
@@ -221,9 +272,35 @@ pub fn start_scheduler_thread(
                                 confidence: 1.0,
                                 provenance: crate::types::common::FactProvenance::Observed,
                                 timestamp: chrono::Utc::now(),
+                                                            ttl_ms: None,
                             };
                             let _ = ws.add_fact(fact);
                         }
+                    } else if let Some(ref goal) = schedule.goal_trigger {
+                        // Goal-trigger mode — spawn an async goal via the
+                        // injected launcher.
+                        let (success, detail) = match &goal_launcher {
+                            Some(launch) => match launch(goal.objective.clone(), goal.max_steps) {
+                                Ok(goal_id) => (true, format!("\"{}\"", goal_id)),
+                                Err(e) => (
+                                    false,
+                                    format!("\"{}\"", e.to_string().replace('"', "\\\"")),
+                                ),
+                            },
+                            None => (
+                                false,
+                                "\"no goal launcher configured\"".to_string(),
+                            ),
+                        };
+                        eprintln!(
+                            "{{\"_scheduler_event\":true,\"id\":\"{}\",\"label\":\"{}\",\"goal_objective\":\"{}\",\"success\":{},\"detail\":{},\"brain\":{}}}",
+                            schedule.id,
+                            schedule.label.replace('"', "\\\""),
+                            goal.objective.replace('"', "\\\""),
+                            success,
+                            detail,
+                            schedule.brain,
+                        );
                     } else if let Some(ref message) = schedule.message {
                         // Message-only mode — emit directly, no port call.
                         let escaped = message.replace('"', "\\\"");
@@ -251,10 +328,20 @@ pub fn start_scheduler_thread(
                     if let Some(interval) = schedule.interval_ms {
                         let next = now + interval;
                         let _ = store.update_next_fire(&schedule.id, next);
-                    } else if schedule.cron_expr.is_some() {
-                        // Cron parsing is deferred. Disable so it doesn't
-                        // fire every tick.
-                        let _ = store.remove(&schedule.id);
+                    } else if let Some(ref cron_expr) = schedule.cron_expr {
+                        match next_fire_from_cron(cron_expr, now) {
+                            Some(next) => {
+                                let _ = store.update_next_fire(&schedule.id, next);
+                            }
+                            None => {
+                                tracing::warn!(
+                                    schedule_id = %schedule.id,
+                                    cron_expr = %cron_expr,
+                                    "could not compute next cron fire time, removing schedule"
+                                );
+                                let _ = store.remove(&schedule.id);
+                            }
+                        }
                     } else {
                         // One-shot: already fired, remove it.
                         let _ = store.remove(&schedule.id);
@@ -274,6 +361,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_next_fire_from_cron_basic() {
+        // "At second 0 of every minute". From any epoch, next fire is
+        // strictly > now.
+        let now = 1_700_000_000_000u64;
+        let next = next_fire_from_cron("0 * * * * *", now).expect("cron should parse");
+        assert!(next > now);
+    }
+
+    #[test]
+    fn test_next_fire_from_cron_invalid_returns_none() {
+        assert!(next_fire_from_cron("not a cron", 0).is_none());
+    }
+
+    #[test]
     fn test_default_store_add_and_list() {
         let mut store = DefaultScheduleStore::new();
         assert!(store.list_all().is_empty());
@@ -289,6 +390,7 @@ mod tests {
                 capability_id: "get".to_string(),
                 input: serde_json::json!({"url": "http://localhost/health"}),
             }),
+            goal_trigger: None,
             message: None,
             max_fires: None,
             fire_count: 0,
@@ -319,6 +421,7 @@ mod tests {
                 capability_id: "c".to_string(),
                 input: serde_json::json!({}),
             }),
+            goal_trigger: None,
             message: None,
             max_fires: None,
             fire_count: 0,
@@ -339,6 +442,7 @@ mod tests {
                 capability_id: "c".to_string(),
                 input: serde_json::json!({}),
             }),
+            goal_trigger: None,
             message: None,
             max_fires: None,
             fire_count: 0,
@@ -359,6 +463,7 @@ mod tests {
                 capability_id: "c".to_string(),
                 input: serde_json::json!({}),
             }),
+            goal_trigger: None,
             message: None,
             max_fires: None,
             fire_count: 0,
@@ -393,6 +498,7 @@ mod tests {
                 capability_id: "c".to_string(),
                 input: serde_json::json!({}),
             }),
+            goal_trigger: None,
             message: None,
             max_fires: None,
             fire_count: 0,

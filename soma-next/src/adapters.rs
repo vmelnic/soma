@@ -27,7 +27,9 @@ use crate::types::common::{
 };
 use crate::types::episode::Episode;
 use crate::types::goal::GoalSpec;
-use crate::types::observation::{Observation, PortCallRecord, default_cost_profile};
+use crate::types::observation::{Observation, PortCallRecord};
+#[cfg(test)]
+use crate::types::observation::default_cost_profile;
 use crate::types::policy::PolicyTargetType;
 use crate::types::port::InvocationContext;
 use crate::types::routine::Routine;
@@ -492,10 +494,23 @@ impl SkillExecutor for PortBackedSkillExecutor {
         bindings: &[WorkingBinding],
         session_id: Uuid,
     ) -> Result<Observation> {
+        self.execute_with_deadline(skill, bindings, session_id, None)
+    }
+
+    fn execute_with_deadline(
+        &self,
+        skill: &SkillSpec,
+        bindings: &[WorkingBinding],
+        session_id: Uuid,
+        deadline_ms: Option<u64>,
+    ) -> Result<Observation> {
         let (port_id, capability_id) = Self::resolve_port_capability(skill)?;
         let port_input = Self::build_port_input(skill, bindings);
 
-        let ctx = InvocationContext::for_session(session_id, None, None);
+        let mut ctx = InvocationContext::for_session(session_id, None, None);
+        if let Some(d) = deadline_ms {
+            ctx = ctx.with_deadline(d);
+        }
 
         let record = {
             let rt = self.port_runtime.lock().map_err(|e| {
@@ -524,6 +539,25 @@ fn port_call_to_observation(
     session_id: Uuid,
     skill_id: &str,
 ) -> Observation {
+    let failure_detail = if record.success {
+        None
+    } else {
+        let port_class = record
+            .failure_class
+            .unwrap_or(crate::types::common::PortFailureClass::Unknown);
+        let message = record
+            .raw_result
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("port call failed")
+            .to_string();
+        Some(crate::types::observation::FailureDetail::PortFailure {
+            port_id: record.port_id.clone(),
+            capability_id: record.capability_id.clone(),
+            port_class,
+            message,
+        })
+    };
     Observation {
         observation_id: Uuid::new_v4(),
         session_id,
@@ -538,8 +572,9 @@ fn port_call_to_observation(
         } else {
             Some(crate::types::common::SkillFailureClass::PortFailure)
         },
+        failure_detail,
         latency_ms: record.latency_ms,
-        resource_cost: default_cost_profile(),
+        resource_cost: crate::types::observation::cost_from_port_record(&record),
         confidence: record.confidence,
         timestamp: Utc::now(),
     }
@@ -706,6 +741,69 @@ impl SimpleSessionCritic {
 
     /// Max consecutive identical errors before aborting.
     const DEAD_END_THRESHOLD: usize = 3;
+
+    /// Evaluate goal.success_conditions against the latest observation and
+    /// belief state. Returns true when every recognized predicate matches.
+    /// Unrecognized predicates are treated as already-satisfied so the
+    /// critic stays compatible with goals that store free-form expressions.
+    ///
+    /// Recognized predicate shapes (`expression` JSON):
+    /// - `{"min_steps": N}` — at least N successful steps must have completed.
+    /// - `{"observation_field": "k", "equals": v}` — last observation's
+    ///   `structured_result.k` must equal `v`.
+    /// - `{"belief_fact": "name"}` — belief.facts must contain a fact with
+    ///   the given fact_type or content key.
+    /// - `{"status": "done"}` — legacy single-step terminator (always true).
+    fn success_predicates_satisfied(
+        goal: &GoalSpec,
+        belief: &BeliefState,
+        observation: &Observation,
+        step_index: u32,
+    ) -> bool {
+        if goal.success_conditions.is_empty() {
+            return true;
+        }
+        let completed_steps = step_index + 1;
+        for cond in &goal.success_conditions {
+            if !Self::predicate_matches(&cond.expression, belief, observation, completed_steps) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn predicate_matches(
+        expr: &serde_json::Value,
+        belief: &BeliefState,
+        observation: &Observation,
+        completed_steps: u32,
+    ) -> bool {
+        let obj = match expr.as_object() {
+            Some(o) => o,
+            None => return true,
+        };
+        if let Some(min) = obj.get("min_steps").and_then(|v| v.as_u64()) {
+            return completed_steps as u64 >= min;
+        }
+        if let Some(field) = obj.get("observation_field").and_then(|v| v.as_str()) {
+            let expected = obj.get("equals");
+            let actual = observation.structured_result.get(field);
+            return match (expected, actual) {
+                (Some(e), Some(a)) => e == a,
+                (None, Some(_)) => true,
+                _ => false,
+            };
+        }
+        if let Some(name) = obj.get("belief_fact").and_then(|v| v.as_str()) {
+            return belief
+                .facts
+                .iter()
+                .any(|f| f.predicate == name || f.subject == name);
+        }
+        // Unknown predicate shape — assume satisfied so legacy goals still
+        // terminate after a single successful step.
+        true
+    }
 }
 
 impl Default for SimpleSessionCritic {
@@ -717,16 +815,23 @@ impl Default for SimpleSessionCritic {
 impl Critic for SimpleSessionCritic {
     fn evaluate(
         &self,
-        _goal: &GoalSpec,
-        _belief: &BeliefState,
+        goal: &GoalSpec,
+        belief: &BeliefState,
         observation: &Observation,
-        _budget: &Budget,
-        _step_index: u32,
+        budget: &Budget,
+        step_index: u32,
     ) -> CriticDecision {
         if observation.success {
             // Clear error history on success.
             if let Ok(mut errors) = self.recent_errors.lock() {
                 errors.clear();
+            }
+            // If the goal carries a structured success predicate, keep going
+            // until it's satisfied. Otherwise default to single-step Stop.
+            if !Self::success_predicates_satisfied(goal, belief, observation, step_index)
+                && budget.steps_remaining > 0
+            {
+                return CriticDecision::Continue;
             }
             return CriticDecision::Stop;
         }
@@ -1168,6 +1273,53 @@ mod tests {
     }
 
     #[test]
+    fn simple_belief_source_extracts_structured_bindings() {
+        let src = SimpleBeliefSource::new();
+        let mut goal = test_goal();
+        goal.objective.structured = Some(serde_json::json!({
+            "table": "users",
+            "limit": 10
+        }));
+        let belief = src.build_initial_belief(&goal).unwrap();
+        let table = belief
+            .active_bindings
+            .iter()
+            .find(|b| b.name == "table")
+            .expect("table binding present");
+        assert_eq!(table.value, serde_json::json!("users"));
+        assert!(belief.active_bindings.iter().any(|b| b.name == "limit"));
+    }
+
+    #[test]
+    fn simple_belief_source_extracts_path_from_description() {
+        let src = SimpleBeliefSource::new();
+        let mut goal = test_goal();
+        goal.objective.description = "list files in /tmp/data".to_string();
+        let belief = src.build_initial_belief(&goal).unwrap();
+        let path = belief
+            .active_bindings
+            .iter()
+            .find(|b| b.name == "path")
+            .expect("path binding present");
+        assert_eq!(path.value, serde_json::json!("/tmp/data"));
+    }
+
+    #[test]
+    fn simple_belief_source_structured_overrides_path_extraction() {
+        let src = SimpleBeliefSource::new();
+        let mut goal = test_goal();
+        goal.objective.description = "list files in /tmp/data".to_string();
+        goal.objective.structured = Some(serde_json::json!({"path": "/explicit"}));
+        let belief = src.build_initial_belief(&goal).unwrap();
+        let path = belief
+            .active_bindings
+            .iter()
+            .find(|b| b.name == "path")
+            .expect("path binding present");
+        assert_eq!(path.value, serde_json::json!("/explicit"));
+    }
+
+    #[test]
     fn empty_episode_memory_returns_empty() {
         let mem = EmptyEpisodeMemory;
         let goal = test_goal();
@@ -1254,6 +1406,102 @@ mod tests {
     }
 
     #[test]
+    fn simple_critic_continues_until_min_steps_reached() {
+        let critic = SimpleSessionCritic::new();
+        let mut goal = test_goal();
+        goal.success_conditions = vec![crate::types::goal::SuccessCondition {
+            description: "three steps".into(),
+            expression: serde_json::json!({"min_steps": 3}),
+        }];
+        let belief = DefaultBeliefRuntime::new()
+            .create_belief(Uuid::new_v4())
+            .unwrap();
+        let obs = Observation {
+            observation_id: Uuid::new_v4(),
+            session_id: Uuid::new_v4(),
+            skill_id: None,
+            port_calls: vec![],
+            raw_result: serde_json::Value::Null,
+            structured_result: serde_json::Value::Null,
+            effect_patch: None,
+            success: true,
+            failure_class: None,
+            failure_detail: None,
+            latency_ms: 0,
+            resource_cost: default_cost_profile(),
+            confidence: 1.0,
+            timestamp: Utc::now(),
+        };
+        let budget = Budget {
+            risk_remaining: 0.5,
+            latency_remaining_ms: 30000,
+            resource_remaining: 100.0,
+            steps_remaining: 100,
+        };
+        // Step indices 0 and 1 → only 1 and 2 completed → keep going.
+        assert_eq!(
+            critic.evaluate(&goal, &belief, &obs, &budget, 0),
+            CriticDecision::Continue
+        );
+        assert_eq!(
+            critic.evaluate(&goal, &belief, &obs, &budget, 1),
+            CriticDecision::Continue
+        );
+        // step_index 2 → 3 completed → stop.
+        assert_eq!(
+            critic.evaluate(&goal, &belief, &obs, &budget, 2),
+            CriticDecision::Stop
+        );
+    }
+
+    #[test]
+    fn simple_critic_continues_until_observation_field_matches() {
+        let critic = SimpleSessionCritic::new();
+        let mut goal = test_goal();
+        goal.success_conditions = vec![crate::types::goal::SuccessCondition {
+            description: "result == done".into(),
+            expression: serde_json::json!({
+                "observation_field": "result",
+                "equals": "done"
+            }),
+        }];
+        let belief = DefaultBeliefRuntime::new()
+            .create_belief(Uuid::new_v4())
+            .unwrap();
+        let mut obs = Observation {
+            observation_id: Uuid::new_v4(),
+            session_id: Uuid::new_v4(),
+            skill_id: None,
+            port_calls: vec![],
+            raw_result: serde_json::Value::Null,
+            structured_result: serde_json::json!({"result": "in_progress"}),
+            effect_patch: None,
+            success: true,
+            failure_class: None,
+            failure_detail: None,
+            latency_ms: 0,
+            resource_cost: default_cost_profile(),
+            confidence: 1.0,
+            timestamp: Utc::now(),
+        };
+        let budget = Budget {
+            risk_remaining: 0.5,
+            latency_remaining_ms: 30000,
+            resource_remaining: 100.0,
+            steps_remaining: 100,
+        };
+        assert_eq!(
+            critic.evaluate(&goal, &belief, &obs, &budget, 0),
+            CriticDecision::Continue
+        );
+        obs.structured_result = serde_json::json!({"result": "done"});
+        assert_eq!(
+            critic.evaluate(&goal, &belief, &obs, &budget, 1),
+            CriticDecision::Stop
+        );
+    }
+
+    #[test]
     fn simple_critic_stops_on_success() {
         let critic = SimpleSessionCritic::new();
         let goal = test_goal();
@@ -1270,6 +1518,7 @@ mod tests {
             effect_patch: None,
             success: true,
             failure_class: None,
+            failure_detail: None,
             latency_ms: 0,
             resource_cost: default_cost_profile(),
             confidence: 1.0,
@@ -1346,6 +1595,8 @@ mod tests {
             deadline: None,
             permissions_scope: vec!["default".to_string()],
             priority: Priority::Normal,
+            max_steps: None,
+            exploration: crate::types::goal::ExplorationStrategy::Greedy,
         }
     }
 
@@ -1657,6 +1908,8 @@ mod tests {
                 precondition_results: vec![],
                 termination_reason: None,
                 rollback_invoked: false,
+                selection_reason: crate::types::session::SelectionReason::HighestScore,
+                failure_detail: None,
                 timestamp: Utc::now(),
             });
         }

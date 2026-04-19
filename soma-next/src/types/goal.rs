@@ -17,6 +17,28 @@ pub struct GoalSpec {
     pub deadline: Option<DateTime<Utc>>,
     pub permissions_scope: Vec<String>,
     pub priority: Priority,
+    /// Per-goal override for the session step budget. When `None` the
+    /// session controller uses its configured `default_max_steps`.
+    #[serde(default)]
+    pub max_steps: Option<u32>,
+    /// Skill-selection exploration policy for this goal. Defaults to
+    /// `Greedy` (always pick the highest predictor score). Brains submit
+    /// goals with `EpsilonGreedy { epsilon }` to opt into exploration —
+    /// useful when the brain wants the body to discover whether a
+    /// lower-ranked skill performs better in this context.
+    #[serde(default)]
+    pub exploration: ExplorationStrategy,
+}
+
+/// Selection policy applied when scoring skill candidates. The body
+/// honors this per-goal so the brain can flip between exploit and explore
+/// without changing the runtime defaults.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExplorationStrategy {
+    #[default]
+    Greedy,
+    EpsilonGreedy { epsilon: f64 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

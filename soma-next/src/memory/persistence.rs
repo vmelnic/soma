@@ -497,6 +497,17 @@ impl WorldStateStore for DiskWorldStateStore {
     fn snapshot_hash(&self) -> String {
         self.inner.snapshot_hash()
     }
+
+    fn prune_expired_facts(&mut self) -> usize {
+        let removed = self.inner.prune_expired();
+        if removed > 0 {
+            // Best-effort: persist the pruned snapshot. Failure leaves the
+            // in-memory state pruned but the disk copy stale until next
+            // mutation; not fatal.
+            let _ = self.flush();
+        }
+        removed
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -911,6 +922,7 @@ mod tests {
             confidence: 1.0,
             provenance: FactProvenance::Observed,
             timestamp: Utc::now(),
+            ttl_ms: None,
         }
     }
 

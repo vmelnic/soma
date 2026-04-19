@@ -37,6 +37,28 @@ pub struct Fact {
     pub confidence: f64,
     pub provenance: FactProvenance,
     pub timestamp: DateTime<Utc>,
+    /// Optional time-to-live in milliseconds from `timestamp`. When set, the
+    /// fact is evicted from world-state snapshots and reactive matching once
+    /// `now - timestamp > ttl_ms`. `None` means the fact persists until
+    /// explicitly removed.
+    #[serde(default)]
+    pub ttl_ms: Option<u64>,
+}
+
+impl Fact {
+    /// True when the fact's TTL has elapsed relative to `now`. Facts with no
+    /// TTL never expire.
+    pub fn is_expired(&self, now: DateTime<Utc>) -> bool {
+        match self.ttl_ms {
+            None => false,
+            Some(ttl) => {
+                let elapsed = now
+                    .signed_duration_since(self.timestamp)
+                    .num_milliseconds();
+                elapsed >= 0 && (elapsed as u64) > ttl
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

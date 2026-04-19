@@ -219,7 +219,43 @@ pub struct TraceStep {
     pub termination_reason: Option<crate::types::common::TerminationType>,
     /// Whether rollback or compensation was invoked this step.
     pub rollback_invoked: bool,
+    /// Why the runtime picked `selected_skill` from `candidate_skills`.
+    /// Populated for every step; defaults to `HighestScore` when nothing
+    /// more specific applies.
+    #[serde(default)]
+    pub selection_reason: SelectionReason,
+    /// Structured cause when the step failed. None on success.
+    /// Mirrored from the step's Observation so the brain can read the
+    /// failure cause off the trace alone (without holding the full
+    /// observation history).
+    #[serde(default)]
+    pub failure_detail: Option<crate::types::observation::FailureDetail>,
     pub timestamp: DateTime<Utc>,
+}
+
+/// Structured rationale for skill selection. Surfaced in the trace, in
+/// `inspect_session`, and in async-goal status payloads so the brain can
+/// inspect or critique a selection without re-running the scorer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SelectionReason {
+    /// Standard path: highest predictor score won.
+    #[default]
+    HighestScore,
+    /// A compiled routine matched the current belief; its first step was used.
+    RoutineMatch,
+    /// Active plan-following: the next step from the active plan was used.
+    PlanFollowing,
+    /// Backtrack/revise: previous candidate was abandoned and we re-picked.
+    AfterBacktrack,
+    /// Only one candidate was available — no scoring tiebreak needed.
+    SoleCandidate,
+    /// Selector could not score; first-available fallback used.
+    Fallback,
+    /// Exploration kicked in: under EpsilonGreedy this pick was sampled
+    /// from the top-K rather than the greedy top-1. The brain should
+    /// down-weight this episode when reasoning about typical outcomes.
+    Exploration,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

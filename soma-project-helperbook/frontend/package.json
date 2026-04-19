@@ -1,5 +1,5 @@
 {
-  "name": "soma-helperbook-frontend",
+  "name": "soma-project-helperbook-frontend",
   "version": "0.1.0",
   "scripts": {
     "start": "node server.js"

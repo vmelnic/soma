@@ -7,7 +7,7 @@ LLM brain that invokes real SOMA ports via `invoke_port` over MCP.
 No application source code per context. No client-side framework.
 No wasm in the browser.
 
-This is the inversion of `soma-helperbook`. HelperBook is an
+This is the inversion of `soma-project-helperbook`. HelperBook is an
 Express app that calls SOMA for its backend. `soma-project-terminal`
 **is SOMA**: the Node layer is a thin HTTP gateway + MCP stdio
 client, and every backend side effect -- database reads, magic-link

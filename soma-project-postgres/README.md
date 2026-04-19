@@ -4,21 +4,21 @@ Self-contained PostgreSQL project for SOMA MCP.
 
 Query, insert, update, delete, and manage tables in PostgreSQL through the SOMA runtime via MCP `invoke_port` calls. 15 capabilities: `query`, `execute`, `find`, `find_many`, `count`, `aggregate`, `insert`, `update`, `delete`, `create_table`, `drop_table`, `alter_table`, `begin_transaction`, `commit`, `rollback`.
 
-Uses the HelperBook database (19 tables, seeded test data) from `soma-helperbook/docker-compose.yml`.
+Uses the HelperBook database (19 tables, seeded test data) from `soma-project-helperbook/docker-compose.yml`.
 
 ## Setup
 
 ### 1. Start PostgreSQL
 
 ```bash
-cd ../soma-helperbook
+cd ../soma-project-helperbook
 docker compose up -d postgres
 ```
 
 ### 2. Seed the database (if not already done)
 
 ```bash
-cd ../soma-helperbook
+cd ../soma-project-helperbook
 psql -h localhost -U soma -d helperbook -f schema.sql
 psql -h localhost -U soma -d helperbook -f seed.sql
 ```
