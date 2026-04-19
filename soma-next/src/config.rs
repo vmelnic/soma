@@ -57,6 +57,10 @@ const fn default_reactive_monitor_interval_secs() -> u64 {
     0
 }
 
+const fn default_port_health_interval_secs() -> u64 {
+    0
+}
+
 const fn default_checkpoint_every_n_steps() -> u32 {
     0
 }
@@ -208,6 +212,12 @@ pub struct RuntimeSection {
     #[serde(default = "default_reactive_monitor_interval_secs")]
     pub reactive_monitor_interval_secs: u64,
 
+    /// Interval in seconds between port health monitor ticks.
+    /// Set to 0 to disable. When enabled, the monitor analyzes per-port
+    /// latency samples and emits health facts into world state.
+    #[serde(default = "default_port_health_interval_secs")]
+    pub port_health_interval_secs: u64,
+
     /// Write a mid-run session checkpoint every N control-loop steps.
     /// Set to 0 to disable mid-run checkpointing (terminal checkpoints
     /// from the CLI path still fire). Mid-run checkpoints let an
@@ -231,6 +241,7 @@ impl Default for RuntimeSection {
             default_resource_budget: default_resource_budget(),
             consolidation_interval_secs: default_consolidation_interval_secs(),
             reactive_monitor_interval_secs: default_reactive_monitor_interval_secs(),
+            port_health_interval_secs: default_port_health_interval_secs(),
             checkpoint_every_n_steps: default_checkpoint_every_n_steps(),
             resume_sessions_on_boot: default_resume_on_boot(),
         }
@@ -645,6 +656,10 @@ impl SomaConfig {
         if let Ok(v) = std::env::var("SOMA_RUNTIME_REACTIVE_MONITOR_INTERVAL_SECS")
             && let Ok(n) = v.parse::<u64>() {
                 self.runtime.reactive_monitor_interval_secs = n;
+            }
+        if let Ok(v) = std::env::var("SOMA_RUNTIME_PORT_HEALTH_INTERVAL_SECS")
+            && let Ok(n) = v.parse::<u64>() {
+                self.runtime.port_health_interval_secs = n;
             }
         if let Ok(v) = std::env::var("SOMA_RUNTIME_CHECKPOINT_EVERY_N_STEPS")
             && let Ok(n) = v.parse::<u32>() {

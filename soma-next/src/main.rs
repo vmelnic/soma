@@ -610,6 +610,11 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
     type WebhookLauncher =
         soma_next::distributed::webhook_listener::WebhookGoalLauncher;
 
+    type PortHealthArcs = (
+        Arc<soma_next::runtime::metrics::RuntimeMetrics>,
+        Arc<Mutex<dyn soma_next::runtime::world_state::WorldStateStore + Send>>,
+    );
+
     type McpServerBundle = (
         McpServer,
         Option<SchedulerArcs>,
@@ -617,6 +622,7 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
         Option<ReactiveMonitorArcs>,
         Option<WorldStateArc>,
         Option<WebhookLauncher>,
+        Option<PortHealthArcs>,
     );
 
     let make_server = |runtime: crate::bootstrap::Runtime| -> McpServerBundle {
@@ -632,6 +638,10 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             Arc::clone(&runtime.embedder),
         );
         let world_state_for_webhook = Arc::clone(&runtime.world_state);
+        let port_health = (
+            Arc::clone(&runtime.metrics),
+            Arc::clone(&runtime.world_state),
+        );
         let handle = RuntimeHandle::from_runtime(runtime);
         let monitor = (
             Arc::clone(&handle.world_state),
@@ -651,10 +661,10 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             handle
         };
         let launcher = handle.build_webhook_launcher();
-        (McpServer::new(handle), Some(sched), Some(consolidation), Some(monitor), Some(world_state_for_webhook), Some(launcher))
+        (McpServer::new(handle), Some(sched), Some(consolidation), Some(monitor), Some(world_state_for_webhook), Some(launcher), Some(port_health))
     };
 
-    let (server, scheduler_arcs, consolidation_arcs, monitor_arcs, webhook_world_state, webhook_launcher) = if mcp_is_auto {
+    let (server, scheduler_arcs, consolidation_arcs, monitor_arcs, webhook_world_state, webhook_launcher, port_health_arcs) = if mcp_is_auto {
         eprintln!("MCP: auto-discovering ports from plugin search paths");
         match bootstrap::bootstrap_auto(&config) {
             Ok(runtime) => make_server(runtime),
@@ -674,7 +684,7 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             Ok(runtime) => make_server(runtime),
             Err(e) => {
                 eprintln!("warning: failed to bootstrap runtime: {e}");
-                (McpServer::new_stub(), None, None, None, None, None)
+                (McpServer::new_stub(), None, None, None, None, None, None)
             }
         }
     } else {
@@ -796,6 +806,17 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             ws, rs, sc, gr, es, emb, interval,
         );
         eprintln!("MCP: reactive monitor started ({}s interval)", interval);
+    }
+
+    // Start the port health monitor background thread.
+    if config.runtime.port_health_interval_secs > 0
+        && let Some((metrics, ws)) = port_health_arcs
+    {
+        let interval = config.runtime.port_health_interval_secs;
+        let _handle = soma_next::runtime::port_health::start_port_health_monitor(
+            metrics, ws, interval,
+        );
+        eprintln!("MCP: port health monitor started ({}s interval)", interval);
     }
 
     // Start heartbeat thread when peers are configured.
