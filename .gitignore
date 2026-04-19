@@ -45,6 +45,7 @@ package-lock.json
 soma-project-helperbook/checkpoints/
 soma-next/target/
 soma-next/data/
+soma-next/sessions/
 soma-ports/target/
 demo.pen
 SM_Posts.md
