@@ -1,0 +1,1 @@
+Operator said: "{{ user_text }}". Action taken: {{ action_json }}. Result: {{ result_snippet }}

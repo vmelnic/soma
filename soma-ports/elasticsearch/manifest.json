@@ -1,0 +1,903 @@
+{
+  "id": "soma.ports.elasticsearch",
+  "name": "elasticsearch",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.elasticsearch",
+  "description": "Elasticsearch search and indexing: search, document CRUD, index management",
+  "capabilities": [
+    {
+      "group_name": "search",
+      "scope": "local",
+      "capabilities": [
+        "search",
+        "index_document",
+        "get_document",
+        "delete_document",
+        "create_index",
+        "delete_index"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
+  },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "search",
+      "index_document",
+      "get_document",
+      "delete_document",
+      "create_index",
+      "delete_index"
+    ],
+    "expected_latency_classes": [
+      "fast",
+      "medium"
+    ],
+    "expected_failure_modes": [
+      "validation_error",
+      "dependency_unavailable",
+      "transport_error",
+      "external_error",
+      "timeout"
+    ],
+    "trace_categories": [
+      "search"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "elasticsearch",
+    "search",
+    "database",
+    "indexing"
+  ],
+  "ports": [
+    {
+      "port_id": "elasticsearch",
+      "name": "elasticsearch",
+      "version": "0.1.0",
+      "kind": "database",
+      "description": "Elasticsearch search and indexing: search, document CRUD, index management",
+      "namespace": "soma.ports.elasticsearch",
+      "trust_level": "verified",
+      "capabilities": [
+        {
+          "capability_id": "search",
+          "name": "search",
+          "purpose": "Search documents in an index",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 50,
+            "p95_latency_ms": 500,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "index_document",
+          "name": "index_document",
+          "purpose": "Index (insert or replace) a document",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "compensating_action",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "conditionally_idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 50,
+            "p95_latency_ms": 500,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "get_document",
+          "name": "get_document",
+          "purpose": "Retrieve a document by ID",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": {
+            "expected_latency_ms": 50,
+            "p95_latency_ms": 500,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "delete_document",
+          "name": "delete_document",
+          "purpose": "Delete a document by ID",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "destructive",
+          "rollback_support": "irreversible",
+          "determinism_class": "partially_deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "high",
+          "latency_profile": {
+            "expected_latency_ms": 50,
+            "p95_latency_ms": 500,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "create_index",
+          "name": "create_index",
+          "purpose": "Create an index with optional mappings",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "compensating_action",
+          "determinism_class": "deterministic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "medium",
+          "latency_profile": {
+            "expected_latency_ms": 50,
+            "p95_latency_ms": 500,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "delete_index",
+          "name": "delete_index",
+          "purpose": "Delete an entire index",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "destructive",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "critical",
+          "latency_profile": {
+            "expected_latency_ms": 50,
+            "p95_latency_ms": 500,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "low",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "output_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "failure_modes": [
+        "validation_error",
+        "dependency_unavailable",
+        "transport_error",
+        "external_error",
+        "timeout"
+      ],
+      "side_effect_class": "external_state_mutation",
+      "latency_profile": {
+        "expected_latency_ms": 50,
+        "p95_latency_ms": 500,
+        "max_latency_ms": 30000
+      },
+      "cost_profile": {
+        "cpu_cost_class": "low",
+        "memory_cost_class": "low",
+        "io_cost_class": "low",
+        "network_cost_class": "low",
+        "energy_cost_class": "negligible"
+      },
+      "auth_requirements": {
+        "methods": [
+          "local_process_trust"
+        ],
+        "required": false
+      },
+      "sandbox_requirements": {
+        "filesystem_access": false,
+        "network_access": true,
+        "device_access": false,
+        "process_access": false,
+        "memory_limit_mb": null,
+        "cpu_limit_percent": null,
+        "time_limit_ms": 30000,
+        "syscall_limit": null
+      },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
+  "skills": [
+    {
+      "skill_id": "soma.ports.elasticsearch.search",
+      "namespace": "soma.ports.elasticsearch",
+      "pack": "soma.ports.elasticsearch",
+      "kind": "primitive",
+      "name": "search",
+      "description": "Search documents in an index via the elasticsearch port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "search documents in an index returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 50,
+          "p95_latency_ms": 500,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "partially_deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "elasticsearch",
+        "search",
+        "database"
+      ],
+      "capability_requirements": [
+        "port:elasticsearch/search"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.elasticsearch.index_document",
+      "namespace": "soma.ports.elasticsearch",
+      "pack": "soma.ports.elasticsearch",
+      "kind": "primitive",
+      "name": "index_document",
+      "description": "Index (insert or replace) a document via the elasticsearch port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "index (insert or replace) a document",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "index (insert or replace) a document completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "compensating_action",
+        "compensation_skill": "soma.ports.delete_document",
+        "description": "compensate via soma.ports.delete_document"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 50,
+          "p95_latency_ms": 500,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "partially_deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "elasticsearch",
+        "search",
+        "database"
+      ],
+      "capability_requirements": [
+        "port:elasticsearch/index_document"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.elasticsearch.get_document",
+      "namespace": "soma.ports.elasticsearch",
+      "pack": "soma.ports.elasticsearch",
+      "kind": "primitive",
+      "name": "get_document",
+      "description": "Retrieve a document by ID via the elasticsearch port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "retrieve a document by id returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 50,
+          "p95_latency_ms": 500,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "low",
+      "determinism": "partially_deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "elasticsearch",
+        "search",
+        "database"
+      ],
+      "capability_requirements": [
+        "port:elasticsearch/get_document"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.elasticsearch.delete_document",
+      "namespace": "soma.ports.elasticsearch",
+      "pack": "soma.ports.elasticsearch",
+      "kind": "primitive",
+      "name": "delete_document",
+      "description": "Delete a document by ID via the elasticsearch port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "deletion",
+          "target_resource": null,
+          "description": "delete a document by id",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "delete a document by id completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 50,
+          "p95_latency_ms": 500,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "high",
+      "determinism": "partially_deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "elasticsearch",
+        "search",
+        "database"
+      ],
+      "capability_requirements": [
+        "port:elasticsearch/delete_document"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.elasticsearch.create_index",
+      "namespace": "soma.ports.elasticsearch",
+      "pack": "soma.ports.elasticsearch",
+      "kind": "primitive",
+      "name": "create_index",
+      "description": "Create an index with optional mappings via the elasticsearch port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "create an index with optional mappings",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "create an index with optional mappings completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "compensating_action",
+        "compensation_skill": "soma.ports.delete_index",
+        "description": "compensate via soma.ports.delete_index"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 50,
+          "p95_latency_ms": 500,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "medium",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "elasticsearch",
+        "search",
+        "database"
+      ],
+      "capability_requirements": [
+        "port:elasticsearch/create_index"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.elasticsearch.delete_index",
+      "namespace": "soma.ports.elasticsearch",
+      "pack": "soma.ports.elasticsearch",
+      "kind": "primitive",
+      "name": "delete_index",
+      "description": "Delete an entire index via the elasticsearch port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "deletion",
+          "target_resource": null,
+          "description": "delete an entire index",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "delete an entire index completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "recreate manually"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 50,
+          "p95_latency_ms": 500,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "low",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "critical",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "elasticsearch",
+        "search",
+        "database"
+      ],
+      "capability_requirements": [
+        "port:elasticsearch/delete_index"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
+    }
+  ],
+  "port_dependencies": []
+}

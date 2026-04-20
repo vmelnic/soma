@@ -7,6 +7,7 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::errors::{Result, SomaError};
+use crate::interfaces::mcp_ws::LocalPortRegistry;
 use crate::types::common::{AuthOutcome, CostClass, PolicyOutcome, PortFailureClass, SandboxOutcome, SideEffectClass};
 use crate::types::observation::PortCallRecord;
 use crate::types::port::{InvocationContext, PortCapabilitySpec, PortLifecycleState, PortSpec};
@@ -253,6 +254,10 @@ pub struct DefaultPortRuntime {
     policy_checker: Box<dyn PortPolicyChecker>,
     auth_checker: Box<dyn PortAuthChecker>,
     sandbox_profile: RuntimeSandboxProfile,
+    /// Optional registry of reverse-registered ports from WebSocket clients
+    /// (e.g. phone sensor ports). When a port_id is not found locally, the
+    /// runtime falls back to invoking it through this registry.
+    reverse_registry: Option<LocalPortRegistry>,
 }
 
 impl DefaultPortRuntime {
@@ -262,6 +267,7 @@ impl DefaultPortRuntime {
             policy_checker: Box::new(AllowAllPortPolicy),
             auth_checker: Box::new(DefaultPortAuthChecker),
             sandbox_profile: RuntimeSandboxProfile::default(),
+            reverse_registry: None,
         }
     }
 
@@ -272,6 +278,7 @@ impl DefaultPortRuntime {
             policy_checker,
             auth_checker: Box::new(DefaultPortAuthChecker),
             sandbox_profile: RuntimeSandboxProfile::default(),
+            reverse_registry: None,
         }
     }
 
@@ -285,6 +292,7 @@ impl DefaultPortRuntime {
             policy_checker,
             auth_checker,
             sandbox_profile: RuntimeSandboxProfile::default(),
+            reverse_registry: None,
         }
     }
 
@@ -295,6 +303,115 @@ impl DefaultPortRuntime {
             policy_checker: Box::new(AllowAllPortPolicy),
             auth_checker: Box::new(DefaultPortAuthChecker),
             sandbox_profile,
+            reverse_registry: None,
+        }
+    }
+
+    /// Attach a reverse-port registry so that `invoke()` can fall back to
+    /// WebSocket-connected device ports when a port_id is not loaded locally.
+    pub fn set_reverse_registry(&mut self, registry: LocalPortRegistry) {
+        self.reverse_registry = Some(registry);
+    }
+
+    /// Try to invoke a port through the reverse registry. Returns `Some` with
+    /// a `PortCallRecord` when the registry knows about the port (success or
+    /// failure), `None` when the port is not in the registry either.
+    fn try_reverse_invoke(
+        &self,
+        port_id: &str,
+        capability_id: &str,
+        input: serde_json::Value,
+        ctx: &InvocationContext,
+        start: &Instant,
+        input_hash: &Option<String>,
+    ) -> Option<PortCallRecord> {
+        let registry = self.reverse_registry.as_ref()?;
+
+        // Only attempt if the registry actually has this port registered.
+        let has_port = registry.list().iter().any(|e| e.port_id == port_id);
+        if !has_port {
+            return None;
+        }
+
+        // Bridge from sync to async. Try an existing tokio runtime first;
+        // fall back to a one-shot current-thread runtime.
+        let result = match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                // We are inside a tokio context but on a sync call path.
+                // block_in_place lets us await without deadlocking the
+                // current-thread scheduler.
+                tokio::task::block_in_place(|| {
+                    handle.block_on(registry.invoke_remote_port(port_id, capability_id, input))
+                })
+            }
+            Err(_) => {
+                // No tokio runtime on this thread -- spin up a temporary one.
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        warn!(port_id, error = %e, "failed to create async runtime for reverse invoke");
+                        let elapsed = start.elapsed().as_millis() as u64;
+                        return Some(Self::failure_record(
+                            port_id,
+                            capability_id,
+                            PortFailureClass::TransportError,
+                            &format!("failed to create async runtime for reverse invoke: {}", e),
+                            elapsed,
+                            input_hash.clone(),
+                            ctx,
+                            None,
+                        ));
+                    }
+                };
+                rt.block_on(registry.invoke_remote_port(port_id, capability_id, input))
+            }
+        };
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        match result {
+            Ok(value) => {
+                debug!(port_id, capability_id, elapsed, "reverse port invocation succeeded");
+                Some(PortCallRecord {
+                    observation_id: Uuid::new_v4(),
+                    port_id: port_id.to_string(),
+                    capability_id: capability_id.to_string(),
+                    invocation_id: Uuid::new_v4(),
+                    success: true,
+                    failure_class: None,
+                    raw_result: value.clone(),
+                    structured_result: value,
+                    effect_patch: None,
+                    side_effect_summary: Some("remote_device".to_string()),
+                    latency_ms: elapsed,
+                    resource_cost: 0.0,
+                    confidence: 1.0,
+                    timestamp: Utc::now(),
+                    retry_safe: true,
+                    input_hash: input_hash.clone(),
+                    session_id: ctx.session_id,
+                    goal_id: ctx.goal_id.clone(),
+                    caller_identity: ctx.caller_identity.clone(),
+                    auth_result: None,
+                    policy_result: None,
+                    sandbox_result: None,
+                })
+            }
+            Err(e) => {
+                warn!(port_id, capability_id, error = %e, "reverse port invocation failed");
+                Some(Self::failure_record(
+                    port_id,
+                    capability_id,
+                    PortFailureClass::TransportError,
+                    &format!("reverse port invocation failed: {}", e),
+                    elapsed,
+                    input_hash.clone(),
+                    ctx,
+                    None,
+                ))
+            }
         }
     }
 
@@ -840,9 +957,16 @@ impl PortRuntime for DefaultPortRuntime {
 
         // Look up the port entry. Unknown-port invocations still produce a
         // PortCallRecord so observation emission is guaranteed even on failure.
+        // Look up the port entry. If not found locally, try the reverse
+        // registry (WebSocket-connected device ports) before giving up.
         let entry = match self.ports.get(port_id) {
             Some(e) => e,
             None => {
+                if let Some(record) = self.try_reverse_invoke(
+                    port_id, capability_id, input, ctx, &start, &input_hash,
+                ) {
+                    return Ok(record);
+                }
                 let elapsed = start.elapsed().as_millis() as u64;
                 return Ok(Self::failure_record(
                     port_id,

@@ -21,6 +21,7 @@ use soma_next::distributed::peer::PeerRegistry;
 use soma_next::distributed::ws_transport::start_ws_listener_background;
 use soma_next::interfaces::cli::{CliCommand, CliRunner, DefaultCliRunner};
 use soma_next::interfaces::mcp::{McpRequest, McpServer};
+use soma_next::interfaces::mcp_ws::LocalPortRegistry;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -43,6 +44,8 @@ fn main() {
         #[cfg(unix)]
         let mut mcp_unix_peers: Vec<std::path::PathBuf> = Vec::new();
         let mut mcp_webhook_listen: Option<SocketAddr> = None;
+        let mut mcp_ws_listen: Option<SocketAddr> = None;
+        let mut mcp_ws_token: Option<String> = None;
         let mut mcp_discover_lan = false;
         let mut mcp_skip = false;
         for (i, arg) in args.iter().enumerate() {
@@ -76,6 +79,18 @@ fn main() {
                     }
                     mcp_skip = true;
                 }
+            if arg == "--mcp-ws-listen"
+                && let Some(addr_str) = args.get(i + 1) {
+                    if let Ok(addr) = addr_str.parse::<SocketAddr>() {
+                        mcp_ws_listen = Some(addr);
+                    }
+                    mcp_skip = true;
+                }
+            if arg == "--mcp-ws-token"
+                && let Some(tok) = args.get(i + 1) {
+                    mcp_ws_token = Some(tok.clone());
+                    mcp_skip = true;
+                }
             if arg == "--discover-lan" {
                 mcp_discover_lan = true;
             }
@@ -93,11 +108,40 @@ fn main() {
                 }
         }
 
+        // Resolve WS auth token: CLI flag takes priority, then env var.
+        let mcp_ws_token = mcp_ws_token
+            .or_else(|| env::var("SOMA_WS_TOKEN").ok().filter(|s| !s.is_empty()));
+
+        // Safety warning when binding to a non-localhost address.
+        if let Some(ref addr) = mcp_ws_listen {
+            let ip = addr.ip();
+            let is_localhost = ip.is_loopback();
+            if !is_localhost {
+                if mcp_ws_token.is_some() {
+                    eprintln!(
+                        "\u{26a0} WARNING: WebSocket MCP listener bound to {} \
+                         \u{2014} this exposes SOMA to the network. \
+                         Use --mcp-ws-token to require authentication.",
+                        addr
+                    );
+                } else {
+                    eprintln!(
+                        "\u{26a0} WARNING: WebSocket MCP listener bound to {} \
+                         \u{2014} this exposes SOMA to the network WITHOUT authentication. \
+                         Set --mcp-ws-token <token> or SOMA_WS_TOKEN to secure it.",
+                        addr
+                    );
+                }
+            }
+        }
+
         let mcp_distributed = McpDistributedConfig {
             listen: mcp_listen,
             peer_addrs: mcp_peer_addrs,
             webhook_listen: mcp_webhook_listen,
             discover_lan: mcp_discover_lan,
+            mcp_ws_listen,
+            mcp_ws_token,
             #[cfg(unix)]
             unix_listen: mcp_unix_listen,
             #[cfg(unix)]
@@ -460,9 +504,13 @@ FLAGS:
     --listen <addr>           Start TCP listener for incoming peer connections
     --ws-listen <addr>        Start WebSocket listener for browser/UI connections
     --webhook-listen <addr>   Start HTTP webhook listener (POST /<hook> patches world state)
+    --mcp-ws-token <token>    Require bearer token auth on the WebSocket MCP listener
     --peer <addr>             Register a remote TCP peer at the given address
     --unix-listen <path>      Start Unix socket listener for fast local IPC
-    --unix-peer <path>        Register a remote peer via Unix socket path"
+    --unix-peer <path>        Register a remote peer via Unix socket path
+
+ENVIRONMENT:
+    SOMA_WS_TOKEN             Fallback for --mcp-ws-token when the flag is not provided"
     );
 }
 
@@ -475,6 +523,14 @@ struct McpDistributedConfig {
     /// register discovered peers dynamically. Discovered peers share
     /// the same peer_map and peer_ids list as static `--peer` entries.
     discover_lan: bool,
+    /// When set, additionally serve the MCP protocol over a WebSocket
+    /// listener on this address. Stdio dispatch still runs in parallel.
+    mcp_ws_listen: Option<SocketAddr>,
+    /// Optional bearer token for WebSocket auth. Clients must send an
+    /// `{"method":"auth","params":{"token":"..."}}` frame as the first
+    /// message after connecting. Sourced from `--mcp-ws-token` or
+    /// `SOMA_WS_TOKEN` env var.
+    mcp_ws_token: Option<String>,
     #[cfg(unix)]
     unix_listen: Option<std::path::PathBuf>,
     #[cfg(unix)]
@@ -696,6 +752,40 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             }
         }
     };
+
+    // Wrap the MCP server in an Arc so stdio and any additional transport
+    // (e.g. WebSocket listener) can share one dispatcher.
+    let server = Arc::new(server);
+
+    // Shared registry for reverse-registered ports from WebSocket clients.
+    // Created before the WS listener so both the listener and the port
+    // runtime share the same instance.
+    let reverse_registry = LocalPortRegistry::new();
+
+    // Wire the reverse registry into DefaultPortRuntime so invoke_port
+    // can route to WebSocket-connected device ports as a fallback.
+    if let Some(ref sched) = scheduler_arcs {
+        let port_rt_arc = &sched.1;
+        port_rt_arc
+            .lock()
+            .unwrap()
+            .set_reverse_registry(reverse_registry.clone());
+    }
+
+    // Optional: WebSocket MCP listener. Runs in parallel with the stdio
+    // loop; each client gets its own async task dispatching into the
+    // shared McpServer.
+    if let Some(ws_addr) = distributed.mcp_ws_listen {
+        let handle =
+            soma_next::interfaces::mcp_ws::start_mcp_ws_listener_background_with_registry(
+                ws_addr,
+                Arc::clone(&server),
+                reverse_registry.clone(),
+                distributed.mcp_ws_token.clone(),
+            );
+        Box::leak(Box::new(handle));
+        eprintln!("MCP: WebSocket transport listening on {}", ws_addr);
+    }
 
     // Start the scheduler background thread.
     if let Some((sched_store, port_rt, ws)) = scheduler_arcs {

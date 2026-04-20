@@ -406,6 +406,8 @@ impl McpServer {
             "sync_beliefs" => self.handle_sync_beliefs(request.id, request.params),
             "migrate_session" => self.handle_migrate_session(request.id, request.params),
             "review_routine" => self.handle_review_routine(request.id, request.params),
+            "handoff_session" => self.handle_handoff_session(request.id, request.params),
+            "claim_session" => self.handle_claim_session(request.id, request.params),
 
             _ => Ok(Self::error_response(
                 request.id,
@@ -511,6 +513,8 @@ impl McpServer {
             "sync_beliefs" => self.handle_sync_beliefs(inner_id, arguments),
             "migrate_session" => self.handle_migrate_session(inner_id, arguments),
             "review_routine" => self.handle_review_routine(inner_id, arguments),
+            "handoff_session" => self.handle_handoff_session(inner_id, arguments),
+            "claim_session" => self.handle_claim_session(inner_id, arguments),
             _ => {
                 return Ok(Self::error_response(
                     id,
@@ -4629,8 +4633,103 @@ impl McpServer {
         ))
     }
 
-    /// Parse an `on_success` or `on_failure` action object into a `NextStep`.
-    /// Returns `NextStep::Continue` when the value is absent or unparseable.
+    fn handle_handoff_session(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id, INVALID_PARAMS,
+                    "params required: session_id, from_device".to_string(), None,
+                ));
+            }
+        };
+        let session_id = params.get("session_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let from_device = params.get("from_device").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let to_device = params.get("to_device").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let objective = params.get("objective").and_then(|v| v.as_str()).map(|s| s.to_string());
+        if session_id.is_empty() || from_device.is_empty() {
+            return Ok(Self::error_response(
+                id, INVALID_PARAMS,
+                "session_id and from_device are required".to_string(), None,
+            ));
+        }
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => return Ok(Self::success_response(id, serde_json::json!({"success": true, "note": "stub mode"}))),
+        };
+        let now = chrono::Utc::now();
+        let ts = now.to_rfc3339();
+        let fact = crate::types::belief::Fact {
+            fact_id: format!("handoff-{}-{}", session_id, ts),
+            subject: format!("session:{}", session_id),
+            predicate: "handoff".to_string(),
+            value: serde_json::json!({
+                "from_device": from_device, "to_device": to_device,
+                "session_id": session_id, "objective": objective, "ts": ts,
+            }),
+            confidence: 1.0,
+            provenance: crate::types::common::FactProvenance::Asserted,
+            timestamp: now, ttl_ms: None,
+        };
+        let mut ws = rt.world_state.lock().unwrap();
+        ws.add_fact(fact)?;
+        let hash = ws.snapshot_hash();
+        drop(ws);
+        Ok(Self::success_response(id, serde_json::json!({
+            "success": true, "session_id": session_id, "snapshot_hash": hash,
+        })))
+    }
+
+    fn handle_claim_session(
+        &self,
+        id: Value,
+        params: Option<Value>,
+    ) -> Result<McpResponse> {
+        let params = match params {
+            Some(p) => p,
+            None => {
+                return Ok(Self::error_response(
+                    id, INVALID_PARAMS,
+                    "params required: session_id, device_id".to_string(), None,
+                ));
+            }
+        };
+        let session_id = params.get("session_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let device_id = params.get("device_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if session_id.is_empty() || device_id.is_empty() {
+            return Ok(Self::error_response(
+                id, INVALID_PARAMS,
+                "session_id and device_id are required".to_string(), None,
+            ));
+        }
+        let rt = match &self.runtime {
+            Some(rt) => rt,
+            None => return Ok(Self::success_response(id, serde_json::json!({"success": true, "note": "stub mode"}))),
+        };
+        let now = chrono::Utc::now();
+        let ts = now.to_rfc3339();
+        let fact = crate::types::belief::Fact {
+            fact_id: format!("claim-{}-{}", session_id, ts),
+            subject: format!("session:{}", session_id),
+            predicate: "claimed_by".to_string(),
+            value: serde_json::json!({"device_id": device_id, "ts": ts}),
+            confidence: 1.0,
+            provenance: crate::types::common::FactProvenance::Asserted,
+            timestamp: now, ttl_ms: None,
+        };
+        let mut ws = rt.world_state.lock().unwrap();
+        ws.add_fact(fact)?;
+        let hash = ws.snapshot_hash();
+        drop(ws);
+        Ok(Self::success_response(id, serde_json::json!({
+            "success": true, "session_id": session_id, "device_id": device_id, "snapshot_hash": hash,
+        })))
+    }
+
     fn parse_authored_next_step(
         val: Option<&serde_json::Value>,
     ) -> crate::types::routine::NextStep {
@@ -5734,6 +5833,32 @@ impl McpServer {
                     "required": ["routine_id"]
                 }),
             },
+            McpTool {
+                name: "handoff_session".to_string(),
+                description: "Hand off a session to another device by writing a handoff fact to world state.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "session_id": { "type": "string", "description": "The session to hand off" },
+                        "from_device": { "type": "string", "description": "The device handing off" },
+                        "to_device": { "type": "string", "description": "Optional target device ID" },
+                        "objective": { "type": "string", "description": "Optional objective for the receiver" }
+                    },
+                    "required": ["session_id", "from_device"]
+                }),
+            },
+            McpTool {
+                name: "claim_session".to_string(),
+                description: "Claim a handed-off session by writing a claim fact to world state.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "session_id": { "type": "string", "description": "The session to claim" },
+                        "device_id": { "type": "string", "description": "The device claiming" }
+                    },
+                    "required": ["session_id", "device_id"]
+                }),
+            },
         ]
     }
 }
@@ -5779,7 +5904,7 @@ mod tests {
     fn test_list_tools_count() {
         let server = McpServer::new_stub();
         let tools = server.list_tools();
-        assert_eq!(tools.len(), 42);
+        assert_eq!(tools.len(), 44);
     }
 
     #[test]
@@ -5814,6 +5939,8 @@ mod tests {
         assert!(names.contains(&"sync_beliefs".to_string()));
         assert!(names.contains(&"migrate_session".to_string()));
         assert!(names.contains(&"review_routine".to_string()));
+        assert!(names.contains(&"handoff_session".to_string()));
+        assert!(names.contains(&"claim_session".to_string()));
     }
 
     #[test]
@@ -6321,7 +6448,7 @@ mod tests {
     #[test]
     fn test_default_impl() {
         let server = McpServer::default();
-        assert_eq!(server.list_tools().len(), 42);
+        assert_eq!(server.list_tools().len(), 44);
     }
 
     /// Build a real RuntimeHandle from a bootstrapped runtime (no packs).
@@ -6341,16 +6468,6 @@ mod tests {
         let mut config = crate::config::SomaConfig::default();
         config.soma.data_dir = String::new();
         let runtime = crate::bootstrap::bootstrap(&config, &[]).unwrap();
-
-        // Register and activate the built-in filesystem port.
-        let fs_port = crate::ports::filesystem::FilesystemPort::new();
-        let spec = fs_port.spec().clone();
-        let port_id = spec.port_id.clone();
-        let mut port_rt = runtime.port_runtime.lock().unwrap();
-        port_rt.register_port(spec, Box::new(fs_port)).unwrap();
-        port_rt.activate(&port_id).unwrap();
-        drop(port_rt);
-
         let handle = RuntimeHandle::from_runtime(runtime);
         McpServer::new(handle)
     }

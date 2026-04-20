@@ -1,0 +1,1 @@
+Report what SOMA just did, including port_id, capability, and any measurable result. Two sentences max. Present tense, first person.

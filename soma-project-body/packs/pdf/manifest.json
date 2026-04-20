@@ -1,0 +1,513 @@
+{
+  "id": "soma.ports.pdf",
+  "name": "pdf",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.pdf",
+  "description": "PDF document generation: create documents, add pages, convert text to PDF",
+  "capabilities": [
+    {
+      "group_name": "document",
+      "scope": "local",
+      "capabilities": [
+        "create_document",
+        "add_page",
+        "text_to_pdf"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
+  },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "create_document",
+      "add_page",
+      "text_to_pdf"
+    ],
+    "expected_latency_classes": [
+      "fast",
+      "medium"
+    ],
+    "expected_failure_modes": [
+      "validation_error",
+      "unknown"
+    ],
+    "trace_categories": [
+      "document"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "pdf",
+    "document",
+    "generation",
+    "renderer"
+  ],
+  "ports": [
+    {
+      "port_id": "pdf",
+      "name": "pdf",
+      "version": "0.1.0",
+      "kind": "renderer",
+      "description": "PDF document generation: create documents, add pages, convert text to PDF",
+      "namespace": "soma.ports.pdf",
+      "trust_level": "verified",
+      "capabilities": [
+        {
+          "capability_id": "create_document",
+          "name": "create_document",
+          "purpose": "Create a new PDF document with a title and text content",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "logical_undo",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 50,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 1000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "low",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "add_page",
+          "name": "add_page",
+          "purpose": "Write a page of text content to a PDF file path",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "logical_undo",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 50,
+            "p95_latency_ms": 200,
+            "max_latency_ms": 1000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "low",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "text_to_pdf",
+          "name": "text_to_pdf",
+          "purpose": "Convert plain text to a multi-page PDF file",
+          "input_schema": {
+            "schema": {
+              "type": "object"
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "logical_undo",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 100,
+            "p95_latency_ms": 500,
+            "max_latency_ms": 5000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "medium",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "output_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "failure_modes": [
+        "validation_error",
+        "unknown"
+      ],
+      "side_effect_class": "local_state_mutation",
+      "latency_profile": {
+        "expected_latency_ms": 100,
+        "p95_latency_ms": 500,
+        "max_latency_ms": 5000
+      },
+      "cost_profile": {
+        "cpu_cost_class": "low",
+        "memory_cost_class": "negligible",
+        "io_cost_class": "low",
+        "network_cost_class": "negligible",
+        "energy_cost_class": "negligible"
+      },
+      "auth_requirements": {
+        "methods": [],
+        "required": false
+      },
+      "sandbox_requirements": {
+        "filesystem_access": true,
+        "network_access": false,
+        "device_access": false,
+        "process_access": false,
+        "memory_limit_mb": null,
+        "cpu_limit_percent": null,
+        "time_limit_ms": null,
+        "syscall_limit": null
+      },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
+  "skills": [
+    {
+      "skill_id": "soma.ports.pdf.create_document",
+      "namespace": "soma.ports.pdf",
+      "pack": "soma.ports.pdf",
+      "kind": "primitive",
+      "name": "create_document",
+      "description": "Create a new PDF document with a title and text content via the pdf port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "create a new PDF document file on disk",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "create a new PDF document completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "logical_undo",
+        "compensation_skill": null,
+        "description": "delete the created file to compensate"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 50,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 1000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "low",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "pdf",
+        "document",
+        "generation"
+      ],
+      "capability_requirements": [
+        "port:pdf/create_document"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.pdf.add_page",
+      "namespace": "soma.ports.pdf",
+      "pack": "soma.ports.pdf",
+      "kind": "primitive",
+      "name": "add_page",
+      "description": "Write a page of text content to a PDF file path via the pdf port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "update",
+          "target_resource": null,
+          "description": "write a page of text content to a PDF file",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "add page to PDF completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "logical_undo",
+        "compensation_skill": null,
+        "description": "no automatic rollback"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 50,
+          "p95_latency_ms": 200,
+          "max_latency_ms": 1000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "low",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "pdf",
+        "document",
+        "generation"
+      ],
+      "capability_requirements": [
+        "port:pdf/add_page"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.pdf.text_to_pdf",
+      "namespace": "soma.ports.pdf",
+      "pack": "soma.ports.pdf",
+      "kind": "primitive",
+      "name": "text_to_pdf",
+      "description": "Convert plain text to a multi-page PDF file via the pdf port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "convert plain text to a multi-page PDF file",
+          "patch": null
+        }
+      ],
+      "observables": [
+        {
+          "field": "success",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "success": true
+          },
+          "description": "convert text to PDF completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "logical_undo",
+        "compensation_skill": null,
+        "description": "delete the created file to compensate"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 100,
+          "p95_latency_ms": 500,
+          "max_latency_ms": 5000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "medium",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "pdf",
+        "document",
+        "conversion"
+      ],
+      "capability_requirements": [
+        "port:pdf/text_to_pdf"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
+    }
+  ],
+  "port_dependencies": []
+}

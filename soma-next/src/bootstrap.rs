@@ -214,6 +214,26 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
     let mut skill_runtime = DefaultSkillRuntime::new();
     let mut pack_specs: Vec<PackSpec> = Vec::new();
 
+    // Register built-in ports before pack loading so they're always available.
+    #[cfg(feature = "native-filesystem")]
+    {
+        let fs_port = FilesystemPort::new();
+        let spec = fs_port.spec().clone();
+        let port_id = spec.port_id.clone();
+        port_runtime.register_port(spec, Box::new(fs_port))?;
+        port_runtime.activate(&port_id)?;
+        tracing::info!(port_id = %port_id, "built-in port registered");
+    }
+    #[cfg(feature = "native-http")]
+    {
+        let http_port = HttpPort::new();
+        let spec = http_port.spec().clone();
+        let port_id = spec.port_id.clone();
+        port_runtime.register_port(spec, Box::new(http_port))?;
+        port_runtime.activate(&port_id)?;
+        tracing::info!(port_id = %port_id, "built-in port registered");
+    }
+
     #[cfg(feature = "dylib-ports")]
     let mut dynamic_loader = {
         let search_paths: Vec<PathBuf> = config
@@ -237,8 +257,24 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
             SomaError::Pack(format!("failed to parse pack manifest '{}': {}", path, e))
         })?;
 
+        // Add manifest's directory to dylib search paths so co-located
+        // libraries are found without explicit plugin_path configuration.
+        #[cfg(feature = "dylib-ports")]
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            dynamic_loader.add_search_path(parent.to_path_buf());
+        }
+
         // Register ports declared in the pack.
         for port_spec in &pack_spec.ports {
+            // Skip ports already registered (e.g. built-in filesystem/http).
+            if port_runtime.get_port(&port_spec.port_id).is_some() {
+                tracing::info!(
+                    port_id = %port_spec.port_id,
+                    "pack declares port already registered (built-in), skipping"
+                );
+                continue;
+            }
+
             let (adapter, effective_spec) = match create_port_adapter(
                 port_spec,
                 #[cfg(feature = "dylib-ports")]
@@ -401,6 +437,26 @@ pub fn bootstrap_with_remote(
     let mut skill_runtime = DefaultSkillRuntime::new();
     let mut pack_specs: Vec<PackSpec> = Vec::new();
 
+    // Register built-in ports before pack loading.
+    #[cfg(feature = "native-filesystem")]
+    {
+        let fs_port = FilesystemPort::new();
+        let spec = fs_port.spec().clone();
+        let port_id = spec.port_id.clone();
+        port_runtime.register_port(spec, Box::new(fs_port))?;
+        port_runtime.activate(&port_id)?;
+        tracing::info!(port_id = %port_id, "built-in port registered");
+    }
+    #[cfg(feature = "native-http")]
+    {
+        let http_port = HttpPort::new();
+        let spec = http_port.spec().clone();
+        let port_id = spec.port_id.clone();
+        port_runtime.register_port(spec, Box::new(http_port))?;
+        port_runtime.activate(&port_id)?;
+        tracing::info!(port_id = %port_id, "built-in port registered");
+    }
+
     #[cfg(feature = "dylib-ports")]
     let mut dynamic_loader = {
         let search_paths: Vec<PathBuf> = config
@@ -424,7 +480,20 @@ pub fn bootstrap_with_remote(
             SomaError::Pack(format!("failed to parse pack manifest '{}': {}", path, e))
         })?;
 
+        #[cfg(feature = "dylib-ports")]
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            dynamic_loader.add_search_path(parent.to_path_buf());
+        }
+
         for port_spec in &pack_spec.ports {
+            if port_runtime.get_port(&port_spec.port_id).is_some() {
+                tracing::info!(
+                    port_id = %port_spec.port_id,
+                    "pack declares port already registered (built-in), skipping"
+                );
+                continue;
+            }
+
             let (adapter, effective_spec) = match create_port_adapter(
                 port_spec,
                 #[cfg(feature = "dylib-ports")]

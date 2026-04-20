@@ -1,0 +1,8 @@
+{
+  "appId": "dev.soma.body",
+  "appName": "SOMA Body",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}

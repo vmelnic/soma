@@ -1,0 +1,19 @@
+[package]
+name = "soma-port-deepgram"
+version = "0.1.0"
+edition = "2024"
+description = "SOMA port for Deepgram speech-to-text, text-to-speech, and text intelligence API"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soma-port-sdk = { path = "../sdk" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+semver = { version = "1", features = ["serde"] }
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+tokio = { version = "1", features = ["rt", "macros"] }
+base64 = "0.22"

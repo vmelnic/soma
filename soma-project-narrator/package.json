@@ -1,0 +1,13 @@
+{
+  "name": "soma-project-narrator",
+  "version": "0.1.0",
+  "description": "Interpreter LLM that attaches to a SOMA MCP server and narrates the body's activity in natural language.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "soma-narrator": "narrator.mjs"
+  },
+  "scripts": {
+    "start": "node narrator.mjs"
+  }
+}

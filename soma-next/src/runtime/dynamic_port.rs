@@ -150,6 +150,13 @@ impl DynamicPortLoader {
         &self.search_paths
     }
 
+    /// Add a directory to the search paths if not already present.
+    pub fn add_search_path(&mut self, path: PathBuf) {
+        if !self.search_paths.contains(&path) {
+            self.search_paths.push(path);
+        }
+    }
+
     /// Discover and load all port libraries found in the search paths.
     ///
     /// Scans every directory in `search_paths` for files matching the platform

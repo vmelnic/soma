@@ -1,0 +1,11 @@
+[soma]
+id = "body"
+log_level = "info"
+data_dir = "./data"
+
+[runtime]
+max_steps = 100
+
+[ports]
+filesystem_enabled = true
+http_enabled = true

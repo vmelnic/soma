@@ -1,0 +1,436 @@
+{
+  "id": "soma.ports.deepgram",
+  "name": "deepgram",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.deepgram",
+  "description": "Deepgram speech-to-text, text-to-speech, and text intelligence: transcription with diarization/smart formatting/summarization/topics/intents/sentiment/redaction, TTS with Aura models, text analysis with sentiment/summary/topics/intents",
+  "capabilities": [
+    {
+      "group_name": "speech_to_text",
+      "scope": "local",
+      "capabilities": ["transcribe"]
+    },
+    {
+      "group_name": "text_to_speech",
+      "scope": "local",
+      "capabilities": ["speak"]
+    },
+    {
+      "group_name": "text_intelligence",
+      "scope": "local",
+      "capabilities": ["analyze_text"]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [
+      "soma.ports.deepgram.transcribe",
+      "soma.ports.deepgram.speak",
+      "soma.ports.deepgram.analyze_text"
+    ],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
+  },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": { "version": "0.1.0" },
+    "dependency_status": [],
+    "capability_inventory": ["transcribe", "speak", "analyze_text"],
+    "expected_latency_classes": ["fast", "medium", "slow"],
+    "expected_failure_modes": [
+      "validation_error",
+      "authorization_denied",
+      "dependency_unavailable",
+      "transport_error",
+      "external_error",
+      "timeout"
+    ],
+    "trace_categories": ["speech_to_text", "text_to_speech", "text_intelligence"],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": ["deepgram", "speech-to-text", "text-to-speech", "transcription", "tts", "text-intelligence", "sentiment", "summarization"],
+  "ports": [
+    {
+      "port_id": "deepgram",
+      "name": "deepgram",
+      "version": "0.1.0",
+      "kind": "http",
+      "description": "Deepgram speech-to-text, text-to-speech, and text intelligence API",
+      "namespace": "soma.ports.deepgram",
+      "trust_level": "verified",
+      "capabilities": [
+        {
+          "capability_id": "transcribe",
+          "name": "transcribe",
+          "purpose": "Transcribe pre-recorded audio from URL using Deepgram STT (nova-3, etc.) with optional punctuation, diarization, smart formatting, summarization, topics, intents, sentiment, language detection, redaction, search, and keywords",
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "required": ["url"],
+              "properties": {
+                "url": { "type": "string", "description": "URL of audio file to transcribe" },
+                "model": { "type": "string", "description": "Model to use (e.g. nova-3, base)" },
+                "language": { "type": "string", "description": "BCP-47 language code" },
+                "punctuate": { "type": "boolean" },
+                "diarize": { "type": "boolean", "description": "Enable speaker diarization" },
+                "smart_format": { "type": "boolean", "description": "Enable smart formatting (dates, currency, etc.)" },
+                "utterances": { "type": "boolean" },
+                "paragraphs": { "type": "boolean" },
+                "summarize": { "type": ["boolean", "string"], "description": "Enable summarization (true or 'v2')" },
+                "topics": { "type": "boolean" },
+                "intents": { "type": "boolean" },
+                "sentiment": { "type": "boolean" },
+                "detect_language": { "type": "boolean" },
+                "redact": { "type": "array", "items": { "type": "string" }, "description": "PII types to redact" },
+                "search": { "type": "array", "items": { "type": "string" }, "description": "Terms to search for in audio" },
+                "keywords": { "type": "array", "items": { "type": "string" }, "description": "Keywords to boost recognition" },
+                "multichannel": { "type": "boolean" },
+                "alternatives": { "type": "integer" },
+                "numerals": { "type": "boolean" },
+                "profanity_filter": { "type": "boolean" },
+                "tag": { "type": "string" }
+              }
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "metadata": { "type": "object" },
+                "results": { "type": "object" }
+              }
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": { "expected_latency_ms": 500, "p95_latency_ms": 5000, "max_latency_ms": 120000 },
+          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "speak",
+          "name": "speak",
+          "purpose": "Convert text to speech audio using Deepgram TTS (Aura models), returns base64-encoded audio with configurable model, encoding, sample rate, and bit rate",
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "required": ["text"],
+              "properties": {
+                "text": { "type": "string", "description": "Text to synthesize (max 2000 chars)", "maxLength": 2000 },
+                "model": { "type": "string", "description": "Voice model (e.g. aura-2-thalia-en, aura-asteria-en)" },
+                "encoding": { "type": "string", "description": "Audio encoding (e.g. mp3, linear16, alaw, mulaw, opus)" },
+                "container": { "type": "string", "description": "Container format (e.g. wav, ogg)" },
+                "sample_rate": { "type": "integer", "description": "Audio sample rate in Hz" },
+                "bit_rate": { "type": "integer", "description": "Audio bit rate in bps" }
+              }
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "audio_base64": { "type": "string" },
+                "audio_size_bytes": { "type": "integer" },
+                "content_type": { "type": "string" },
+                "model_name": { "type": "string" },
+                "char_count": { "type": "string" },
+                "request_id": { "type": "string" }
+              }
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 },
+          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "medium", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "analyze_text",
+          "name": "analyze_text",
+          "purpose": "Analyze text or URL content using Deepgram text intelligence for sentiment analysis, summarization, topic detection, and intent recognition",
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "text": { "type": "string", "description": "Plain text to analyze" },
+                "url": { "type": "string", "description": "URL of text content to analyze" },
+                "sentiment": { "type": "boolean" },
+                "summarize": { "type": ["boolean", "string"], "description": "Enable summarization (true or 'v2')" },
+                "topics": { "type": "boolean" },
+                "intents": { "type": "boolean" },
+                "language": { "type": "string", "description": "BCP-47 language code" },
+                "custom_topic": { "type": "array", "items": { "type": "string" }, "description": "Custom topics to detect (max 100)" },
+                "custom_topic_mode": { "type": "string", "enum": ["extended", "strict"] },
+                "custom_intent": { "type": "array", "items": { "type": "string" } },
+                "custom_intent_mode": { "type": "string", "enum": ["extended", "strict"] }
+              }
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "metadata": { "type": "object" },
+                "results": { "type": "object" }
+              }
+            }
+          },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": { "expected_latency_ms": 300, "p95_latency_ms": 3000, "max_latency_ms": 60000 },
+          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": { "schema": { "type": "object" } },
+      "output_schema": { "schema": { "description": "any" } },
+      "failure_modes": ["validation_error", "authorization_denied", "dependency_unavailable", "transport_error", "external_error", "timeout"],
+      "side_effect_class": "read_only",
+      "latency_profile": { "expected_latency_ms": 500, "p95_latency_ms": 5000, "max_latency_ms": 120000 },
+      "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
+      "auth_requirements": { "methods": ["api_key"], "required": true },
+      "sandbox_requirements": {
+        "filesystem_access": false,
+        "network_access": true,
+        "device_access": false,
+        "process_access": false,
+        "memory_limit_mb": null,
+        "cpu_limit_percent": null,
+        "time_limit_ms": 120000,
+        "syscall_limit": null
+      },
+      "observable_fields": ["request_id", "model_name", "content_type"],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
+  "skills": [
+    {
+      "skill_id": "soma.ports.deepgram.transcribe",
+      "namespace": "soma.ports.deepgram",
+      "pack": "soma.ports.deepgram",
+      "kind": "primitive",
+      "name": "Transcribe Audio",
+      "description": "Transcribe pre-recorded audio from URL using Deepgram STT with optional diarization, smart formatting, summarization, topics, intents, sentiment, language detection, redaction, and keyword boosting",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "required": ["url"],
+          "properties": {
+            "url": { "type": "string" },
+            "model": { "type": "string" },
+            "language": { "type": "string" },
+            "punctuate": { "type": "boolean" },
+            "diarize": { "type": "boolean" },
+            "smart_format": { "type": "boolean" },
+            "utterances": { "type": "boolean" },
+            "paragraphs": { "type": "boolean" },
+            "summarize": { "type": ["boolean", "string"] },
+            "topics": { "type": "boolean" },
+            "intents": { "type": "boolean" },
+            "sentiment": { "type": "boolean" },
+            "detect_language": { "type": "boolean" },
+            "redact": { "type": "array", "items": { "type": "string" } },
+            "search": { "type": "array", "items": { "type": "string" } },
+            "keywords": { "type": "array", "items": { "type": "string" } },
+            "multichannel": { "type": "boolean" },
+            "alternatives": { "type": "integer" },
+            "numerals": { "type": "boolean" },
+            "profanity_filter": { "type": "boolean" },
+            "tag": { "type": "string" }
+          }
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "metadata": { "type": "object" },
+            "results": { "type": "object" }
+          }
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        { "field": "results.channels", "role": "confirm_success" },
+        { "field": "metadata.duration", "role": "general" },
+        { "field": "metadata.request_id", "role": "general" }
+      ],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "results": "present" }, "description": "transcription results returned" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "transcription failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": {
+        "latency": { "expected_latency_ms": 500, "p95_latency_ms": 5000, "max_latency_ms": 120000 },
+        "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" }
+      },
+      "risk_class": "low",
+      "determinism": "stochastic",
+      "nondeterminism_sources": ["ml_model_inference", "audio_quality_variance"],
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["transcription", "speech-to-text", "deepgram"],
+      "capability_requirements": ["port:deepgram/transcribe"],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.deepgram.speak",
+      "namespace": "soma.ports.deepgram",
+      "pack": "soma.ports.deepgram",
+      "kind": "primitive",
+      "name": "Text to Speech",
+      "description": "Convert text to speech audio using Deepgram TTS (Aura models), returns base64-encoded audio with configurable voice model, encoding, and sample rate",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "required": ["text"],
+          "properties": {
+            "text": { "type": "string", "maxLength": 2000 },
+            "model": { "type": "string" },
+            "encoding": { "type": "string" },
+            "container": { "type": "string" },
+            "sample_rate": { "type": "integer" },
+            "bit_rate": { "type": "integer" }
+          }
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "audio_base64": { "type": "string" },
+            "audio_size_bytes": { "type": "integer" },
+            "content_type": { "type": "string" },
+            "model_name": { "type": "string" },
+            "char_count": { "type": "string" },
+            "request_id": { "type": "string" }
+          }
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        { "field": "audio_base64", "role": "confirm_success" },
+        { "field": "audio_size_bytes", "role": "general" },
+        { "field": "model_name", "role": "general" }
+      ],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "audio_base64": "present" }, "description": "audio data returned" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "speech synthesis failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": {
+        "latency": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 },
+        "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "medium", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" }
+      },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "nondeterminism_sources": ["ml_model_inference"],
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["tts", "text-to-speech", "deepgram", "audio"],
+      "capability_requirements": ["port:deepgram/speak"],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.deepgram.analyze_text",
+      "namespace": "soma.ports.deepgram",
+      "pack": "soma.ports.deepgram",
+      "kind": "primitive",
+      "name": "Analyze Text",
+      "description": "Analyze text or URL content using Deepgram text intelligence for sentiment analysis, summarization, topic detection, and intent recognition",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "text": { "type": "string" },
+            "url": { "type": "string" },
+            "sentiment": { "type": "boolean" },
+            "summarize": { "type": ["boolean", "string"] },
+            "topics": { "type": "boolean" },
+            "intents": { "type": "boolean" },
+            "language": { "type": "string" },
+            "custom_topic": { "type": "array", "items": { "type": "string" } },
+            "custom_topic_mode": { "type": "string", "enum": ["extended", "strict"] },
+            "custom_intent": { "type": "array", "items": { "type": "string" } },
+            "custom_intent_mode": { "type": "string", "enum": ["extended", "strict"] }
+          }
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "metadata": { "type": "object" },
+            "results": { "type": "object" }
+          }
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        { "field": "results", "role": "confirm_success" },
+        { "field": "metadata.request_id", "role": "general" }
+      ],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "results": "present" }, "description": "analysis results returned" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "text analysis failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": {
+        "latency": { "expected_latency_ms": 300, "p95_latency_ms": 3000, "max_latency_ms": 60000 },
+        "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" }
+      },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "nondeterminism_sources": ["ml_model_inference"],
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["text-intelligence", "sentiment", "summarization", "topics", "intents", "deepgram"],
+      "capability_requirements": ["port:deepgram/analyze_text"],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
+    }
+  ],
+  "port_dependencies": []
+}

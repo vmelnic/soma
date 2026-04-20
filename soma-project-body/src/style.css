@@ -1,0 +1,61 @@
+@import "tailwindcss";
+@import "@fontsource-variable/lexend/index.css";
+
+/* Claude Code–inspired palette: warm cream on near-black, coral accent. */
+@theme {
+  --color-claude-bg:      #1f1e1d;
+  --color-claude-surface: #262524;
+  --color-claude-raised:  #2e2c2a;
+  --color-claude-border:  #3a3836;
+  --color-claude-text:    #e8e6e3;
+  --color-claude-muted:   #a39d97;
+  --color-claude-dim:     #6b6763;
+  --color-claude-accent:  #d97757;
+  --color-claude-hover:   #cc6a4b;
+  --color-claude-success: #7aa886;
+  --color-claude-warn:    #d4a574;
+  --color-claude-error:   #c76565;
+  --color-claude-errBg:   #3b1f1a;
+  --color-claude-warnBg:  #2e2418;
+
+  --font-sans: "Lexend Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, monospace;
+}
+
+:root { color-scheme: dark; }
+
+html, body, #app {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-claude-bg);
+  color: var(--color-claude-text);
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+input, select, textarea, button {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* Subtle gradient glow under the top bar — a hint of body warmth. */
+.glow-accent {
+  background-image:
+    radial-gradient(60% 140% at 50% 0%, rgba(217, 119, 87, 0.08) 0%, transparent 70%),
+    linear-gradient(to bottom, var(--color-claude-bg), var(--color-claude-bg));
+}
+
+/* Scrollbars tuned to the palette. */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-claude-border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--color-claude-dim); }

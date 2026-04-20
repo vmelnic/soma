@@ -1,0 +1,1 @@
+Only narrate failures or errors. If the action succeeded, respond with exactly "—". Never speak on success.
