@@ -37,6 +37,7 @@ The same architecture runs on microcontrollers. `soma-project-esp32` deploys a `
 | [soma-project-mcp-bridge](soma-project-mcp-bridge/) | `PortBackend::McpClient` proof. Python, Node.js, and PHP each a pure-stdlib MCP server running as a SOMA port. Writing a port in any language is now "write an MCP server in that language." | Proven |
 | [soma-project-web](soma-project-web/) | **soma-next in a browser tab.** Wasm core runtime with in-tab `dom` / `audio` / `voice` ports, autonomous goal execution through the real `SessionController`, plan-following dispatch, and an LLM brain over HTTP. | Proven |
 | [soma-project-terminal](soma-project-terminal/) | **Multi-user SOMA-native web platform.** Fallout-inspired terminal UI, conversation-first architecture. Operator logs in via magic link, creates named contexts, talks to a tool-calling chat brain that invokes real SOMA ports via `invoke_port` over MCP. | Production |
+| [soma-project-body](soma-project-body/) | Full MCP body with all ports loaded. Claude Code integration, mDNS peer discovery, autonomous goals, routine authoring, world state, scheduling. | Production |
 
 Legacy (not active): `soma-core/`, `soma-plugins/`, `soma-synthesizer/`, `poc/`, `pow/`.
 

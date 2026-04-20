@@ -25,6 +25,7 @@ export const useBodyStore = defineStore('body', () => {
   const localPorts = ref([]);       // ports this device offers to SOMA
   const ports = ref([]);            // ports loaded in the runtime (list_ports)
   const tools = ref([]);            // MCP tools exposed by the runtime
+  const skills = ref([]);           // skills from loaded packs (inspect_skills)
   const events = reactive([]);      // narrator-observable event stream
   const client = { value: null };   // non-reactive to avoid Vue proxying WS
 
@@ -60,6 +61,8 @@ export const useBodyStore = defineStore('body', () => {
       remotePorts.value = r?.ports || [];
       const p = await c.callTool('list_ports', {}).catch(() => ({ ports: [] }));
       ports.value = p?.ports || [];
+      const sk = await c.callTool('inspect_skills', {}).catch(() => ({ skills: [] }));
+      skills.value = sk?.skills || [];
       client.value = c;
       connected.value = true;
 
@@ -135,7 +138,7 @@ export const useBodyStore = defineStore('body', () => {
 
   return {
     serverUrl, deviceId, authToken, connected, connectError,
-    remotePorts, localPorts, ports, tools, events,
+    remotePorts, localPorts, ports, tools, skills, events,
     setServerUrl, setAuthToken, connect, disconnect,
     announcePorts, registerLocalPort, refreshRemotePorts, callTool,
     handoffSession, claimSession, fetchHandoffs,

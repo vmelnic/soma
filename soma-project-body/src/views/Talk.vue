@@ -101,7 +101,7 @@ function push(kind, text) {
 // ─── Execute a resolved action against SOMA ───
 
 async function executeAction(entry, args) {
-  if (entry.kind === 'port') {
+  if (entry.kind === 'skill') {
     const result = await body.callTool('invoke_port', {
       port_id: entry.port_id,
       capability_id: entry.capability_id,
@@ -168,12 +168,12 @@ async function submit() {
   busy.value = true;
 
   try {
-    const { definitions, dispatch } = buildRegistry(
-      body.ports, body.remotePorts, body.tools,
-    );
+    const { definitions, dispatch } = buildRegistry(body.skills, body.tools);
 
     const decider = brains.router.get(ROLE_DECIDER);
-    const systemContent = render('decider-system', {});
+    const portCatalog = (body.ports || []).map(p => `- ${p.port_id}: ${(p.capabilities || []).map(c => c.capability_id).join(', ')}`).join('\n');
+    const skillCatalog = (body.skills || []).map(s => `- ${s.skill_id}: ${s.description || s.name}`).join('\n');
+    const systemContent = render('decider-system', { port_catalog: portCatalog, skill_catalog: skillCatalog });
 
     const resp = await decider.chat({
       messages: [

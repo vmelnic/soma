@@ -126,17 +126,18 @@ impl DynamicPortLoader {
 
         let sdk_port = unsafe { Box::from_raw(port_ptr) };
 
+        // Keep the library alive — the port holds references to its symbols.
+        self.loaded_libs.push(lib);
+
+        // Wrap in adapter that bridges SDK Port → runtime Port via JSON.
+        let adapter = SdkPortAdapter::new(sdk_port)?;
+
         tracing::info!(
-            port_id = %sdk_port.spec().port_id,
+            port_id = %adapter.spec.port_id,
             path = %lib_path.display(),
             "dynamic port loaded"
         );
 
-        // Keep the library alive — the port holds references to its symbols.
-        self.loaded_libs.push(lib);
-
-        // Wrap in adapter that bridges SDK Port → runtime Port.
-        let adapter = SdkPortAdapter::new(sdk_port)?;
         Ok(Box::new(adapter))
     }
 
@@ -241,12 +242,12 @@ struct SdkPortAdapter {
 
 impl SdkPortAdapter {
     fn new(inner: Box<dyn soma_port_sdk::Port>) -> Result<Self> {
-        let sdk_spec = inner.spec();
-        let spec_json = serde_json::to_value(sdk_spec).map_err(|e| {
-            SomaError::Port(format!("failed to serialize SDK port spec: {e}"))
-        })?;
-        let spec: crate::types::port::PortSpec = serde_json::from_value(spec_json).map_err(|e| {
-            SomaError::Port(format!("failed to convert SDK port spec to runtime format: {e}"))
+        // Call spec_json() through the vtable so serialization happens inside
+        // the dylib using its own struct layout. This avoids ABI mismatches
+        // when the host binary and the dylib were compiled separately.
+        let json_str = inner.spec_json();
+        let spec: crate::types::port::PortSpec = serde_json::from_str(&json_str).map_err(|e| {
+            SomaError::Port(format!("failed to parse port spec JSON: {e}"))
         })?;
         Ok(Self { inner, spec })
     }
@@ -262,20 +263,17 @@ impl Port for SdkPortAdapter {
         capability_id: &str,
         input: serde_json::Value,
     ) -> Result<crate::types::observation::PortCallRecord> {
-        match self.inner.invoke(capability_id, input) {
-            Ok(sdk_record) => {
-                let json = serde_json::to_value(&sdk_record).map_err(|e| {
-                    SomaError::Port(format!("failed to serialize SDK PortCallRecord: {e}"))
-                })?;
+        // Serialize input to JSON string so no serde_json::Value crosses ABI.
+        let input_json = serde_json::to_string(&input).unwrap_or_else(|_| "{}".to_string());
+        match self.inner.invoke_json(capability_id, &input_json) {
+            Ok(json_str) => {
                 let record: crate::types::observation::PortCallRecord =
-                    serde_json::from_value(json).map_err(|e| {
-                        SomaError::Port(format!(
-                            "failed to convert SDK PortCallRecord to runtime format: {e}"
-                        ))
+                    serde_json::from_str(&json_str).map_err(|e| {
+                        SomaError::Port(format!("failed to parse port call record JSON: {e}"))
                     })?;
                 Ok(record)
             }
-            Err(sdk_err) => Err(SomaError::Port(sdk_err.to_string())),
+            Err(err_str) => Err(SomaError::Port(err_str)),
         }
     }
 
@@ -284,12 +282,14 @@ impl Port for SdkPortAdapter {
         capability_id: &str,
         input: &serde_json::Value,
     ) -> Result<()> {
+        let input_json = serde_json::to_string(input).unwrap_or_else(|_| "{}".to_string());
         self.inner
-            .validate_input(capability_id, input)
-            .map_err(|e| SomaError::Port(e.to_string()))
+            .validate_input_json(capability_id, &input_json)
+            .map_err(|e| SomaError::Port(e))
     }
 
     fn lifecycle_state(&self) -> crate::types::port::PortLifecycleState {
+        // Serialize through JSON to avoid ABI layout assumptions
         let sdk_state = self.inner.lifecycle_state();
         let json = serde_json::to_value(sdk_state).unwrap_or_default();
         serde_json::from_value(json).unwrap_or(crate::types::port::PortLifecycleState::Loaded)

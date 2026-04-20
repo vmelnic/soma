@@ -23,13 +23,14 @@ use crate::types::pack::PackSpec;
 // JSON-RPC 2.0 types
 // ---------------------------------------------------------------------------
 
-/// JSON-RPC 2.0 request.
+/// JSON-RPC 2.0 request (or notification when `id` is absent).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpRequest {
     pub jsonrpc: String,
     pub method: String,
     #[serde(default)]
     pub params: Option<Value>,
+    #[serde(default)]
     pub id: Value,
 }
 
@@ -297,7 +298,7 @@ const IMPLICIT_SESSION_TIMEOUT: std::time::Duration = std::time::Duration::from_
 /// return static placeholder data — useful for protocol-level testing.
 pub struct McpServer {
     tools: Vec<McpTool>,
-    runtime: Option<RuntimeHandle>,
+    runtime: std::sync::OnceLock<RuntimeHandle>,
     /// Tracks the current implicit session for LLM-driven invoke_port calls.
     /// When finalized, the session becomes an episode fed into the learning
     /// pipeline (schema induction / routine compilation).
@@ -307,20 +308,32 @@ pub struct McpServer {
 impl McpServer {
     /// Create an MCP server wired to real runtime subsystems.
     pub fn new(runtime: RuntimeHandle) -> Self {
+        let lock = std::sync::OnceLock::new();
+        let _ = lock.set(runtime);
         Self {
             tools: Self::build_tools(),
-            runtime: Some(runtime),
+            runtime: lock,
             implicit_session: Mutex::new(None),
         }
     }
 
     /// Create a stub MCP server without any runtime backing.
-    /// Handlers return placeholder data. Useful for protocol-level tests.
+    /// The runtime can be installed later via `install_runtime`.
     pub fn new_stub() -> Self {
         Self {
             tools: Self::build_tools(),
-            runtime: None,
+            runtime: std::sync::OnceLock::new(),
             implicit_session: Mutex::new(None),
+        }
+    }
+
+    /// Hot-install a runtime into a stub server. Called from the background
+    /// bootstrap thread once all packs are loaded.
+    pub fn install_runtime(&self, runtime: RuntimeHandle) {
+        let n_skills = runtime.skill_runtime.lock().unwrap().list_skills(None).len();
+        match self.runtime.set(runtime) {
+            Ok(()) => eprintln!("MCP: runtime installed ({n_skills} skills ready)"),
+            Err(_) => eprintln!("MCP: warning: runtime already installed"),
         }
     }
 
@@ -572,7 +585,7 @@ impl McpServer {
             .and_then(|v| v.as_u64())
             .and_then(|v| u32::try_from(v).ok());
 
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => {
                 // Stub mode: return placeholder response.
@@ -768,7 +781,7 @@ impl McpServer {
             .and_then(|v| v.as_u64())
             .and_then(|v| u32::try_from(v).ok());
 
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => {
                 let goal_id = Uuid::new_v4();
@@ -821,6 +834,11 @@ impl McpServer {
         }
         if let Some(ms) = max_steps_override {
             goal.max_steps = Some(ms);
+        }
+        if let Some(inputs) = params.get("inputs").cloned() {
+            if inputs.is_object() {
+                goal.objective.structured = Some(inputs);
+            }
         }
         if let Some(ms) = params
             .get("latency_budget_ms")
@@ -913,7 +931,7 @@ impl McpServer {
                 ));
             }
         };
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => {
                 return Ok(Self::success_response(
@@ -992,7 +1010,7 @@ impl McpServer {
             .map(|v| v as usize)
             .unwrap_or(100);
 
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => {
                 return Ok(Self::success_response(
@@ -1092,7 +1110,7 @@ impl McpServer {
                 ));
             }
         };
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => {
                 return Ok(Self::success_response(
@@ -1134,7 +1152,7 @@ impl McpServer {
             }
         };
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let uuid = match Uuid::parse_str(&session_id_str) {
                 Ok(u) => u,
                 Err(_) => {
@@ -1217,7 +1235,7 @@ impl McpServer {
             }
         };
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let uuid = match Uuid::parse_str(&session_id_str) {
                 Ok(u) => u,
                 Err(_) => {
@@ -1284,7 +1302,7 @@ impl McpServer {
         // Resources are tracked inside belief state per-session. The global
         // resource listing comes from registered port specs which declare what
         // external resources are available to the runtime.
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let port_rt = rt.port_runtime.lock().unwrap();
             let ports = port_rt.list_ports(None);
             let resources: Vec<Value> = ports
@@ -1311,7 +1329,7 @@ impl McpServer {
     }
 
     fn handle_inspect_packs(&self, id: Value, _params: Option<Value>) -> Result<McpResponse> {
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let specs = rt.pack_specs.lock().unwrap();
             let packs: Vec<Value> = specs
                 .iter()
@@ -1338,7 +1356,7 @@ impl McpServer {
     }
 
     fn handle_inspect_skills(&self, id: Value, params: Option<Value>) -> Result<McpResponse> {
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let pack_filter = params
                 .as_ref()
                 .and_then(|p| p.get("pack"))
@@ -1361,6 +1379,8 @@ impl McpServer {
                         "determinism": format!("{:?}", s.determinism),
                         "inputs": s.inputs.schema,
                         "outputs": s.outputs.schema,
+                        "capability_requirements": s.capability_requirements,
+                        "tags": s.tags,
                         "observed": stats.map(|st| serde_json::json!({
                             "n": st.n_observed,
                             "ema_latency_ms": st.ema_latency_ms,
@@ -1396,7 +1416,7 @@ impl McpServer {
             }
         };
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let uuid = match Uuid::parse_str(&session_id_str) {
                 Ok(u) => u,
                 Err(_) => {
@@ -1510,7 +1530,7 @@ impl McpServer {
             }
         };
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let uuid = match Uuid::parse_str(&session_id_str) {
                 Ok(u) => u,
                 Err(_) => {
@@ -1577,7 +1597,7 @@ impl McpServer {
         };
         let payload = params.as_ref().and_then(|p| p.get("payload")).cloned();
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let uuid = match Uuid::parse_str(&session_id_str) {
                 Ok(u) => u,
                 Err(_) => {
@@ -1726,7 +1746,7 @@ impl McpServer {
             }
         };
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let uuid = match Uuid::parse_str(&session_id_str) {
                 Ok(u) => u,
                 Err(_) => {
@@ -1779,7 +1799,7 @@ impl McpServer {
     }
 
     fn handle_list_sessions(&self, id: Value, _params: Option<Value>) -> Result<McpResponse> {
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let ctrl = rt.session_controller.lock().unwrap();
             let sessions: Vec<Value> = ctrl
                 .list_sessions()
@@ -1804,7 +1824,7 @@ impl McpServer {
     }
 
     fn handle_query_metrics(&self, id: Value, _params: Option<Value>) -> Result<McpResponse> {
-        match &self.runtime {
+        match self.runtime.get() {
             Some(rt) => {
                 let snap = rt.metrics.snapshot();
                 Ok(Self::success_response(
@@ -1858,7 +1878,7 @@ impl McpServer {
             })
             .unwrap_or_else(|| vec!["full".to_string()]);
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let ctrl = rt.session_controller.lock().unwrap();
             let skill_rt = rt.skill_runtime.lock().unwrap();
             let port_rt_clone = Arc::clone(&rt.port_runtime);
@@ -2143,7 +2163,7 @@ impl McpServer {
             .cloned()
             .unwrap_or(serde_json::json!({}));
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let ctx = crate::types::port::InvocationContext {
                 caller_identity: Some("mcp".to_string()),
                 ..Default::default()
@@ -2195,7 +2215,7 @@ impl McpServer {
             .and_then(|v| v.as_str())
             .map(String::from);
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let port_rt = rt.port_runtime.lock().unwrap();
             let ports = port_rt.list_ports(namespace.as_deref());
             let port_json: Vec<Value> = ports
@@ -2243,7 +2263,7 @@ impl McpServer {
         id: Value,
         params: Option<Value>,
     ) -> Result<McpResponse> {
-        let Some(rt) = &self.runtime else {
+        let Some(rt) = self.runtime.get() else {
             return Ok(Self::success_response(
                 id,
                 serde_json::json!({
@@ -2359,7 +2379,7 @@ impl McpServer {
     // -----------------------------------------------------------------------
 
     fn handle_list_peers(&self, id: Value, _params: Option<Value>) -> Result<McpResponse> {
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let ids = rt.peer_ids.lock().unwrap();
             let peers: Vec<Value> = ids
                 .iter()
@@ -2429,7 +2449,7 @@ impl McpServer {
             .cloned()
             .unwrap_or(serde_json::json!({}));
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             if let Some(ref exec) = rt.remote_executor {
                 match exec.invoke_skill(&peer_id, &skill_id, input) {
                     Ok(resp) => {
@@ -2546,7 +2566,7 @@ impl McpServer {
             }
         };
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             // Look up the routine locally.
             let routine = {
                 let store = rt.routine_store.lock().unwrap();
@@ -2650,7 +2670,7 @@ impl McpServer {
             ));
         }
 
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => {
                 // Stub mode: return placeholder response.
@@ -2949,7 +2969,7 @@ impl McpServer {
         // Resolve short port names (e.g. "smtp") to full port IDs
         // (e.g. "soma.smtp") so the scheduler can invoke them directly.
         let port_id = params.get("port_id").and_then(|v| v.as_str()).map(|s| {
-            if let Some(ref rt) = self.runtime {
+            if let Some(rt) = self.runtime.get() {
                 if let Ok(pr) = rt.port_runtime.lock() {
                     // If the exact ID exists, use it. Otherwise search for
                     // a registered port whose ID ends with the given name.
@@ -3034,7 +3054,7 @@ impl McpServer {
             enabled: true,
         };
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let mut store = rt.schedule_store.lock().unwrap();
             store.add(schedule)?;
         }
@@ -3054,7 +3074,7 @@ impl McpServer {
         id: Value,
         _params: Option<Value>,
     ) -> Result<McpResponse> {
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let store = rt.schedule_store.lock().unwrap();
             let all = store.list_all();
             let schedules: Vec<Value> = all
@@ -3120,7 +3140,7 @@ impl McpServer {
             }
         };
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let mut store = rt.schedule_store.lock().unwrap();
             let cancelled = store.remove(&schedule_uuid)?;
             Ok(Self::success_response(
@@ -3140,7 +3160,7 @@ impl McpServer {
         id: Value,
         _params: Option<Value>,
     ) -> Result<McpResponse> {
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let (schemas_induced, routines_compiled) =
                 crate::memory::schemas::run_consolidation_cycle(
                     &rt.episode_store,
@@ -3188,7 +3208,7 @@ impl McpServer {
             }
         };
 
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => {
                 return Ok(Self::success_response(
@@ -3275,7 +3295,7 @@ impl McpServer {
                 ));
             }
         };
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => {
                 return Ok(Self::success_response(
@@ -3321,7 +3341,7 @@ impl McpServer {
                 ));
             }
         };
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => {
                 return Ok(Self::success_response(
@@ -3369,11 +3389,21 @@ impl McpServer {
         let mut errors: Vec<String> = Vec::new();
         {
             #[cfg(feature = "dylib-ports")]
-            let mut loader =
+            let mut loader = {
+                let mut paths = rt.plugin_search_paths.clone();
+                // Add the manifest's parent directory so the loader can find
+                // dylibs co-located with the manifest (packs/<port>/ layout).
+                if let Some(parent) = std::path::Path::new(&manifest_path).parent() {
+                    let parent = parent.to_path_buf();
+                    if !paths.contains(&parent) {
+                        paths.push(parent);
+                    }
+                }
                 crate::runtime::dynamic_port::DynamicPortLoader::with_signature_policy(
-                    rt.plugin_search_paths.clone(),
+                    paths,
                     rt.require_port_signatures,
-                );
+                )
+            };
             let mut port_rt = rt.port_runtime.lock().unwrap();
             for port_spec in &new_spec.ports {
                 let result = crate::bootstrap::create_port_adapter(
@@ -3510,7 +3540,7 @@ impl McpServer {
         id: Value,
         _params: Option<Value>,
     ) -> Result<McpResponse> {
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => {
                 return Ok(Self::success_response(
@@ -3534,7 +3564,7 @@ impl McpServer {
         id: Value,
         _params: Option<Value>,
     ) -> Result<McpResponse> {
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => {
                 return Ok(Self::success_response(
@@ -3603,7 +3633,7 @@ impl McpServer {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => {
                 return Ok(Self::success_response(
@@ -3669,7 +3699,7 @@ impl McpServer {
             ));
         }
 
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => {
                 return Ok(Self::success_response(
@@ -3978,7 +4008,7 @@ impl McpServer {
             version: 0,
         };
 
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => {
                 return Ok(Self::success_response(
@@ -4045,7 +4075,7 @@ impl McpServer {
             ));
         }
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let store = rt.routine_store.lock().unwrap();
             let versions = store.list_versions(&routine_id);
             let entries: Vec<Value> = versions
@@ -4117,7 +4147,7 @@ impl McpServer {
             }
         };
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let mut store = rt.routine_store.lock().unwrap();
             match store.rollback(&routine_id, target_version) {
                 Ok(()) => Ok(Self::success_response(
@@ -4178,7 +4208,7 @@ impl McpServer {
             }
         };
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             // Gather current world state facts and convert to BeliefFactEntry.
             let ws = rt.world_state.lock().unwrap();
             let facts: Vec<crate::distributed::sync::BeliefFactEntry> = ws
@@ -4288,7 +4318,7 @@ impl McpServer {
             }
         };
 
-        if let Some(rt) = &self.runtime {
+        if let Some(rt) = self.runtime.get() {
             let dm = match &rt.delegation_manager {
                 Some(dm) => Arc::clone(dm),
                 None => {
@@ -4394,7 +4424,7 @@ impl McpServer {
             ));
         }
 
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => {
                 return Ok(Self::success_response(
@@ -4657,7 +4687,7 @@ impl McpServer {
                 "session_id and from_device are required".to_string(), None,
             ));
         }
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => return Ok(Self::success_response(id, serde_json::json!({"success": true, "note": "stub mode"}))),
         };
@@ -4706,7 +4736,7 @@ impl McpServer {
                 "session_id and device_id are required".to_string(), None,
             ));
         }
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => return Ok(Self::success_response(id, serde_json::json!({"success": true, "note": "stub mode"}))),
         };
@@ -4815,7 +4845,7 @@ impl McpServer {
         capability_id: String,
         record: crate::types::observation::PortCallRecord,
     ) {
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => return,
         };
@@ -4864,7 +4894,7 @@ impl McpServer {
     /// Called when the caller switches to a non-invoke_port MCP method,
     /// signaling the end of a logical "turn".
     fn flush_implicit_session(&self) {
-        let rt = match &self.runtime {
+        let rt = match self.runtime.get() {
             Some(rt) => rt,
             None => return,
         };
@@ -5111,6 +5141,10 @@ impl McpServer {
                         "objective": {
                             "type": "string",
                             "description": "The goal objective description"
+                        },
+                        "inputs": {
+                            "type": "object",
+                            "description": "Structured key-value inputs seeded into belief bindings before execution. Keys must match the target skill's input schema fields."
                         },
                         "max_steps": {
                             "type": "integer",
@@ -6985,7 +7019,7 @@ mod tests {
             server.handle_request(req).unwrap();
         }
         server.handle_request(make_request("list_ports", None)).unwrap();
-        let rt = server.runtime.as_ref().unwrap();
+        let rt = server.runtime.get().unwrap();
         let store = rt.episode_store.lock().unwrap();
         let episodes = store.retrieve_nearest("filesystem.stat\u{2192}filesystem.readdir", 10);
         assert!(!episodes.is_empty(), "episode should be stored after flush");
@@ -7011,7 +7045,7 @@ mod tests {
         );
         server.handle_request(req).unwrap();
         server.handle_request(make_request("list_ports", None)).unwrap();
-        let rt = server.runtime.as_ref().unwrap();
+        let rt = server.runtime.get().unwrap();
         let store = rt.episode_store.lock().unwrap();
         let episodes = store.retrieve_nearest("filesystem.stat", 10);
         assert!(episodes.is_empty(), "single-call sessions should not produce episodes");
@@ -7097,7 +7131,7 @@ mod tests {
         // Flush.
         server.handle_request(make_request("query_metrics", None)).unwrap();
 
-        let rt = server.runtime.as_ref().unwrap();
+        let rt = server.runtime.get().unwrap();
         let store = rt.episode_store.lock().unwrap();
         let fp = "filesystem.stat\u{2192}filesystem.readdir\u{2192}filesystem.stat";
         let episodes = store.retrieve_nearest(fp, 10);
@@ -7320,7 +7354,7 @@ mod tests {
         let server = make_wired_server();
         // Register a routine into the store.
         {
-            let rt = server.runtime.as_ref().unwrap();
+            let rt = server.runtime.get().unwrap();
             let mut rs = rt.routine_store.lock().unwrap();
             rs.register(crate::types::routine::Routine {
                 routine_id: "review-test".to_string(),

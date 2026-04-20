@@ -30,7 +30,7 @@ use crate::types::goal::GoalSpec;
 use crate::types::observation::{Observation, PortCallRecord};
 #[cfg(test)]
 use crate::types::observation::default_cost_profile;
-use crate::types::policy::PolicyTargetType;
+use crate::types::policy::{PolicyEffect, PolicyTargetType};
 use crate::types::port::InvocationContext;
 use crate::types::routine::Routine;
 use crate::types::schema::Schema;
@@ -429,7 +429,27 @@ impl SkillExecutor for PortBackedSkillExecutor {
 
         let properties = match schema_obj.get("properties").and_then(|p| p.as_object()) {
             Some(props) => props,
-            None => return Ok(Vec::new()),
+            None => {
+                // Schemaless skill: forward all available bindings so the port
+                // receives whatever the belief/working memory provides.
+                let mut bindings = Vec::new();
+                let mut seen = std::collections::HashSet::new();
+                for wb in &working_memory.active_bindings {
+                    if seen.insert(wb.name.clone()) {
+                        bindings.push(wb.clone());
+                    }
+                }
+                for bb in &belief.active_bindings {
+                    if seen.insert(bb.name.clone()) {
+                        bindings.push(WorkingBinding {
+                            name: bb.name.clone(),
+                            value: bb.value.clone(),
+                            source: BindingSource::BeliefResource,
+                        });
+                    }
+                }
+                return Ok(bindings);
+            }
         };
 
         let required_fields: Vec<&str> = schema_obj
@@ -1097,13 +1117,36 @@ impl PolicyEngine for PolicyEngineAdapter {
 
         // Delegate to the full policy engine for rule-based evaluation.
         let context = Self::build_context(skill, session);
+        let has_confirmation = session.belief.active_bindings.iter().any(|b| {
+            b.name == "confirmed" && b.value == serde_json::Value::Bool(true)
+        });
         match self.inner.check_skill(&skill.skill_id, &context) {
-            Ok(decision) => PolicyCheckResult {
-                allowed: decision.allowed,
-                reason: decision.reason,
-                blocked_by_policy: !decision.allowed,
-                waiting_for_input: None,
-            },
+            Ok(decision) => {
+                if !decision.allowed
+                    && decision.effect == PolicyEffect::RequireConfirmation
+                    && has_confirmation
+                {
+                    return PolicyCheckResult {
+                        allowed: true,
+                        reason: "confirmed by resume payload".to_string(),
+                        blocked_by_policy: false,
+                        waiting_for_input: None,
+                    };
+                }
+                let waiting = if !decision.allowed
+                    && decision.effect == PolicyEffect::RequireConfirmation
+                {
+                    Some(format!("confirm operation: {}", skill.skill_id))
+                } else {
+                    None
+                };
+                PolicyCheckResult {
+                    allowed: decision.allowed,
+                    reason: decision.reason,
+                    blocked_by_policy: !decision.allowed && waiting.is_none(),
+                    waiting_for_input: waiting,
+                }
+            }
             Err(e) => {
                 tracing::error!(error = %e, "policy evaluation failed, denying as safety fallback");
                 PolicyCheckResult {
@@ -1147,6 +1190,19 @@ impl PolicyEngine for PolicyEngineAdapter {
                             waiting_for_input: None,
                         };
                     }
+                    // If session has confirmation binding, allow through.
+                    let has_confirmation = session.belief.active_bindings.iter().any(|b| {
+                        b.name == "confirmed" && b.value == serde_json::Value::Bool(true)
+                    });
+                    if has_confirmation && denied.waiting_for_input.is_some() {
+                        Self::warn_write_operations(skill);
+                        return PolicyCheckResult {
+                            allowed: true,
+                            reason: "confirmed by resume payload".to_string(),
+                            blocked_by_policy: false,
+                            waiting_for_input: None,
+                        };
+                    }
                     return denied;
                 }
                 Self::warn_write_operations(skill);
@@ -1156,15 +1212,32 @@ impl PolicyEngine for PolicyEngineAdapter {
                 // RequireConfirmation rule is only meant for destructive ops.
                 let side_effect = Self::derive_side_effect_class(skill);
                 if !matches!(side_effect, SideEffectClass::None | SideEffectClass::ReadOnly) {
+                    let has_confirmation = session.belief.active_bindings.iter().any(|b| {
+                        b.name == "confirmed" && b.value == serde_json::Value::Bool(true)
+                    });
                     let context = Self::build_context(skill, session);
                     match self.inner.check_skill(&skill.skill_id, &context) {
                         Ok(decision) if !decision.allowed => {
-                            return PolicyCheckResult {
-                                allowed: false,
-                                reason: decision.reason,
-                                blocked_by_policy: true,
-                                waiting_for_input: None,
-                            };
+                            if decision.effect == PolicyEffect::RequireConfirmation
+                                && has_confirmation
+                            {
+                                // Confirmed by resume — allow through.
+                            } else {
+                                let waiting = if decision.effect == PolicyEffect::RequireConfirmation {
+                                    Some(format!(
+                                        "confirm operation: {}",
+                                        skill.skill_id
+                                    ))
+                                } else {
+                                    None
+                                };
+                                return PolicyCheckResult {
+                                    allowed: false,
+                                    reason: decision.reason,
+                                    blocked_by_policy: waiting.is_none(),
+                                    waiting_for_input: waiting,
+                                };
+                            }
                         }
                         Err(e) => {
                             return PolicyCheckResult {

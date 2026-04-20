@@ -82,6 +82,8 @@ A change that violates any of these is an architectural redirection, not a bug f
 - **Async goals**: `runtime/goal_registry.rs` (background thread + cancel flag) + `runtime/goal_executor.rs` (shared `run_loop` / `finalize_episode`).
 - **Pack manifests**: full `PackSpec`; template in `packs/reference/manifest.json`. `port_id` must match library name. Skills need all fields.
 - **Port crates**: cdylib, depend on `soma-port-sdk`, export `soma_port_init`.
+- **Remote skill invocation handler**: `distributed/transport.rs::LocalDispatchHandler::handle(InvokeSkill)`. Injects the target skill as a single-step plan and seeds `objective.structured` from the input payload. The handler does NOT go through the predictor/selector — it uses plan-following directly.
+- **mDNS discovery**: `distributed/discovery.rs`. Browses `_soma._tcp.local.`, assigns `lan-<instance>` peer IDs. Wired via `--discover-lan` in `main.rs`.
 
 ## Known gaps — honest status
 

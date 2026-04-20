@@ -196,48 +196,53 @@ cargo run -- --mcp --pack packs/reference/manifest.json
 SOMA_PORTS_PLUGIN_PATH=../soma-ports/target/release cargo run -- --mcp --pack auto
 ```
 
-The server exposes these runtime tools:
+The server exposes these runtime tools (call `tools/list` for the authoritative catalog):
 
-**16 core tools:**
+**Core tools:**
 
 - `create_goal`, `inspect_session`, `inspect_belief`, `inspect_resources`
 - `inspect_packs`, `inspect_skills`, `inspect_trace`
-- `pause_session`, `resume_session`, `abort_session`, `list_sessions`
+- `pause_session`, `resume_session`, `abort_session`, `claim_session`, `list_sessions`
 - `query_metrics`, `query_policy`, `dump_state`
-- `invoke_port`, `list_ports`
+- `invoke_port`, `list_ports`, `list_capabilities`
+- `reload_pack`, `unload_pack`
 
-**3 async goal tools:**
+**Async goal tools:**
 
 - `create_goal_async` — fire and forget; returns `goal_id` + `session_id` immediately
 - `get_goal_status` — live poll `{status, steps, last_skill, error}`
 - `cancel_goal` — flip cancel flag; thread aborts at next step boundary
+- `stream_goal_observations` — subscribe to observation delivery events
 
-**3 scheduler tools:**
+**Scheduler tools:**
 
 - `schedule` — one-shot (`delay_ms`), recurring (`interval_ms`), message-only or port-call, optional `max_fires` and `brain` routing
 - `list_schedules` — list active schedules
 - `cancel_schedule` — cancel by UUID
 
-**4 distributed peer tools:**
+**Distributed peer tools:**
 
-- `list_peers`, `invoke_remote_skill`, `transfer_routine`
-- `replicate_routine` — replicate a compiled routine to remote peers (optional `peer_ids` targets specific peers; omitted = all known peers)
+- `list_peers`, `invoke_remote_skill`, `transfer_routine`, `replicate_routine`
+- `sync_beliefs` — synchronize world state facts with a peer
+- `handoff_session` — write a handoff fact for cross-device session continuity
+- `migrate_session` — atomically transfer session state to a peer (requires delegation manager)
 
-**3 world state and learning tools:**
+**World state and learning tools:**
 
 - `patch_world_state` — add/remove facts from the global world state
 - `dump_world_state` — return current world state snapshot
+- `expire_world_facts` — force-evict TTL-expired facts
 - `set_routine_autonomous` — mark a routine to fire automatically when conditions match
 
-**3 execution tools:**
+**Execution tools:**
 
 - `execute_routine` — run a compiled routine by ID with pre-loaded plan
 - `trigger_consolidation` — manually trigger the episode → schema → routine pipeline
 - `author_routine` — create or update a routine from a structured definition (LLM translates behavioral intent into compiled routine with steps, branching, priority, and policy scope)
 
-**5 other tools:**
+**Routine management tools:**
 
-- `list_routine_versions`, `rollback_routine`, `sync_beliefs`, `migrate_session`, `review_routine`
+- `list_routine_versions`, `rollback_routine`, `review_routine`
 
 In addition, two autonomy features are driven from `soma.toml` rather than MCP tools: webhook-triggered async goals (`[webhooks.trigger_goal.<name>]`) and cron-scheduled async goals (`[scheduler.goal.<label>]`). Both land in the same `GoalRegistry` as `create_goal_async` and are observable via `get_goal_status`.
 
@@ -271,7 +276,11 @@ Relevant flags:
 - `--peer <addr>`
 - `--unix-listen <path>`
 - `--unix-peer <path>`
+- `--discover-lan` — start mDNS browser for `_soma._tcp.local.`, auto-register discovered peers
 - `--webhook-listen <addr>` — HTTP server for inbound webhooks (POST → world state patch + stderr event)
+
+`--discover-lan` and `--peer` compose: static peers are available immediately
+while mDNS-discovered peers appear as they announce (prefixed `lan-`).
 
 If `tls_cert` and `tls_key` are configured, outbound peer connections and TCP
 listeners use TLS. Rate limiting and blacklist behavior come from the

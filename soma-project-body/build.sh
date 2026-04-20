@@ -36,7 +36,7 @@ build_soma() {
   echo "building soma-next..."
   (cd "$SOMA_NEXT" && cargo build --release --bin soma)
   cp "$SOMA_NEXT/target/release/soma" bin/soma
-  xattr -d com.apple.quarantine bin/soma 2>/dev/null || true
+  xattr -cr bin/soma 2>/dev/null || true
   codesign -fs - bin/soma 2>/dev/null || true
   echo "  bin/soma updated"
 }
@@ -49,10 +49,6 @@ build_port() {
     echo "building $port (separate manifest)..."
     (cd "$SOMA_PORTS/redis" && cargo build --release)
     local dylib="$SOMA_PORTS/redis/target/release/lib${libname}.dylib"
-  elif [[ "$port" == "sqlite" ]]; then
-    echo "building $port (separate manifest)..."
-    (cd "$SOMA_PORTS/sqlite" && cargo build --release)
-    local dylib="$SOMA_PORTS/sqlite/target/release/lib${libname}.dylib"
   else
     echo "building $port..."
     (cd "$SOMA_PORTS" && cargo build --release -p "$crate")
@@ -64,6 +60,7 @@ build_port() {
   fi
   mkdir -p "packs/$port"
   cp "$dylib" "packs/$port/"
+  codesign -fs - "packs/$port/$(basename "$dylib")" 2>/dev/null || true
   echo "  packs/$port/$(basename "$dylib")"
 }
 

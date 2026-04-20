@@ -681,49 +681,77 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
         Option<PortHealthArcs>,
     );
 
-    let make_server = |runtime: crate::bootstrap::Runtime| -> McpServerBundle {
-        let sched = (
-            Arc::clone(&runtime.schedule_store),
-            Arc::clone(&runtime.port_runtime),
-            Arc::clone(&runtime.world_state),
-        );
-        let consolidation = (
-            Arc::clone(&runtime.episode_store),
-            Arc::clone(&runtime.schema_store),
-            Arc::clone(&runtime.routine_store),
-            Arc::clone(&runtime.embedder),
-        );
-        let world_state_for_webhook = Arc::clone(&runtime.world_state);
-        let port_health = (
-            Arc::clone(&runtime.metrics),
-            Arc::clone(&runtime.world_state),
-        );
-        let handle = RuntimeHandle::from_runtime(runtime);
-        let monitor = (
-            Arc::clone(&handle.world_state),
-            Arc::clone(&handle.routine_store),
-            Arc::clone(&handle.session_controller),
-            Arc::clone(&handle.goal_runtime),
-            Arc::clone(&handle.episode_store),
-            Arc::clone(&handle.embedder),
-        );
-        let handle = if has_peers {
-            if let Some(exec) = make_executor() {
-                handle.with_remote_shared(exec, Arc::clone(&shared_peer_ids))
+    // Create a stub server immediately so transports can start while packs load.
+    let server = Arc::new(McpServer::new_stub());
+
+    let make_server = {
+        let server_ref = Arc::clone(&server);
+        let shared_peer_ids = Arc::clone(&shared_peer_ids);
+        move |runtime: crate::bootstrap::Runtime| -> McpServerBundle {
+            let sched = (
+                Arc::clone(&runtime.schedule_store),
+                Arc::clone(&runtime.port_runtime),
+                Arc::clone(&runtime.world_state),
+            );
+            let consolidation = (
+                Arc::clone(&runtime.episode_store),
+                Arc::clone(&runtime.schema_store),
+                Arc::clone(&runtime.routine_store),
+                Arc::clone(&runtime.embedder),
+            );
+            let world_state_for_webhook = Arc::clone(&runtime.world_state);
+            let port_health = (
+                Arc::clone(&runtime.metrics),
+                Arc::clone(&runtime.world_state),
+            );
+            let handle = RuntimeHandle::from_runtime(runtime);
+            let monitor = (
+                Arc::clone(&handle.world_state),
+                Arc::clone(&handle.routine_store),
+                Arc::clone(&handle.session_controller),
+                Arc::clone(&handle.goal_runtime),
+                Arc::clone(&handle.episode_store),
+                Arc::clone(&handle.embedder),
+            );
+            let handle = if has_peers {
+                if let Some(exec) = make_executor() {
+                    handle.with_remote_shared(exec, Arc::clone(&shared_peer_ids))
+                } else {
+                    handle
+                }
             } else {
                 handle
-            }
-        } else {
-            handle
-        };
-        let launcher = handle.build_webhook_launcher();
-        (McpServer::new(handle), Some(sched), Some(consolidation), Some(monitor), Some(world_state_for_webhook), Some(launcher), Some(port_health))
+            };
+            let launcher = handle.build_webhook_launcher();
+            server_ref.install_runtime(handle);
+            (McpServer::new_stub(), Some(sched), Some(consolidation), Some(monitor), Some(world_state_for_webhook), Some(launcher), Some(port_health))
+        }
     };
 
-    let (server, scheduler_arcs, consolidation_arcs, monitor_arcs, webhook_world_state, webhook_launcher, port_health_arcs) = if mcp_is_auto {
+    // Shared registry for reverse-registered ports from WebSocket clients.
+    let reverse_registry = LocalPortRegistry::new();
+
+    // Start WebSocket listener BEFORE bootstrap so it's instantly reachable.
+    if let Some(ws_addr) = distributed.mcp_ws_listen {
+        let handle =
+            soma_next::interfaces::mcp_ws::start_mcp_ws_listener_background_with_registry(
+                ws_addr,
+                Arc::clone(&server),
+                reverse_registry.clone(),
+                distributed.mcp_ws_token.clone(),
+            );
+        Box::leak(Box::new(handle));
+        eprintln!("MCP: WebSocket transport listening on {}", ws_addr);
+    }
+
+    // Now bootstrap — this loads all dylibs (may take seconds with many packs).
+    let (scheduler_arcs, consolidation_arcs, monitor_arcs, webhook_world_state, webhook_launcher, port_health_arcs) = if mcp_is_auto {
         eprintln!("MCP: auto-discovering ports from plugin search paths");
         match bootstrap::bootstrap_auto(&config) {
-            Ok(runtime) => make_server(runtime),
+            Ok(runtime) => {
+                let (_, s, c, m, w, l, p) = make_server(runtime);
+                (s, c, m, w, l, p)
+            }
             Err(e) => {
                 eprintln!("error: failed to auto-bootstrap runtime: {e}");
                 std::process::exit(1);
@@ -737,15 +765,21 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             vec![]
         };
         match bootstrap_runtime(&packs) {
-            Ok(runtime) => make_server(runtime),
+            Ok(runtime) => {
+                let (_, s, c, m, w, l, p) = make_server(runtime);
+                (s, c, m, w, l, p)
+            }
             Err(e) => {
                 eprintln!("warning: failed to bootstrap runtime: {e}");
-                (McpServer::new_stub(), None, None, None, None, None, None)
+                (None, None, None, None, None, None)
             }
         }
     } else {
         match bootstrap_runtime(pack_paths) {
-            Ok(runtime) => make_server(runtime),
+            Ok(runtime) => {
+                let (_, s, c, m, w, l, p) = make_server(runtime);
+                (s, c, m, w, l, p)
+            }
             Err(e) => {
                 eprintln!("error: failed to bootstrap runtime: {e}");
                 std::process::exit(1);
@@ -753,38 +787,13 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
         }
     };
 
-    // Wrap the MCP server in an Arc so stdio and any additional transport
-    // (e.g. WebSocket listener) can share one dispatcher.
-    let server = Arc::new(server);
-
-    // Shared registry for reverse-registered ports from WebSocket clients.
-    // Created before the WS listener so both the listener and the port
-    // runtime share the same instance.
-    let reverse_registry = LocalPortRegistry::new();
-
-    // Wire the reverse registry into DefaultPortRuntime so invoke_port
-    // can route to WebSocket-connected device ports as a fallback.
+    // Wire the reverse registry into DefaultPortRuntime.
     if let Some(ref sched) = scheduler_arcs {
         let port_rt_arc = &sched.1;
         port_rt_arc
             .lock()
             .unwrap()
             .set_reverse_registry(reverse_registry.clone());
-    }
-
-    // Optional: WebSocket MCP listener. Runs in parallel with the stdio
-    // loop; each client gets its own async task dispatching into the
-    // shared McpServer.
-    if let Some(ws_addr) = distributed.mcp_ws_listen {
-        let handle =
-            soma_next::interfaces::mcp_ws::start_mcp_ws_listener_background_with_registry(
-                ws_addr,
-                Arc::clone(&server),
-                reverse_registry.clone(),
-                distributed.mcp_ws_token.clone(),
-            );
-        Box::leak(Box::new(handle));
-        eprintln!("MCP: WebSocket transport listening on {}", ws_addr);
     }
 
     // Start the scheduler background thread.
@@ -1082,6 +1091,11 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
                 continue;
             }
         };
+
+        // JSON-RPC notifications have no id — don't respond.
+        if request.id.is_null() {
+            continue;
+        }
 
         // Handle request
         let response = match server.handle_request(request) {

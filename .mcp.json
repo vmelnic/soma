@@ -2,7 +2,7 @@
   "mcpServers": {
     "soma": {
       "type": "stdio",
-      "command": "soma-project-mcp/scripts/run-mcp.sh"
+      "command": "/Users/vm/Projects/personal/soma/soma-project-body/mcp.sh"
     }
   }
 }

@@ -51,9 +51,13 @@ const tabs = [
           spellcheck="false"
           :class="[INPUT, 'w-[20ch] font-mono']"
         />
-        <button :class="BTN" @click="connected ? body.disconnect() : tryConnect()">
-          <component :is="connected ? Plug : PlugZap" class="w-4 h-4" :stroke-width="1.75" />
-          <span>{{ connected ? 'disconnect' : 'connect' }}</span>
+        <button v-if="!connected" :class="BTN" @click="tryConnect()">
+          <PlugZap class="w-4 h-4" :stroke-width="1.75" />
+          <span>connect</span>
+        </button>
+        <button v-else :class="BTN" @click="body.disconnect()">
+          <Plug class="w-4 h-4" :stroke-width="1.75" />
+          <span>disconnect</span>
         </button>
       </div>
     </header>

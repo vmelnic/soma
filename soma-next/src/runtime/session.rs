@@ -1240,6 +1240,13 @@ impl SessionController {
                 session,
             );
             if !side_effect_policy.allowed {
+                if let Some(ref input_needed) = side_effect_policy.waiting_for_input {
+                    session.status = SessionStatus::WaitingForInput;
+                    session.updated_at = Utc::now();
+                    return Err(SomaError::Skill(format!(
+                        "waiting_for_input:{}", input_needed
+                    )));
+                }
                 return Err(SomaError::PolicyDenied {
                     action: format!("side_effect:{}", chosen_skill.skill_id),
                     reason: side_effect_policy.reason,
@@ -1285,6 +1292,13 @@ impl SessionController {
             session,
         );
         if !pre_exec_policy.allowed {
+            if let Some(ref input_needed) = pre_exec_policy.waiting_for_input {
+                session.status = SessionStatus::WaitingForInput;
+                session.updated_at = Utc::now();
+                return Err(SomaError::Skill(format!(
+                    "waiting_for_input:{}", input_needed
+                )));
+            }
             return Err(SomaError::PolicyDenied {
                 action: format!("execute:{}", chosen_skill.skill_id),
                 reason: pre_exec_policy.reason,
@@ -2286,6 +2300,14 @@ impl SessionRuntime for SessionController {
         }];
 
         if !policy_result.allowed {
+            // WaitingForInput takes priority over hard deny — the session
+            // pauses so the brain (or user) can confirm the operation.
+            if let Some(ref input_needed) = policy_result.waiting_for_input {
+                session.status = SessionStatus::WaitingForInput;
+                session.updated_at = Utc::now();
+                return Ok(StepResult::WaitingForInput(input_needed.clone()));
+            }
+
             if policy_result.blocked_by_policy {
                 session.status = SessionStatus::BlockedByPolicy;
                 session.updated_at = Utc::now();
@@ -2338,12 +2360,6 @@ impl SessionRuntime for SessionController {
                     action: format!("execute:{}", chosen_skill.skill_id),
                     reason: policy_result.reason,
                 });
-            }
-
-            if let Some(ref input_needed) = policy_result.waiting_for_input {
-                session.status = SessionStatus::WaitingForInput;
-                session.updated_at = Utc::now();
-                return Ok(StepResult::WaitingForInput(input_needed.clone()));
             }
         }
 

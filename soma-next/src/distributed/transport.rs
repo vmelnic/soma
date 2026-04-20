@@ -596,10 +596,8 @@ impl IncomingHandler for LocalDispatchHandler {
             TransportMessage::InvokeSkill {
                 peer_id: _,
                 skill_id,
-                input: _,
+                input,
             } => {
-                // Execute the skill locally by creating a session for the goal,
-                // then stepping it to completion.
                 let mut rt = self.runtime.lock().unwrap();
                 let goal_text = format!("remote invoke: {}", skill_id);
                 let goal_input = crate::runtime::goal::GoalInput::NaturalLanguage {
@@ -611,7 +609,7 @@ impl IncomingHandler for LocalDispatchHandler {
                         peer_id: None,
                     },
                 };
-                let goal_spec = match rt.goal_runtime.parse_goal(goal_input) {
+                let mut goal_spec = match rt.goal_runtime.parse_goal(goal_input) {
                     Ok(g) => g,
                     Err(e) => {
                         return TransportResponse::Error {
@@ -622,6 +620,9 @@ impl IncomingHandler for LocalDispatchHandler {
                         };
                     }
                 };
+                if input.is_object() && !input.as_object().map_or(true, |m| m.is_empty()) {
+                    goal_spec.objective.structured = Some(input);
+                }
                 let mut session = match rt.session_controller.create_session(goal_spec) {
                     Ok(s) => s,
                     Err(e) => {
@@ -631,19 +632,34 @@ impl IncomingHandler for LocalDispatchHandler {
                     }
                 };
 
-                // Step the session until it reaches a terminal state.
+                // Inject the target skill as a single-step plan so plan-following
+                // picks it up directly, bypassing the selector/predictor.
+                session.working_memory.active_steps = Some(vec![
+                    crate::types::routine::CompiledStep::Skill {
+                        skill_id: skill_id.clone(),
+                        on_success: Default::default(),
+                        on_failure: Default::default(),
+                        conditions: Vec::new(),
+                    },
+                ]);
+                session.working_memory.plan_step = 0;
                 let mut success = false;
                 let mut final_observation = serde_json::json!(null);
+                let mut step_count = 0u32;
+                let mut last_error: Option<String> = None;
                 let max_steps = 100;
                 for _ in 0..max_steps {
+                    step_count += 1;
                     match rt.session_controller.run_step(&mut session) {
                         Ok(step_result) => match step_result {
                             crate::runtime::session::StepResult::Continue => {
-                                // Capture the latest observation from trace.
                                 if let Some(last_step) = session.trace.steps.last() {
                                     for pc in &last_step.port_calls {
                                         if pc.success {
                                             success = true;
+                                            final_observation =
+                                                pc.structured_result.clone();
+                                        } else {
                                             final_observation =
                                                 pc.structured_result.clone();
                                         }
@@ -655,28 +671,36 @@ impl IncomingHandler for LocalDispatchHandler {
                                     for pc in &last_step.port_calls {
                                         if pc.success {
                                             success = true;
-                                            final_observation =
-                                                pc.structured_result.clone();
                                         }
+                                        final_observation =
+                                            pc.structured_result.clone();
                                     }
                                 }
                                 break;
                             }
                             crate::runtime::session::StepResult::Failed(reason) => {
-                                return TransportResponse::Error { details: reason };
+                                last_error = Some(reason.clone());
+                                break;
                             }
                             crate::runtime::session::StepResult::Aborted => {
-                                return TransportResponse::Error {
-                                    details: "session aborted".to_string(),
-                                };
+                                last_error = Some("session aborted".to_string());
+                                break;
                             }
-                            _ => break,
+                            other => {
+                                last_error = Some(format!("unexpected step result: {:?}", other));
+                                break;
+                            }
                         },
                         Err(e) => {
-                            return TransportResponse::Error {
-                                details: format!("session step failed: {}", e),
-                            };
+                            last_error = Some(format!("session step error: {}", e));
+                            break;
                         }
+                    }
+                }
+
+                if final_observation.is_null() {
+                    if let Some(error) = last_error {
+                        final_observation = serde_json::json!({"error": error});
                     }
                 }
 

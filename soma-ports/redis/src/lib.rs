@@ -24,12 +24,14 @@ use soma_port_sdk::prelude::*;
 
 /// SOMA port adapter for Redis.
 ///
-/// Wraps an async `ConnectionManager` behind a `Mutex`. The connection is
-/// established during construction and reconnects automatically on failure.
+/// Connection is lazy: established on first invoke, not during init.
+/// If Redis is unreachable, invoke returns DependencyUnavailable without
+/// blocking the runtime startup.
 pub struct RedisPort {
     spec: PortSpec,
+    url: String,
     conn: Mutex<Option<redis::aio::ConnectionManager>>,
-    rt: tokio::runtime::Runtime,
+    rt: Mutex<Option<tokio::runtime::Runtime>>,
 }
 
 impl Default for RedisPort {
@@ -39,37 +41,62 @@ impl Default for RedisPort {
 }
 
 impl RedisPort {
-    /// Create a new Redis port, connecting to `SOMA_REDIS_URL` or localhost.
     pub fn new() -> Self {
         let url = std::env::var("SOMA_REDIS_URL")
             .unwrap_or_else(|_| "redis://localhost:6379/0".to_string());
 
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("failed to create tokio runtime for redis port");
-
-        let conn = rt.block_on(async {
-            let client = redis::Client::open(url.as_str()).ok()?;
-            redis::aio::ConnectionManager::new(client).await.ok()
-        });
-
         Self {
             spec: build_spec(),
-            conn: Mutex::new(conn),
-            rt,
+            url,
+            conn: Mutex::new(None),
+            rt: Mutex::new(None),
         }
     }
 
-    /// Clone the connection manager, returning an error if not connected.
+    fn ensure_runtime(&self) -> soma_port_sdk::Result<()> {
+        let mut guard = self.rt.lock()
+            .map_err(|e| PortError::Internal(format!("rt lock poisoned: {e}")))?;
+        if guard.is_none() {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| PortError::Internal(format!("tokio runtime: {e}")))?;
+            *guard = Some(rt);
+        }
+        Ok(())
+    }
+
     fn get_conn(&self) -> soma_port_sdk::Result<redis::aio::ConnectionManager> {
-        let guard = self
+        let mut guard = self
             .conn
             .lock()
             .map_err(|e| PortError::Internal(format!("lock poisoned: {e}")))?;
-        guard
-            .clone()
-            .ok_or_else(|| PortError::DependencyUnavailable("Redis not connected".into()))
+
+        if let Some(ref conn) = *guard {
+            return Ok(conn.clone());
+        }
+
+        // Lazy connect with timeout
+        let rt_guard = self.rt.lock()
+            .map_err(|e| PortError::Internal(format!("rt lock poisoned: {e}")))?;
+        let rt = rt_guard.as_ref()
+            .ok_or_else(|| PortError::Internal("runtime not initialized".into()))?;
+
+        let url = self.url.clone();
+        let conn = rt.block_on(async {
+            let client = redis::Client::open(url.as_str())
+                .map_err(|e| PortError::DependencyUnavailable(format!("Redis client: {e}")))?;
+            tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                redis::aio::ConnectionManager::new(client),
+            )
+            .await
+            .map_err(|_| PortError::DependencyUnavailable("Redis connect timeout (3s)".into()))?
+            .map_err(|e| PortError::DependencyUnavailable(format!("Redis connect: {e}")))
+        })?;
+
+        *guard = Some(conn.clone());
+        Ok(conn)
     }
 
     /// Async implementation for all 13 capabilities.
@@ -219,8 +246,14 @@ impl Port for RedisPort {
         input: serde_json::Value,
     ) -> soma_port_sdk::Result<PortCallRecord> {
         let start = Instant::now();
+        self.ensure_runtime()?;
 
-        match self.rt.block_on(self.invoke_async(capability_id, input)) {
+        let rt_guard = self.rt.lock()
+            .map_err(|e| PortError::Internal(format!("rt lock poisoned: {e}")))?;
+        let rt = rt_guard.as_ref()
+            .ok_or_else(|| PortError::Internal("runtime not initialized".into()))?;
+
+        match rt.block_on(self.invoke_async(capability_id, input)) {
             Ok(result) => {
                 let latency_ms = start.elapsed().as_millis() as u64;
                 Ok(PortCallRecord::success(

@@ -21,9 +21,9 @@ pub mod prelude {
     pub use crate::semver;
     pub use crate::{
         AuthMethod, AuthRequirements, CostClass, CostProfile, DeterminismClass, IdempotenceClass,
-        LatencyProfile, Port, PortCallRecord, PortCapabilitySpec, PortError, PortFailureClass,
-        PortKind, PortLifecycleState, PortSpec, RiskClass, RollbackSupport, SandboxRequirements,
-        SchemaRef, SideEffectClass, TrustLevel, ValidationRule,
+        LazyConn, LatencyProfile, Port, PortCallRecord, PortCapabilitySpec, PortError,
+        PortFailureClass, PortKind, PortLifecycleState, PortSpec, RiskClass, RollbackSupport,
+        SandboxRequirements, SchemaRef, SideEffectClass, TrustLevel, ValidationRule,
     };
 }
 
@@ -445,9 +445,27 @@ impl PortCallRecord {
 /// Implementors wrap a single integration boundary (database, filesystem,
 /// HTTP endpoint, device, etc.) and expose one or more capabilities through
 /// a stable, validated contract.
+///
+/// # Init contract
+///
+/// `soma_port_init()` MUST return immediately. Never block on network I/O,
+/// service connections, or resource acquisition during construction. Use
+/// [`LazyConn`] or `OnceLock` to defer connections to first invoke.
+/// A port whose backing service is down MUST still load — it reports
+/// `DependencyUnavailable` at invoke time, not at init time.
 pub trait Port: Send + Sync {
     /// The declared specification for this port.
     fn spec(&self) -> &PortSpec;
+
+    /// Serialize the port spec to JSON. Used by the runtime to safely
+    /// transfer PortSpec data across the dylib ABI boundary. The default
+    /// implementation calls `spec()` and serializes — ports should NOT
+    /// override this unless they have a custom serialization need.
+    fn spec_json(&self) -> String {
+        serde_json::to_string(self.spec()).unwrap_or_else(|e| {
+            format!("{{\"error\":\"spec serialization failed: {e}\"}}")
+        })
+    }
 
     /// Execute a capability, returning a fully-populated `PortCallRecord`.
     ///
@@ -455,12 +473,112 @@ pub trait Port: Send + Sync {
     /// implementations may assume the input passed schema validation.
     fn invoke(&self, capability_id: &str, input: serde_json::Value) -> Result<PortCallRecord>;
 
+    /// ABI-safe invoke: input and output are both JSON strings so no Rust
+    /// structs cross the dylib boundary. The runtime passes serialized input;
+    /// this default deserializes, calls invoke(), and re-serializes the result.
+    fn invoke_json(&self, capability_id: &str, input_json: &str) -> std::result::Result<String, String> {
+        let input: serde_json::Value = serde_json::from_str(input_json)
+            .map_err(|e| format!("input deserialization failed: {e}"))?;
+        match self.invoke(capability_id, input) {
+            Ok(record) => serde_json::to_string(&record).map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
     /// Validate input against the capability's declared schema.
     ///
     /// Called by the runtime before `invoke`. A port MAY add domain-specific
     /// checks beyond pure schema conformance.
     fn validate_input(&self, capability_id: &str, input: &serde_json::Value) -> Result<()>;
 
+    /// ABI-safe validation: input arrives as a JSON string so no Value crosses
+    /// the dylib boundary. Default deserializes and delegates to validate_input.
+    fn validate_input_json(&self, capability_id: &str, input_json: &str) -> std::result::Result<(), String> {
+        let input: serde_json::Value = serde_json::from_str(input_json)
+            .map_err(|e| format!("input deserialization failed: {e}"))?;
+        self.validate_input(capability_id, &input).map_err(|e| e.to_string())
+    }
+
     /// Current lifecycle state as seen by the adapter itself.
     fn lifecycle_state(&self) -> PortLifecycleState;
+}
+
+// ---------------------------------------------------------------------------
+// LazyConn -- SDK helper for deferred, non-blocking connections
+// ---------------------------------------------------------------------------
+
+use std::sync::Mutex;
+use std::time::Duration;
+
+/// Thread-safe lazy connection wrapper for port adapters.
+///
+/// Defers connection establishment to first use. If the backing service is
+/// unreachable, returns `PortError::DependencyUnavailable` without blocking
+/// the runtime startup.
+///
+/// ```rust,ignore
+/// struct MyPort {
+///     conn: LazyConn<MyClient>,
+///     // ...
+/// }
+///
+/// impl MyPort {
+///     fn new() -> Self {
+///         Self {
+///             conn: LazyConn::new(Duration::from_secs(3), || {
+///                 MyClient::connect(&url)
+///             }),
+///         }
+///     }
+/// }
+/// ```
+pub struct LazyConn<C> {
+    inner: Mutex<Option<C>>,
+    factory: Box<dyn Fn() -> std::result::Result<C, String> + Send + Sync>,
+    timeout: Duration,
+}
+
+impl<C: Clone + Send> LazyConn<C> {
+    pub fn new<F>(timeout: Duration, factory: F) -> Self
+    where
+        F: Fn() -> std::result::Result<C, String> + Send + Sync + 'static,
+    {
+        Self {
+            inner: Mutex::new(None),
+            factory: Box::new(factory),
+            timeout,
+        }
+    }
+
+    /// Get or establish the connection. Returns DependencyUnavailable on failure.
+    pub fn get(&self) -> Result<C> {
+        let mut guard = self.inner.lock()
+            .map_err(|e| PortError::Internal(format!("lock poisoned: {e}")))?;
+
+        if let Some(ref conn) = *guard {
+            return Ok(conn.clone());
+        }
+
+        let conn = (self.factory)()
+            .map_err(|e| PortError::DependencyUnavailable(e))?;
+        *guard = Some(conn.clone());
+        Ok(conn)
+    }
+
+    /// Reset the cached connection (e.g., after a disconnect).
+    pub fn reset(&self) {
+        if let Ok(mut guard) = self.inner.lock() {
+            *guard = None;
+        }
+    }
+
+    /// Whether a connection is currently cached.
+    pub fn is_connected(&self) -> bool {
+        self.inner.lock().map(|g| g.is_some()).unwrap_or(false)
+    }
+
+    /// The configured connect timeout.
+    pub fn timeout(&self) -> Duration {
+        self.timeout
+    }
 }
