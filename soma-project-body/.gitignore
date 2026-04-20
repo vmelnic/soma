@@ -13,3 +13,4 @@ bin/soma
 packs/*/*.dylib
 packs/*/*.so
 packs/*/*.dll
+soma.db
