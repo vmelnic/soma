@@ -362,6 +362,8 @@ fn main() {
         deadline: None,
         permissions_scope: vec!["read_only".to_string()],
         priority: Priority::Normal,
+        max_steps: None,
+        exploration: soma_next::types::goal::ExplorationStrategy::Greedy,
     };
 
     let mut session = match runtime.session_controller.create_session(goal) {
@@ -541,6 +543,7 @@ fn make_multistep_episode(seq_no: usize, skills: &[&str]) -> Episode {
                 effect_patch: None,
                 success: true,
                 failure_class: None,
+                failure_detail: None,
                 latency_ms: 5,
                 resource_cost: cost_profile.clone(),
                 confidence: 0.95,
@@ -572,6 +575,8 @@ fn make_multistep_episode(seq_no: usize, skills: &[&str]) -> Episode {
         success: true,
         tags: vec!["multistep".to_string(), "filesystem".to_string()],
         embedding: None,
+        salience: 1.0,
+        world_state_context: serde_json::Value::Null,
         created_at: Utc::now(),
     }
 }

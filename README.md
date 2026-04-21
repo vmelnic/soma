@@ -12,7 +12,7 @@ No application source code. A goal-driven runtime receives intent, selects skill
 Two execution paths:
 
 - **LLM-driven** — an LLM calls `invoke_port` via MCP to execute operations directly (database queries, email, S3, auth). SOMA is the body, the LLM is the brain. `--pack auto` discovers all available ports from dylib search paths without any manifest.
-- **Autonomous** — SOMA executes goals through its own control loop: skill selection, port invocation, observation, belief update, repeat. Learned routines bypass deliberation (plan-following mode).
+- **Autonomous** — SOMA executes goals through its own control loop: skill selection, port invocation, observation, belief update, repeat. Learned routines bypass deliberation (plan-following mode). When the body can't resolve inputs, it pauses (`WaitingForInput`) and an external brain provides them via MCP — any LLM, any provider, no API keys in the runtime.
 
 The same architecture runs on microcontrollers. `soma-project-esp32` deploys a `no_std` leaf firmware to ESP32-S3 and ESP32 LX6 chips with 12 hardware ports, runtime-configurable pins, mDNS auto-discovery, and an SSD1306 OLED display port. A brain-side loop reading the thermistor and drawing temperature on the OLED was verified on the physical panel — the leaf has no concept of "every 5 seconds" or "read sensor, show on screen". Both are the brain's composition. Server SOMA reaches the leaf via `invoke_remote_skill` over TCP after discovering it via `_soma._tcp.local.`.
 
@@ -93,6 +93,7 @@ Consolidation cycle: episodes accumulate → HashEmbedder clusters by semantic s
 - [Architecture](docs/architecture.md) — Runtime layers, type system, skill/port/pack contracts
 - [MCP Interface](docs/mcp.md) — `invoke_port`, `dump_state`, scheduler, world state, distributed peer tools, async goals
 - [What SOMA Is Not](docs/what-soma-is-not.md) — Not a code generator, LLM wrapper, workflow engine, or chatbot
+- [Brain as Component](docs/brain-as-component.md) — External brain via MCP, belief projection, the body-calls-brain inversion
 - [Tradeoffs](docs/tradeoffs.md) — Where SOMA wins, where conventional apps win, architectural costs
 - [Neuroscience Architecture](docs/neuroscience-architecture.md) — How SOMA maps to biological neural systems
 - [Ports](docs/ports.md) — SDK, dynamic loading, port contract
