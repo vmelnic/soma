@@ -57,34 +57,9 @@ Disk persistence uses JSON files in a configurable `data_dir`. Each `Disk*Store`
 
 ### 4. Interfaces
 
-**CLI** (10 commands):
+**CLI**: `run`, `inspect`, `restore`, `sessions`, `packs`, `skills`, `metrics`, `verify-port`, `dump`, `repl`. Run `soma --help` for the current list.
 
-| Command | Action |
-|---|---|
-| `run` | Submit and execute a goal to completion |
-| `inspect` | Show session state by ID |
-| `restore` | Restore and resume a checkpointed session |
-| `list_sessions` | List all sessions with status |
-| `list_packs` | Show loaded pack manifests |
-| `list_skills` | Enumerate registered skills |
-| `metrics` | Dump runtime metrics (text, JSON, or Prometheus format) |
-| `verify_port` | Verify Ed25519 signature of a port library |
-| `dump` | Structured JSON dump for LLM context (sections: full, belief, episodes, schemas, routines, sessions, skills, ports, packs, metrics) |
-| `repl` | Interactive mode |
-
-**MCP Server** (JSON-RPC 2.0). Tools are grouped by concern; for the
-authoritative current list, call `tools/list` or read `build_tools()` in
-`src/interfaces/mcp.rs`.
-
-*Core*: `create_goal`, `inspect_session`, `inspect_belief`, `inspect_resources`, `inspect_packs`, `inspect_skills`, `inspect_trace`, `pause_session`, `resume_session`, `abort_session`, `list_sessions`, `query_metrics`, `query_policy`, `dump_state`, `invoke_port`, `list_ports`.
-
-*Distributed*: `list_peers`, `invoke_remote_skill`, `transfer_routine`, `replicate_routine`.
-
-*Scheduler*: `schedule`, `list_schedules`, `cancel_schedule`.
-
-*World state*: `patch_world_state`, `dump_world_state`, `set_routine_autonomous`.
-
-*Execution*: `trigger_consolidation`, `execute_routine`, `author_routine`.
+**MCP Server** (JSON-RPC 2.0). Tools are grouped by concern; for the authoritative current list, call `tools/list` or read `build_tools()` in `src/interfaces/mcp.rs`. Categories: Core (goal creation, session lifecycle, inspection, metrics, policy, port invocation, pack management), Async goals (background execution, status polling, cancellation, observation streaming), Brain integration (belief projection, session input, plan injection, routine matching), Scheduler (one-shot and recurring schedules), Distributed (peer discovery, remote skill invocation, routine transfer/replication, belief sync), World state (fact patching, snapshots, TTL expiration, autonomous triggers), Learning (routine execution, episode consolidation, routine authoring/versioning/rollback/review).
 
 Also supports the MCP protocol methods `initialize`, `tools/list`, and `tools/call`.
 

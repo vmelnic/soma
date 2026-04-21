@@ -402,17 +402,6 @@ When routines cover the goal, the cost is zero — no brain calls.
 
 ## Open questions
 
-**Async brain interaction.** `create_goal` currently blocks until
-completion. With `WaitingForInput`, it returns early. The external
-brain must poll or subscribe. `create_goal_async` + `get_goal_status`
-already support this pattern. The brain polls, provides input, and
-the session resumes on the next step.
-
-**Multi-slot binding.** When a skill needs multiple unresolved slots,
-should the body expose all missing slots at once or one at a time?
-All-at-once is more efficient (one brain call vs many). The
-`provide_session_input` tool should accept multiple bindings.
-
 **Brain call latency.** MCP round-trip adds latency compared to
 in-process calls. For latency-sensitive goals, the in-process
 `BrainFallback` trait (already wired) could use a local model. But
@@ -424,3 +413,15 @@ through input provision, not direct critic override. If the brain
 wants to abort or redirect, it could provide a special binding or
 call `abort_session`. Whether a formal `BrainCritic` trait adds
 value beyond this needs empirical evidence.
+
+## Resolved
+
+**Async brain interaction.** Proven via `soma-project-brain`:
+`create_goal_async` + `get_goal_status` polling +
+`notifications/goal/trace_step` push notifications. The brain polls
+or streams, provides input via `provide_session_input`, and the
+session resumes on the next step.
+
+**Multi-slot binding.** `provide_session_input` accepts multiple
+bindings in a single call. All missing slots are exposed at once
+in the `WaitingForInput` metadata. Proven via `soma-project-brain`.

@@ -57,36 +57,25 @@ After rebuilding a port, re-copy the `.dylib` to any `soma-project-*/packs/` tha
 
 A change that violates any of these is an architectural redirection, not a bug fix.
 
-- **Body ≠ brain.** Runtime is domain-agnostic. It knows skills, ports, observations, episodes — never SQL, HTTP verbs, table names, API flows. When editing soma-next: "would this change if the port were different?" If yes, it belongs in a port adapter or the brain.
+- **Body != brain.** Runtime is domain-agnostic. It knows skills, ports, observations, episodes — never SQL, HTTP verbs, table names, API flows. Test: "would this change if the port were different?" If yes, it belongs in a port or brain.
 - **Input binding** comes from brain, belief state, working memory, or goal fields. Never hardcoded domain extraction.
 - **Every external interaction** produces a typed `PortCallRecord`.
 - **Sessions carry finite budgets.** Exhaustion terminates the session.
 - **Learning mines structure**, not content.
 - **Interfaces are self-describing** at runtime.
 
+## How to think
+
+- **Think first.** Surface tradeoffs and state assumptions before writing code. Present multiple interpretations when ambiguity exists.
+- **Simplicity first.** Minimum code that solves the problem. No speculative features, unnecessary abstractions, or over-engineered error handling.
+- **Surgical changes.** Touch only what you must. Don't reformat unrelated code, don't remove pre-existing dead code unless asked.
+- **Goal-driven.** Define success criteria. Loop until verified against real behavior, not just compilation.
+
 ## Working rules
 
 - **NEVER GUESS.** Read the code. Read the spec. If neither answers, ask.
 - **NO HEDGING.** Don't call work "hard" or "1-2 weeks". Ship the first concrete step.
-- **TIMEBOX DEBUGGING.** If two patches don't fix the bug, the diagnosis is wrong — back out and re-examine. Round or absurd panic values usually indicate uninitialized memory, stack corruption, or format-string mismatch, not "zero-byte alloc" paths. Check heap/stack size, buffer overflow, missing init first.
-- **HONEST STATUS.** "Proven" = expected user-visible behavior end-to-end on real data, captured in session. "Compiles", "boots", "got further than before" are NOT proof. 15/16 passing is not "working" — report the failing case.
+- **TIMEBOX DEBUGGING.** If two patches don't fix the bug, the diagnosis is wrong — back out and re-examine. Round or absurd panic values usually indicate uninitialized memory, stack corruption, or format-string mismatch. Check heap/stack size, buffer overflow, missing init first.
+- **HONEST STATUS.** "Proven" = expected user-visible behavior end-to-end on real data. "Compiles", "boots", "got further" are NOT proof. 15/16 passing is not "working" — report the failing case.
 - **NO SPEC CITATIONS IN COMMENTS.** Comments say what and why; never cite RFC numbers or architecture-doc sections.
-- **NO COUNT/SIZE CHURN.** Tool counts, test counts, binary sizes rot. Point readers at `tools/list` / `cargo test` / `ls -la` instead of writing numbers.
-
-## Editing hotspots
-
-- **MCP tool change**: update `build_tools()` (`src/interfaces/mcp.rs`), add handler, add routing in tools/call AND direct dispatch, update `test_list_tools_count` / `test_default_impl`. `McpTool` uses `#[serde(rename = "inputSchema")]` (MCP is camelCase). Wrap tools/call responses via `tool_success_response()`.
-- **Episode/learning change**: both `interfaces/cli.rs` AND `interfaces/mcp.rs` store episodes via `runtime/goal_executor.rs`. Update the shared path, not either interface in isolation.
-- **Memory pipeline**: `memory/embedder.rs` (GoalEmbedder) → `memory/sequence_mining.rs` (PrefixSpan) → `memory/schemas.rs` (induction) → `memory/routines.rs` (compilation) → `memory/checkpoint.rs` (disk).
-- **Plan-following**: `runtime/session.rs::active_plan`, `adapters.rs::{SkillRegistryAdapter, SimpleSessionCritic}`. Branching via `NextStep::{Continue,Goto,CallRoutine,Complete,Abandon}`, sub-routine composition via `plan_stack` (max depth 16).
-- **Async goals**: `runtime/goal_registry.rs` (background thread + cancel flag) + `runtime/goal_executor.rs` (shared `run_loop` / `finalize_episode`).
-- **Pack manifests**: full `PackSpec`; template in `packs/reference/manifest.json`. `port_id` must match library name. Skills need all fields.
-- **Port crates**: cdylib, depend on `soma-port-sdk`, export `soma_port_init`.
-- **Remote skill invocation handler**: `distributed/transport.rs::LocalDispatchHandler::handle(InvokeSkill)`. Injects the target skill as a single-step plan and seeds `objective.structured` from the input payload. The handler does NOT go through the predictor/selector — it uses plan-following directly.
-- **mDNS discovery**: `distributed/discovery.rs`. Browses `_soma._tcp.local.`, assigns `lan-<instance>` peer IDs. Wired via `--discover-lan` in `main.rs`.
-- **Belief projection**: `runtime/belief_projection.rs` (BeliefProjector — JMESPath + TOON). Used at the brain fallback call site in `session.rs` and exposed via `inspect_belief_projection` MCP tool. Dependencies: `jmespath` (with `sync` feature) and `toon-format`.
-
-## Known gaps — honest status
-
-- **Organic multi-step episode production.** Multi-step routines work *given* multi-step episodes; `soma-project-multistep` Phase 1 still injects them. Dead-end detection works (3 identical failures → stop), belief projection is proven, and `provide_session_input` is implemented — the external brain can now fill missing input slots when the body pauses at `WaitingForInput`. The remaining step is end-to-end proof: an external brain (via MCP) driving a multi-step goal through repeated `inspect_session` → `provide_session_input` cycles, producing organic episodes that compile into routines.
-- **Observation streaming is poll-based, not push.** `stream_goal_observations` MCP tool exists and returns batches of observations after a given step index, but it is still poll-driven — the brain must re-call to get new entries. True server-push subscription is not implemented.
+- **NO COUNT/SIZE CHURN.** Tool counts, test counts, binary sizes rot. Point readers at `tools/list` / `cargo test` / `ls -la`.

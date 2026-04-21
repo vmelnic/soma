@@ -64,30 +64,23 @@ target named `soma` from [`src/main.rs`](src/main.rs).
 ```bash
 cd soma-next
 
-cargo build                              # debug binary → target/debug/soma (~32 MB)
+cargo build                              # debug binary → target/debug/soma
 cargo test                               # full unit-test suite, all must pass
 cargo clippy --all-targets --all-features # must be zero warnings
 ```
 
-Debug builds include full debug info and are ~3x larger than release. Use them
-for day-to-day development — they compile faster and produce better backtraces.
+Debug builds compile faster and produce better backtraces.
 
 ### Production release
 
 ```bash
 cd soma-next
 
-cargo build --release                    # optimized binary → target/release/soma (~11 MB)
+cargo build --release                    # optimized binary → target/release/soma
 cargo test --release                     # run tests against the release binary
 ```
 
-The release binary is what gets deployed to project directories:
-
-```bash
-cp target/release/soma ../soma-project-postgres/bin/soma
-cp target/release/soma ../soma-project-helperbook/bin/soma
-cp target/release/soma ../soma-project-llm/bin/soma
-```
+The release binary is what gets deployed to `soma-project-*/bin/soma`.
 
 ### macOS post-copy
 
@@ -196,53 +189,15 @@ cargo run -- --mcp --pack packs/reference/manifest.json
 SOMA_PORTS_PLUGIN_PATH=../soma-ports/target/release cargo run -- --mcp --pack auto
 ```
 
-The server exposes these runtime tools (call `tools/list` for the authoritative catalog):
+Run `tools/list` at runtime for the authoritative tool catalog. Tools are organized into these categories:
 
-**Core tools:**
-
-- `create_goal`, `inspect_session`, `inspect_belief`, `inspect_resources`
-- `inspect_packs`, `inspect_skills`, `inspect_trace`
-- `pause_session`, `resume_session`, `abort_session`, `claim_session`, `list_sessions`
-- `query_metrics`, `query_policy`, `dump_state`
-- `invoke_port`, `list_ports`, `list_capabilities`
-- `reload_pack`, `unload_pack`
-
-**Async goal tools:**
-
-- `create_goal_async` — fire and forget; returns `goal_id` + `session_id` immediately
-- `get_goal_status` — live poll `{status, steps, last_skill, error}`
-- `cancel_goal` — flip cancel flag; thread aborts at next step boundary
-- `stream_goal_observations` — subscribe to observation delivery events
-
-**Scheduler tools:**
-
-- `schedule` — one-shot (`delay_ms`), recurring (`interval_ms`), message-only or port-call, optional `max_fires` and `brain` routing
-- `list_schedules` — list active schedules
-- `cancel_schedule` — cancel by UUID
-
-**Distributed peer tools:**
-
-- `list_peers`, `invoke_remote_skill`, `transfer_routine`, `replicate_routine`
-- `sync_beliefs` — synchronize world state facts with a peer
-- `handoff_session` — write a handoff fact for cross-device session continuity
-- `migrate_session` — atomically transfer session state to a peer (requires delegation manager)
-
-**World state and learning tools:**
-
-- `patch_world_state` — add/remove facts from the global world state
-- `dump_world_state` — return current world state snapshot
-- `expire_world_facts` — force-evict TTL-expired facts
-- `set_routine_autonomous` — mark a routine to fire automatically when conditions match
-
-**Execution tools:**
-
-- `execute_routine` — run a compiled routine by ID with pre-loaded plan
-- `trigger_consolidation` — manually trigger the episode → schema → routine pipeline
-- `author_routine` — create or update a routine from a structured definition (LLM translates behavioral intent into compiled routine with steps, branching, priority, and policy scope)
-
-**Routine management tools:**
-
-- `list_routine_versions`, `rollback_routine`, `review_routine`
+- **Core** — goal creation, session lifecycle, inspection, metrics, policy, port invocation, pack management
+- **Async goals** — fire-and-forget goals with background execution, status polling, cancellation, observation streaming
+- **Brain integration** — belief projection, session input provision, plan injection, skill redirect
+- **Scheduler** — one-shot and recurring schedules with port-call or message payloads
+- **Distributed** — peer discovery, remote skill invocation, routine transfer/replication, belief sync, session migration/handoff
+- **World state** — fact patching, snapshots, TTL expiration, autonomous routine triggers
+- **Learning** — routine execution, episode consolidation, routine authoring/versioning/rollback/review, routine search
 
 In addition, two autonomy features are driven from `soma.toml` rather than MCP tools: webhook-triggered async goals (`[webhooks.trigger_goal.<name>]`) and cron-scheduled async goals (`[scheduler.goal.<label>]`). Both land in the same `GoalRegistry` as `create_goal_async` and are observable via `get_goal_status`.
 
@@ -277,6 +232,7 @@ Relevant flags:
 - `--unix-listen <path>`
 - `--unix-peer <path>`
 - `--discover-lan` — start mDNS browser for `_soma._tcp.local.`, auto-register discovered peers
+- `--mcp-ws-listen <addr>` — MCP over WebSocket (JSON-RPC 2.0 over WS instead of stdio)
 - `--webhook-listen <addr>` — HTTP server for inbound webhooks (POST → world state patch + stderr event)
 
 `--discover-lan` and `--peer` compose: static peers are available immediately

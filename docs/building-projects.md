@@ -227,23 +227,17 @@ The MCP client pattern: spawn `run-mcp.sh`, send a JSON-RPC `initialize` request
 
 ## Existing Projects
 
-### Server-side (dylib-based)
+Run `ls -d soma-project-*/` from the repo root for the current list.
 
-| Project | Port | What it does |
-|---------|------|-------------|
-| `soma-project-smtp` | smtp | Email delivery via mailcatcher or real SMTP |
-| `soma-project-s3` | s3 | AWS S3 object storage |
-| `soma-project-postgres` | postgres | Database queries against HelperBook schema |
-| `soma-project-llm` | postgres | Ollama local LLM generates SQL, SOMA executes via postgres port |
-| `soma-project-mcp` | (any) | Claude Code MCP integration — SOMA registered as an MCP server |
-| `soma-project-s2s` | filesystem | SOMA-to-SOMA delegation and routine transfer |
-| `soma-project-multistep` | filesystem (reference pack) | End-to-end proof of multi-step autonomous routine learning |
+Projects fall into three groups:
 
-### Embedded (compile-time ports, no dylib)
+**Server-side (dylib-based)** -- each wires `bin/soma` to port `.dylib` libraries via pack manifests. Examples: `soma-project-postgres`, `soma-project-smtp`, `soma-project-s3`, `soma-project-llm`, `soma-project-mcp`, `soma-project-s2s`, `soma-project-multistep`, `soma-project-terminal`, `soma-project-helperbook`, `soma-project-mcp-bridge`, `soma-project-narrator`.
 
-| Project | Target | What it does |
-|---------|--------|-------------|
-| `soma-project-esp32` | ESP32-S3, ESP32 LX6 | `no_std` leaf firmware with 12 hardware ports, runtime-configurable pins, mDNS auto-discovery, SSD1306 OLED display. Different structure from the dylib projects (see below). |
+**Brain/body proofs** -- demonstrate brain-as-component architecture. `soma-project-brain` (external LLM brain via MCP), `soma-project-body` (body runtime with full port set), `soma-project-autonomy` (autonomous control loop), `soma-project-distributed` (peer-to-peer).
+
+**Embedded (compile-time ports, no dylib)** -- `soma-project-esp32` targets ESP32-S3 and ESP32 LX6 with `no_std` leaf firmware, runtime-configurable pins, mDNS auto-discovery, and SSD1306 OLED display. Different structure from the dylib projects (see below).
+
+**Platform targets** -- `soma-project-android`, `soma-project-ios`, `soma-project-web`.
 
 ## Building an Embedded Project (`soma-project-esp32` pattern)
 

@@ -172,33 +172,17 @@ Key rules:
 
 ## Port Catalog
 
+Run `list_ports` at runtime for the authoritative list with full capability metadata. Run `cargo metadata --no-deps --format-version 1 | jq '.packages[].name'` in `soma-ports/` for the current crate list.
+
 ### Overview
 
-| port_id | Kind | Caps | Key Env Vars | State Model |
-|---------|------|------|-------------|-------------|
-| `filesystem` | Filesystem | 7 | -- | Stateless (built-in) |
-| `http` | Http | 4 | -- | Stateless (built-in) |
-| `auth` | Custom | 10 | -- | In-memory (OTP, sessions, tokens) |
-| `crypto` | Custom | 13 | -- | Stateless |
-| `geo` | Custom | 5 | `api_key` (per-call) | Stateless |
-| `soma.image` | Custom | 5 | -- | Stateless |
-| `soma.ports.postgres` | Database | 15 | `SOMA_POSTGRES_URL` | Connection per call |
-| `redis` | Database | 13 | `SOMA_REDIS_URL` | Persistent connection (ConnectionManager) |
-| `soma.s3` | Database | 5 | `SOMA_S3_DEFAULT_BUCKET`, `SOMA_S3_REGION`, `SOMA_S3_ENDPOINT` | Persistent client (OnceLock) |
-| `soma.smtp` | Messaging | 3 | `SOMA_SMTP_HOST`, `SOMA_SMTP_FROM`, `SOMA_SMTP_PORT`, `SOMA_SMTP_USERNAME`, `SOMA_SMTP_PASSWORD`, `SOMA_SMTP_STARTTLS` | Persistent transport config (OnceLock) |
-| `soma.push` | Messaging | 4 | -- | In-memory (device registry) |
-| `soma.timer` | Custom | 4 | -- | In-memory (timer state) |
-| `soma.stripe` | Payment | 5 | `SOMA_STRIPE_SECRET_KEY` | Stateless (HTTP per call) |
-| `soma.twilio` | Messaging | 4 | `SOMA_TWILIO_ACCOUNT_SID`, `SOMA_TWILIO_AUTH_TOKEN`, `SOMA_TWILIO_FROM_NUMBER` | Stateless (HTTP per call) |
-| `soma.slack` | Messaging | 4 | `SOMA_SLACK_BOT_TOKEN` | Stateless (HTTP per call) |
-| `soma.pdf` | Document | 3 | -- | Stateless |
-| `soma.google.calendar` | Cloud | 4 | `SOMA_GOOGLE_ACCESS_TOKEN` | Stateless (HTTP per call) |
-| `soma.google.drive` | Cloud | 5 | `SOMA_GOOGLE_ACCESS_TOKEN` | Stateless (HTTP per call) |
-| `soma.google.mail` | Cloud | 4 | `SOMA_GOOGLE_ACCESS_TOKEN` | Stateless (HTTP per call) |
-| `soma.mysql` | Database | 5 | `SOMA_MYSQL_URL` | Connection per call |
-| `soma.mongodb` | Database | 7 | `SOMA_MONGODB_URL`, `SOMA_MONGODB_DATABASE` | Persistent client |
-| `soma.elasticsearch` | Database | 6 | `SOMA_ELASTICSEARCH_URL` | Stateless (HTTP per call) |
-| `soma.calendar` | Utility | 4 | `SOMA_CALENDAR_DIR` | Filesystem-backed |
+Ports fall into three categories:
+
+- **Built-in** (filesystem, http) -- compiled into the runtime binary, always available.
+- **Service-backed** (postgres, mysql, mongodb, redis, elasticsearch, s3, smtp, slack, twilio, stripe, google-calendar, google-drive, google-mail, assemblyai, deepgram) -- require credentials via `SOMA_*` env vars. Check each port's `src/lib.rs` or `manifest.json` for exact variable names.
+- **Local logic** (auth, crypto, geo, image, timer, pdf, calendar, sqlite, push, youtube) -- no external service dependency.
+
+Google ports share `SOMA_GOOGLE_ACCESS_TOKEN`.
 
 ### filesystem (built-in)
 
