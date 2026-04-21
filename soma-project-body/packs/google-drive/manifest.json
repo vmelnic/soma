@@ -84,7 +84,26 @@
           "purpose": "List files in Google Drive with optional search query",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "description": "Search query (Google Drive query syntax)"
+                },
+                "page_size": {
+                  "type": "integer",
+                  "description": "Maximum number of files to return"
+                },
+                "page_token": {
+                  "type": "string",
+                  "description": "Token for next page of results"
+                },
+                "folder_id": {
+                  "type": "string",
+                  "description": "Restrict listing to files in this folder"
+                }
+              },
+              "required": []
             }
           },
           "output_schema": {
@@ -117,7 +136,16 @@
           "purpose": "Get metadata for a single file by ID",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "file_id": {
+                  "type": "string",
+                  "description": "ID of the file to retrieve"
+                }
+              },
+              "required": [
+                "file_id"
+              ]
             }
           },
           "output_schema": {
@@ -150,7 +178,29 @@
           "purpose": "Upload a file to Google Drive",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Name for the uploaded file"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "File content (base64-encoded for binary)"
+                },
+                "mime_type": {
+                  "type": "string",
+                  "description": "MIME type of the file"
+                },
+                "folder_id": {
+                  "type": "string",
+                  "description": "Parent folder ID"
+                }
+              },
+              "required": [
+                "name",
+                "content"
+              ]
             }
           },
           "output_schema": {
@@ -183,7 +233,16 @@
           "purpose": "Delete a file from Google Drive by ID",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "file_id": {
+                  "type": "string",
+                  "description": "ID of the file to delete"
+                }
+              },
+              "required": [
+                "file_id"
+              ]
             }
           },
           "output_schema": {
@@ -216,7 +275,20 @@
           "purpose": "Create a folder in Google Drive",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Folder name"
+                },
+                "parent_id": {
+                  "type": "string",
+                  "description": "Parent folder ID"
+                }
+              },
+              "required": [
+                "name"
+              ]
             }
           },
           "output_schema": {
@@ -307,7 +379,26 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search query (Google Drive query syntax)"
+            },
+            "page_size": {
+              "type": "integer",
+              "description": "Maximum number of files to return"
+            },
+            "page_token": {
+              "type": "string",
+              "description": "Token for next page of results"
+            },
+            "folder_id": {
+              "type": "string",
+              "description": "Restrict listing to files in this folder"
+            }
+          },
+          "required": []
         }
       },
       "outputs": {
@@ -398,7 +489,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "file_id": {
+              "type": "string",
+              "description": "ID of the file to retrieve"
+            }
+          },
+          "required": [
+            "file_id"
+          ]
         }
       },
       "outputs": {
@@ -489,7 +589,29 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Name for the uploaded file"
+            },
+            "content": {
+              "type": "string",
+              "description": "File content (base64-encoded for binary)"
+            },
+            "mime_type": {
+              "type": "string",
+              "description": "MIME type of the file"
+            },
+            "folder_id": {
+              "type": "string",
+              "description": "Parent folder ID"
+            }
+          },
+          "required": [
+            "name",
+            "content"
+          ]
         }
       },
       "outputs": {
@@ -587,7 +709,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "file_id": {
+              "type": "string",
+              "description": "ID of the file to delete"
+            }
+          },
+          "required": [
+            "file_id"
+          ]
         }
       },
       "outputs": {
@@ -685,7 +816,20 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Folder name"
+            },
+            "parent_id": {
+              "type": "string",
+              "description": "Parent folder ID"
+            }
+          },
+          "required": [
+            "name"
+          ]
         }
       },
       "outputs": {

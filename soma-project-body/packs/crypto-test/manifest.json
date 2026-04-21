@@ -1,0 +1,261 @@
+{
+  "id": "soma.test.crypto",
+  "name": "CryptoTest",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.test.crypto",
+  "description": "Minimal crypto test \u2014 sha256 only",
+  "capabilities": [
+    {
+      "group_name": "hashing",
+      "scope": "local",
+      "capabilities": [
+        "sha256"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
+  },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "sha256"
+    ],
+    "expected_latency_classes": [
+      "fast"
+    ],
+    "expected_failure_modes": [
+      "validation_error",
+      "external_error"
+    ],
+    "trace_categories": [
+      "cryptography"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "hash",
+    "sha256",
+    "crypto",
+    "digest"
+  ],
+  "ports": [
+    {
+      "port_id": "crypto",
+      "name": "Crypto",
+      "version": "0.1.0",
+      "kind": "custom",
+      "description": "Cryptographic operations: hashing, signing, encryption, JWT, random generation",
+      "namespace": "soma.ports.crypto",
+      "trust_level": "trusted",
+      "capabilities": [
+        {
+          "capability_id": "sha256",
+          "name": "SHA-256",
+          "purpose": "Compute SHA-256 hex digest",
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "data": {
+                  "type": "string",
+                  "description": "Data to hash"
+                }
+              },
+              "required": [
+                "data"
+              ]
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "any"
+            }
+          },
+          "effect_class": "none",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": {
+            "expected_latency_ms": 1,
+            "p95_latency_ms": 5,
+            "max_latency_ms": 20
+          },
+          "cost_profile": {
+            "cpu_cost_class": "negligible",
+            "memory_cost_class": "negligible",
+            "io_cost_class": "negligible",
+            "network_cost_class": "negligible",
+            "energy_cost_class": "negligible"
+          },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "output_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "failure_modes": [
+        "validation_error",
+        "external_error"
+      ],
+      "side_effect_class": "none",
+      "latency_profile": {
+        "expected_latency_ms": 1,
+        "p95_latency_ms": 50,
+        "max_latency_ms": 2000
+      },
+      "cost_profile": {
+        "cpu_cost_class": "negligible",
+        "memory_cost_class": "negligible",
+        "io_cost_class": "negligible",
+        "network_cost_class": "negligible",
+        "energy_cost_class": "negligible"
+      },
+      "auth_requirements": {
+        "methods": [],
+        "required": false
+      },
+      "sandbox_requirements": {
+        "filesystem_access": false,
+        "network_access": false,
+        "device_access": false,
+        "process_access": false,
+        "memory_limit_mb": null,
+        "cpu_limit_percent": null,
+        "time_limit_ms": null,
+        "syscall_limit": null
+      },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
+  "skills": [
+    {
+      "skill_id": "soma.test.crypto.sha256",
+      "namespace": "soma.test.crypto",
+      "pack": "soma.test.crypto",
+      "kind": "primitive",
+      "name": "SHA-256",
+      "description": "Compute SHA-256 hex digest via the crypto port",
+      "version": "0.1.0",
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "string",
+              "description": "Data to hash"
+            }
+          },
+          "required": [
+            "data"
+          ]
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [],
+      "observables": [
+        {
+          "field": "result",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "result": "present"
+          },
+          "description": "compute sha-256 hex digest returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "operation failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1,
+          "p95_latency_ms": 5,
+          "max_latency_ms": 20
+        },
+        "resource_cost": {
+          "cpu_cost_class": "negligible",
+          "memory_cost_class": "negligible",
+          "io_cost_class": "negligible",
+          "network_cost_class": "negligible",
+          "energy_cost_class": "negligible"
+        }
+      },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "hash",
+        "sha256",
+        "crypto",
+        "digest",
+        "checksum"
+      ],
+      "capability_requirements": [
+        "port:crypto/sha256"
+      ],
+      "confidence_threshold": null,
+      "locality": null,
+      "remote_endpoint": null,
+      "remote_trust_requirement": null,
+      "remote_capability_contract": null,
+      "fallback_skill": null,
+      "partial_success_behavior": null
+    }
+  ],
+  "port_dependencies": []
+}

@@ -96,7 +96,16 @@
           "purpose": "Get string value by key",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "Key to retrieve"
+                }
+              },
+              "required": [
+                "key"
+              ]
             }
           },
           "output_schema": {
@@ -129,7 +138,25 @@
           "purpose": "Set string value with optional TTL",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "Key to set"
+                },
+                "value": {
+                  "type": "string",
+                  "description": "Value to store"
+                },
+                "ttl_seconds": {
+                  "type": "integer",
+                  "description": "Time-to-live in seconds"
+                }
+              },
+              "required": [
+                "key",
+                "value"
+              ]
             }
           },
           "output_schema": {
@@ -162,7 +189,16 @@
           "purpose": "Delete a key",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "Key to delete"
+                }
+              },
+              "required": [
+                "key"
+              ]
             }
           },
           "output_schema": {
@@ -195,7 +231,21 @@
           "purpose": "Get a hash field value",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "Hash key"
+                },
+                "field": {
+                  "type": "string",
+                  "description": "Hash field name"
+                }
+              },
+              "required": [
+                "key",
+                "field"
+              ]
             }
           },
           "output_schema": {
@@ -228,7 +278,26 @@
           "purpose": "Set a hash field value",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "Hash key"
+                },
+                "field": {
+                  "type": "string",
+                  "description": "Hash field name"
+                },
+                "value": {
+                  "type": "string",
+                  "description": "Value to store"
+                }
+              },
+              "required": [
+                "key",
+                "field",
+                "value"
+              ]
             }
           },
           "output_schema": {
@@ -261,7 +330,21 @@
           "purpose": "Delete a hash field",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "Hash key"
+                },
+                "field": {
+                  "type": "string",
+                  "description": "Hash field name"
+                }
+              },
+              "required": [
+                "key",
+                "field"
+              ]
             }
           },
           "output_schema": {
@@ -294,7 +377,16 @@
           "purpose": "Get all hash fields and values",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "Hash key"
+                }
+              },
+              "required": [
+                "key"
+              ]
             }
           },
           "output_schema": {
@@ -327,7 +419,21 @@
           "purpose": "Push value to head of list",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "List key"
+                },
+                "value": {
+                  "type": "string",
+                  "description": "Value to push"
+                }
+              },
+              "required": [
+                "key",
+                "value"
+              ]
             }
           },
           "output_schema": {
@@ -360,7 +466,16 @@
           "purpose": "Pop value from head of list",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "List key"
+                }
+              },
+              "required": [
+                "key"
+              ]
             }
           },
           "output_schema": {
@@ -393,7 +508,26 @@
           "purpose": "Get a range of elements from a list",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "List key"
+                },
+                "start": {
+                  "type": "integer",
+                  "description": "Start index"
+                },
+                "stop": {
+                  "type": "integer",
+                  "description": "Stop index"
+                }
+              },
+              "required": [
+                "key",
+                "start",
+                "stop"
+              ]
             }
           },
           "output_schema": {
@@ -426,7 +560,21 @@
           "purpose": "Publish a message to a channel",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "channel": {
+                  "type": "string",
+                  "description": "Channel name"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Message to publish"
+                }
+              },
+              "required": [
+                "channel",
+                "message"
+              ]
             }
           },
           "output_schema": {
@@ -459,7 +607,16 @@
           "purpose": "Subscribe to a channel (streaming, not yet supported)",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "channel": {
+                  "type": "string",
+                  "description": "Channel name to subscribe to"
+                }
+              },
+              "required": [
+                "channel"
+              ]
             }
           },
           "output_schema": {
@@ -492,7 +649,16 @@
           "purpose": "Find keys matching a glob pattern",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "pattern": {
+                  "type": "string",
+                  "description": "Glob pattern to match keys"
+                }
+              },
+              "required": [
+                "pattern"
+              ]
             }
           },
           "output_schema": {
@@ -579,7 +745,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "Key to retrieve"
+            }
+          },
+          "required": [
+            "key"
+          ]
         }
       },
       "outputs": {
@@ -669,7 +844,25 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "Key to set"
+            },
+            "value": {
+              "type": "string",
+              "description": "Value to store"
+            },
+            "ttl_seconds": {
+              "type": "integer",
+              "description": "Time-to-live in seconds"
+            }
+          },
+          "required": [
+            "key",
+            "value"
+          ]
         }
       },
       "outputs": {
@@ -766,7 +959,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "Key to delete"
+            }
+          },
+          "required": [
+            "key"
+          ]
         }
       },
       "outputs": {
@@ -863,7 +1065,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "Hash key"
+            },
+            "field": {
+              "type": "string",
+              "description": "Hash field name"
+            }
+          },
+          "required": [
+            "key",
+            "field"
+          ]
         }
       },
       "outputs": {
@@ -953,7 +1169,26 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "Hash key"
+            },
+            "field": {
+              "type": "string",
+              "description": "Hash field name"
+            },
+            "value": {
+              "type": "string",
+              "description": "Value to store"
+            }
+          },
+          "required": [
+            "key",
+            "field",
+            "value"
+          ]
         }
       },
       "outputs": {
@@ -1050,7 +1285,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "Hash key"
+            },
+            "field": {
+              "type": "string",
+              "description": "Hash field name"
+            }
+          },
+          "required": [
+            "key",
+            "field"
+          ]
         }
       },
       "outputs": {
@@ -1147,7 +1396,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "Hash key"
+            }
+          },
+          "required": [
+            "key"
+          ]
         }
       },
       "outputs": {
@@ -1237,7 +1495,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "List key"
+            },
+            "value": {
+              "type": "string",
+              "description": "Value to push"
+            }
+          },
+          "required": [
+            "key",
+            "value"
+          ]
         }
       },
       "outputs": {
@@ -1334,7 +1606,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "List key"
+            }
+          },
+          "required": [
+            "key"
+          ]
         }
       },
       "outputs": {
@@ -1424,7 +1705,26 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "List key"
+            },
+            "start": {
+              "type": "integer",
+              "description": "Start index"
+            },
+            "stop": {
+              "type": "integer",
+              "description": "Stop index"
+            }
+          },
+          "required": [
+            "key",
+            "start",
+            "stop"
+          ]
         }
       },
       "outputs": {
@@ -1514,7 +1814,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "channel": {
+              "type": "string",
+              "description": "Channel name"
+            },
+            "message": {
+              "type": "string",
+              "description": "Message to publish"
+            }
+          },
+          "required": [
+            "channel",
+            "message"
+          ]
         }
       },
       "outputs": {
@@ -1611,7 +1925,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "channel": {
+              "type": "string",
+              "description": "Channel name to subscribe to"
+            }
+          },
+          "required": [
+            "channel"
+          ]
         }
       },
       "outputs": {
@@ -1701,7 +2024,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Glob pattern to match keys"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
         }
       },
       "outputs": {

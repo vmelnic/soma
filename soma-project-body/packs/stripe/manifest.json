@@ -84,7 +84,30 @@
           "purpose": "Create a charge against a payment source",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "amount": {
+                  "type": "integer",
+                  "description": "Amount in cents"
+                },
+                "currency": {
+                  "type": "string",
+                  "description": "Three-letter currency code"
+                },
+                "source": {
+                  "type": "string",
+                  "description": "Payment source token"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Charge description"
+                }
+              },
+              "required": [
+                "amount",
+                "currency",
+                "source"
+              ]
             }
           },
           "output_schema": {
@@ -117,7 +140,24 @@
           "purpose": "Create a new Stripe customer",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string",
+                  "description": "Customer email"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Customer name"
+                },
+                "source": {
+                  "type": "string",
+                  "description": "Payment source token"
+                }
+              },
+              "required": [
+                "email"
+              ]
             }
           },
           "output_schema": {
@@ -150,7 +190,17 @@
           "purpose": "List recent charges",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "limit": {
+                  "type": "integer",
+                  "description": "Number of charges to return"
+                },
+                "customer": {
+                  "type": "string",
+                  "description": "Filter by customer ID"
+                }
+              }
             }
           },
           "output_schema": {
@@ -183,7 +233,29 @@
           "purpose": "Create a payment intent for client-side confirmation",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "amount": {
+                  "type": "integer",
+                  "description": "Amount in cents"
+                },
+                "currency": {
+                  "type": "string",
+                  "description": "Three-letter currency code"
+                },
+                "customer": {
+                  "type": "string",
+                  "description": "Customer ID"
+                },
+                "payment_method_types": {
+                  "type": "array",
+                  "description": "Allowed payment method types"
+                }
+              },
+              "required": [
+                "amount",
+                "currency"
+              ]
             }
           },
           "output_schema": {
@@ -307,7 +379,30 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "amount": {
+              "type": "integer",
+              "description": "Amount in cents"
+            },
+            "currency": {
+              "type": "string",
+              "description": "Three-letter currency code"
+            },
+            "source": {
+              "type": "string",
+              "description": "Payment source token"
+            },
+            "description": {
+              "type": "string",
+              "description": "Charge description"
+            }
+          },
+          "required": [
+            "amount",
+            "currency",
+            "source"
+          ]
         }
       },
       "outputs": {
@@ -404,7 +499,24 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": "string",
+              "description": "Customer email"
+            },
+            "name": {
+              "type": "string",
+              "description": "Customer name"
+            },
+            "source": {
+              "type": "string",
+              "description": "Payment source token"
+            }
+          },
+          "required": [
+            "email"
+          ]
         }
       },
       "outputs": {
@@ -501,7 +613,17 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "description": "Number of charges to return"
+            },
+            "customer": {
+              "type": "string",
+              "description": "Filter by customer ID"
+            }
+          }
         }
       },
       "outputs": {
@@ -591,7 +713,29 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "amount": {
+              "type": "integer",
+              "description": "Amount in cents"
+            },
+            "currency": {
+              "type": "string",
+              "description": "Three-letter currency code"
+            },
+            "customer": {
+              "type": "string",
+              "description": "Customer ID"
+            },
+            "payment_method_types": {
+              "type": "array",
+              "description": "Allowed payment method types"
+            }
+          },
+          "required": [
+            "amount",
+            "currency"
+          ]
         }
       },
       "outputs": {

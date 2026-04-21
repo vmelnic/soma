@@ -83,7 +83,25 @@
           "purpose": "Send an SMS message to a phone number",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "to": {
+                  "type": "string",
+                  "description": "Recipient phone number"
+                },
+                "body": {
+                  "type": "string",
+                  "description": "SMS message body"
+                },
+                "from": {
+                  "type": "string",
+                  "description": "Sender phone number"
+                }
+              },
+              "required": [
+                "to",
+                "body"
+              ]
             }
           },
           "output_schema": {
@@ -116,7 +134,25 @@
           "purpose": "Send a WhatsApp message to a phone number",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "to": {
+                  "type": "string",
+                  "description": "Recipient WhatsApp number"
+                },
+                "body": {
+                  "type": "string",
+                  "description": "Message body"
+                },
+                "from": {
+                  "type": "string",
+                  "description": "Sender WhatsApp number"
+                }
+              },
+              "required": [
+                "to",
+                "body"
+              ]
             }
           },
           "output_schema": {
@@ -149,7 +185,25 @@
           "purpose": "Initiate a phone call with a TwiML application URL",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "to": {
+                  "type": "string",
+                  "description": "Recipient phone number"
+                },
+                "from": {
+                  "type": "string",
+                  "description": "Caller phone number"
+                },
+                "twiml": {
+                  "type": "string",
+                  "description": "TwiML instructions for the call"
+                }
+              },
+              "required": [
+                "to",
+                "twiml"
+              ]
             }
           },
           "output_schema": {
@@ -182,7 +236,21 @@
           "purpose": "List recent messages from the account",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "to": {
+                  "type": "string",
+                  "description": "Filter by recipient"
+                },
+                "from": {
+                  "type": "string",
+                  "description": "Filter by sender"
+                },
+                "limit": {
+                  "type": "integer",
+                  "description": "Maximum messages to return"
+                }
+              }
             }
           },
           "output_schema": {
@@ -273,7 +341,25 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "string",
+              "description": "Recipient phone number"
+            },
+            "body": {
+              "type": "string",
+              "description": "SMS message body"
+            },
+            "from": {
+              "type": "string",
+              "description": "Sender phone number"
+            }
+          },
+          "required": [
+            "to",
+            "body"
+          ]
         }
       },
       "outputs": {
@@ -370,7 +456,25 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "string",
+              "description": "Recipient WhatsApp number"
+            },
+            "body": {
+              "type": "string",
+              "description": "Message body"
+            },
+            "from": {
+              "type": "string",
+              "description": "Sender WhatsApp number"
+            }
+          },
+          "required": [
+            "to",
+            "body"
+          ]
         }
       },
       "outputs": {
@@ -467,7 +571,25 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "string",
+              "description": "Recipient phone number"
+            },
+            "from": {
+              "type": "string",
+              "description": "Caller phone number"
+            },
+            "twiml": {
+              "type": "string",
+              "description": "TwiML instructions for the call"
+            }
+          },
+          "required": [
+            "to",
+            "twiml"
+          ]
         }
       },
       "outputs": {
@@ -564,7 +686,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "string",
+              "description": "Filter by recipient"
+            },
+            "from": {
+              "type": "string",
+              "description": "Filter by sender"
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Maximum messages to return"
+            }
+          }
         }
       },
       "outputs": {

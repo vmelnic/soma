@@ -82,7 +82,39 @@
           "purpose": "Send an email via Gmail",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "to": {
+                  "type": "string",
+                  "description": "Recipient email address"
+                },
+                "subject": {
+                  "type": "string",
+                  "description": "Email subject line"
+                },
+                "body": {
+                  "type": "string",
+                  "description": "Email body content"
+                },
+                "cc": {
+                  "type": "string",
+                  "description": "CC recipient(s)"
+                },
+                "bcc": {
+                  "type": "string",
+                  "description": "BCC recipient(s)"
+                },
+                "content_type": {
+                  "type": "string",
+                  "description": "Content type (text/plain or text/html)",
+                  "default": "text/plain"
+                }
+              },
+              "required": [
+                "to",
+                "subject",
+                "body"
+              ]
             }
           },
           "output_schema": {
@@ -115,7 +147,29 @@
           "purpose": "List messages in the Gmail inbox with optional search query",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "description": "Gmail search query (e.g. from:user@example.com)"
+                },
+                "max_results": {
+                  "type": "integer",
+                  "description": "Maximum number of messages to return"
+                },
+                "label_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Filter by label IDs"
+                },
+                "page_token": {
+                  "type": "string",
+                  "description": "Token for next page of results"
+                }
+              },
+              "required": []
             }
           },
           "output_schema": {
@@ -148,7 +202,21 @@
           "purpose": "Get a single Gmail message by ID",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "message_id": {
+                  "type": "string",
+                  "description": "ID of the message to retrieve"
+                },
+                "format": {
+                  "type": "string",
+                  "description": "Response format: full, metadata, minimal, raw",
+                  "default": "full"
+                }
+              },
+              "required": [
+                "message_id"
+              ]
             }
           },
           "output_schema": {
@@ -272,7 +340,39 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "string",
+              "description": "Recipient email address"
+            },
+            "subject": {
+              "type": "string",
+              "description": "Email subject line"
+            },
+            "body": {
+              "type": "string",
+              "description": "Email body content"
+            },
+            "cc": {
+              "type": "string",
+              "description": "CC recipient(s)"
+            },
+            "bcc": {
+              "type": "string",
+              "description": "BCC recipient(s)"
+            },
+            "content_type": {
+              "type": "string",
+              "description": "Content type (text/plain or text/html)",
+              "default": "text/plain"
+            }
+          },
+          "required": [
+            "to",
+            "subject",
+            "body"
+          ]
         }
       },
       "outputs": {
@@ -370,7 +470,29 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Gmail search query (e.g. from:user@example.com)"
+            },
+            "max_results": {
+              "type": "integer",
+              "description": "Maximum number of messages to return"
+            },
+            "label_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Filter by label IDs"
+            },
+            "page_token": {
+              "type": "string",
+              "description": "Token for next page of results"
+            }
+          },
+          "required": []
         }
       },
       "outputs": {
@@ -461,7 +583,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "message_id": {
+              "type": "string",
+              "description": "ID of the message to retrieve"
+            },
+            "format": {
+              "type": "string",
+              "description": "Response format: full, metadata, minimal, raw",
+              "default": "full"
+            }
+          },
+          "required": [
+            "message_id"
+          ]
         }
       },
       "outputs": {

@@ -81,7 +81,25 @@
           "purpose": "Post a message to a Slack channel or thread",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "channel": {
+                  "type": "string",
+                  "description": "Channel ID or name"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "Message text"
+                },
+                "thread_ts": {
+                  "type": "string",
+                  "description": "Thread timestamp for replies"
+                }
+              },
+              "required": [
+                "channel",
+                "text"
+              ]
             }
           },
           "output_schema": {
@@ -147,7 +165,30 @@
           "purpose": "Upload file content to a Slack channel",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "channel": {
+                  "type": "string",
+                  "description": "Channel ID"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "File content"
+                },
+                "filename": {
+                  "type": "string",
+                  "description": "File name"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "File title"
+                }
+              },
+              "required": [
+                "channel",
+                "content",
+                "filename"
+              ]
             }
           },
           "output_schema": {
@@ -180,7 +221,26 @@
           "purpose": "Add an emoji reaction to a message",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "channel": {
+                  "type": "string",
+                  "description": "Channel ID"
+                },
+                "timestamp": {
+                  "type": "string",
+                  "description": "Message timestamp"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Emoji name without colons"
+                }
+              },
+              "required": [
+                "channel",
+                "timestamp",
+                "name"
+              ]
             }
           },
           "output_schema": {
@@ -271,7 +331,25 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "channel": {
+              "type": "string",
+              "description": "Channel ID or name"
+            },
+            "text": {
+              "type": "string",
+              "description": "Message text"
+            },
+            "thread_ts": {
+              "type": "string",
+              "description": "Thread timestamp for replies"
+            }
+          },
+          "required": [
+            "channel",
+            "text"
+          ]
         }
       },
       "outputs": {
@@ -458,7 +536,30 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "channel": {
+              "type": "string",
+              "description": "Channel ID"
+            },
+            "content": {
+              "type": "string",
+              "description": "File content"
+            },
+            "filename": {
+              "type": "string",
+              "description": "File name"
+            },
+            "title": {
+              "type": "string",
+              "description": "File title"
+            }
+          },
+          "required": [
+            "channel",
+            "content",
+            "filename"
+          ]
         }
       },
       "outputs": {
@@ -555,7 +656,26 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "channel": {
+              "type": "string",
+              "description": "Channel ID"
+            },
+            "timestamp": {
+              "type": "string",
+              "description": "Message timestamp"
+            },
+            "name": {
+              "type": "string",
+              "description": "Emoji name without colons"
+            }
+          },
+          "required": [
+            "channel",
+            "timestamp",
+            "name"
+          ]
         }
       },
       "outputs": {

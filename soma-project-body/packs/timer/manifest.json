@@ -76,7 +76,21 @@
           "purpose": "Set a one-shot timer that fires after a delay",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "Timer label"
+                },
+                "delay_ms": {
+                  "type": "integer",
+                  "description": "Delay in milliseconds"
+                }
+              },
+              "required": [
+                "label",
+                "delay_ms"
+              ]
             }
           },
           "output_schema": {
@@ -109,7 +123,21 @@
           "purpose": "Set a recurring timer that fires at regular intervals",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "Timer label"
+                },
+                "delay_ms": {
+                  "type": "integer",
+                  "description": "Interval in milliseconds"
+                }
+              },
+              "required": [
+                "label",
+                "delay_ms"
+              ]
             }
           },
           "output_schema": {
@@ -142,7 +170,16 @@
           "purpose": "Cancel an active timer by ID",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "timer_id": {
+                  "type": "string",
+                  "description": "ID of the timer to cancel"
+                }
+              },
+              "required": [
+                "timer_id"
+              ]
             }
           },
           "output_schema": {
@@ -175,7 +212,7 @@
           "purpose": "List all active timers with remaining time",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object"
             }
           },
           "output_schema": {
@@ -259,7 +296,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "Timer label"
+            },
+            "delay_ms": {
+              "type": "integer",
+              "description": "Delay in milliseconds"
+            }
+          },
+          "required": [
+            "label",
+            "delay_ms"
+          ]
         }
       },
       "outputs": {
@@ -357,7 +408,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "Timer label"
+            },
+            "delay_ms": {
+              "type": "integer",
+              "description": "Interval in milliseconds"
+            }
+          },
+          "required": [
+            "label",
+            "delay_ms"
+          ]
         }
       },
       "outputs": {
@@ -455,7 +520,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "timer_id": {
+              "type": "string",
+              "description": "ID of the timer to cancel"
+            }
+          },
+          "required": [
+            "timer_id"
+          ]
         }
       },
       "outputs": {
@@ -553,7 +627,7 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object"
         }
       },
       "outputs": {

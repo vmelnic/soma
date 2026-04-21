@@ -96,7 +96,16 @@
           "purpose": "Compute SHA-256 hex digest",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "data": {
+                  "type": "string",
+                  "description": "Data to hash"
+                }
+              },
+              "required": [
+                "data"
+              ]
             }
           },
           "output_schema": {
@@ -129,7 +138,16 @@
           "purpose": "Compute SHA-512 hex digest",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "data": {
+                  "type": "string",
+                  "description": "Data to hash"
+                }
+              },
+              "required": [
+                "data"
+              ]
             }
           },
           "output_schema": {
@@ -162,7 +180,21 @@
           "purpose": "Compute HMAC-SHA256 authentication code",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "data": {
+                  "type": "string",
+                  "description": "Data to authenticate"
+                },
+                "key": {
+                  "type": "string",
+                  "description": "HMAC secret key"
+                }
+              },
+              "required": [
+                "data",
+                "key"
+              ]
             }
           },
           "output_schema": {
@@ -195,7 +227,20 @@
           "purpose": "Hash a password with bcrypt",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "password": {
+                  "type": "string",
+                  "description": "Password to hash"
+                },
+                "cost": {
+                  "type": "integer",
+                  "description": "bcrypt cost factor"
+                }
+              },
+              "required": [
+                "password"
+              ]
             }
           },
           "output_schema": {
@@ -228,7 +273,21 @@
           "purpose": "Verify password against bcrypt hash",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "password": {
+                  "type": "string",
+                  "description": "Password to verify"
+                },
+                "hash": {
+                  "type": "string",
+                  "description": "bcrypt hash to check against"
+                }
+              },
+              "required": [
+                "password",
+                "hash"
+              ]
             }
           },
           "output_schema": {
@@ -261,7 +320,21 @@
           "purpose": "Encrypt data with AES-256-GCM",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "plaintext": {
+                  "type": "string",
+                  "description": "Data to encrypt"
+                },
+                "key": {
+                  "type": "string",
+                  "description": "AES-256 encryption key"
+                }
+              },
+              "required": [
+                "plaintext",
+                "key"
+              ]
             }
           },
           "output_schema": {
@@ -294,7 +367,21 @@
           "purpose": "Decrypt AES-256-GCM ciphertext",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "ciphertext": {
+                  "type": "array",
+                  "description": "Encrypted byte array"
+                },
+                "key": {
+                  "type": "string",
+                  "description": "AES-256 decryption key"
+                }
+              },
+              "required": [
+                "ciphertext",
+                "key"
+              ]
             }
           },
           "output_schema": {
@@ -327,7 +414,21 @@
           "purpose": "Sign data with RSA-PKCS1v15-SHA256",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "data": {
+                  "type": "string",
+                  "description": "Data to sign"
+                },
+                "private_key_pem": {
+                  "type": "string",
+                  "description": "RSA private key in PEM format"
+                }
+              },
+              "required": [
+                "data",
+                "private_key_pem"
+              ]
             }
           },
           "output_schema": {
@@ -360,7 +461,26 @@
           "purpose": "Verify RSA-PKCS1v15-SHA256 signature",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "data": {
+                  "type": "string",
+                  "description": "Original data"
+                },
+                "signature": {
+                  "type": "string",
+                  "description": "Signature to verify"
+                },
+                "public_key_pem": {
+                  "type": "string",
+                  "description": "RSA public key in PEM format"
+                }
+              },
+              "required": [
+                "data",
+                "signature",
+                "public_key_pem"
+              ]
             }
           },
           "output_schema": {
@@ -393,7 +513,21 @@
           "purpose": "Sign JWT with HS256",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "claims": {
+                  "type": "string",
+                  "description": "JSON claims payload"
+                },
+                "secret": {
+                  "type": "string",
+                  "description": "HS256 signing secret"
+                }
+              },
+              "required": [
+                "claims",
+                "secret"
+              ]
             }
           },
           "output_schema": {
@@ -426,7 +560,21 @@
           "purpose": "Verify JWT and decode claims",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "token": {
+                  "type": "string",
+                  "description": "JWT token to verify"
+                },
+                "secret": {
+                  "type": "string",
+                  "description": "HS256 verification secret"
+                }
+              },
+              "required": [
+                "token",
+                "secret"
+              ]
             }
           },
           "output_schema": {
@@ -459,7 +607,16 @@
           "purpose": "Generate cryptographically secure random bytes",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "count": {
+                  "type": "integer",
+                  "description": "Number of random bytes to generate"
+                }
+              },
+              "required": [
+                "count"
+              ]
             }
           },
           "output_schema": {
@@ -492,7 +649,16 @@
           "purpose": "Generate random alphanumeric string",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "length": {
+                  "type": "integer",
+                  "description": "Length of random string to generate"
+                }
+              },
+              "required": [
+                "length"
+              ]
             }
           },
           "output_schema": {
@@ -577,7 +743,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "string",
+              "description": "Data to hash"
+            }
+          },
+          "required": [
+            "data"
+          ]
         }
       },
       "outputs": {
@@ -669,7 +844,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "string",
+              "description": "Data to hash"
+            }
+          },
+          "required": [
+            "data"
+          ]
         }
       },
       "outputs": {
@@ -761,7 +945,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "string",
+              "description": "Data to authenticate"
+            },
+            "key": {
+              "type": "string",
+              "description": "HMAC secret key"
+            }
+          },
+          "required": [
+            "data",
+            "key"
+          ]
         }
       },
       "outputs": {
@@ -853,7 +1051,20 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "password": {
+              "type": "string",
+              "description": "Password to hash"
+            },
+            "cost": {
+              "type": "integer",
+              "description": "bcrypt cost factor"
+            }
+          },
+          "required": [
+            "password"
+          ]
         }
       },
       "outputs": {
@@ -945,7 +1156,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "password": {
+              "type": "string",
+              "description": "Password to verify"
+            },
+            "hash": {
+              "type": "string",
+              "description": "bcrypt hash to check against"
+            }
+          },
+          "required": [
+            "password",
+            "hash"
+          ]
         }
       },
       "outputs": {
@@ -1037,7 +1262,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "plaintext": {
+              "type": "string",
+              "description": "Data to encrypt"
+            },
+            "key": {
+              "type": "string",
+              "description": "AES-256 encryption key"
+            }
+          },
+          "required": [
+            "plaintext",
+            "key"
+          ]
         }
       },
       "outputs": {
@@ -1129,7 +1368,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "ciphertext": {
+              "type": "array",
+              "description": "Encrypted byte array"
+            },
+            "key": {
+              "type": "string",
+              "description": "AES-256 decryption key"
+            }
+          },
+          "required": [
+            "ciphertext",
+            "key"
+          ]
         }
       },
       "outputs": {
@@ -1221,7 +1474,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "string",
+              "description": "Data to sign"
+            },
+            "private_key_pem": {
+              "type": "string",
+              "description": "RSA private key in PEM format"
+            }
+          },
+          "required": [
+            "data",
+            "private_key_pem"
+          ]
         }
       },
       "outputs": {
@@ -1313,7 +1580,26 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "string",
+              "description": "Original data"
+            },
+            "signature": {
+              "type": "string",
+              "description": "Signature to verify"
+            },
+            "public_key_pem": {
+              "type": "string",
+              "description": "RSA public key in PEM format"
+            }
+          },
+          "required": [
+            "data",
+            "signature",
+            "public_key_pem"
+          ]
         }
       },
       "outputs": {
@@ -1405,7 +1691,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "claims": {
+              "type": "string",
+              "description": "JSON claims payload"
+            },
+            "secret": {
+              "type": "string",
+              "description": "HS256 signing secret"
+            }
+          },
+          "required": [
+            "claims",
+            "secret"
+          ]
         }
       },
       "outputs": {
@@ -1497,7 +1797,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "token": {
+              "type": "string",
+              "description": "JWT token to verify"
+            },
+            "secret": {
+              "type": "string",
+              "description": "HS256 verification secret"
+            }
+          },
+          "required": [
+            "token",
+            "secret"
+          ]
         }
       },
       "outputs": {
@@ -1589,7 +1903,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "integer",
+              "description": "Number of random bytes to generate"
+            }
+          },
+          "required": [
+            "count"
+          ]
         }
       },
       "outputs": {
@@ -1681,7 +2004,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "length": {
+              "type": "integer",
+              "description": "Length of random string to generate"
+            }
+          },
+          "required": [
+            "length"
+          ]
         }
       },
       "outputs": {

@@ -102,7 +102,20 @@
           "purpose": "Execute a SELECT query and return rows",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "sql": {
+                  "type": "string",
+                  "description": "SQL SELECT statement to execute"
+                },
+                "params": {
+                  "type": "array",
+                  "description": "Positional bind parameters"
+                }
+              },
+              "required": [
+                "sql"
+              ]
             }
           },
           "output_schema": {
@@ -135,7 +148,20 @@
           "purpose": "Execute an INSERT/UPDATE/DELETE and return rows affected",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "sql": {
+                  "type": "string",
+                  "description": "SQL statement to execute"
+                },
+                "params": {
+                  "type": "array",
+                  "description": "Positional bind parameters"
+                }
+              },
+              "required": [
+                "sql"
+              ]
             }
           },
           "output_schema": {
@@ -168,7 +194,26 @@
           "purpose": "Find a single row by ID (ORM-style)",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "table": {
+                  "type": "string",
+                  "description": "Table name"
+                },
+                "id": {
+                  "type": "string",
+                  "description": "Row ID value"
+                },
+                "id_column": {
+                  "type": "string",
+                  "description": "ID column name",
+                  "default": "id"
+                }
+              },
+              "required": [
+                "table",
+                "id"
+              ]
             }
           },
           "output_schema": {
@@ -201,7 +246,32 @@
           "purpose": "Find multiple rows with structured filter",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "table": {
+                  "type": "string",
+                  "description": "Table name"
+                },
+                "where": {
+                  "type": "object",
+                  "description": "Column/value filter pairs"
+                },
+                "order_by": {
+                  "type": "array",
+                  "description": "Ordering columns"
+                },
+                "limit": {
+                  "type": "integer",
+                  "description": "Maximum rows to return"
+                },
+                "offset": {
+                  "type": "integer",
+                  "description": "Number of rows to skip"
+                }
+              },
+              "required": [
+                "table"
+              ]
             }
           },
           "output_schema": {
@@ -234,7 +304,20 @@
           "purpose": "Count rows matching a filter",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "table": {
+                  "type": "string",
+                  "description": "Table name"
+                },
+                "where": {
+                  "type": "object",
+                  "description": "Column/value filter pairs"
+                }
+              },
+              "required": [
+                "table"
+              ]
             }
           },
           "output_schema": {
@@ -267,7 +350,41 @@
           "purpose": "Run an aggregate function (SUM/AVG/MIN/MAX) with optional grouping",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "table": {
+                  "type": "string",
+                  "description": "Table name"
+                },
+                "function": {
+                  "type": "string",
+                  "description": "Aggregate function",
+                  "enum": [
+                    "SUM",
+                    "AVG",
+                    "MIN",
+                    "MAX",
+                    "COUNT"
+                  ]
+                },
+                "column": {
+                  "type": "string",
+                  "description": "Column to aggregate"
+                },
+                "group_by": {
+                  "type": "array",
+                  "description": "Columns to group by"
+                },
+                "where": {
+                  "type": "object",
+                  "description": "Column/value filter pairs"
+                }
+              },
+              "required": [
+                "table",
+                "function",
+                "column"
+              ]
             }
           },
           "output_schema": {
@@ -300,7 +417,21 @@
           "purpose": "Create a table (DDL CREATE TABLE IF NOT EXISTS)",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "table": {
+                  "type": "string",
+                  "description": "Table name"
+                },
+                "columns": {
+                  "type": "string",
+                  "description": "Column definitions SQL fragment"
+                }
+              },
+              "required": [
+                "table",
+                "columns"
+              ]
             }
           },
           "output_schema": {
@@ -333,7 +464,16 @@
           "purpose": "Drop a table (DDL DROP TABLE IF EXISTS)",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "table": {
+                  "type": "string",
+                  "description": "Table name"
+                }
+              },
+              "required": [
+                "table"
+              ]
             }
           },
           "output_schema": {
@@ -366,7 +506,21 @@
           "purpose": "Alter a table (DDL ALTER TABLE)",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "table": {
+                  "type": "string",
+                  "description": "Table name"
+                },
+                "changes": {
+                  "type": "string",
+                  "description": "ALTER TABLE SQL fragment"
+                }
+              },
+              "required": [
+                "table",
+                "changes"
+              ]
             }
           },
           "output_schema": {
@@ -399,7 +553,21 @@
           "purpose": "Insert a row with column/value pairs",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "table": {
+                  "type": "string",
+                  "description": "Table name"
+                },
+                "values": {
+                  "type": "object",
+                  "description": "Column/value pairs to insert"
+                }
+              },
+              "required": [
+                "table",
+                "values"
+              ]
             }
           },
           "output_schema": {
@@ -432,7 +600,25 @@
           "purpose": "Update rows matching a WHERE filter",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "table": {
+                  "type": "string",
+                  "description": "Table name"
+                },
+                "set": {
+                  "type": "object",
+                  "description": "Column/value pairs to update"
+                },
+                "where": {
+                  "type": "object",
+                  "description": "Column/value filter pairs"
+                }
+              },
+              "required": [
+                "table",
+                "set"
+              ]
             }
           },
           "output_schema": {
@@ -465,7 +651,21 @@
           "purpose": "Delete rows matching a WHERE filter",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "table": {
+                  "type": "string",
+                  "description": "Table name"
+                },
+                "where": {
+                  "type": "object",
+                  "description": "Column/value filter pairs"
+                }
+              },
+              "required": [
+                "table",
+                "where"
+              ]
             }
           },
           "output_schema": {
@@ -498,7 +698,30 @@
           "purpose": "Execute multiple statements atomically within a transaction",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "statements": {
+                  "type": "array",
+                  "description": "Array of statement objects",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "sql": {
+                        "type": "string"
+                      },
+                      "params": {
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "sql"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "statements"
+              ]
             }
           },
           "output_schema": {
@@ -654,7 +877,20 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "sql": {
+              "type": "string",
+              "description": "SQL SELECT statement to execute"
+            },
+            "params": {
+              "type": "array",
+              "description": "Positional bind parameters"
+            }
+          },
+          "required": [
+            "sql"
+          ]
         }
       },
       "outputs": {
@@ -744,7 +980,20 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "sql": {
+              "type": "string",
+              "description": "SQL statement to execute"
+            },
+            "params": {
+              "type": "array",
+              "description": "Positional bind parameters"
+            }
+          },
+          "required": [
+            "sql"
+          ]
         }
       },
       "outputs": {
@@ -841,7 +1090,26 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "table": {
+              "type": "string",
+              "description": "Table name"
+            },
+            "id": {
+              "type": "string",
+              "description": "Row ID value"
+            },
+            "id_column": {
+              "type": "string",
+              "description": "ID column name",
+              "default": "id"
+            }
+          },
+          "required": [
+            "table",
+            "id"
+          ]
         }
       },
       "outputs": {
@@ -931,7 +1199,32 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "table": {
+              "type": "string",
+              "description": "Table name"
+            },
+            "where": {
+              "type": "object",
+              "description": "Column/value filter pairs"
+            },
+            "order_by": {
+              "type": "array",
+              "description": "Ordering columns"
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Maximum rows to return"
+            },
+            "offset": {
+              "type": "integer",
+              "description": "Number of rows to skip"
+            }
+          },
+          "required": [
+            "table"
+          ]
         }
       },
       "outputs": {
@@ -1021,7 +1314,20 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "table": {
+              "type": "string",
+              "description": "Table name"
+            },
+            "where": {
+              "type": "object",
+              "description": "Column/value filter pairs"
+            }
+          },
+          "required": [
+            "table"
+          ]
         }
       },
       "outputs": {
@@ -1111,7 +1417,41 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "table": {
+              "type": "string",
+              "description": "Table name"
+            },
+            "function": {
+              "type": "string",
+              "description": "Aggregate function",
+              "enum": [
+                "SUM",
+                "AVG",
+                "MIN",
+                "MAX",
+                "COUNT"
+              ]
+            },
+            "column": {
+              "type": "string",
+              "description": "Column to aggregate"
+            },
+            "group_by": {
+              "type": "array",
+              "description": "Columns to group by"
+            },
+            "where": {
+              "type": "object",
+              "description": "Column/value filter pairs"
+            }
+          },
+          "required": [
+            "table",
+            "function",
+            "column"
+          ]
         }
       },
       "outputs": {
@@ -1201,7 +1541,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "table": {
+              "type": "string",
+              "description": "Table name"
+            },
+            "columns": {
+              "type": "string",
+              "description": "Column definitions SQL fragment"
+            }
+          },
+          "required": [
+            "table",
+            "columns"
+          ]
         }
       },
       "outputs": {
@@ -1298,7 +1652,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "table": {
+              "type": "string",
+              "description": "Table name"
+            }
+          },
+          "required": [
+            "table"
+          ]
         }
       },
       "outputs": {
@@ -1395,7 +1758,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "table": {
+              "type": "string",
+              "description": "Table name"
+            },
+            "changes": {
+              "type": "string",
+              "description": "ALTER TABLE SQL fragment"
+            }
+          },
+          "required": [
+            "table",
+            "changes"
+          ]
         }
       },
       "outputs": {
@@ -1492,7 +1869,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "table": {
+              "type": "string",
+              "description": "Table name"
+            },
+            "values": {
+              "type": "object",
+              "description": "Column/value pairs to insert"
+            }
+          },
+          "required": [
+            "table",
+            "values"
+          ]
         }
       },
       "outputs": {
@@ -1589,7 +1980,25 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "table": {
+              "type": "string",
+              "description": "Table name"
+            },
+            "set": {
+              "type": "object",
+              "description": "Column/value pairs to update"
+            },
+            "where": {
+              "type": "object",
+              "description": "Column/value filter pairs"
+            }
+          },
+          "required": [
+            "table",
+            "set"
+          ]
         }
       },
       "outputs": {
@@ -1686,7 +2095,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "table": {
+              "type": "string",
+              "description": "Table name"
+            },
+            "where": {
+              "type": "object",
+              "description": "Column/value filter pairs"
+            }
+          },
+          "required": [
+            "table",
+            "where"
+          ]
         }
       },
       "outputs": {
@@ -1783,7 +2206,30 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "statements": {
+              "type": "array",
+              "description": "Array of statement objects",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "sql": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "sql"
+                ]
+              }
+            }
+          },
+          "required": [
+            "statements"
+          ]
         }
       },
       "outputs": {

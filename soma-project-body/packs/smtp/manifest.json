@@ -78,7 +78,26 @@
           "purpose": "Send a plain-text email to a recipient",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "to": {
+                  "type": "string",
+                  "description": "Recipient email address"
+                },
+                "subject": {
+                  "type": "string",
+                  "description": "Email subject"
+                },
+                "body": {
+                  "type": "string",
+                  "description": "Plain text body"
+                }
+              },
+              "required": [
+                "to",
+                "subject",
+                "body"
+              ]
             }
           },
           "output_schema": {
@@ -111,7 +130,26 @@
           "purpose": "Send an HTML email to a recipient",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "to": {
+                  "type": "string",
+                  "description": "Recipient email address"
+                },
+                "subject": {
+                  "type": "string",
+                  "description": "Email subject"
+                },
+                "html": {
+                  "type": "string",
+                  "description": "HTML body content"
+                }
+              },
+              "required": [
+                "to",
+                "subject",
+                "html"
+              ]
             }
           },
           "output_schema": {
@@ -144,7 +182,40 @@
           "purpose": "Send an email with a binary attachment",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "to": {
+                  "type": "string",
+                  "description": "Recipient email address"
+                },
+                "subject": {
+                  "type": "string",
+                  "description": "Email subject"
+                },
+                "body": {
+                  "type": "string",
+                  "description": "Plain text body"
+                },
+                "attachment_data": {
+                  "type": "string",
+                  "description": "Base64-encoded attachment data"
+                },
+                "attachment_name": {
+                  "type": "string",
+                  "description": "Attachment file name"
+                },
+                "attachment_mime": {
+                  "type": "string",
+                  "description": "Attachment MIME type"
+                }
+              },
+              "required": [
+                "to",
+                "subject",
+                "body",
+                "attachment_data",
+                "attachment_name"
+              ]
             }
           },
           "output_schema": {
@@ -234,7 +305,26 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "string",
+              "description": "Recipient email address"
+            },
+            "subject": {
+              "type": "string",
+              "description": "Email subject"
+            },
+            "body": {
+              "type": "string",
+              "description": "Plain text body"
+            }
+          },
+          "required": [
+            "to",
+            "subject",
+            "body"
+          ]
         }
       },
       "outputs": {
@@ -331,7 +421,26 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "string",
+              "description": "Recipient email address"
+            },
+            "subject": {
+              "type": "string",
+              "description": "Email subject"
+            },
+            "html": {
+              "type": "string",
+              "description": "HTML body content"
+            }
+          },
+          "required": [
+            "to",
+            "subject",
+            "html"
+          ]
         }
       },
       "outputs": {
@@ -428,7 +537,40 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "string",
+              "description": "Recipient email address"
+            },
+            "subject": {
+              "type": "string",
+              "description": "Email subject"
+            },
+            "body": {
+              "type": "string",
+              "description": "Plain text body"
+            },
+            "attachment_data": {
+              "type": "string",
+              "description": "Base64-encoded attachment data"
+            },
+            "attachment_name": {
+              "type": "string",
+              "description": "Attachment file name"
+            },
+            "attachment_mime": {
+              "type": "string",
+              "description": "Attachment MIME type"
+            }
+          },
+          "required": [
+            "to",
+            "subject",
+            "body",
+            "attachment_data",
+            "attachment_name"
+          ]
         }
       },
       "outputs": {

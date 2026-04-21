@@ -80,7 +80,31 @@
           "purpose": "Compute great-circle distance between two lat/lon points",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "lat1": {
+                  "type": "number",
+                  "description": "Latitude of point 1"
+                },
+                "lon1": {
+                  "type": "number",
+                  "description": "Longitude of point 1"
+                },
+                "lat2": {
+                  "type": "number",
+                  "description": "Latitude of point 2"
+                },
+                "lon2": {
+                  "type": "number",
+                  "description": "Longitude of point 2"
+                }
+              },
+              "required": [
+                "lat1",
+                "lon1",
+                "lat2",
+                "lon2"
+              ]
             }
           },
           "output_schema": {
@@ -113,7 +137,31 @@
           "purpose": "Filter a JSON array of points to those within a radius",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "center_lat": {
+                  "type": "number",
+                  "description": "Center latitude"
+                },
+                "center_lon": {
+                  "type": "number",
+                  "description": "Center longitude"
+                },
+                "radius_km": {
+                  "type": "number",
+                  "description": "Radius in kilometers"
+                },
+                "points": {
+                  "type": "array",
+                  "description": "Array of {lat, lon} points to filter"
+                }
+              },
+              "required": [
+                "center_lat",
+                "center_lon",
+                "radius_km",
+                "points"
+              ]
             }
           },
           "output_schema": {
@@ -146,7 +194,16 @@
           "purpose": "Convert address to lat/lon coordinates (requires API key)",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "address": {
+                  "type": "string",
+                  "description": "Address to geocode"
+                }
+              },
+              "required": [
+                "address"
+              ]
             }
           },
           "output_schema": {
@@ -179,7 +236,21 @@
           "purpose": "Convert lat/lon to address (requires API key)",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "lat": {
+                  "type": "number",
+                  "description": "Latitude"
+                },
+                "lon": {
+                  "type": "number",
+                  "description": "Longitude"
+                }
+              },
+              "required": [
+                "lat",
+                "lon"
+              ]
             }
           },
           "output_schema": {
@@ -212,7 +283,26 @@
           "purpose": "Check if a point falls within a bounding box",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "lat": {
+                  "type": "number",
+                  "description": "Point latitude"
+                },
+                "lon": {
+                  "type": "number",
+                  "description": "Point longitude"
+                },
+                "bounds": {
+                  "type": "object",
+                  "description": "Bounding box {min_lat, min_lon, max_lat, max_lon}"
+                }
+              },
+              "required": [
+                "lat",
+                "lon",
+                "bounds"
+              ]
             }
           },
           "output_schema": {
@@ -298,7 +388,31 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "lat1": {
+              "type": "number",
+              "description": "Latitude of point 1"
+            },
+            "lon1": {
+              "type": "number",
+              "description": "Longitude of point 1"
+            },
+            "lat2": {
+              "type": "number",
+              "description": "Latitude of point 2"
+            },
+            "lon2": {
+              "type": "number",
+              "description": "Longitude of point 2"
+            }
+          },
+          "required": [
+            "lat1",
+            "lon1",
+            "lat2",
+            "lon2"
+          ]
         }
       },
       "outputs": {
@@ -389,7 +503,31 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "center_lat": {
+              "type": "number",
+              "description": "Center latitude"
+            },
+            "center_lon": {
+              "type": "number",
+              "description": "Center longitude"
+            },
+            "radius_km": {
+              "type": "number",
+              "description": "Radius in kilometers"
+            },
+            "points": {
+              "type": "array",
+              "description": "Array of {lat, lon} points to filter"
+            }
+          },
+          "required": [
+            "center_lat",
+            "center_lon",
+            "radius_km",
+            "points"
+          ]
         }
       },
       "outputs": {
@@ -480,7 +618,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "address": {
+              "type": "string",
+              "description": "Address to geocode"
+            }
+          },
+          "required": [
+            "address"
+          ]
         }
       },
       "outputs": {
@@ -571,7 +718,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "lat": {
+              "type": "number",
+              "description": "Latitude"
+            },
+            "lon": {
+              "type": "number",
+              "description": "Longitude"
+            }
+          },
+          "required": [
+            "lat",
+            "lon"
+          ]
         }
       },
       "outputs": {
@@ -662,7 +823,26 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "lat": {
+              "type": "number",
+              "description": "Point latitude"
+            },
+            "lon": {
+              "type": "number",
+              "description": "Point longitude"
+            },
+            "bounds": {
+              "type": "object",
+              "description": "Bounding box {min_lat, min_lon, max_lat, max_lon}"
+            }
+          },
+          "required": [
+            "lat",
+            "lon",
+            "bounds"
+          ]
         }
       },
       "outputs": {

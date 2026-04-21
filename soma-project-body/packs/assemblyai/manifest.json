@@ -9,22 +9,36 @@
     {
       "group_name": "audio_upload",
       "scope": "local",
-      "capabilities": ["upload"]
+      "capabilities": [
+        "upload"
+      ]
     },
     {
       "group_name": "transcription",
       "scope": "local",
-      "capabilities": ["transcribe", "get_transcript", "list_transcripts", "delete_transcript"]
+      "capabilities": [
+        "transcribe",
+        "get_transcript",
+        "list_transcripts",
+        "delete_transcript"
+      ]
     },
     {
       "group_name": "transcript_export",
       "scope": "local",
-      "capabilities": ["get_sentences", "get_paragraphs", "get_subtitles", "word_search"]
+      "capabilities": [
+        "get_sentences",
+        "get_paragraphs",
+        "get_subtitles",
+        "word_search"
+      ]
     },
     {
       "group_name": "pii_redaction",
       "scope": "local",
-      "capabilities": ["get_redacted_audio"]
+      "capabilities": [
+        "get_redacted_audio"
+      ]
     }
   ],
   "dependencies": [],
@@ -52,7 +66,9 @@
   },
   "observability": {
     "health_checks": [],
-    "version_metadata": { "version": "0.1.0" },
+    "version_metadata": {
+      "version": "0.1.0"
+    },
     "dependency_status": [],
     "capability_inventory": [
       "upload",
@@ -66,7 +82,11 @@
       "delete_transcript",
       "get_redacted_audio"
     ],
-    "expected_latency_classes": ["fast", "medium", "slow"],
+    "expected_latency_classes": [
+      "fast",
+      "medium",
+      "slow"
+    ],
     "expected_failure_modes": [
       "validation_error",
       "authorization_denied",
@@ -75,12 +95,23 @@
       "external_error",
       "timeout"
     ],
-    "trace_categories": ["speech_to_text", "audio_intelligence"],
+    "trace_categories": [
+      "speech_to_text",
+      "audio_intelligence"
+    ],
     "metric_names": [],
     "pack_load_state": "active"
   },
   "authors": [],
-  "tags": ["assemblyai", "speech-to-text", "transcription", "audio-intelligence", "diarization", "sentiment", "pii"],
+  "tags": [
+    "assemblyai",
+    "speech-to-text",
+    "transcription",
+    "audio-intelligence",
+    "diarization",
+    "sentiment",
+    "pii"
+  ],
   "ports": [
     {
       "port_id": "assemblyai",
@@ -95,160 +126,523 @@
           "capability_id": "upload",
           "name": "upload",
           "purpose": "Upload a local audio file via URL and receive a temporary AssemblyAI-hosted URL",
-          "input_schema": { "schema": { "type": "object", "properties": { "audio_url": { "type": "string" } }, "required": ["audio_url"] } },
-          "output_schema": { "schema": { "type": "object", "properties": { "upload_url": { "type": "string" } } } },
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "data": {
+                  "type": "string",
+                  "description": "Base64-encoded audio data"
+                }
+              },
+              "required": [
+                "data"
+              ]
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "upload_url": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "effect_class": "external_state_mutation",
           "rollback_support": "irreversible",
           "determinism_class": "deterministic",
           "idempotence_class": "non_idempotent",
           "risk_class": "low",
-          "latency_profile": { "expected_latency_ms": 1000, "p95_latency_ms": 10000, "max_latency_ms": 120000 },
-          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "medium", "io_cost_class": "medium", "network_cost_class": "high", "energy_cost_class": "low" },
+          "latency_profile": {
+            "expected_latency_ms": 1000,
+            "p95_latency_ms": 10000,
+            "max_latency_ms": 120000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "medium",
+            "io_cost_class": "medium",
+            "network_cost_class": "high",
+            "energy_cost_class": "low"
+          },
           "remote_exposable": false
         },
         {
           "capability_id": "transcribe",
           "name": "transcribe",
           "purpose": "Submit audio for transcription with optional audio intelligence features (speaker labels, sentiment, entities, topics, PII redaction, chapters, highlights, content safety)",
-          "input_schema": { "schema": { "type": "object", "properties": { "audio_url": { "type": "string" }, "speaker_labels": { "type": "boolean" }, "sentiment_analysis": { "type": "boolean" }, "entity_detection": { "type": "boolean" }, "auto_highlights": { "type": "boolean" }, "content_safety": { "type": "boolean" }, "iab_categories": { "type": "boolean" }, "redact_pii": { "type": "boolean" }, "language_code": { "type": "string" } }, "required": ["audio_url"] } },
-          "output_schema": { "schema": { "type": "object", "properties": { "id": { "type": "string" }, "status": { "type": "string" } } } },
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "audio_url": {
+                  "type": "string",
+                  "description": "URL of audio to transcribe"
+                },
+                "language_code": {
+                  "type": "string",
+                  "description": "Language code (e.g. en_us)"
+                },
+                "speaker_labels": {
+                  "type": "boolean",
+                  "description": "Enable speaker diarization"
+                },
+                "auto_highlights": {
+                  "type": "boolean",
+                  "description": "Enable key phrase detection"
+                },
+                "sentiment_analysis": {
+                  "type": "boolean",
+                  "description": "Enable sentiment analysis"
+                },
+                "entity_detection": {
+                  "type": "boolean",
+                  "description": "Enable entity detection"
+                },
+                "iab_categories": {
+                  "type": "boolean",
+                  "description": "Enable topic classification"
+                },
+                "content_safety": {
+                  "type": "boolean",
+                  "description": "Enable content safety detection"
+                },
+                "redact_pii": {
+                  "type": "boolean",
+                  "description": "Enable PII redaction"
+                }
+              },
+              "required": [
+                "audio_url"
+              ]
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "effect_class": "external_state_mutation",
           "rollback_support": "compensating_action",
           "determinism_class": "stochastic",
           "idempotence_class": "non_idempotent",
           "risk_class": "low",
-          "latency_profile": { "expected_latency_ms": 500, "p95_latency_ms": 5000, "max_latency_ms": 120000 },
-          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
+          "latency_profile": {
+            "expected_latency_ms": 500,
+            "p95_latency_ms": 5000,
+            "max_latency_ms": 120000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "medium",
+            "energy_cost_class": "low"
+          },
           "remote_exposable": false
         },
         {
           "capability_id": "get_transcript",
           "name": "get_transcript",
           "purpose": "Poll transcript status and retrieve results including all audio intelligence outputs",
-          "input_schema": { "schema": { "type": "object", "properties": { "transcript_id": { "type": "string" } }, "required": ["transcript_id"] } },
-          "output_schema": { "schema": { "description": "Full transcript object with status, text, confidence, and audio intelligence results" } },
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "transcript_id": {
+                  "type": "string",
+                  "description": "Transcript ID"
+                }
+              },
+              "required": [
+                "transcript_id"
+              ]
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "Full transcript object with status, text, confidence, and audio intelligence results"
+            }
+          },
           "effect_class": "read_only",
           "rollback_support": "irreversible",
           "determinism_class": "partially_deterministic",
           "idempotence_class": "idempotent",
           "risk_class": "negligible",
-          "latency_profile": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 },
-          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
+          "latency_profile": {
+            "expected_latency_ms": 200,
+            "p95_latency_ms": 2000,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "medium",
+            "energy_cost_class": "low"
+          },
           "remote_exposable": false
         },
         {
           "capability_id": "get_sentences",
           "name": "get_sentences",
           "purpose": "Retrieve transcript segmented by sentences with timing data",
-          "input_schema": { "schema": { "type": "object", "properties": { "transcript_id": { "type": "string" } }, "required": ["transcript_id"] } },
-          "output_schema": { "schema": { "description": "Sentence-segmented transcript with timestamps" } },
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "transcript_id": {
+                  "type": "string",
+                  "description": "Transcript ID"
+                }
+              },
+              "required": [
+                "transcript_id"
+              ]
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "Sentence-segmented transcript with timestamps"
+            }
+          },
           "effect_class": "read_only",
           "rollback_support": "irreversible",
           "determinism_class": "deterministic",
           "idempotence_class": "idempotent",
           "risk_class": "negligible",
-          "latency_profile": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 },
-          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
+          "latency_profile": {
+            "expected_latency_ms": 200,
+            "p95_latency_ms": 2000,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "medium",
+            "energy_cost_class": "low"
+          },
           "remote_exposable": false
         },
         {
           "capability_id": "get_paragraphs",
           "name": "get_paragraphs",
           "purpose": "Retrieve transcript segmented by paragraphs with timing data",
-          "input_schema": { "schema": { "type": "object", "properties": { "transcript_id": { "type": "string" } }, "required": ["transcript_id"] } },
-          "output_schema": { "schema": { "description": "Paragraph-segmented transcript with timestamps" } },
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "transcript_id": {
+                  "type": "string",
+                  "description": "Transcript ID"
+                }
+              },
+              "required": [
+                "transcript_id"
+              ]
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "Paragraph-segmented transcript with timestamps"
+            }
+          },
           "effect_class": "read_only",
           "rollback_support": "irreversible",
           "determinism_class": "deterministic",
           "idempotence_class": "idempotent",
           "risk_class": "negligible",
-          "latency_profile": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 },
-          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
+          "latency_profile": {
+            "expected_latency_ms": 200,
+            "p95_latency_ms": 2000,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "medium",
+            "energy_cost_class": "low"
+          },
           "remote_exposable": false
         },
         {
           "capability_id": "get_subtitles",
           "name": "get_subtitles",
           "purpose": "Export transcript as SRT or VTT subtitle format",
-          "input_schema": { "schema": { "type": "object", "properties": { "transcript_id": { "type": "string" }, "format": { "type": "string", "enum": ["srt", "vtt"] } }, "required": ["transcript_id"] } },
-          "output_schema": { "schema": { "type": "object", "properties": { "format": { "type": "string" }, "content": { "type": "string" } } } },
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "transcript_id": {
+                  "type": "string",
+                  "description": "Transcript ID"
+                },
+                "format": {
+                  "type": "string",
+                  "description": "Subtitle format (srt or vtt)"
+                }
+              },
+              "required": [
+                "transcript_id"
+              ]
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "format": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "effect_class": "read_only",
           "rollback_support": "irreversible",
           "determinism_class": "deterministic",
           "idempotence_class": "idempotent",
           "risk_class": "negligible",
-          "latency_profile": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 },
-          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
+          "latency_profile": {
+            "expected_latency_ms": 200,
+            "p95_latency_ms": 2000,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "medium",
+            "energy_cost_class": "low"
+          },
           "remote_exposable": false
         },
         {
           "capability_id": "word_search",
           "name": "word_search",
           "purpose": "Search transcript for specific words and get timestamps",
-          "input_schema": { "schema": { "type": "object", "properties": { "transcript_id": { "type": "string" }, "words": { "type": "array", "items": { "type": "string" } } }, "required": ["transcript_id", "words"] } },
-          "output_schema": { "schema": { "description": "Word search matches with timestamps and counts" } },
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "transcript_id": {
+                  "type": "string",
+                  "description": "Transcript ID"
+                },
+                "words": {
+                  "type": "array",
+                  "description": "Words to search for"
+                }
+              },
+              "required": [
+                "transcript_id",
+                "words"
+              ]
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "Word search matches with timestamps and counts"
+            }
+          },
           "effect_class": "read_only",
           "rollback_support": "irreversible",
           "determinism_class": "deterministic",
           "idempotence_class": "idempotent",
           "risk_class": "negligible",
-          "latency_profile": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 },
-          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
+          "latency_profile": {
+            "expected_latency_ms": 200,
+            "p95_latency_ms": 2000,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "medium",
+            "energy_cost_class": "low"
+          },
           "remote_exposable": false
         },
         {
           "capability_id": "list_transcripts",
           "name": "list_transcripts",
           "purpose": "List recent transcripts with optional status and pagination filters",
-          "input_schema": { "schema": { "type": "object", "properties": { "limit": { "type": "integer" }, "status": { "type": "string" }, "before_id": { "type": "string" }, "after_id": { "type": "string" } } } },
-          "output_schema": { "schema": { "description": "Paginated list of transcript summaries" } },
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "limit": {
+                  "type": "integer",
+                  "description": "Maximum transcripts to return"
+                },
+                "status": {
+                  "type": "string",
+                  "description": "Filter by status"
+                }
+              }
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "Paginated list of transcript summaries"
+            }
+          },
           "effect_class": "read_only",
           "rollback_support": "irreversible",
           "determinism_class": "partially_deterministic",
           "idempotence_class": "idempotent",
           "risk_class": "negligible",
-          "latency_profile": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 },
-          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
+          "latency_profile": {
+            "expected_latency_ms": 200,
+            "p95_latency_ms": 2000,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "medium",
+            "energy_cost_class": "low"
+          },
           "remote_exposable": false
         },
         {
           "capability_id": "delete_transcript",
           "name": "delete_transcript",
           "purpose": "Permanently remove a transcript and its associated data",
-          "input_schema": { "schema": { "type": "object", "properties": { "transcript_id": { "type": "string" } }, "required": ["transcript_id"] } },
-          "output_schema": { "schema": { "description": "Deletion confirmation" } },
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "transcript_id": {
+                  "type": "string",
+                  "description": "Transcript ID"
+                }
+              },
+              "required": [
+                "transcript_id"
+              ]
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "Deletion confirmation"
+            }
+          },
           "effect_class": "destructive",
           "rollback_support": "irreversible",
           "determinism_class": "deterministic",
           "idempotence_class": "idempotent",
           "risk_class": "medium",
-          "latency_profile": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 },
-          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
+          "latency_profile": {
+            "expected_latency_ms": 200,
+            "p95_latency_ms": 2000,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "medium",
+            "energy_cost_class": "low"
+          },
           "remote_exposable": false
         },
         {
           "capability_id": "get_redacted_audio",
           "name": "get_redacted_audio",
           "purpose": "Retrieve PII-redacted audio URL for a transcript with redact_pii_audio enabled",
-          "input_schema": { "schema": { "type": "object", "properties": { "transcript_id": { "type": "string" } }, "required": ["transcript_id"] } },
-          "output_schema": { "schema": { "description": "Redacted audio URL and status" } },
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "transcript_id": {
+                  "type": "string",
+                  "description": "Transcript ID"
+                }
+              },
+              "required": [
+                "transcript_id"
+              ]
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "Redacted audio URL and status"
+            }
+          },
           "effect_class": "read_only",
           "rollback_support": "irreversible",
           "determinism_class": "deterministic",
           "idempotence_class": "idempotent",
           "risk_class": "negligible",
-          "latency_profile": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 },
-          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
+          "latency_profile": {
+            "expected_latency_ms": 200,
+            "p95_latency_ms": 2000,
+            "max_latency_ms": 30000
+          },
+          "cost_profile": {
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "medium",
+            "energy_cost_class": "low"
+          },
           "remote_exposable": false
         }
       ],
-      "input_schema": { "schema": { "type": "object" } },
-      "output_schema": { "schema": { "description": "any" } },
-      "failure_modes": ["validation_error", "authorization_denied", "dependency_unavailable", "transport_error", "external_error", "timeout"],
+      "input_schema": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "output_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "failure_modes": [
+        "validation_error",
+        "authorization_denied",
+        "dependency_unavailable",
+        "transport_error",
+        "external_error",
+        "timeout"
+      ],
       "side_effect_class": "external_state_mutation",
-      "latency_profile": { "expected_latency_ms": 500, "p95_latency_ms": 5000, "max_latency_ms": 120000 },
-      "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
-      "auth_requirements": { "methods": ["api_key"], "required": true },
+      "latency_profile": {
+        "expected_latency_ms": 500,
+        "p95_latency_ms": 5000,
+        "max_latency_ms": 120000
+      },
+      "cost_profile": {
+        "cpu_cost_class": "low",
+        "memory_cost_class": "low",
+        "io_cost_class": "low",
+        "network_cost_class": "medium",
+        "energy_cost_class": "low"
+      },
+      "auth_requirements": {
+        "methods": [
+          "api_key"
+        ],
+        "required": true
+      },
       "sandbox_requirements": {
         "filesystem_access": false,
         "network_access": true,
@@ -259,7 +653,10 @@
         "time_limit_ms": 120000,
         "syscall_limit": null
       },
-      "observable_fields": ["id", "status"],
+      "observable_fields": [
+        "id",
+        "status"
+      ],
       "validation_rules": [],
       "remote_exposure": false
     }
@@ -273,23 +670,100 @@
       "name": "Upload Audio",
       "description": "Upload audio via URL to AssemblyAI and receive a temporary hosted URL for transcription",
       "version": "0.1.0",
-      "inputs": { "schema": { "type": "object", "required": ["audio_url"], "properties": { "audio_url": { "type": "string" } } } },
-      "outputs": { "schema": { "type": "object", "properties": { "upload_url": { "type": "string" } } } },
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "string",
+              "description": "Base64-encoded audio data"
+            }
+          },
+          "required": [
+            "data"
+          ]
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "upload_url": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "required_resources": [],
       "preconditions": [],
-      "expected_effects": [{ "effect_type": "creation", "target_resource": null, "description": "temporary audio file hosted on AssemblyAI", "patch": null }],
-      "observables": [{ "field": "upload_url", "role": "confirm_success" }],
-      "termination_conditions": [
-        { "condition_type": "success", "expression": { "upload_url": "present" }, "description": "upload URL returned" },
-        { "condition_type": "failure", "expression": { "error": "any" }, "description": "upload failed" }
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "temporary audio file hosted on AssemblyAI",
+          "patch": null
+        }
       ],
-      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "temporary URL expires automatically" },
-      "cost_prior": { "latency": { "expected_latency_ms": 1000, "p95_latency_ms": 10000, "max_latency_ms": 120000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "medium", "io_cost_class": "medium", "network_cost_class": "high", "energy_cost_class": "low" } },
+      "observables": [
+        {
+          "field": "upload_url",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "upload_url": "present"
+          },
+          "description": "upload URL returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "upload failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "temporary URL expires automatically"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 1000,
+          "p95_latency_ms": 10000,
+          "max_latency_ms": 120000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "medium",
+          "io_cost_class": "medium",
+          "network_cost_class": "high",
+          "energy_cost_class": "low"
+        }
+      },
       "risk_class": "low",
       "determinism": "deterministic",
-      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
-      "tags": ["audio", "upload"],
-      "capability_requirements": ["port:assemblyai/upload"],
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "audio",
+        "upload"
+      ],
+      "capability_requirements": [
+        "port:assemblyai/upload"
+      ],
       "confidence_threshold": null,
       "locality": null,
       "remote_endpoint": null,
@@ -306,24 +780,143 @@
       "name": "Transcribe Audio",
       "description": "Submit audio for transcription with optional audio intelligence features (speaker labels, sentiment, entities, topics, PII redaction, chapters, highlights, content safety)",
       "version": "0.1.0",
-      "inputs": { "schema": { "type": "object", "required": ["audio_url"], "properties": { "audio_url": { "type": "string" }, "speaker_labels": { "type": "boolean" }, "sentiment_analysis": { "type": "boolean" }, "entity_detection": { "type": "boolean" }, "auto_highlights": { "type": "boolean" }, "content_safety": { "type": "boolean" }, "iab_categories": { "type": "boolean" }, "redact_pii": { "type": "boolean" }, "language_code": { "type": "string" } } } },
-      "outputs": { "schema": { "type": "object", "properties": { "id": { "type": "string" }, "status": { "type": "string" } } } },
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "audio_url": {
+              "type": "string",
+              "description": "URL of audio to transcribe"
+            },
+            "language_code": {
+              "type": "string",
+              "description": "Language code (e.g. en_us)"
+            },
+            "speaker_labels": {
+              "type": "boolean",
+              "description": "Enable speaker diarization"
+            },
+            "auto_highlights": {
+              "type": "boolean",
+              "description": "Enable key phrase detection"
+            },
+            "sentiment_analysis": {
+              "type": "boolean",
+              "description": "Enable sentiment analysis"
+            },
+            "entity_detection": {
+              "type": "boolean",
+              "description": "Enable entity detection"
+            },
+            "iab_categories": {
+              "type": "boolean",
+              "description": "Enable topic classification"
+            },
+            "content_safety": {
+              "type": "boolean",
+              "description": "Enable content safety detection"
+            },
+            "redact_pii": {
+              "type": "boolean",
+              "description": "Enable PII redaction"
+            }
+          },
+          "required": [
+            "audio_url"
+          ]
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "required_resources": [],
       "preconditions": [],
-      "expected_effects": [{ "effect_type": "creation", "target_resource": null, "description": "transcription job created on AssemblyAI", "patch": null }],
-      "observables": [{ "field": "id", "role": "confirm_success" }, { "field": "status", "role": "general" }],
-      "termination_conditions": [
-        { "condition_type": "success", "expression": { "id": "present" }, "description": "transcript ID returned" },
-        { "condition_type": "failure", "expression": { "error": "any" }, "description": "submission failed" }
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "transcription job created on AssemblyAI",
+          "patch": null
+        }
       ],
-      "rollback_or_compensation": { "support": "compensating_action", "compensation_skill": "soma.ports.assemblyai.delete_transcript", "description": "delete the created transcript" },
-      "cost_prior": { "latency": { "expected_latency_ms": 500, "p95_latency_ms": 5000, "max_latency_ms": 120000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" } },
+      "observables": [
+        {
+          "field": "id",
+          "role": "confirm_success"
+        },
+        {
+          "field": "status",
+          "role": "general"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "id": "present"
+          },
+          "description": "transcript ID returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "submission failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "compensating_action",
+        "compensation_skill": "soma.ports.assemblyai.delete_transcript",
+        "description": "delete the created transcript"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 500,
+          "p95_latency_ms": 5000,
+          "max_latency_ms": 120000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "medium",
+          "energy_cost_class": "low"
+        }
+      },
       "risk_class": "low",
       "determinism": "stochastic",
-      "nondeterminism_sources": ["ml_model_inference", "audio_quality_variance"],
-      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
-      "tags": ["transcription", "speech-to-text"],
-      "capability_requirements": ["port:assemblyai/transcribe"],
+      "nondeterminism_sources": [
+        "ml_model_inference",
+        "audio_quality_variance"
+      ],
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "transcription",
+        "speech-to-text"
+      ],
+      "capability_requirements": [
+        "port:assemblyai/transcribe"
+      ],
       "confidence_threshold": null,
       "locality": null,
       "remote_endpoint": null,
@@ -340,23 +933,96 @@
       "name": "Get Transcript",
       "description": "Poll transcript status and retrieve results including all audio intelligence outputs",
       "version": "0.1.0",
-      "inputs": { "schema": { "type": "object", "required": ["transcript_id"], "properties": { "transcript_id": { "type": "string" } } } },
-      "outputs": { "schema": { "description": "Full transcript object with status, text, confidence, and audio intelligence results" } },
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "transcript_id": {
+              "type": "string",
+              "description": "Transcript ID"
+            }
+          },
+          "required": [
+            "transcript_id"
+          ]
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "Full transcript object with status, text, confidence, and audio intelligence results"
+        }
+      },
       "required_resources": [],
       "preconditions": [],
       "expected_effects": [],
-      "observables": [{ "field": "status", "role": "confirm_success" }, { "field": "text", "role": "confirm_success" }, { "field": "confidence", "role": "update_confidence" }],
-      "termination_conditions": [
-        { "condition_type": "success", "expression": { "status": "completed" }, "description": "transcript completed" },
-        { "condition_type": "failure", "expression": { "status": "error" }, "description": "transcription failed" }
+      "observables": [
+        {
+          "field": "status",
+          "role": "confirm_success"
+        },
+        {
+          "field": "text",
+          "role": "confirm_success"
+        },
+        {
+          "field": "confidence",
+          "role": "update_confidence"
+        }
       ],
-      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
-      "cost_prior": { "latency": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" } },
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "status": "completed"
+          },
+          "description": "transcript completed"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "status": "error"
+          },
+          "description": "transcription failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 200,
+          "p95_latency_ms": 2000,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "medium",
+          "energy_cost_class": "low"
+        }
+      },
       "risk_class": "negligible",
       "determinism": "partially_deterministic",
-      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
-      "tags": ["transcription", "polling"],
-      "capability_requirements": ["port:assemblyai/get_transcript"],
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "transcription",
+        "polling"
+      ],
+      "capability_requirements": [
+        "port:assemblyai/get_transcript"
+      ],
       "confidence_threshold": null,
       "locality": null,
       "remote_endpoint": null,
@@ -373,23 +1039,88 @@
       "name": "Get Sentences",
       "description": "Retrieve transcript segmented by sentences with timing data",
       "version": "0.1.0",
-      "inputs": { "schema": { "type": "object", "required": ["transcript_id"], "properties": { "transcript_id": { "type": "string" } } } },
-      "outputs": { "schema": { "description": "Sentence-segmented transcript with timestamps" } },
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "transcript_id": {
+              "type": "string",
+              "description": "Transcript ID"
+            }
+          },
+          "required": [
+            "transcript_id"
+          ]
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "Sentence-segmented transcript with timestamps"
+        }
+      },
       "required_resources": [],
       "preconditions": [],
       "expected_effects": [],
-      "observables": [{ "field": "sentences", "role": "confirm_success" }],
-      "termination_conditions": [
-        { "condition_type": "success", "expression": { "sentences": "present" }, "description": "sentences returned" },
-        { "condition_type": "failure", "expression": { "error": "any" }, "description": "retrieval failed" }
+      "observables": [
+        {
+          "field": "sentences",
+          "role": "confirm_success"
+        }
       ],
-      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
-      "cost_prior": { "latency": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" } },
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "sentences": "present"
+          },
+          "description": "sentences returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "retrieval failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 200,
+          "p95_latency_ms": 2000,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "medium",
+          "energy_cost_class": "low"
+        }
+      },
       "risk_class": "negligible",
       "determinism": "deterministic",
-      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
-      "tags": ["transcription", "export"],
-      "capability_requirements": ["port:assemblyai/get_sentences"],
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "transcription",
+        "export"
+      ],
+      "capability_requirements": [
+        "port:assemblyai/get_sentences"
+      ],
       "confidence_threshold": null,
       "locality": null,
       "remote_endpoint": null,
@@ -406,23 +1137,88 @@
       "name": "Get Paragraphs",
       "description": "Retrieve transcript segmented by paragraphs with timing data",
       "version": "0.1.0",
-      "inputs": { "schema": { "type": "object", "required": ["transcript_id"], "properties": { "transcript_id": { "type": "string" } } } },
-      "outputs": { "schema": { "description": "Paragraph-segmented transcript with timestamps" } },
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "transcript_id": {
+              "type": "string",
+              "description": "Transcript ID"
+            }
+          },
+          "required": [
+            "transcript_id"
+          ]
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "Paragraph-segmented transcript with timestamps"
+        }
+      },
       "required_resources": [],
       "preconditions": [],
       "expected_effects": [],
-      "observables": [{ "field": "paragraphs", "role": "confirm_success" }],
-      "termination_conditions": [
-        { "condition_type": "success", "expression": { "paragraphs": "present" }, "description": "paragraphs returned" },
-        { "condition_type": "failure", "expression": { "error": "any" }, "description": "retrieval failed" }
+      "observables": [
+        {
+          "field": "paragraphs",
+          "role": "confirm_success"
+        }
       ],
-      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
-      "cost_prior": { "latency": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" } },
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "paragraphs": "present"
+          },
+          "description": "paragraphs returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "retrieval failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 200,
+          "p95_latency_ms": 2000,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "medium",
+          "energy_cost_class": "low"
+        }
+      },
       "risk_class": "negligible",
       "determinism": "deterministic",
-      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
-      "tags": ["transcription", "export"],
-      "capability_requirements": ["port:assemblyai/get_paragraphs"],
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "transcription",
+        "export"
+      ],
+      "capability_requirements": [
+        "port:assemblyai/get_paragraphs"
+      ],
       "confidence_threshold": null,
       "locality": null,
       "remote_endpoint": null,
@@ -439,23 +1235,101 @@
       "name": "Get Subtitles",
       "description": "Export transcript as SRT or VTT subtitle format",
       "version": "0.1.0",
-      "inputs": { "schema": { "type": "object", "required": ["transcript_id"], "properties": { "transcript_id": { "type": "string" }, "format": { "type": "string", "enum": ["srt", "vtt"] } } } },
-      "outputs": { "schema": { "type": "object", "properties": { "format": { "type": "string" }, "content": { "type": "string" } } } },
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "transcript_id": {
+              "type": "string",
+              "description": "Transcript ID"
+            },
+            "format": {
+              "type": "string",
+              "description": "Subtitle format (srt or vtt)"
+            }
+          },
+          "required": [
+            "transcript_id"
+          ]
+        }
+      },
+      "outputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "required_resources": [],
       "preconditions": [],
       "expected_effects": [],
-      "observables": [{ "field": "content", "role": "confirm_success" }],
-      "termination_conditions": [
-        { "condition_type": "success", "expression": { "content": "present" }, "description": "subtitle content returned" },
-        { "condition_type": "failure", "expression": { "error": "any" }, "description": "export failed" }
+      "observables": [
+        {
+          "field": "content",
+          "role": "confirm_success"
+        }
       ],
-      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
-      "cost_prior": { "latency": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" } },
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "content": "present"
+          },
+          "description": "subtitle content returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "export failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 200,
+          "p95_latency_ms": 2000,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "medium",
+          "energy_cost_class": "low"
+        }
+      },
       "risk_class": "negligible",
       "determinism": "deterministic",
-      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
-      "tags": ["transcription", "subtitles", "export"],
-      "capability_requirements": ["port:assemblyai/get_subtitles"],
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "transcription",
+        "subtitles",
+        "export"
+      ],
+      "capability_requirements": [
+        "port:assemblyai/get_subtitles"
+      ],
       "confidence_threshold": null,
       "locality": null,
       "remote_endpoint": null,
@@ -472,23 +1346,93 @@
       "name": "Word Search",
       "description": "Search transcript for specific words and get timestamps",
       "version": "0.1.0",
-      "inputs": { "schema": { "type": "object", "required": ["transcript_id", "words"], "properties": { "transcript_id": { "type": "string" }, "words": { "type": "array", "items": { "type": "string" } } } } },
-      "outputs": { "schema": { "description": "Word search matches with timestamps and counts" } },
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "transcript_id": {
+              "type": "string",
+              "description": "Transcript ID"
+            },
+            "words": {
+              "type": "array",
+              "description": "Words to search for"
+            }
+          },
+          "required": [
+            "transcript_id",
+            "words"
+          ]
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "Word search matches with timestamps and counts"
+        }
+      },
       "required_resources": [],
       "preconditions": [],
       "expected_effects": [],
-      "observables": [{ "field": "matches", "role": "confirm_success" }],
-      "termination_conditions": [
-        { "condition_type": "success", "expression": { "matches": "present" }, "description": "search results returned" },
-        { "condition_type": "failure", "expression": { "error": "any" }, "description": "search failed" }
+      "observables": [
+        {
+          "field": "matches",
+          "role": "confirm_success"
+        }
       ],
-      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
-      "cost_prior": { "latency": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" } },
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "matches": "present"
+          },
+          "description": "search results returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "search failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 200,
+          "p95_latency_ms": 2000,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "medium",
+          "energy_cost_class": "low"
+        }
+      },
       "risk_class": "negligible",
       "determinism": "deterministic",
-      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
-      "tags": ["transcription", "search"],
-      "capability_requirements": ["port:assemblyai/word_search"],
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "transcription",
+        "search"
+      ],
+      "capability_requirements": [
+        "port:assemblyai/word_search"
+      ],
       "confidence_threshold": null,
       "locality": null,
       "remote_endpoint": null,
@@ -505,23 +1449,89 @@
       "name": "List Transcripts",
       "description": "List recent transcripts with optional status and pagination filters",
       "version": "0.1.0",
-      "inputs": { "schema": { "type": "object", "properties": { "limit": { "type": "integer" }, "status": { "type": "string" }, "before_id": { "type": "string" }, "after_id": { "type": "string" } } } },
-      "outputs": { "schema": { "description": "Paginated list of transcript summaries" } },
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "description": "Maximum transcripts to return"
+            },
+            "status": {
+              "type": "string",
+              "description": "Filter by status"
+            }
+          }
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "Paginated list of transcript summaries"
+        }
+      },
       "required_resources": [],
       "preconditions": [],
       "expected_effects": [],
-      "observables": [{ "field": "transcripts", "role": "confirm_success" }],
-      "termination_conditions": [
-        { "condition_type": "success", "expression": { "transcripts": "present" }, "description": "transcript list returned" },
-        { "condition_type": "failure", "expression": { "error": "any" }, "description": "listing failed" }
+      "observables": [
+        {
+          "field": "transcripts",
+          "role": "confirm_success"
+        }
       ],
-      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
-      "cost_prior": { "latency": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" } },
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "transcripts": "present"
+          },
+          "description": "transcript list returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "listing failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 200,
+          "p95_latency_ms": 2000,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "medium",
+          "energy_cost_class": "low"
+        }
+      },
       "risk_class": "negligible",
       "determinism": "partially_deterministic",
-      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
-      "tags": ["transcription", "management"],
-      "capability_requirements": ["port:assemblyai/list_transcripts"],
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "transcription",
+        "management"
+      ],
+      "capability_requirements": [
+        "port:assemblyai/list_transcripts"
+      ],
       "confidence_threshold": null,
       "locality": null,
       "remote_endpoint": null,
@@ -538,23 +1548,96 @@
       "name": "Delete Transcript",
       "description": "Permanently remove a transcript and its associated data",
       "version": "0.1.0",
-      "inputs": { "schema": { "type": "object", "required": ["transcript_id"], "properties": { "transcript_id": { "type": "string" } } } },
-      "outputs": { "schema": { "description": "Deletion confirmation" } },
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "transcript_id": {
+              "type": "string",
+              "description": "Transcript ID"
+            }
+          },
+          "required": [
+            "transcript_id"
+          ]
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "Deletion confirmation"
+        }
+      },
       "required_resources": [],
       "preconditions": [],
-      "expected_effects": [{ "effect_type": "deletion", "target_resource": null, "description": "transcript permanently removed", "patch": null }],
-      "observables": [{ "field": "deleted", "role": "confirm_success" }],
-      "termination_conditions": [
-        { "condition_type": "success", "expression": { "deleted": true }, "description": "transcript deleted" },
-        { "condition_type": "failure", "expression": { "error": "any" }, "description": "deletion failed" }
+      "expected_effects": [
+        {
+          "effect_type": "deletion",
+          "target_resource": null,
+          "description": "transcript permanently removed",
+          "patch": null
+        }
       ],
-      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "cannot undo transcript deletion" },
-      "cost_prior": { "latency": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" } },
+      "observables": [
+        {
+          "field": "deleted",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "deleted": true
+          },
+          "description": "transcript deleted"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "deletion failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "cannot undo transcript deletion"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 200,
+          "p95_latency_ms": 2000,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "medium",
+          "energy_cost_class": "low"
+        }
+      },
       "risk_class": "medium",
       "determinism": "deterministic",
-      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
-      "tags": ["transcription", "management", "destructive"],
-      "capability_requirements": ["port:assemblyai/delete_transcript"],
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "transcription",
+        "management",
+        "destructive"
+      ],
+      "capability_requirements": [
+        "port:assemblyai/delete_transcript"
+      ],
       "confidence_threshold": null,
       "locality": null,
       "remote_endpoint": null,
@@ -571,23 +1654,89 @@
       "name": "Get Redacted Audio",
       "description": "Retrieve PII-redacted audio URL for a transcript with redact_pii_audio enabled",
       "version": "0.1.0",
-      "inputs": { "schema": { "type": "object", "required": ["transcript_id"], "properties": { "transcript_id": { "type": "string" } } } },
-      "outputs": { "schema": { "description": "Redacted audio URL and status" } },
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "transcript_id": {
+              "type": "string",
+              "description": "Transcript ID"
+            }
+          },
+          "required": [
+            "transcript_id"
+          ]
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "Redacted audio URL and status"
+        }
+      },
       "required_resources": [],
       "preconditions": [],
       "expected_effects": [],
-      "observables": [{ "field": "redacted_audio_url", "role": "confirm_success" }],
-      "termination_conditions": [
-        { "condition_type": "success", "expression": { "redacted_audio_url": "present" }, "description": "redacted audio URL returned" },
-        { "condition_type": "failure", "expression": { "error": "any" }, "description": "retrieval failed" }
+      "observables": [
+        {
+          "field": "redacted_audio_url",
+          "role": "confirm_success"
+        }
       ],
-      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
-      "cost_prior": { "latency": { "expected_latency_ms": 200, "p95_latency_ms": 2000, "max_latency_ms": 30000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" } },
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "redacted_audio_url": "present"
+          },
+          "description": "redacted audio URL returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "retrieval failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 200,
+          "p95_latency_ms": 2000,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "medium",
+          "energy_cost_class": "low"
+        }
+      },
       "risk_class": "negligible",
       "determinism": "deterministic",
-      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
-      "tags": ["pii", "redaction", "audio"],
-      "capability_requirements": ["port:assemblyai/get_redacted_audio"],
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "pii",
+        "redaction",
+        "audio"
+      ],
+      "capability_requirements": [
+        "port:assemblyai/get_redacted_audio"
+      ],
       "confidence_threshold": null,
       "locality": null,
       "remote_endpoint": null,

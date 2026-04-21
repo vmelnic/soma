@@ -81,7 +81,26 @@
           "purpose": "Generate a thumbnail of an image (fast, lower quality than resize)",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "data": {
+                  "type": "string",
+                  "description": "Base64-encoded image data"
+                },
+                "width": {
+                  "type": "integer",
+                  "description": "Thumbnail width in pixels"
+                },
+                "height": {
+                  "type": "integer",
+                  "description": "Thumbnail height in pixels"
+                }
+              },
+              "required": [
+                "data",
+                "width",
+                "height"
+              ]
             }
           },
           "output_schema": {
@@ -114,7 +133,26 @@
           "purpose": "Resize an image to exact dimensions using Lanczos3 interpolation",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "data": {
+                  "type": "string",
+                  "description": "Base64-encoded image data"
+                },
+                "width": {
+                  "type": "integer",
+                  "description": "Target width in pixels"
+                },
+                "height": {
+                  "type": "integer",
+                  "description": "Target height in pixels"
+                }
+              },
+              "required": [
+                "data",
+                "width",
+                "height"
+              ]
             }
           },
           "output_schema": {
@@ -147,7 +185,36 @@
           "purpose": "Crop a rectangular region from an image",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "data": {
+                  "type": "string",
+                  "description": "Base64-encoded image data"
+                },
+                "x": {
+                  "type": "integer",
+                  "description": "Left offset in pixels"
+                },
+                "y": {
+                  "type": "integer",
+                  "description": "Top offset in pixels"
+                },
+                "w": {
+                  "type": "integer",
+                  "description": "Crop width in pixels"
+                },
+                "h": {
+                  "type": "integer",
+                  "description": "Crop height in pixels"
+                }
+              },
+              "required": [
+                "data",
+                "x",
+                "y",
+                "w",
+                "h"
+              ]
             }
           },
           "output_schema": {
@@ -180,7 +247,26 @@
           "purpose": "Convert image between formats (png, jpeg, webp)",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "data": {
+                  "type": "string",
+                  "description": "Base64-encoded image data"
+                },
+                "format": {
+                  "type": "string",
+                  "description": "Target format",
+                  "enum": [
+                    "png",
+                    "jpeg",
+                    "webp"
+                  ]
+                }
+              },
+              "required": [
+                "data",
+                "format"
+              ]
             }
           },
           "output_schema": {
@@ -213,7 +299,16 @@
           "purpose": "Strip EXIF metadata from an image by re-encoding pixel data",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "data": {
+                  "type": "string",
+                  "description": "Base64-encoded image data"
+                }
+              },
+              "required": [
+                "data"
+              ]
             }
           },
           "output_schema": {
@@ -298,7 +393,26 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "string",
+              "description": "Base64-encoded image data"
+            },
+            "width": {
+              "type": "integer",
+              "description": "Thumbnail width in pixels"
+            },
+            "height": {
+              "type": "integer",
+              "description": "Thumbnail height in pixels"
+            }
+          },
+          "required": [
+            "data",
+            "width",
+            "height"
+          ]
         }
       },
       "outputs": {
@@ -390,7 +504,26 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "string",
+              "description": "Base64-encoded image data"
+            },
+            "width": {
+              "type": "integer",
+              "description": "Target width in pixels"
+            },
+            "height": {
+              "type": "integer",
+              "description": "Target height in pixels"
+            }
+          },
+          "required": [
+            "data",
+            "width",
+            "height"
+          ]
         }
       },
       "outputs": {
@@ -482,7 +615,36 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "string",
+              "description": "Base64-encoded image data"
+            },
+            "x": {
+              "type": "integer",
+              "description": "Left offset in pixels"
+            },
+            "y": {
+              "type": "integer",
+              "description": "Top offset in pixels"
+            },
+            "w": {
+              "type": "integer",
+              "description": "Crop width in pixels"
+            },
+            "h": {
+              "type": "integer",
+              "description": "Crop height in pixels"
+            }
+          },
+          "required": [
+            "data",
+            "x",
+            "y",
+            "w",
+            "h"
+          ]
         }
       },
       "outputs": {
@@ -574,7 +736,26 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "string",
+              "description": "Base64-encoded image data"
+            },
+            "format": {
+              "type": "string",
+              "description": "Target format",
+              "enum": [
+                "png",
+                "jpeg",
+                "webp"
+              ]
+            }
+          },
+          "required": [
+            "data",
+            "format"
+          ]
         }
       },
       "outputs": {
@@ -666,7 +847,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "string",
+              "description": "Base64-encoded image data"
+            }
+          },
+          "required": [
+            "data"
+          ]
         }
       },
       "outputs": {

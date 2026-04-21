@@ -85,7 +85,29 @@
           "purpose": "Search documents in an index",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "string",
+                  "description": "Index name"
+                },
+                "query": {
+                  "type": "object",
+                  "description": "Elasticsearch query DSL"
+                },
+                "size": {
+                  "type": "integer",
+                  "description": "Number of results"
+                },
+                "from": {
+                  "type": "integer",
+                  "description": "Offset for pagination"
+                }
+              },
+              "required": [
+                "index",
+                "query"
+              ]
             }
           },
           "output_schema": {
@@ -118,7 +140,25 @@
           "purpose": "Index (insert or replace) a document",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "string",
+                  "description": "Index name"
+                },
+                "id": {
+                  "type": "string",
+                  "description": "Document ID"
+                },
+                "document": {
+                  "type": "object",
+                  "description": "Document body"
+                }
+              },
+              "required": [
+                "index",
+                "document"
+              ]
             }
           },
           "output_schema": {
@@ -151,7 +191,21 @@
           "purpose": "Retrieve a document by ID",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "string",
+                  "description": "Index name"
+                },
+                "id": {
+                  "type": "string",
+                  "description": "Document ID"
+                }
+              },
+              "required": [
+                "index",
+                "id"
+              ]
             }
           },
           "output_schema": {
@@ -184,7 +238,21 @@
           "purpose": "Delete a document by ID",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "string",
+                  "description": "Index name"
+                },
+                "id": {
+                  "type": "string",
+                  "description": "Document ID"
+                }
+              },
+              "required": [
+                "index",
+                "id"
+              ]
             }
           },
           "output_schema": {
@@ -217,7 +285,24 @@
           "purpose": "Create an index with optional mappings",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "string",
+                  "description": "Index name"
+                },
+                "mappings": {
+                  "type": "object",
+                  "description": "Index mappings"
+                },
+                "settings": {
+                  "type": "object",
+                  "description": "Index settings"
+                }
+              },
+              "required": [
+                "index"
+              ]
             }
           },
           "output_schema": {
@@ -250,7 +335,16 @@
           "purpose": "Delete an entire index",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "string",
+                  "description": "Index name"
+                }
+              },
+              "required": [
+                "index"
+              ]
             }
           },
           "output_schema": {
@@ -340,7 +434,29 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "index": {
+              "type": "string",
+              "description": "Index name"
+            },
+            "query": {
+              "type": "object",
+              "description": "Elasticsearch query DSL"
+            },
+            "size": {
+              "type": "integer",
+              "description": "Number of results"
+            },
+            "from": {
+              "type": "integer",
+              "description": "Offset for pagination"
+            }
+          },
+          "required": [
+            "index",
+            "query"
+          ]
         }
       },
       "outputs": {
@@ -430,7 +546,25 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "index": {
+              "type": "string",
+              "description": "Index name"
+            },
+            "id": {
+              "type": "string",
+              "description": "Document ID"
+            },
+            "document": {
+              "type": "object",
+              "description": "Document body"
+            }
+          },
+          "required": [
+            "index",
+            "document"
+          ]
         }
       },
       "outputs": {
@@ -527,7 +661,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "index": {
+              "type": "string",
+              "description": "Index name"
+            },
+            "id": {
+              "type": "string",
+              "description": "Document ID"
+            }
+          },
+          "required": [
+            "index",
+            "id"
+          ]
         }
       },
       "outputs": {
@@ -617,7 +765,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "index": {
+              "type": "string",
+              "description": "Index name"
+            },
+            "id": {
+              "type": "string",
+              "description": "Document ID"
+            }
+          },
+          "required": [
+            "index",
+            "id"
+          ]
         }
       },
       "outputs": {
@@ -714,7 +876,24 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "index": {
+              "type": "string",
+              "description": "Index name"
+            },
+            "mappings": {
+              "type": "object",
+              "description": "Index mappings"
+            },
+            "settings": {
+              "type": "object",
+              "description": "Index settings"
+            }
+          },
+          "required": [
+            "index"
+          ]
         }
       },
       "outputs": {
@@ -811,7 +990,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "index": {
+              "type": "string",
+              "description": "Index name"
+            }
+          },
+          "required": [
+            "index"
+          ]
         }
       },
       "outputs": {

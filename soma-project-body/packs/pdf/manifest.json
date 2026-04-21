@@ -76,7 +76,20 @@
           "purpose": "Create a new PDF document with a title and text content",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "Document title"
+                },
+                "author": {
+                  "type": "string",
+                  "description": "Document author"
+                }
+              },
+              "required": [
+                "title"
+              ]
             }
           },
           "output_schema": {
@@ -109,7 +122,25 @@
           "purpose": "Write a page of text content to a PDF file path",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "document_id": {
+                  "type": "string",
+                  "description": "Document ID"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Page content text"
+                },
+                "font_size": {
+                  "type": "number",
+                  "description": "Font size in points"
+                }
+              },
+              "required": [
+                "document_id",
+                "content"
+              ]
             }
           },
           "output_schema": {
@@ -142,7 +173,20 @@
           "purpose": "Convert plain text to a multi-page PDF file",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Text content to convert"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "PDF title"
+                }
+              },
+              "required": [
+                "text"
+              ]
             }
           },
           "output_schema": {
@@ -227,7 +271,20 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Document title"
+            },
+            "author": {
+              "type": "string",
+              "description": "Document author"
+            }
+          },
+          "required": [
+            "title"
+          ]
         }
       },
       "outputs": {
@@ -324,7 +381,25 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "document_id": {
+              "type": "string",
+              "description": "Document ID"
+            },
+            "content": {
+              "type": "string",
+              "description": "Page content text"
+            },
+            "font_size": {
+              "type": "number",
+              "description": "Font size in points"
+            }
+          },
+          "required": [
+            "document_id",
+            "content"
+          ]
         }
       },
       "outputs": {
@@ -421,7 +496,20 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "Text content to convert"
+            },
+            "title": {
+              "type": "string",
+              "description": "PDF title"
+            }
+          },
+          "required": [
+            "text"
+          ]
         }
       },
       "outputs": {

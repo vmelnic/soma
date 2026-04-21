@@ -90,7 +90,20 @@
           "purpose": "Generate a 6-digit OTP for phone verification",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "user_id": {
+                  "type": "string",
+                  "description": "User identifier"
+                },
+                "length": {
+                  "type": "integer",
+                  "description": "OTP code length"
+                }
+              },
+              "required": [
+                "user_id"
+              ]
             }
           },
           "output_schema": {
@@ -123,7 +136,21 @@
           "purpose": "Verify an OTP code against stored hash",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "user_id": {
+                  "type": "string",
+                  "description": "User identifier"
+                },
+                "code": {
+                  "type": "string",
+                  "description": "OTP code to verify"
+                }
+              },
+              "required": [
+                "user_id",
+                "code"
+              ]
             }
           },
           "output_schema": {
@@ -156,7 +183,24 @@
           "purpose": "Create an authenticated session with expiry",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "user_id": {
+                  "type": "string",
+                  "description": "User identifier"
+                },
+                "ttl_seconds": {
+                  "type": "integer",
+                  "description": "Session time-to-live in seconds"
+                },
+                "metadata": {
+                  "type": "object",
+                  "description": "Session metadata"
+                }
+              },
+              "required": [
+                "user_id"
+              ]
             }
           },
           "output_schema": {
@@ -189,7 +233,16 @@
           "purpose": "Check if a session token is valid and not expired",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "session_id": {
+                  "type": "string",
+                  "description": "Session token to validate"
+                }
+              },
+              "required": [
+                "session_id"
+              ]
             }
           },
           "output_schema": {
@@ -222,7 +275,16 @@
           "purpose": "Mark a session as revoked",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "session_id": {
+                  "type": "string",
+                  "description": "Session token to revoke"
+                }
+              },
+              "required": [
+                "session_id"
+              ]
             }
           },
           "output_schema": {
@@ -255,7 +317,20 @@
           "purpose": "Generate a TOTP secret and provisioning URI for 2FA setup",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "user_id": {
+                  "type": "string",
+                  "description": "User identifier"
+                },
+                "issuer": {
+                  "type": "string",
+                  "description": "TOTP issuer name"
+                }
+              },
+              "required": [
+                "user_id"
+              ]
             }
           },
           "output_schema": {
@@ -288,7 +363,26 @@
           "purpose": "Verify a TOTP code against a secret",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "user_id": {
+                  "type": "string",
+                  "description": "User identifier"
+                },
+                "code": {
+                  "type": "string",
+                  "description": "TOTP code to verify"
+                },
+                "secret": {
+                  "type": "string",
+                  "description": "TOTP secret"
+                }
+              },
+              "required": [
+                "user_id",
+                "code",
+                "secret"
+              ]
             }
           },
           "output_schema": {
@@ -321,7 +415,20 @@
           "purpose": "Generate a random bearer token with expiry",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "claims": {
+                  "type": "object",
+                  "description": "Token claims"
+                },
+                "ttl_seconds": {
+                  "type": "integer",
+                  "description": "Token time-to-live in seconds"
+                }
+              },
+              "required": [
+                "claims"
+              ]
             }
           },
           "output_schema": {
@@ -354,7 +461,16 @@
           "purpose": "Check if a bearer token is valid and not expired",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "token": {
+                  "type": "string",
+                  "description": "Token to validate"
+                }
+              },
+              "required": [
+                "token"
+              ]
             }
           },
           "output_schema": {
@@ -387,7 +503,16 @@
           "purpose": "Extend the expiry of a valid bearer token",
           "input_schema": {
             "schema": {
-              "description": "any"
+              "type": "object",
+              "properties": {
+                "token": {
+                  "type": "string",
+                  "description": "Token to refresh"
+                }
+              },
+              "required": [
+                "token"
+              ]
             }
           },
           "output_schema": {
@@ -472,7 +597,20 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "description": "User identifier"
+            },
+            "length": {
+              "type": "integer",
+              "description": "OTP code length"
+            }
+          },
+          "required": [
+            "user_id"
+          ]
         }
       },
       "outputs": {
@@ -571,7 +709,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "description": "User identifier"
+            },
+            "code": {
+              "type": "string",
+              "description": "OTP code to verify"
+            }
+          },
+          "required": [
+            "user_id",
+            "code"
+          ]
         }
       },
       "outputs": {
@@ -670,7 +822,24 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "description": "User identifier"
+            },
+            "ttl_seconds": {
+              "type": "integer",
+              "description": "Session time-to-live in seconds"
+            },
+            "metadata": {
+              "type": "object",
+              "description": "Session metadata"
+            }
+          },
+          "required": [
+            "user_id"
+          ]
         }
       },
       "outputs": {
@@ -769,7 +938,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "description": "Session token to validate"
+            }
+          },
+          "required": [
+            "session_id"
+          ]
         }
       },
       "outputs": {
@@ -861,7 +1039,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "description": "Session token to revoke"
+            }
+          },
+          "required": [
+            "session_id"
+          ]
         }
       },
       "outputs": {
@@ -960,7 +1147,20 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "description": "User identifier"
+            },
+            "issuer": {
+              "type": "string",
+              "description": "TOTP issuer name"
+            }
+          },
+          "required": [
+            "user_id"
+          ]
         }
       },
       "outputs": {
@@ -1052,7 +1252,26 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "description": "User identifier"
+            },
+            "code": {
+              "type": "string",
+              "description": "TOTP code to verify"
+            },
+            "secret": {
+              "type": "string",
+              "description": "TOTP secret"
+            }
+          },
+          "required": [
+            "user_id",
+            "code",
+            "secret"
+          ]
         }
       },
       "outputs": {
@@ -1144,7 +1363,20 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "claims": {
+              "type": "object",
+              "description": "Token claims"
+            },
+            "ttl_seconds": {
+              "type": "integer",
+              "description": "Token time-to-live in seconds"
+            }
+          },
+          "required": [
+            "claims"
+          ]
         }
       },
       "outputs": {
@@ -1243,7 +1475,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "token": {
+              "type": "string",
+              "description": "Token to validate"
+            }
+          },
+          "required": [
+            "token"
+          ]
         }
       },
       "outputs": {
@@ -1335,7 +1576,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "description": "any"
+          "type": "object",
+          "properties": {
+            "token": {
+              "type": "string",
+              "description": "Token to refresh"
+            }
+          },
+          "required": [
+            "token"
+          ]
         }
       },
       "outputs": {

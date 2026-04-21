@@ -81,7 +81,30 @@
           "purpose": "Send push notification via Firebase Cloud Messaging HTTP v1 API",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "device_token": {
+                  "type": "string",
+                  "description": "FCM device token"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Notification title"
+                },
+                "body": {
+                  "type": "string",
+                  "description": "Notification body"
+                },
+                "data": {
+                  "type": "object",
+                  "description": "Custom data payload"
+                }
+              },
+              "required": [
+                "device_token",
+                "title",
+                "body"
+              ]
             }
           },
           "output_schema": {
@@ -114,7 +137,30 @@
           "purpose": "Send push notification via Web Push protocol (VAPID)",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "subscription": {
+                  "type": "object",
+                  "description": "WebPush subscription object"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Notification title"
+                },
+                "body": {
+                  "type": "string",
+                  "description": "Notification body"
+                },
+                "data": {
+                  "type": "object",
+                  "description": "Custom data payload"
+                }
+              },
+              "required": [
+                "subscription",
+                "title",
+                "body"
+              ]
             }
           },
           "output_schema": {
@@ -147,7 +193,25 @@
           "purpose": "Register a device token for push notifications",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "device_token": {
+                  "type": "string",
+                  "description": "Device push token"
+                },
+                "platform": {
+                  "type": "string",
+                  "description": "Platform (fcm, webpush)"
+                },
+                "user_id": {
+                  "type": "string",
+                  "description": "User identifier"
+                }
+              },
+              "required": [
+                "device_token",
+                "platform"
+              ]
             }
           },
           "output_schema": {
@@ -180,7 +244,16 @@
           "purpose": "Unregister a device from push notifications",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "device_token": {
+                  "type": "string",
+                  "description": "Device push token"
+                }
+              },
+              "required": [
+                "device_token"
+              ]
             }
           },
           "output_schema": {
@@ -269,7 +342,30 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "device_token": {
+              "type": "string",
+              "description": "FCM device token"
+            },
+            "title": {
+              "type": "string",
+              "description": "Notification title"
+            },
+            "body": {
+              "type": "string",
+              "description": "Notification body"
+            },
+            "data": {
+              "type": "object",
+              "description": "Custom data payload"
+            }
+          },
+          "required": [
+            "device_token",
+            "title",
+            "body"
+          ]
         }
       },
       "outputs": {
@@ -367,7 +463,30 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "subscription": {
+              "type": "object",
+              "description": "WebPush subscription object"
+            },
+            "title": {
+              "type": "string",
+              "description": "Notification title"
+            },
+            "body": {
+              "type": "string",
+              "description": "Notification body"
+            },
+            "data": {
+              "type": "object",
+              "description": "Custom data payload"
+            }
+          },
+          "required": [
+            "subscription",
+            "title",
+            "body"
+          ]
         }
       },
       "outputs": {
@@ -465,7 +584,25 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "device_token": {
+              "type": "string",
+              "description": "Device push token"
+            },
+            "platform": {
+              "type": "string",
+              "description": "Platform (fcm, webpush)"
+            },
+            "user_id": {
+              "type": "string",
+              "description": "User identifier"
+            }
+          },
+          "required": [
+            "device_token",
+            "platform"
+          ]
         }
       },
       "outputs": {
@@ -563,7 +700,16 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "device_token": {
+              "type": "string",
+              "description": "Device push token"
+            }
+          },
+          "required": [
+            "device_token"
+          ]
         }
       },
       "outputs": {

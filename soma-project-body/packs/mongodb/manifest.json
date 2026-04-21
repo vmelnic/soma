@@ -87,7 +87,28 @@
           "purpose": "Find documents matching an optional filter",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "collection": {
+                  "type": "string",
+                  "description": "Collection name"
+                },
+                "filter": {
+                  "type": "object",
+                  "description": "MongoDB query filter"
+                },
+                "limit": {
+                  "type": "integer",
+                  "description": "Maximum documents to return"
+                },
+                "skip": {
+                  "type": "integer",
+                  "description": "Number of documents to skip"
+                }
+              },
+              "required": [
+                "collection"
+              ]
             }
           },
           "output_schema": {
@@ -120,7 +141,21 @@
           "purpose": "Find a single document matching a filter",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "collection": {
+                  "type": "string",
+                  "description": "Collection name"
+                },
+                "filter": {
+                  "type": "object",
+                  "description": "MongoDB query filter"
+                }
+              },
+              "required": [
+                "collection",
+                "filter"
+              ]
             }
           },
           "output_schema": {
@@ -153,7 +188,21 @@
           "purpose": "Insert a single document",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "collection": {
+                  "type": "string",
+                  "description": "Collection name"
+                },
+                "document": {
+                  "type": "object",
+                  "description": "Document to insert"
+                }
+              },
+              "required": [
+                "collection",
+                "document"
+              ]
             }
           },
           "output_schema": {
@@ -186,7 +235,21 @@
           "purpose": "Insert multiple documents",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "collection": {
+                  "type": "string",
+                  "description": "Collection name"
+                },
+                "documents": {
+                  "type": "array",
+                  "description": "Array of documents to insert"
+                }
+              },
+              "required": [
+                "collection",
+                "documents"
+              ]
             }
           },
           "output_schema": {
@@ -219,7 +282,26 @@
           "purpose": "Update a single document matching a filter",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "collection": {
+                  "type": "string",
+                  "description": "Collection name"
+                },
+                "filter": {
+                  "type": "object",
+                  "description": "MongoDB query filter"
+                },
+                "update": {
+                  "type": "object",
+                  "description": "Update operations"
+                }
+              },
+              "required": [
+                "collection",
+                "filter",
+                "update"
+              ]
             }
           },
           "output_schema": {
@@ -252,7 +334,21 @@
           "purpose": "Delete a single document matching a filter",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "collection": {
+                  "type": "string",
+                  "description": "Collection name"
+                },
+                "filter": {
+                  "type": "object",
+                  "description": "MongoDB query filter"
+                }
+              },
+              "required": [
+                "collection",
+                "filter"
+              ]
             }
           },
           "output_schema": {
@@ -285,7 +381,20 @@
           "purpose": "Count documents matching an optional filter",
           "input_schema": {
             "schema": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "collection": {
+                  "type": "string",
+                  "description": "Collection name"
+                },
+                "filter": {
+                  "type": "object",
+                  "description": "MongoDB query filter"
+                }
+              },
+              "required": [
+                "collection"
+              ]
             }
           },
           "output_schema": {
@@ -375,7 +484,28 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "collection": {
+              "type": "string",
+              "description": "Collection name"
+            },
+            "filter": {
+              "type": "object",
+              "description": "MongoDB query filter"
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Maximum documents to return"
+            },
+            "skip": {
+              "type": "integer",
+              "description": "Number of documents to skip"
+            }
+          },
+          "required": [
+            "collection"
+          ]
         }
       },
       "outputs": {
@@ -465,7 +595,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "collection": {
+              "type": "string",
+              "description": "Collection name"
+            },
+            "filter": {
+              "type": "object",
+              "description": "MongoDB query filter"
+            }
+          },
+          "required": [
+            "collection",
+            "filter"
+          ]
         }
       },
       "outputs": {
@@ -555,7 +699,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "collection": {
+              "type": "string",
+              "description": "Collection name"
+            },
+            "document": {
+              "type": "object",
+              "description": "Document to insert"
+            }
+          },
+          "required": [
+            "collection",
+            "document"
+          ]
         }
       },
       "outputs": {
@@ -652,7 +810,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "collection": {
+              "type": "string",
+              "description": "Collection name"
+            },
+            "documents": {
+              "type": "array",
+              "description": "Array of documents to insert"
+            }
+          },
+          "required": [
+            "collection",
+            "documents"
+          ]
         }
       },
       "outputs": {
@@ -749,7 +921,26 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "collection": {
+              "type": "string",
+              "description": "Collection name"
+            },
+            "filter": {
+              "type": "object",
+              "description": "MongoDB query filter"
+            },
+            "update": {
+              "type": "object",
+              "description": "Update operations"
+            }
+          },
+          "required": [
+            "collection",
+            "filter",
+            "update"
+          ]
         }
       },
       "outputs": {
@@ -846,7 +1037,21 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "collection": {
+              "type": "string",
+              "description": "Collection name"
+            },
+            "filter": {
+              "type": "object",
+              "description": "MongoDB query filter"
+            }
+          },
+          "required": [
+            "collection",
+            "filter"
+          ]
         }
       },
       "outputs": {
@@ -943,7 +1148,20 @@
       "version": "0.1.0",
       "inputs": {
         "schema": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "collection": {
+              "type": "string",
+              "description": "Collection name"
+            },
+            "filter": {
+              "type": "object",
+              "description": "MongoDB query filter"
+            }
+          },
+          "required": [
+            "collection"
+          ]
         }
       },
       "outputs": {

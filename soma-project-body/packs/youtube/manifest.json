@@ -9,7 +9,12 @@
     {
       "group_name": "media",
       "scope": "local",
-      "capabilities": ["get_info", "list_formats", "download_video", "download_audio"]
+      "capabilities": [
+        "get_info",
+        "list_formats",
+        "download_video",
+        "download_audio"
+      ]
     }
   ],
   "dependencies": [],
@@ -31,17 +36,40 @@
   },
   "observability": {
     "health_checks": [],
-    "version_metadata": { "version": "0.1.0" },
+    "version_metadata": {
+      "version": "0.1.0"
+    },
     "dependency_status": [],
-    "capability_inventory": ["get_info", "list_formats", "download_video", "download_audio"],
-    "expected_latency_classes": ["medium", "slow"],
-    "expected_failure_modes": ["validation_error", "dependency_unavailable", "external_error", "timeout"],
-    "trace_categories": ["media"],
+    "capability_inventory": [
+      "get_info",
+      "list_formats",
+      "download_video",
+      "download_audio"
+    ],
+    "expected_latency_classes": [
+      "medium",
+      "slow"
+    ],
+    "expected_failure_modes": [
+      "validation_error",
+      "dependency_unavailable",
+      "external_error",
+      "timeout"
+    ],
+    "trace_categories": [
+      "media"
+    ],
     "metric_names": [],
     "pack_load_state": "active"
   },
   "authors": [],
-  "tags": ["youtube", "media", "video", "audio", "yt-dlp"],
+  "tags": [
+    "youtube",
+    "media",
+    "video",
+    "audio",
+    "yt-dlp"
+  ],
   "ports": [
     {
       "port_id": "youtube",
@@ -56,17 +84,40 @@
           "capability_id": "get_info",
           "name": "get_info",
           "purpose": "Fetch video metadata (title, duration, uploader, etc.) without downloading",
-          "input_schema": { "schema": { "type": "object", "properties": { "url": { "type": "string" } }, "required": ["url"] } },
-          "output_schema": { "schema": { "description": "Video metadata object" } },
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "description": "YouTube video URL"
+                }
+              },
+              "required": [
+                "url"
+              ]
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "Video metadata object"
+            }
+          },
           "effect_class": "read_only",
           "rollback_support": "irreversible",
           "determinism_class": "partially_deterministic",
           "idempotence_class": "idempotent",
           "risk_class": "negligible",
-          "latency_profile": { "expected_latency_ms": 500, "p95_latency_ms": 5000, "max_latency_ms": 30000 },
+          "latency_profile": {
+            "expected_latency_ms": 500,
+            "p95_latency_ms": 5000,
+            "max_latency_ms": 30000
+          },
           "cost_profile": {
-            "cpu_cost_class": "low", "memory_cost_class": "low",
-            "io_cost_class": "low", "network_cost_class": "medium",
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "medium",
             "energy_cost_class": "low"
           },
           "remote_exposable": false
@@ -75,17 +126,40 @@
           "capability_id": "list_formats",
           "name": "list_formats",
           "purpose": "List available download formats and qualities for a video",
-          "input_schema": { "schema": { "type": "object", "properties": { "url": { "type": "string" } }, "required": ["url"] } },
-          "output_schema": { "schema": { "description": "Array of available formats" } },
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "description": "YouTube video URL"
+                }
+              },
+              "required": [
+                "url"
+              ]
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "Array of available formats"
+            }
+          },
           "effect_class": "read_only",
           "rollback_support": "irreversible",
           "determinism_class": "partially_deterministic",
           "idempotence_class": "idempotent",
           "risk_class": "negligible",
-          "latency_profile": { "expected_latency_ms": 500, "p95_latency_ms": 5000, "max_latency_ms": 30000 },
+          "latency_profile": {
+            "expected_latency_ms": 500,
+            "p95_latency_ms": 5000,
+            "max_latency_ms": 30000
+          },
           "cost_profile": {
-            "cpu_cost_class": "low", "memory_cost_class": "low",
-            "io_cost_class": "low", "network_cost_class": "medium",
+            "cpu_cost_class": "low",
+            "memory_cost_class": "low",
+            "io_cost_class": "low",
+            "network_cost_class": "medium",
             "energy_cost_class": "low"
           },
           "remote_exposable": false
@@ -94,17 +168,48 @@
           "capability_id": "download_video",
           "name": "download_video",
           "purpose": "Download video to disk in best quality (or specified format)",
-          "input_schema": { "schema": { "type": "object", "properties": { "url": { "type": "string" }, "format": { "type": "string" }, "merge_format": { "type": "string" } }, "required": ["url"] } },
-          "output_schema": { "schema": { "description": "Download result with filepath" } },
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "description": "YouTube video URL"
+                },
+                "format": {
+                  "type": "string",
+                  "description": "Format code or quality selector"
+                },
+                "output_path": {
+                  "type": "string",
+                  "description": "Output file path"
+                }
+              },
+              "required": [
+                "url"
+              ]
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "Download result with filepath"
+            }
+          },
           "effect_class": "external_state_mutation",
           "rollback_support": "compensating_action",
           "determinism_class": "partially_deterministic",
           "idempotence_class": "conditionally_idempotent",
           "risk_class": "low",
-          "latency_profile": { "expected_latency_ms": 5000, "p95_latency_ms": 60000, "max_latency_ms": 600000 },
+          "latency_profile": {
+            "expected_latency_ms": 5000,
+            "p95_latency_ms": 60000,
+            "max_latency_ms": 600000
+          },
           "cost_profile": {
-            "cpu_cost_class": "medium", "memory_cost_class": "medium",
-            "io_cost_class": "high", "network_cost_class": "high",
+            "cpu_cost_class": "medium",
+            "memory_cost_class": "medium",
+            "io_cost_class": "high",
+            "network_cost_class": "high",
             "energy_cost_class": "medium"
           },
           "remote_exposable": false
@@ -113,38 +218,97 @@
           "capability_id": "download_audio",
           "name": "download_audio",
           "purpose": "Download audio-only track, extracting to mp3/m4a/etc.",
-          "input_schema": { "schema": { "type": "object", "properties": { "url": { "type": "string" }, "audio_format": { "type": "string" } }, "required": ["url"] } },
-          "output_schema": { "schema": { "description": "Download result with filepath" } },
+          "input_schema": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "description": "YouTube video URL"
+                },
+                "format": {
+                  "type": "string",
+                  "description": "Audio format (mp3, m4a, etc.)"
+                },
+                "output_path": {
+                  "type": "string",
+                  "description": "Output file path"
+                }
+              },
+              "required": [
+                "url"
+              ]
+            }
+          },
+          "output_schema": {
+            "schema": {
+              "description": "Download result with filepath"
+            }
+          },
           "effect_class": "external_state_mutation",
           "rollback_support": "compensating_action",
           "determinism_class": "partially_deterministic",
           "idempotence_class": "conditionally_idempotent",
           "risk_class": "low",
-          "latency_profile": { "expected_latency_ms": 5000, "p95_latency_ms": 60000, "max_latency_ms": 600000 },
+          "latency_profile": {
+            "expected_latency_ms": 5000,
+            "p95_latency_ms": 60000,
+            "max_latency_ms": 600000
+          },
           "cost_profile": {
-            "cpu_cost_class": "medium", "memory_cost_class": "medium",
-            "io_cost_class": "high", "network_cost_class": "high",
+            "cpu_cost_class": "medium",
+            "memory_cost_class": "medium",
+            "io_cost_class": "high",
+            "network_cost_class": "high",
             "energy_cost_class": "medium"
           },
           "remote_exposable": false
         }
       ],
-      "input_schema": { "schema": { "type": "object" } },
-      "output_schema": { "schema": { "description": "any" } },
-      "failure_modes": ["validation_error", "dependency_unavailable", "external_error", "timeout"],
+      "input_schema": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "output_schema": {
+        "schema": {
+          "description": "any"
+        }
+      },
+      "failure_modes": [
+        "validation_error",
+        "dependency_unavailable",
+        "external_error",
+        "timeout"
+      ],
       "side_effect_class": "external_state_mutation",
-      "latency_profile": { "expected_latency_ms": 5000, "p95_latency_ms": 60000, "max_latency_ms": 600000 },
+      "latency_profile": {
+        "expected_latency_ms": 5000,
+        "p95_latency_ms": 60000,
+        "max_latency_ms": 600000
+      },
       "cost_profile": {
-        "cpu_cost_class": "medium", "memory_cost_class": "medium",
-        "io_cost_class": "high", "network_cost_class": "high",
+        "cpu_cost_class": "medium",
+        "memory_cost_class": "medium",
+        "io_cost_class": "high",
+        "network_cost_class": "high",
         "energy_cost_class": "medium"
       },
-      "auth_requirements": { "methods": ["local_process_trust"], "required": false },
+      "auth_requirements": {
+        "methods": [
+          "local_process_trust"
+        ],
+        "required": false
+      },
       "sandbox_requirements": {
-        "filesystem_access": true, "network_access": true,
-        "device_access": false, "process_access": true,
-        "memory_limit_mb": null, "cpu_limit_percent": null,
-        "time_limit_ms": 600000, "syscall_limit": null
+        "filesystem_access": true,
+        "network_access": true,
+        "device_access": false,
+        "process_access": true,
+        "memory_limit_mb": null,
+        "cpu_limit_percent": null,
+        "time_limit_ms": 600000,
+        "syscall_limit": null
       },
       "observable_fields": [],
       "validation_rules": [],
@@ -160,23 +324,92 @@
       "name": "Get Video Info",
       "description": "Fetch video metadata (title, duration, uploader, etc.) without downloading",
       "version": "0.1.0",
-      "inputs": { "schema": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string" } } } },
-      "outputs": { "schema": { "description": "Video metadata object" } },
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "YouTube video URL"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "Video metadata object"
+        }
+      },
       "required_resources": [],
       "preconditions": [],
       "expected_effects": [],
-      "observables": [{ "field": "title", "role": "confirm_success" }, { "field": "duration", "role": "general" }],
-      "termination_conditions": [
-        { "condition_type": "success", "expression": { "title": "present" }, "description": "video metadata returned" },
-        { "condition_type": "failure", "expression": { "error": "any" }, "description": "metadata fetch failed" }
+      "observables": [
+        {
+          "field": "title",
+          "role": "confirm_success"
+        },
+        {
+          "field": "duration",
+          "role": "general"
+        }
       ],
-      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
-      "cost_prior": { "latency": { "expected_latency_ms": 500, "p95_latency_ms": 5000, "max_latency_ms": 30000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" } },
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "title": "present"
+          },
+          "description": "video metadata returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "metadata fetch failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 500,
+          "p95_latency_ms": 5000,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "medium",
+          "energy_cost_class": "low"
+        }
+      },
       "risk_class": "negligible",
       "determinism": "partially_deterministic",
-      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
-      "tags": ["youtube", "metadata"],
-      "capability_requirements": ["port:youtube/get_info"],
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "youtube",
+        "metadata"
+      ],
+      "capability_requirements": [
+        "port:youtube/get_info"
+      ],
       "confidence_threshold": null,
       "locality": null,
       "remote_endpoint": null,
@@ -193,23 +426,88 @@
       "name": "List Formats",
       "description": "List available download formats and qualities for a video",
       "version": "0.1.0",
-      "inputs": { "schema": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string" } } } },
-      "outputs": { "schema": { "description": "Array of available formats" } },
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "YouTube video URL"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "Array of available formats"
+        }
+      },
       "required_resources": [],
       "preconditions": [],
       "expected_effects": [],
-      "observables": [{ "field": "formats", "role": "confirm_success" }],
-      "termination_conditions": [
-        { "condition_type": "success", "expression": { "formats": "present" }, "description": "format list returned" },
-        { "condition_type": "failure", "expression": { "error": "any" }, "description": "format listing failed" }
+      "observables": [
+        {
+          "field": "formats",
+          "role": "confirm_success"
+        }
       ],
-      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
-      "cost_prior": { "latency": { "expected_latency_ms": 500, "p95_latency_ms": 5000, "max_latency_ms": 30000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" } },
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "formats": "present"
+          },
+          "description": "format list returned"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "format listing failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "irreversible",
+        "compensation_skill": null,
+        "description": "read-only, no rollback needed"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 500,
+          "p95_latency_ms": 5000,
+          "max_latency_ms": 30000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "low",
+          "memory_cost_class": "low",
+          "io_cost_class": "low",
+          "network_cost_class": "medium",
+          "energy_cost_class": "low"
+        }
+      },
       "risk_class": "negligible",
       "determinism": "partially_deterministic",
-      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
-      "tags": ["youtube", "formats"],
-      "capability_requirements": ["port:youtube/list_formats"],
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "youtube",
+        "formats"
+      ],
+      "capability_requirements": [
+        "port:youtube/list_formats"
+      ],
       "confidence_threshold": null,
       "locality": null,
       "remote_endpoint": null,
@@ -226,23 +524,104 @@
       "name": "Download Video",
       "description": "Download video to disk in best quality or specified format",
       "version": "0.1.0",
-      "inputs": { "schema": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string" }, "format": { "type": "string" }, "merge_format": { "type": "string" } } } },
-      "outputs": { "schema": { "description": "Download result with filepath" } },
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "YouTube video URL"
+            },
+            "format": {
+              "type": "string",
+              "description": "Format code or quality selector"
+            },
+            "output_path": {
+              "type": "string",
+              "description": "Output file path"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "Download result with filepath"
+        }
+      },
       "required_resources": [],
       "preconditions": [],
-      "expected_effects": [{ "effect_type": "creation", "target_resource": null, "description": "video file written to disk", "patch": null }],
-      "observables": [{ "field": "filepath", "role": "confirm_success" }],
-      "termination_conditions": [
-        { "condition_type": "success", "expression": { "filepath": "present" }, "description": "video downloaded" },
-        { "condition_type": "failure", "expression": { "error": "any" }, "description": "download failed" }
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "video file written to disk",
+          "patch": null
+        }
       ],
-      "rollback_or_compensation": { "support": "compensating_action", "compensation_skill": null, "description": "delete the downloaded file" },
-      "cost_prior": { "latency": { "expected_latency_ms": 5000, "p95_latency_ms": 60000, "max_latency_ms": 600000 }, "resource_cost": { "cpu_cost_class": "medium", "memory_cost_class": "medium", "io_cost_class": "high", "network_cost_class": "high", "energy_cost_class": "medium" } },
+      "observables": [
+        {
+          "field": "filepath",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "filepath": "present"
+          },
+          "description": "video downloaded"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "download failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "compensating_action",
+        "compensation_skill": null,
+        "description": "delete the downloaded file"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 5000,
+          "p95_latency_ms": 60000,
+          "max_latency_ms": 600000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "medium",
+          "memory_cost_class": "medium",
+          "io_cost_class": "high",
+          "network_cost_class": "high",
+          "energy_cost_class": "medium"
+        }
+      },
       "risk_class": "low",
       "determinism": "partially_deterministic",
-      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
-      "tags": ["youtube", "download", "video"],
-      "capability_requirements": ["port:youtube/download_video"],
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "youtube",
+        "download",
+        "video"
+      ],
+      "capability_requirements": [
+        "port:youtube/download_video"
+      ],
       "confidence_threshold": null,
       "locality": null,
       "remote_endpoint": null,
@@ -259,23 +638,104 @@
       "name": "Download Audio",
       "description": "Download audio-only track, extracting to mp3/m4a/etc.",
       "version": "0.1.0",
-      "inputs": { "schema": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string" }, "audio_format": { "type": "string" } } } },
-      "outputs": { "schema": { "description": "Download result with filepath" } },
+      "inputs": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "YouTube video URL"
+            },
+            "format": {
+              "type": "string",
+              "description": "Audio format (mp3, m4a, etc.)"
+            },
+            "output_path": {
+              "type": "string",
+              "description": "Output file path"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      },
+      "outputs": {
+        "schema": {
+          "description": "Download result with filepath"
+        }
+      },
       "required_resources": [],
       "preconditions": [],
-      "expected_effects": [{ "effect_type": "creation", "target_resource": null, "description": "audio file written to disk", "patch": null }],
-      "observables": [{ "field": "filepath", "role": "confirm_success" }],
-      "termination_conditions": [
-        { "condition_type": "success", "expression": { "filepath": "present" }, "description": "audio downloaded" },
-        { "condition_type": "failure", "expression": { "error": "any" }, "description": "download failed" }
+      "expected_effects": [
+        {
+          "effect_type": "creation",
+          "target_resource": null,
+          "description": "audio file written to disk",
+          "patch": null
+        }
       ],
-      "rollback_or_compensation": { "support": "compensating_action", "compensation_skill": null, "description": "delete the downloaded file" },
-      "cost_prior": { "latency": { "expected_latency_ms": 5000, "p95_latency_ms": 60000, "max_latency_ms": 600000 }, "resource_cost": { "cpu_cost_class": "medium", "memory_cost_class": "medium", "io_cost_class": "high", "network_cost_class": "high", "energy_cost_class": "medium" } },
+      "observables": [
+        {
+          "field": "filepath",
+          "role": "confirm_success"
+        }
+      ],
+      "termination_conditions": [
+        {
+          "condition_type": "success",
+          "expression": {
+            "filepath": "present"
+          },
+          "description": "audio downloaded"
+        },
+        {
+          "condition_type": "failure",
+          "expression": {
+            "error": "any"
+          },
+          "description": "download failed"
+        }
+      ],
+      "rollback_or_compensation": {
+        "support": "compensating_action",
+        "compensation_skill": null,
+        "description": "delete the downloaded file"
+      },
+      "cost_prior": {
+        "latency": {
+          "expected_latency_ms": 5000,
+          "p95_latency_ms": 60000,
+          "max_latency_ms": 600000
+        },
+        "resource_cost": {
+          "cpu_cost_class": "medium",
+          "memory_cost_class": "medium",
+          "io_cost_class": "high",
+          "network_cost_class": "high",
+          "energy_cost_class": "medium"
+        }
+      },
       "risk_class": "low",
       "determinism": "partially_deterministic",
-      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
-      "tags": ["youtube", "download", "audio"],
-      "capability_requirements": ["port:youtube/download_audio"],
+      "remote_exposure": {
+        "remote_scope": "local",
+        "peer_trust_requirements": "none",
+        "serialization_requirements": "json",
+        "rate_limits": "none",
+        "replay_protection": false,
+        "observation_streaming": false,
+        "delegation_support": false,
+        "enabled": false
+      },
+      "tags": [
+        "youtube",
+        "download",
+        "audio"
+      ],
+      "capability_requirements": [
+        "port:youtube/download_audio"
+      ],
       "confidence_threshold": null,
       "locality": null,
       "remote_endpoint": null,
