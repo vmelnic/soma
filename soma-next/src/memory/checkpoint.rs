@@ -238,6 +238,7 @@ mod tests {
                 used_plan_following: false,
                 active_policy_scope: None,
                 loop_counts: std::collections::HashMap::new(),
+                pending_input_request: None,
             },
             status: SessionStatus::Completed,
             trace: SessionTrace { steps: Vec::new() },

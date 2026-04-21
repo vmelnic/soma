@@ -26,7 +26,7 @@ pub enum GoalInput {
     /// A natural-language request string that must be parsed.
     NaturalLanguage { text: String, source: GoalSource },
     /// A goal received from a peer node via the Synaptic Protocol.
-    Remote { goal: GoalSpec, peer_id: String },
+    Remote { goal: Box<GoalSpec>, peer_id: String },
 }
 
 // --- GoalRuntime trait ---
@@ -108,7 +108,7 @@ impl GoalRuntime for DefaultGoalRuntime {
                 };
                 Ok(goal)
             }
-            GoalInput::Remote { goal, peer_id: _ } => Ok(goal),
+            GoalInput::Remote { goal, peer_id: _ } => Ok(*goal),
         }
     }
 
@@ -285,7 +285,7 @@ mod tests {
         let goal = make_valid_goal();
         let expected_id = goal.goal_id;
         let input = GoalInput::Remote {
-            goal,
+            goal: Box::new(goal),
             peer_id: "peer-abc".to_string(),
         };
         let parsed = rt.parse_goal(input).unwrap();

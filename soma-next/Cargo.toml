@@ -125,6 +125,8 @@ libc = { version = "0.2", optional = true }
 mdns-sd = { version = "0.19", optional = true }
 flume = { version = "0.11", optional = true }
 hostname = { version = "0.4", optional = true }
+jmespath = { version = "0.5", features = ["sync"] }
+toon-format = "0.4"
 
 # ---------------------------------------------------------------------------
 # Target-specific deps

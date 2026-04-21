@@ -187,6 +187,24 @@ pub enum FailureDetail {
 }
 
 impl FailureDetail {
+    pub fn message(&self) -> &str {
+        match self {
+            FailureDetail::BindingMissing { message, .. }
+            | FailureDetail::PreconditionFailed { message, .. }
+            | FailureDetail::PolicyDenied { message, .. }
+            | FailureDetail::PortFailure { message, .. }
+            | FailureDetail::RemoteFailure { message, .. }
+            | FailureDetail::Other { message } => message,
+            FailureDetail::Timeout { budget_ms, elapsed_ms } => {
+                // No message field; return empty so the caller can
+                // format its own string from the numeric fields.
+                let _ = (budget_ms, elapsed_ms);
+                ""
+            }
+            FailureDetail::BudgetExhausted { dimension } => dimension,
+        }
+    }
+
     pub fn class(&self) -> SkillFailureClass {
         match self {
             FailureDetail::BindingMissing { .. } => SkillFailureClass::BindingFailure,

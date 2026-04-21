@@ -275,6 +275,9 @@ pub struct SessionControllerDeps {
     /// When present and the failure recovery action is Delegate, the controller
     /// attempts to delegate the failed skill to an available peer.
     pub delegation_manager: Option<Arc<dyn DelegationManager>>,
+    /// Projects belief state into minimal, token-efficient summaries for brain
+    /// communication. Uses JMESPath filtering + TOON encoding.
+    pub belief_projector: super::belief_projection::BeliefProjector,
 }
 
 /// SessionController holds references to all subsystems and manages sessions.
@@ -303,6 +306,8 @@ pub struct SessionController {
     brain_fallback: Option<Box<dyn BrainFallback>>,
     /// Optional delegation manager for routing failed skills to remote peers.
     delegation_manager: Option<Arc<dyn DelegationManager>>,
+    /// Projects belief state into minimal summaries for brain communication.
+    belief_projector: super::belief_projection::BeliefProjector,
     /// Default maximum steps per session if goal does not specify.
     default_max_steps: u32,
     /// Shared runtime metrics for recording session lifecycle events,
@@ -311,9 +316,11 @@ pub struct SessionController {
 }
 
 /// Checks whether a data condition expression matches an observation's structured_result.
+///
 /// The expression must be a JSON object. Each key/value pair is checked against the result:
 /// - If the value is `true`, the key just needs to exist in the result (existence check).
 /// - Otherwise, the result's value for that key must equal the expression's value exactly.
+///
 /// All entries must match (AND semantics). Non-object expressions always return false.
 fn data_condition_matches(expression: &serde_json::Value, result: &serde_json::Value) -> bool {
     match expression {
@@ -323,12 +330,8 @@ fn data_condition_matches(expression: &serde_json::Value, result: &serde_json::V
                 None => return false,
             };
             expr_map.iter().all(|(k, v)| {
-                ctx_map.get(k).map_or(false, |cv| {
-                    if *v == serde_json::Value::Bool(true) {
-                        true
-                    } else {
-                        cv == v
-                    }
+                ctx_map.get(k).is_some_and(|cv| {
+                    *v == serde_json::Value::Bool(true) || cv == v
                 })
             })
         }
@@ -353,6 +356,7 @@ impl SessionController {
             capability_scope_checker: deps.capability_scope_checker,
             brain_fallback: deps.brain_fallback,
             delegation_manager: deps.delegation_manager,
+            belief_projector: deps.belief_projector,
             default_max_steps: 100,
             metrics,
         }
@@ -377,9 +381,30 @@ impl SessionController {
         session: &mut ControlSession,
         payload: &serde_json::Value,
     ) -> Result<usize> {
+        Self::inject_bindings(session, payload, "resume_payload")
+    }
+
+    /// Inject brain-provided bindings into a `WaitingForInput` session.
+    /// Like `inject_resume_payload` but uses `"brain_provided"` source so
+    /// `bind_inputs` can set `BindingSource::BrainProvided` provenance.
+    /// Also clears the `pending_input_request`.
+    pub fn inject_brain_input(
+        session: &mut ControlSession,
+        bindings: &serde_json::Value,
+    ) -> Result<usize> {
+        let count = Self::inject_bindings(session, bindings, "brain_provided")?;
+        session.working_memory.pending_input_request = None;
+        Ok(count)
+    }
+
+    fn inject_bindings(
+        session: &mut ControlSession,
+        payload: &serde_json::Value,
+        source: &str,
+    ) -> Result<usize> {
         let obj = payload.as_object().ok_or_else(|| {
             SomaError::Session(
-                "resume payload must be a JSON object".to_string(),
+                "payload must be a JSON object".to_string(),
             )
         })?;
         let mut count = 0;
@@ -388,12 +413,49 @@ impl SessionController {
             session.belief.active_bindings.push(crate::types::belief::Binding {
                 name: k.clone(),
                 value: v.clone(),
-                source: "resume_payload".to_string(),
+                source: source.to_string(),
                 confidence: 1.0,
             });
             count += 1;
         }
         Ok(count)
+    }
+
+    /// Compute which required input slots a skill needs that are not present
+    /// in the session's belief or working memory.
+    fn compute_missing_slots(
+        skill: &SkillSpec,
+        session: &ControlSession,
+    ) -> Vec<crate::types::session::MissingSlot> {
+        let schema_obj = match skill.inputs.schema.as_object() {
+            Some(obj) => obj,
+            None => return Vec::new(),
+        };
+        let properties = match schema_obj.get("properties").and_then(|p| p.as_object()) {
+            Some(props) => props,
+            None => return Vec::new(),
+        };
+        let required: Vec<&str> = schema_obj
+            .get("required")
+            .and_then(|r| r.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+
+        let mut missing = Vec::new();
+        for (key, prop_schema) in properties {
+            if !required.contains(&key.as_str()) {
+                continue;
+            }
+            let in_wm = session.working_memory.active_bindings.iter().any(|b| b.name == *key);
+            let in_belief = session.belief.active_bindings.iter().any(|b| b.name == *key);
+            if !in_wm && !in_belief {
+                missing.push(crate::types::session::MissingSlot {
+                    name: key.clone(),
+                    schema: prop_schema.clone(),
+                });
+            }
+        }
+        missing
     }
 
     /// List all sessions as (session_id, status_string) pairs.
@@ -407,6 +469,18 @@ impl SessionController {
     /// Look up a session by ID (public convenience method).
     pub fn get_session_by_id(&self, session_id: &Uuid) -> Option<&ControlSession> {
         self.sessions.get(session_id)
+    }
+
+    pub fn get_session_by_id_mut(&mut self, session_id: &Uuid) -> Option<&mut ControlSession> {
+        self.sessions.get_mut(session_id)
+    }
+
+    pub fn project_belief(&self, session_id: &Uuid) -> Option<(serde_json::Value, serde_json::Value, String)> {
+        let session = self.sessions.get(session_id)?;
+        let full = serde_json::to_value(&session.belief).unwrap_or_default();
+        let projected = self.belief_projector.project_for_brain(&session.belief);
+        let toon = self.belief_projector.project_to_toon(&session.belief);
+        Some((full, projected, toon))
     }
 
     /// Serialize a session to JSON bytes for persistence.
@@ -587,27 +661,26 @@ impl SessionController {
                 *count += 1;
 
                 // If max_iterations is set and exceeded, auto-complete instead of looping.
-                if let Some(max) = max_iterations {
-                    if *count > *max {
-                        debug!(
-                            session_id = %session_id,
-                            step = step_index,
-                            target = target,
-                            iterations = *count - 1,
-                            max = max,
-                            "loop iteration limit reached, completing"
-                        );
-                        wm.loop_counts.clear();
-                        // Complete the current routine (or pop to parent).
-                        if let Some(frame) = wm.plan_stack.pop() {
-                            wm.active_steps = Some(frame.steps);
-                            wm.plan_step = frame.step_index;
-                            return CriticDecision::Continue;
-                        }
-                        wm.active_steps = None;
-                        wm.plan_step = 0;
-                        return CriticDecision::Stop;
+                if let Some(max) = max_iterations
+                    && *count > *max
+                {
+                    debug!(
+                        session_id = %session_id,
+                        step = step_index,
+                        target = target,
+                        iterations = *count - 1,
+                        max = max,
+                        "loop iteration limit reached, completing"
+                    );
+                    wm.loop_counts.clear();
+                    if let Some(frame) = wm.plan_stack.pop() {
+                        wm.active_steps = Some(frame.steps);
+                        wm.plan_step = frame.step_index;
+                        return CriticDecision::Continue;
                     }
+                    wm.active_steps = None;
+                    wm.plan_step = 0;
+                    return CriticDecision::Stop;
                 }
 
                 debug!(
@@ -1825,6 +1898,7 @@ impl SessionRuntime for SessionController {
                 used_plan_following: false,
                 active_policy_scope: None,
                 loop_counts: std::collections::HashMap::new(),
+                pending_input_request: None,
             },
             status: SessionStatus::Created,
             trace: SessionTrace { steps: Vec::new() },
@@ -2208,8 +2282,8 @@ impl SessionRuntime for SessionController {
                     let candidate_ids: Vec<String> = candidates.iter()
                         .map(|c| c.skill_id.clone())
                         .collect();
-                    let belief_json = serde_json::to_string(&session.belief)
-                        .unwrap_or_default();
+                    let belief_json = self.belief_projector
+                        .project_to_toon(&session.belief);
                     if let Ok(selected) = fallback.select_skill(
                         &session.goal.objective.description,
                         &candidate_ids,
@@ -2410,7 +2484,7 @@ impl SessionRuntime for SessionController {
                         // Outer wrapper from execute_skill_lifecycle — peel
                         // it to surface the underlying binding name when
                         // present.
-                        let inner = msg.splitn(2, ':').nth(1).unwrap_or(msg);
+                        let inner = msg.split_once(':').map_or(msg.as_str(), |x| x.1);
                         let binding_name = inner
                             .split('\'')
                             .nth(1)
@@ -2471,9 +2545,20 @@ impl SessionRuntime for SessionController {
                         return Err(e);
                     }
                     _ => {
+                        let err_str = e.to_string();
+                        if !err_str.starts_with("waiting_for_input:") {
+                            session.working_memory.pending_input_request =
+                                Some(crate::types::session::PendingInputRequest {
+                                    skill_id: chosen_skill.skill_id.clone(),
+                                    missing_slots: Self::compute_missing_slots(
+                                        &chosen_skill,
+                                        session,
+                                    ),
+                                });
+                        }
                         session.status = SessionStatus::WaitingForInput;
                         session.updated_at = Utc::now();
-                        return Ok(StepResult::WaitingForInput(e.to_string()));
+                        return Ok(StepResult::WaitingForInput(err_str));
                     }
                 }
             }
@@ -2552,13 +2637,21 @@ impl SessionRuntime for SessionController {
                     .unwrap_or(NextStep::Abandon)
             };
 
-            Self::apply_next_step(
+            let prev_step = session.working_memory.plan_step;
+            let decision = Self::apply_next_step(
                 &next_action,
                 &mut session.working_memory,
                 &*self.routine_memory,
                 session.session_id,
                 step_index,
-            )
+            );
+            if session.working_memory.plan_step != prev_step {
+                session.belief.active_bindings.retain(|b| {
+                    b.source == "goal_field" || b.source == "goal"
+                });
+                session.working_memory.active_bindings.clear();
+            }
+            decision
         } else if session.working_memory.active_plan.is_some() {
             // Legacy active_plan path (flat skill sequence, no branching)
             if !observation.success {
@@ -2600,9 +2693,13 @@ impl SessionRuntime for SessionController {
 
         // ---------------------------------------------------------------
         // Failure recovery: when the observation reports failure, consult
-        // handle_failure to decide the recovery strategy.
+        // handle_failure to decide the recovery strategy — unless the
+        // critic already detected a dead end (repeated identical failures).
         // ---------------------------------------------------------------
         let step_result = if !observation.success {
+            if critic_decision == CriticDecision::Stop {
+                StepResult::Completed
+            } else {
             let recovery = self.handle_failure(session, &chosen_skill, &observation, step_index);
             debug!(
                 session_id = %session.session_id,
@@ -2692,6 +2789,7 @@ impl SessionRuntime for SessionController {
                         chosen_skill.skill_id
                     ))
                 }
+            }
             }
         } else {
             // Successful observation — use the critic's decision.
@@ -3282,6 +3380,7 @@ mod tests {
             capability_scope_checker: None,
             brain_fallback: None,
             delegation_manager: None,
+            belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
         }, test_metrics())
     }
 
@@ -3300,6 +3399,7 @@ mod tests {
             capability_scope_checker: None,
             brain_fallback: None,
             delegation_manager: None,
+            belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
         }, test_metrics())
     }
 
@@ -3698,6 +3798,7 @@ mod tests {
             capability_scope_checker: None,
             brain_fallback: None,
             delegation_manager: None,
+            belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
         }, test_metrics());
 
         let goal = test_goal();
@@ -3757,6 +3858,7 @@ mod tests {
             capability_scope_checker: None,
             brain_fallback: None,
             delegation_manager: None,
+            belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
         }, test_metrics());
 
         let goal = test_goal();
@@ -3855,6 +3957,7 @@ mod tests {
             capability_scope_checker: None,
             brain_fallback: None,
             delegation_manager: None,
+            belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
         }, test_metrics());
 
         let goal = test_goal();
@@ -3975,6 +4078,7 @@ mod tests {
             capability_scope_checker: None,
             brain_fallback: None,
             delegation_manager: None,
+            belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
         }, test_metrics());
 
         let goal = test_goal();
@@ -4044,6 +4148,7 @@ mod tests {
             capability_scope_checker: None,
             brain_fallback: None,
             delegation_manager: None,
+            belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
         }, test_metrics());
 
         let goal = test_goal();
@@ -4137,6 +4242,7 @@ mod tests {
             capability_scope_checker: None,
             brain_fallback: None,
             delegation_manager: None,
+            belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
         }, test_metrics());
 
         let goal = test_goal();
@@ -4402,6 +4508,7 @@ mod tests {
             capability_scope_checker: Some(scope_checker),
             brain_fallback: None,
             delegation_manager: None,
+            belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
         }, test_metrics());
 
         let goal = test_goal(); // User source -> Local scope
@@ -4437,6 +4544,7 @@ mod tests {
             capability_scope_checker: Some(scope_checker),
             brain_fallback: None,
             delegation_manager: None,
+            belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
         }, test_metrics());
 
         // Peer source -> Peer scope, which is broader than the skill's Local scope.
@@ -4480,6 +4588,7 @@ mod tests {
             capability_scope_checker: Some(scope_checker),
             brain_fallback: None,
             delegation_manager: None,
+            belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
         }, test_metrics());
 
         let mut goal = test_goal();
@@ -4509,6 +4618,7 @@ mod tests {
             capability_scope_checker: None,
             brain_fallback: None,
             delegation_manager: None,
+            belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
         }, test_metrics());
 
         // Even a Peer-sourced goal executes fine without a scope checker.
@@ -4542,6 +4652,7 @@ mod tests {
             capability_scope_checker: Some(scope_checker),
             brain_fallback: None,
             delegation_manager: None,
+            belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
         }, test_metrics());
 
         let mut goal = test_goal();
@@ -4923,6 +5034,7 @@ mod tests {
             used_plan_following: false,
             active_policy_scope: None,
             loop_counts: std::collections::HashMap::new(),
+            pending_input_request: None,
         }
     }
 

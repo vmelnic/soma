@@ -222,10 +222,10 @@ fn handle_webhook_request(
             break;
         }
         let lower = trimmed.to_lowercase();
-        if lower.starts_with("content-length:") {
-            if let Ok(len) = lower["content-length:".len()..].trim().parse::<usize>() {
-                content_length = len;
-            }
+        if let Some(val) = lower.strip_prefix("content-length:")
+            && let Ok(len) = val.trim().parse::<usize>()
+        {
+            content_length = len;
         }
     }
 
@@ -253,7 +253,7 @@ fn handle_webhook_request(
     // Otherwise read whatever is available (handles chunked or missing header).
     let body_bytes = if content_length > 0 {
         let mut buf = vec![0u8; content_length];
-        reader.read_exact(&mut buf).map_err(|e| crate::errors::SomaError::Io(e))?;
+        reader.read_exact(&mut buf).map_err(crate::errors::SomaError::Io)?;
         buf
     } else {
         // No Content-Length — read what's available (with timeout protecting us).

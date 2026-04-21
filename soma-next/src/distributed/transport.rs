@@ -620,7 +620,7 @@ impl IncomingHandler for LocalDispatchHandler {
                         };
                     }
                 };
-                if input.is_object() && !input.as_object().map_or(true, |m| m.is_empty()) {
+                if input.is_object() && !input.as_object().is_none_or(|m| m.is_empty()) {
                     goal_spec.objective.structured = Some(input);
                 }
                 let mut session = match rt.session_controller.create_session(goal_spec) {
@@ -645,11 +645,9 @@ impl IncomingHandler for LocalDispatchHandler {
                 session.working_memory.plan_step = 0;
                 let mut success = false;
                 let mut final_observation = serde_json::json!(null);
-                let mut step_count = 0u32;
                 let mut last_error: Option<String> = None;
                 let max_steps = 100;
-                for _ in 0..max_steps {
-                    step_count += 1;
+                for _step_count in 0..max_steps {
                     match rt.session_controller.run_step(&mut session) {
                         Ok(step_result) => match step_result {
                             crate::runtime::session::StepResult::Continue => {
@@ -698,10 +696,8 @@ impl IncomingHandler for LocalDispatchHandler {
                     }
                 }
 
-                if final_observation.is_null() {
-                    if let Some(error) = last_error {
-                        final_observation = serde_json::json!({"error": error});
-                    }
+                if final_observation.is_null() && let Some(error) = last_error {
+                    final_observation = serde_json::json!({"error": error});
                 }
 
                 TransportResponse::SkillResult {

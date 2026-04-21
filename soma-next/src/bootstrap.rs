@@ -377,6 +377,7 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
         capability_scope_checker: None,
         brain_fallback: None,
         delegation_manager: None,
+        belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());
@@ -593,6 +594,7 @@ pub fn bootstrap_with_remote(
         capability_scope_checker: None,
         brain_fallback: None,
         delegation_manager: None,
+        belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());
@@ -757,6 +759,7 @@ pub fn bootstrap_from_specs(
         capability_scope_checker: None,
         brain_fallback: None,
         delegation_manager: None,
+        belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());
@@ -944,6 +947,7 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
         capability_scope_checker: None,
         brain_fallback: None,
         delegation_manager: None,
+        belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());

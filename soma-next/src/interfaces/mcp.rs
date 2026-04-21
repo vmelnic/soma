@@ -384,6 +384,10 @@ impl McpServer {
             "cancel_goal" => self.handle_cancel_goal(request.id, request.params),
             "inspect_session" => self.handle_inspect_session(request.id, request.params),
             "inspect_belief" => self.handle_inspect_belief(request.id, request.params),
+            "inspect_belief_projection" => self.handle_inspect_belief_projection(request.id, request.params),
+            "provide_session_input" => self.handle_provide_session_input(request.id, request.params),
+            "inject_plan" => self.handle_inject_plan(request.id, request.params),
+            "find_routines" => self.handle_find_routines(request.id, request.params),
             "inspect_resources" => self.handle_inspect_resources(request.id, request.params),
             "inspect_packs" => self.handle_inspect_packs(request.id, request.params),
             "inspect_skills" => self.handle_inspect_skills(request.id, request.params),
@@ -491,6 +495,10 @@ impl McpServer {
             "cancel_goal" => self.handle_cancel_goal(inner_id, arguments),
             "inspect_session" => self.handle_inspect_session(inner_id, arguments),
             "inspect_belief" => self.handle_inspect_belief(inner_id, arguments),
+            "inspect_belief_projection" => self.handle_inspect_belief_projection(inner_id, arguments),
+            "provide_session_input" => self.handle_provide_session_input(inner_id, arguments),
+            "inject_plan" => self.handle_inject_plan(inner_id, arguments),
+            "find_routines" => self.handle_find_routines(inner_id, arguments),
             "inspect_resources" => self.handle_inspect_resources(inner_id, arguments),
             "inspect_packs" => self.handle_inspect_packs(inner_id, arguments),
             "inspect_skills" => self.handle_inspect_skills(inner_id, arguments),
@@ -835,10 +843,10 @@ impl McpServer {
         if let Some(ms) = max_steps_override {
             goal.max_steps = Some(ms);
         }
-        if let Some(inputs) = params.get("inputs").cloned() {
-            if inputs.is_object() {
-                goal.objective.structured = Some(inputs);
-            }
+        if let Some(inputs) = params.get("inputs").cloned()
+            && inputs.is_object()
+        {
+            goal.objective.structured = Some(inputs);
         }
         if let Some(ms) = params
             .get("latency_budget_ms")
@@ -1165,37 +1173,59 @@ impl McpServer {
                 }
             };
 
+            // Check async goal entries first (their session is the live copy).
+            let async_entry = rt
+                .goal_registry
+                .list()
+                .into_iter()
+                .filter_map(|gid| rt.goal_registry.get(&gid))
+                .find(|e| e.session_id == uuid);
+
+            let build_response = |session: &crate::types::session::ControlSession| {
+                serde_json::json!({
+                    "session_id": session.session_id.to_string(),
+                    "status": format!("{:?}", session.status),
+                    "objective": session.goal.objective.description,
+                    "working_memory": {
+                        "active_bindings": session.working_memory.active_bindings.len(),
+                        "unresolved_slots": &session.working_memory.unresolved_slots,
+                        "current_subgoal": &session.working_memory.current_subgoal,
+                        "candidate_shortlist": &session.working_memory.candidate_shortlist,
+                        "plan_step": session.working_memory.plan_step,
+                        "has_active_steps": session.working_memory.active_steps.is_some(),
+                        "active_steps_len": session.working_memory.active_steps.as_ref().map(|s| s.len()).unwrap_or(0),
+                        "has_active_plan": session.working_memory.active_plan.is_some(),
+                        "plan_stack_depth": session.working_memory.plan_stack.len(),
+                        "used_plan_following": session.working_memory.used_plan_following,
+                        "pending_input_request": session.working_memory.pending_input_request.as_ref().map(|r| {
+                            serde_json::json!({
+                                "skill_id": r.skill_id,
+                                "missing_slots": r.missing_slots.iter().map(|s| {
+                                    serde_json::json!({"name": s.name, "schema": s.schema})
+                                }).collect::<Vec<_>>()
+                            })
+                        }),
+                    },
+                    "budget_remaining": {
+                        "risk_remaining": session.budget_remaining.risk_remaining,
+                        "latency_remaining_ms": session.budget_remaining.latency_remaining_ms,
+                        "resource_remaining": session.budget_remaining.resource_remaining,
+                        "steps_remaining": session.budget_remaining.steps_remaining
+                    },
+                    "step_count": session.trace.steps.len(),
+                    "created_at": session.created_at.to_rfc3339(),
+                    "updated_at": session.updated_at.to_rfc3339()
+                })
+            };
+
+            if let Some(entry) = async_entry.as_ref() {
+                let session = entry.session.lock().unwrap();
+                return Ok(Self::success_response(id, build_response(&session)));
+            }
+
             let ctrl = rt.session_controller.lock().unwrap();
             match ctrl.get_session(&uuid) {
-                Some(session) => Ok(Self::success_response(
-                    id,
-                    serde_json::json!({
-                        "session_id": session.session_id.to_string(),
-                        "status": format!("{:?}", session.status),
-                        "objective": session.goal.objective.description,
-                        "working_memory": {
-                            "active_bindings": session.working_memory.active_bindings.len(),
-                            "unresolved_slots": &session.working_memory.unresolved_slots,
-                            "current_subgoal": &session.working_memory.current_subgoal,
-                            "candidate_shortlist": &session.working_memory.candidate_shortlist,
-                            "plan_step": session.working_memory.plan_step,
-                            "has_active_steps": session.working_memory.active_steps.is_some(),
-                            "active_steps_len": session.working_memory.active_steps.as_ref().map(|s| s.len()).unwrap_or(0),
-                            "has_active_plan": session.working_memory.active_plan.is_some(),
-                            "plan_stack_depth": session.working_memory.plan_stack.len(),
-                            "used_plan_following": session.working_memory.used_plan_following,
-                        },
-                        "budget_remaining": {
-                            "risk_remaining": session.budget_remaining.risk_remaining,
-                            "latency_remaining_ms": session.budget_remaining.latency_remaining_ms,
-                            "resource_remaining": session.budget_remaining.resource_remaining,
-                            "steps_remaining": session.budget_remaining.steps_remaining
-                        },
-                        "step_count": session.trace.steps.len(),
-                        "created_at": session.created_at.to_rfc3339(),
-                        "updated_at": session.updated_at.to_rfc3339()
-                    }),
-                )),
+                Some(session) => Ok(Self::success_response(id, build_response(session))),
                 None => Ok(Self::error_response(
                     id,
                     INVALID_PARAMS,
@@ -1296,6 +1326,470 @@ impl McpServer {
                 }),
             ))
         }
+    }
+
+    fn handle_inspect_belief_projection(&self, id: Value, params: Option<Value>) -> Result<McpResponse> {
+        let session_id_str = match Self::extract_session_id(&params) {
+            Some(sid) => sid,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "session_id required".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        if let Some(rt) = self.runtime.get() {
+            let uuid = match Uuid::parse_str(&session_id_str) {
+                Ok(u) => u,
+                Err(_) => {
+                    return Ok(Self::error_response(
+                        id,
+                        INVALID_PARAMS,
+                        "session_id must be a valid UUID".to_string(),
+                        None,
+                    ));
+                }
+            };
+
+            let ctrl = rt.session_controller.lock().unwrap();
+            match ctrl.project_belief(&uuid) {
+                Some((full_belief, projected, toon_encoded)) => {
+                    let full_size = serde_json::to_string(&full_belief)
+                        .map(|s| s.len())
+                        .unwrap_or(0);
+                    let projected_size = serde_json::to_string(&projected)
+                        .map(|s| s.len())
+                        .unwrap_or(0);
+                    let toon_size = toon_encoded.len();
+
+                    Ok(Self::success_response(
+                        id,
+                        serde_json::json!({
+                            "session_id": session_id_str,
+                            "full_belief": full_belief,
+                            "projected": projected,
+                            "toon_encoded": toon_encoded,
+                            "size_comparison": {
+                                "full_json_bytes": full_size,
+                                "projected_json_bytes": projected_size,
+                                "toon_bytes": toon_size,
+                                "projection_reduction_pct": if full_size > 0 {
+                                    ((1.0 - projected_size as f64 / full_size as f64) * 100.0).round()
+                                } else { 0.0 },
+                                "toon_reduction_pct": if full_size > 0 {
+                                    ((1.0 - toon_size as f64 / full_size as f64) * 100.0).round()
+                                } else { 0.0 },
+                            }
+                        }),
+                    ))
+                }
+                None => Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    format!("session not found: {session_id_str}"),
+                    None,
+                )),
+            }
+        } else {
+            Ok(Self::error_response(
+                id,
+                INTERNAL_ERROR,
+                "runtime not initialized".to_string(),
+                None,
+            ))
+        }
+    }
+
+    fn handle_provide_session_input(&self, id: Value, params: Option<Value>) -> Result<McpResponse> {
+        let session_id_str = match Self::extract_session_id(&params) {
+            Some(sid) => sid,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "session_id required".to_string(),
+                    None,
+                ));
+            }
+        };
+        let bindings = match params.as_ref().and_then(|p| p.get("bindings")) {
+            Some(b) if b.is_object() => b.clone(),
+            _ => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "bindings required (JSON object of name → value)".to_string(),
+                    None,
+                ));
+            }
+        };
+        let redirect_skill_id = params
+            .as_ref()
+            .and_then(|p| p.get("redirect_skill_id"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        if let Some(rt) = self.runtime.get() {
+            let uuid = match Uuid::parse_str(&session_id_str) {
+                Ok(u) => u,
+                Err(_) => {
+                    return Ok(Self::error_response(
+                        id,
+                        INVALID_PARAMS,
+                        "session_id must be a valid UUID".to_string(),
+                        None,
+                    ));
+                }
+            };
+
+            let async_entry = rt
+                .goal_registry
+                .list()
+                .into_iter()
+                .filter_map(|gid| rt.goal_registry.get(&gid))
+                .find(|e| e.session_id == uuid);
+
+            let injected_count;
+            if let Some(entry) = async_entry.as_ref() {
+                let mut session = entry.session.lock().unwrap();
+                if session.status != crate::types::session::SessionStatus::WaitingForInput {
+                    return Ok(Self::error_response(
+                        id,
+                        INVALID_PARAMS,
+                        format!(
+                            "session is {:?}, not WaitingForInput",
+                            session.status
+                        ),
+                        None,
+                    ));
+                }
+                injected_count = match crate::runtime::session::SessionController::inject_brain_input(
+                    &mut session,
+                    &bindings,
+                ) {
+                    Ok(n) => n,
+                    Err(e) => {
+                        return Ok(Self::error_response(
+                            id,
+                            INVALID_PARAMS,
+                            format!("invalid bindings: {e}"),
+                            None,
+                        ));
+                    }
+                };
+                if let Some(ref skill_id) = redirect_skill_id {
+                    session.working_memory.active_steps = Some(vec![
+                        crate::types::routine::CompiledStep::Skill {
+                            skill_id: skill_id.clone(),
+                            on_success: crate::types::routine::NextStep::Continue,
+                            on_failure: crate::types::routine::NextStep::Continue,
+                            conditions: vec![],
+                        },
+                    ]);
+                    session.working_memory.plan_step = 0;
+                    session.working_memory.active_plan = None;
+                    session.working_memory.used_plan_following = true;
+                }
+                let mut ctrl = rt.session_controller.lock().unwrap();
+                if let Err(e) = ctrl.resume(&mut session) {
+                    return Ok(Self::error_response(
+                        id,
+                        INTERNAL_ERROR,
+                        format!("resume failed: {e}"),
+                        None,
+                    ));
+                }
+                drop(session);
+                drop(ctrl);
+
+                let ctx = crate::runtime::goal_registry::OwnedEpisodeContext {
+                    episode_store: Arc::clone(&rt.episode_store),
+                    schema_store: Arc::clone(&rt.schema_store),
+                    routine_store: Arc::clone(&rt.routine_store),
+                    embedder: Arc::clone(&rt.embedder),
+                    world_state: Arc::clone(&rt.world_state),
+                    skill_stats: Some(Arc::clone(&rt.skill_stats)),
+                };
+                crate::runtime::goal_registry::spawn_async_goal(
+                    Arc::clone(entry),
+                    Arc::clone(&rt.session_controller),
+                    Arc::clone(&rt.checkpoint_store),
+                    rt.checkpoint_every_n_steps,
+                    ctx,
+                );
+            } else {
+                let mut ctrl = rt.session_controller.lock().unwrap();
+                let mut session = match ctrl.get_session(&uuid).cloned() {
+                    Some(s) => s,
+                    None => {
+                        return Ok(Self::error_response(
+                            id,
+                            INVALID_PARAMS,
+                            format!("session not found: {session_id_str}"),
+                            None,
+                        ));
+                    }
+                };
+                if session.status != crate::types::session::SessionStatus::WaitingForInput {
+                    return Ok(Self::error_response(
+                        id,
+                        INVALID_PARAMS,
+                        format!(
+                            "session is {:?}, not WaitingForInput",
+                            session.status
+                        ),
+                        None,
+                    ));
+                }
+                injected_count = match crate::runtime::session::SessionController::inject_brain_input(
+                    &mut session,
+                    &bindings,
+                ) {
+                    Ok(n) => n,
+                    Err(e) => {
+                        return Ok(Self::error_response(
+                            id,
+                            INVALID_PARAMS,
+                            format!("invalid bindings: {e}"),
+                            None,
+                        ));
+                    }
+                };
+                if let Some(ref skill_id) = redirect_skill_id {
+                    session.working_memory.active_steps = Some(vec![
+                        crate::types::routine::CompiledStep::Skill {
+                            skill_id: skill_id.clone(),
+                            on_success: crate::types::routine::NextStep::Continue,
+                            on_failure: crate::types::routine::NextStep::Continue,
+                            conditions: vec![],
+                        },
+                    ]);
+                    session.working_memory.plan_step = 0;
+                    session.working_memory.active_plan = None;
+                    session.working_memory.used_plan_following = true;
+                }
+                if let Err(e) = ctrl.resume(&mut session) {
+                    return Ok(Self::error_response(
+                        id,
+                        INTERNAL_ERROR,
+                        format!("resume failed: {e}"),
+                        None,
+                    ));
+                }
+            }
+
+            let mut resp = serde_json::json!({
+                "session_id": session_id_str,
+                "bindings_injected": injected_count,
+                "status": "resumed",
+            });
+            if let Some(ref skill_id) = redirect_skill_id {
+                resp["redirected_to"] = serde_json::json!(skill_id);
+            }
+            Ok(Self::success_response(id, resp))
+        } else {
+            Ok(Self::error_response(
+                id,
+                INTERNAL_ERROR,
+                "runtime not initialized".to_string(),
+                None,
+            ))
+        }
+    }
+
+    fn handle_inject_plan(&self, id: Value, params: Option<Value>) -> Result<McpResponse> {
+        let session_id_str = match Self::extract_session_id(&params) {
+            Some(sid) => sid,
+            None => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "session_id required".to_string(),
+                    None,
+                ));
+            }
+        };
+        let steps_val = match params.as_ref().and_then(|p| p.get("steps")) {
+            Some(s) if s.is_array() => s.clone(),
+            _ => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    "steps required (array of CompiledStep)".to_string(),
+                    None,
+                ));
+            }
+        };
+        let steps: Vec<crate::types::routine::CompiledStep> = match serde_json::from_value(steps_val) {
+            Ok(s) => s,
+            Err(e) => {
+                return Ok(Self::error_response(
+                    id,
+                    INVALID_PARAMS,
+                    format!("invalid steps: {e}"),
+                    None,
+                ));
+            }
+        };
+        if steps.is_empty() {
+            return Ok(Self::error_response(
+                id,
+                INVALID_PARAMS,
+                "steps must not be empty".to_string(),
+                None,
+            ));
+        }
+
+        if let Some(rt) = self.runtime.get() {
+            let uuid = match Uuid::parse_str(&session_id_str) {
+                Ok(u) => u,
+                Err(_) => {
+                    return Ok(Self::error_response(
+                        id,
+                        INVALID_PARAMS,
+                        "session_id must be a valid UUID".to_string(),
+                        None,
+                    ));
+                }
+            };
+
+            let step_count = steps.len();
+
+            let async_entry = rt
+                .goal_registry
+                .list()
+                .into_iter()
+                .filter_map(|gid| rt.goal_registry.get(&gid))
+                .find(|e| e.session_id == uuid);
+
+            if let Some(entry) = async_entry.as_ref() {
+                let mut session = entry.session.lock().unwrap();
+                session.working_memory.active_steps = Some(steps);
+                session.working_memory.plan_step = 0;
+                session.working_memory.active_plan = None;
+                session.working_memory.used_plan_following = true;
+            } else {
+                let mut ctrl = rt.session_controller.lock().unwrap();
+                let session = match ctrl.get_session_by_id_mut(&uuid) {
+                    Some(s) => s,
+                    None => {
+                        return Ok(Self::error_response(
+                            id,
+                            INVALID_PARAMS,
+                            format!("session not found: {session_id_str}"),
+                            None,
+                        ));
+                    }
+                };
+                session.working_memory.active_steps = Some(steps);
+                session.working_memory.plan_step = 0;
+                session.working_memory.active_plan = None;
+                session.working_memory.used_plan_following = true;
+            }
+
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({
+                    "session_id": session_id_str,
+                    "steps_injected": step_count,
+                }),
+            ))
+        } else {
+            Ok(Self::error_response(
+                id,
+                INTERNAL_ERROR,
+                "runtime not initialized".to_string(),
+                None,
+            ))
+        }
+    }
+
+    fn handle_find_routines(&self, id: Value, params: Option<Value>) -> Result<McpResponse> {
+        let query = params
+            .as_ref()
+            .and_then(|p| p.get("query"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let limit = params
+            .as_ref()
+            .and_then(|p| p.get("limit"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(5) as usize;
+
+        if let Some(rt) = self.runtime.get() {
+            let routine_store = rt.routine_store.lock().unwrap();
+            let all_routines = routine_store.list_all();
+
+            let mut results: Vec<serde_json::Value> = Vec::new();
+
+            if query.is_empty() {
+                for r in all_routines.iter().take(limit) {
+                    results.push(Self::routine_summary(r));
+                }
+            } else {
+                use crate::memory::embedder::GoalEmbedder;
+                let embedder = crate::memory::embedder::HashEmbedder::new();
+                let query_emb = embedder.embed(query);
+                let mut scored: Vec<(f64, &crate::types::routine::Routine)> = all_routines
+                    .iter()
+                    .map(|&r| {
+                        let goal_fp = r.match_conditions.iter()
+                            .find(|c| c.condition_type == "goal_fingerprint")
+                            .and_then(|c| c.expression.get("goal_fingerprint"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let r_text = format!(
+                            "{} {}",
+                            goal_fp,
+                            r.compiled_skill_path.join(" ")
+                        );
+                        let r_emb = embedder.embed(&r_text);
+                        let sim = embedder.similarity(&query_emb, &r_emb);
+                        (sim, r)
+                    })
+                    .collect();
+                scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                for (score, r) in scored.into_iter().take(limit) {
+                    let mut summary = Self::routine_summary(r);
+                    summary["similarity"] = serde_json::json!(score);
+                    results.push(summary);
+                }
+            }
+
+            Ok(Self::success_response(
+                id,
+                serde_json::json!({
+                    "routines": results,
+                    "total": all_routines.len(),
+                }),
+            ))
+        } else {
+            Ok(Self::error_response(
+                id,
+                INTERNAL_ERROR,
+                "runtime not initialized".to_string(),
+                None,
+            ))
+        }
+    }
+
+    fn routine_summary(r: &crate::types::routine::Routine) -> serde_json::Value {
+        let goal_fp = r.match_conditions.iter()
+            .find(|c| c.condition_type == "goal_fingerprint")
+            .and_then(|c| c.expression.get("goal_fingerprint"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        serde_json::json!({
+            "routine_id": r.routine_id,
+            "goal_fingerprint": goal_fp,
+            "skill_path": r.compiled_skill_path,
+            "steps": r.effective_steps().len(),
+            "confidence": r.confidence,
+            "version": r.version,
+        })
     }
 
     fn handle_inspect_resources(&self, id: Value, _params: Option<Value>) -> Result<McpResponse> {
@@ -2969,17 +3463,15 @@ impl McpServer {
         // Resolve short port names (e.g. "smtp") to full port IDs
         // (e.g. "soma.smtp") so the scheduler can invoke them directly.
         let port_id = params.get("port_id").and_then(|v| v.as_str()).map(|s| {
-            if let Some(rt) = self.runtime.get() {
-                if let Ok(pr) = rt.port_runtime.lock() {
-                    // If the exact ID exists, use it. Otherwise search for
-                    // a registered port whose ID ends with the given name.
-                    if pr.get_port(s).is_some() {
-                        return s.to_string();
-                    }
-                    for p in pr.list_ports(None) {
-                        if p.port_id.ends_with(s) || p.port_id.ends_with(&format!(".{}", s)) {
-                            return p.port_id.clone();
-                        }
+            if let Some(rt) = self.runtime.get()
+                && let Ok(pr) = rt.port_runtime.lock()
+            {
+                if pr.get_port(s).is_some() {
+                    return s.to_string();
+                }
+                for p in pr.list_ports(None) {
+                    if p.port_id.ends_with(s) || p.port_id.ends_with(&format!(".{}", s)) {
+                        return p.port_id.clone();
                     }
                 }
             }
@@ -4479,10 +4971,10 @@ impl McpServer {
         for sub_id in &sub_routine_ids {
             if let Some(sub_routine) = rs.get(sub_id) {
                 for step in sub_routine.effective_steps() {
-                    if let crate::types::routine::CompiledStep::Skill { skill_id, .. } = &step {
-                        if !all_skill_ids.contains(skill_id) {
-                            all_skill_ids.push(skill_id.clone());
-                        }
+                    if let crate::types::routine::CompiledStep::Skill { skill_id, .. } = &step
+                        && !all_skill_ids.contains(skill_id)
+                    {
+                        all_skill_ids.push(skill_id.clone());
                     }
                 }
             }
@@ -5237,6 +5729,78 @@ impl McpServer {
                 }),
             },
             McpTool {
+                name: "inspect_belief_projection".to_string(),
+                description: "Show full belief vs JMESPath-projected vs TOON-encoded for a session. Compares sizes and reduction percentages.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "string",
+                            "description": "The session UUID"
+                        }
+                    },
+                    "required": ["session_id"]
+                }),
+            },
+            McpTool {
+                name: "provide_session_input".to_string(),
+                description: "Provide missing input bindings to a WaitingForInput session. The external brain calls this after inspecting the session's pending_input_request to fill slots the body could not resolve. Optionally override the skill selection with redirect_skill_id. Auto-resumes the session.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "string",
+                            "description": "The session UUID (must be in WaitingForInput status)"
+                        },
+                        "bindings": {
+                            "type": "object",
+                            "description": "JSON object of slot_name → value for each missing input"
+                        },
+                        "redirect_skill_id": {
+                            "type": "string",
+                            "description": "Optional: override the body's skill selection. The next step will execute this skill instead of the originally selected one."
+                        }
+                    },
+                    "required": ["session_id", "bindings"]
+                }),
+            },
+            McpTool {
+                name: "inject_plan".to_string(),
+                description: "Inject a compiled execution plan into a session. The body will follow the plan steps in order using its existing plan-following engine. Used by the brain orchestrator to compose multi-step workflows from known routines and skills.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "string",
+                            "description": "The session UUID"
+                        },
+                        "steps": {
+                            "type": "array",
+                            "description": "Array of CompiledStep objects. Each is either {\"Skill\":{\"skill_id\":\"...\"}} or {\"SubRoutine\":{\"routine_id\":\"...\"}}.",
+                            "items": { "type": "object" }
+                        }
+                    },
+                    "required": ["session_id", "steps"]
+                }),
+            },
+            McpTool {
+                name: "find_routines".to_string(),
+                description: "Search compiled routines by similarity to a goal description. Returns matching routines with their skill paths and confidence. Used by the brain to check if a sub-goal already has a learned routine before composing a plan.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Goal description to search for. If empty, lists all routines."
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of results (default: 5)"
+                        }
+                    }
+                }),
+            },
+            McpTool {
                 name: "inspect_resources".to_string(),
                 description: "List or get resources known to the runtime.".to_string(),
                 input_schema: serde_json::json!({
@@ -5938,7 +6502,7 @@ mod tests {
     fn test_list_tools_count() {
         let server = McpServer::new_stub();
         let tools = server.list_tools();
-        assert_eq!(tools.len(), 44);
+        assert_eq!(tools.len(), 48);
     }
 
     #[test]
@@ -5948,6 +6512,7 @@ mod tests {
         assert!(names.contains(&"create_goal".to_string()));
         assert!(names.contains(&"inspect_session".to_string()));
         assert!(names.contains(&"inspect_belief".to_string()));
+        assert!(names.contains(&"provide_session_input".to_string()));
         assert!(names.contains(&"inspect_resources".to_string()));
         assert!(names.contains(&"inspect_packs".to_string()));
         assert!(names.contains(&"inspect_skills".to_string()));
@@ -5975,6 +6540,71 @@ mod tests {
         assert!(names.contains(&"review_routine".to_string()));
         assert!(names.contains(&"handoff_session".to_string()));
         assert!(names.contains(&"claim_session".to_string()));
+        assert!(names.contains(&"inject_plan".to_string()));
+        assert!(names.contains(&"find_routines".to_string()));
+    }
+
+    #[test]
+    fn test_inject_plan_missing_session() {
+        let server = McpServer::new_stub();
+        let resp = server.handle_request(McpRequest {
+            jsonrpc: "2.0".to_string(),
+            id: serde_json::json!(1),
+            method: "tools/call".to_string(),
+            params: Some(serde_json::json!({
+                "name": "inject_plan",
+                "arguments": {
+                    "session_id": "00000000-0000-0000-0000-000000000001",
+                    "steps": [{"type": "skill", "skill_id": "test.skill"}]
+                }
+            })),
+        }).unwrap();
+        let text = resp.result
+            .and_then(|r| r.get("content").cloned())
+            .and_then(|c| c.as_array().cloned())
+            .and_then(|a| a.first().cloned())
+            .and_then(|c| c.get("text").cloned())
+            .and_then(|t| t.as_str().map(|s| s.to_string()));
+        let has_error = resp.error.is_some()
+            || text.as_deref().map(|t| t.contains("not found")).unwrap_or(false)
+            || text.as_deref().map(|t| t.contains("error")).unwrap_or(false);
+        assert!(has_error);
+    }
+
+    #[test]
+    fn test_inject_plan_empty_steps_rejected() {
+        let server = McpServer::new_stub();
+        let resp = server.handle_request(McpRequest {
+            jsonrpc: "2.0".to_string(),
+            id: serde_json::json!(1),
+            method: "tools/call".to_string(),
+            params: Some(serde_json::json!({
+                "name": "inject_plan",
+                "arguments": {
+                    "session_id": "00000000-0000-0000-0000-000000000001",
+                    "steps": []
+                }
+            })),
+        }).unwrap();
+        assert!(resp.error.is_some());
+    }
+
+    #[test]
+    fn test_find_routines_stub_returns_error() {
+        let server = McpServer::new_stub();
+        let resp = server.handle_request(McpRequest {
+            jsonrpc: "2.0".to_string(),
+            id: serde_json::json!(1),
+            method: "tools/call".to_string(),
+            params: Some(serde_json::json!({
+                "name": "find_routines",
+                "arguments": {
+                    "query": "compute sha256 hash",
+                    "limit": 5
+                }
+            })),
+        }).unwrap();
+        assert!(resp.error.is_some());
     }
 
     #[test]
@@ -6482,7 +7112,7 @@ mod tests {
     #[test]
     fn test_default_impl() {
         let server = McpServer::default();
-        assert_eq!(server.list_tools().len(), 44);
+        assert_eq!(server.list_tools().len(), 48);
     }
 
     /// Build a real RuntimeHandle from a bootstrapped runtime (no packs).

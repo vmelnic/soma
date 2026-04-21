@@ -210,6 +210,7 @@ pub fn spawn_async_goal(
                             continue;
                         }
                         Ok(StepResult::Completed) => {
+                            *entry.error.lock().unwrap() = None;
                             *entry.status.lock().unwrap() = AsyncGoalStatus::Completed;
                             break;
                         }
@@ -344,6 +345,7 @@ mod tests {
                 used_plan_following: false,
                 active_policy_scope: None,
                 loop_counts: std::collections::HashMap::new(),
+                pending_input_request: None,
             },
             status: SessionStatus::Created,
             trace: SessionTrace { steps: vec![] },

@@ -285,7 +285,7 @@ impl Port for SdkPortAdapter {
         let input_json = serde_json::to_string(input).unwrap_or_else(|_| "{}".to_string());
         self.inner
             .validate_input_json(capability_id, &input_json)
-            .map_err(|e| SomaError::Port(e))
+            .map_err(SomaError::Port)
     }
 
     fn lifecycle_state(&self) -> crate::types::port::PortLifecycleState {

@@ -71,16 +71,16 @@ impl BeliefSource for SimpleBeliefSource {
         let mut belief = self.belief_runtime.create_belief(session_id)?;
 
         // Extract bindings from goal.objective.structured (JSON key-value → bindings).
-        if let Some(ref structured) = goal.objective.structured {
-            if let Some(obj) = structured.as_object() {
-                for (key, value) in obj {
-                    belief.active_bindings.push(crate::types::belief::Binding {
-                        name: key.clone(),
-                        value: value.clone(),
-                        source: "goal".to_string(),
-                        confidence: 1.0,
-                    });
-                }
+        if let Some(ref structured) = goal.objective.structured
+            && let Some(obj) = structured.as_object()
+        {
+            for (key, value) in obj {
+                belief.active_bindings.push(crate::types::belief::Binding {
+                    name: key.clone(),
+                    value: value.clone(),
+                    source: "goal".to_string(),
+                    confidence: 1.0,
+                });
             }
         }
 
@@ -478,10 +478,15 @@ impl SkillExecutor for PortBackedSkillExecutor {
                 .find(|b| b.name == *key);
 
             if let Some(bb) = from_belief {
+                let source = if bb.source == "brain_provided" {
+                    BindingSource::BrainProvided
+                } else {
+                    BindingSource::BeliefResource
+                };
                 bindings.push(WorkingBinding {
                     name: bb.name.clone(),
                     value: bb.value.clone(),
-                    source: BindingSource::BeliefResource,
+                    source,
                 });
                 continue;
             }
@@ -604,17 +609,21 @@ fn port_call_to_observation(
 // SimpleCandidatePredictor
 // ---------------------------------------------------------------------------
 
-/// Scores candidates using keyword matching against the goal description.
-/// Skills whose name or description shares words with the goal score higher.
+/// Scores candidates using embedding similarity + keyword matching against the
+/// goal description. Embeds both the goal and each skill's text (description,
+/// tags, skill_id) via the HashEmbedder, then computes cosine similarity.
+/// Falls back to keyword bonus for capability-specific mappings.
 /// Penalizes skills that have failed recently within the session.
 pub struct SimpleCandidatePredictor {
     failure_counts: std::sync::Mutex<std::collections::HashMap<String, u32>>,
+    embedder: crate::memory::embedder::HashEmbedder,
 }
 
 impl SimpleCandidatePredictor {
     pub fn new() -> Self {
         Self {
             failure_counts: std::sync::Mutex::new(std::collections::HashMap::new()),
+            embedder: crate::memory::embedder::HashEmbedder::new(),
         }
     }
 
@@ -629,33 +638,21 @@ impl SimpleCandidatePredictor {
         }
     }
 
-    /// Compute a relevance score for a skill against a goal description.
-    fn relevance_score(skill: &SkillSpec, goal_text: &str) -> f64 {
-        let goal_lower = goal_text.to_lowercase();
-        let goal_words: Vec<&str> = goal_lower.split_whitespace().collect();
-
-        let mut score = 0.0;
-
-        let skill_text = format!(
+    fn skill_text(skill: &SkillSpec) -> String {
+        format!(
             "{} {} {} {}",
             skill.name.to_lowercase(),
             skill.description.to_lowercase(),
             skill.skill_id.to_lowercase(),
             skill.tags.join(" ").to_lowercase(),
-        );
+        )
+    }
 
-        for word in &goal_words {
-            if word.len() < 3 {
-                continue;
-            }
-            if skill_text.contains(word) {
-                score += 1.0;
-            }
-        }
+    fn keyword_bonus(skill: &SkillSpec, goal_text: &str) -> f64 {
+        let goal_lower = goal_text.to_lowercase();
+        let mut bonus = 0.0;
 
-        // Keyword-to-capability mapping for filesystem and database operations.
         let keyword_map: &[(&[&str], &str)] = &[
-            // Filesystem
             (&["list", "ls", "dir", "files", "directory", "readdir", "entries"], "readdir"),
             (&["read", "cat", "show", "view", "content", "contents", "readfile"], "readfile"),
             (&["write", "save", "writefile"], "writefile"),
@@ -663,7 +660,6 @@ impl SimpleCandidatePredictor {
             (&["mkdir", "make directory"], "mkdir"),
             (&["rmdir", "remove directory"], "rmdir"),
             (&["rm", "remove file", "unlink"], "rm"),
-            // Database
             (&["count", "how many", "total number"], "count"),
             (&["query", "select", "sql", "fetch rows"], "query"),
             (&["find", "look up", "search", "find_many"], "find"),
@@ -678,14 +674,14 @@ impl SimpleCandidatePredictor {
                 if goal_lower.contains(kw) {
                     for req in &skill.capability_requirements {
                         if req.contains(cap_id) {
-                            score += 10.0;
+                            bonus += 0.3;
                         }
                     }
                 }
             }
         }
 
-        score
+        bonus
     }
 }
 
@@ -703,15 +699,37 @@ impl CandidatePredictor for SimpleCandidatePredictor {
         _belief: &BeliefState,
         _episodes: &[Episode],
     ) -> Vec<CandidateScore> {
+        use crate::memory::embedder::GoalEmbedder;
+
         let goal_text = &goal.objective.description;
+        let goal_lower = goal_text.to_lowercase();
+        let goal_words: Vec<&str> = goal_lower.split_whitespace()
+            .filter(|w| w.len() >= 3)
+            .collect();
+        let goal_embedding = self.embedder.embed(goal_text);
         let failure_counts = self.failure_counts.lock().ok();
 
         candidates
             .iter()
             .map(|skill| {
-                let relevance = Self::relevance_score(skill, goal_text);
+                let skill_text = Self::skill_text(skill);
 
-                // Penalize skills that have failed — score decays with each failure.
+                // Word overlap: count goal words found in skill text
+                let word_hits: f64 = goal_words.iter()
+                    .filter(|w| skill_text.contains(*w))
+                    .count() as f64;
+
+                // Embedding similarity (0..1 range, clamped)
+                let skill_embedding = self.embedder.embed(&skill_text);
+                let similarity = self.embedder.similarity(&goal_embedding, &skill_embedding)
+                    .max(0.0);
+
+                // Capability mapping bonus
+                let capability = Self::keyword_bonus(skill, goal_text);
+
+                // Combined: capability bonus dominates, then word overlap, embedding as tiebreaker
+                let relevance = capability * 10.0 + word_hits + similarity * 0.5;
+
                 let failures = failure_counts
                     .as_ref()
                     .and_then(|m| m.get(&skill.skill_id))
@@ -861,6 +879,12 @@ impl Critic for SimpleSessionCritic {
             .raw_result
             .get("error")
             .and_then(|e| e.as_str())
+            .or_else(|| {
+                observation.structured_result.get("error").and_then(|e| e.as_str())
+            })
+            .or_else(|| {
+                observation.failure_detail.as_ref().map(|fd| fd.message())
+            })
             .unwrap_or("")
             .to_string();
 
@@ -1738,6 +1762,7 @@ mod tests {
                 used_plan_following: false,
                 active_policy_scope: None,
                 loop_counts: std::collections::HashMap::new(),
+                pending_input_request: None,
             },
             status: SessionStatus::Created,
             trace: SessionTrace { steps: vec![] },

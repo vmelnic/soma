@@ -117,6 +117,11 @@ pub struct WorkingMemory {
     /// Key: "step_{index}" string. Cleared by `clear_plan`.
     #[serde(default)]
     pub loop_counts: std::collections::HashMap<String, u32>,
+    /// Populated when the session enters `WaitingForInput` due to unresolved
+    /// bindings. The external brain reads this to know which slots to fill.
+    /// Cleared when `provide_session_input` delivers the bindings.
+    #[serde(default)]
+    pub pending_input_request: Option<PendingInputRequest>,
 }
 
 impl WorkingMemory {
@@ -157,6 +162,8 @@ pub enum BindingSource {
     RemoteObservation,
     /// Bound from a pack-defined default.
     PackDefault,
+    /// Bound by an external brain via `provide_session_input`.
+    BrainProvided,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,6 +172,23 @@ pub struct WorkingBinding {
     pub value: serde_json::Value,
     /// Which source this value was drawn from.
     pub source: BindingSource,
+}
+
+/// Describes a single input slot the body could not resolve, exposed to the
+/// external brain so it knows exactly what to provide.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissingSlot {
+    pub name: String,
+    pub schema: serde_json::Value,
+}
+
+/// Structured request emitted when the session enters `WaitingForInput` due to
+/// unresolved input bindings. The external brain reads this via `inspect_session`
+/// and responds via `provide_session_input`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingInputRequest {
+    pub skill_id: String,
+    pub missing_slots: Vec<MissingSlot>,
 }
 
 /// Output binding that preserves provenance through the execution pipeline.
