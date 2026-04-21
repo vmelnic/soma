@@ -704,7 +704,10 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
                 Arc::clone(&runtime.metrics),
                 Arc::clone(&runtime.world_state),
             );
-            let handle = RuntimeHandle::from_runtime(runtime);
+            let mut handle = RuntimeHandle::from_runtime(runtime);
+            handle.trace_notifier = std::sync::Arc::new(
+                soma_next::runtime::trace_notifier::StdioTraceNotifier,
+            );
             let monitor = (
                 Arc::clone(&handle.world_state),
                 Arc::clone(&handle.routine_store),
@@ -1061,7 +1064,6 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
         }
     }
     let stdin = io::stdin();
-    let mut stdout = io::stdout();
 
     for line in stdin.lock().lines() {
         let line = match line {
@@ -1086,8 +1088,10 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
                     },
                     "id": null
                 });
-                let _ = writeln!(stdout, "{}", error_response);
-                let _ = stdout.flush();
+                let stdout = io::stdout();
+                let mut handle = stdout.lock();
+                let _ = writeln!(handle, "{}", error_response);
+                let _ = handle.flush();
                 continue;
             }
         };
@@ -1109,15 +1113,19 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
                     },
                     "id": null
                 });
-                let _ = writeln!(stdout, "{}", error_response);
-                let _ = stdout.flush();
+                let stdout = io::stdout();
+                let mut handle = stdout.lock();
+                let _ = writeln!(handle, "{}", error_response);
+                let _ = handle.flush();
                 continue;
             }
         };
         match serde_json::to_string(&response) {
             Ok(json) => {
-                let _ = writeln!(stdout, "{json}");
-                let _ = stdout.flush();
+                let stdout = io::stdout();
+                let mut handle = stdout.lock();
+                let _ = writeln!(handle, "{json}");
+                let _ = handle.flush();
             }
             Err(e) => {
                 eprintln!("serialization error: {e}");

@@ -1,0 +1,221 @@
+{
+  "id": "soma.ports.search",
+  "name": "search",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.search",
+  "description": "Code search operations: text_search, file_search, symbol_search",
+  "capabilities": [
+    {
+      "group_name": "search",
+      "scope": "local",
+      "capabilities": [
+        "text_search",
+        "file_search",
+        "symbol_search"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
+  },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "text_search",
+      "file_search",
+      "symbol_search"
+    ],
+    "expected_latency_classes": [
+      "fast",
+      "medium"
+    ],
+    "expected_failure_modes": [
+      "validation_error",
+      "unknown"
+    ],
+    "trace_categories": [
+      "search"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "search",
+    "code",
+    "ripgrep"
+  ],
+  "ports": [
+    {
+      "port_id": "search",
+      "name": "search",
+      "version": "0.1.0",
+      "kind": "custom",
+      "description": "Code search operations: text_search, file_search, symbol_search",
+      "namespace": "soma.ports.search",
+      "trust_level": "verified",
+      "capabilities": [
+        {
+          "capability_id": "text_search",
+          "name": "text_search",
+          "purpose": "Search for text patterns in files using ripgrep",
+          "input_schema": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": { "expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 5000 },
+          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "file_search",
+          "name": "file_search",
+          "purpose": "Search for files by name or glob pattern",
+          "input_schema": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": { "expected_latency_ms": 10, "p95_latency_ms": 100, "max_latency_ms": 2000 },
+          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "negligible", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "symbol_search",
+          "name": "symbol_search",
+          "purpose": "Search for code symbols (functions, classes, types) across the codebase",
+          "input_schema": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": { "expected_latency_ms": 50, "p95_latency_ms": 500, "max_latency_ms": 10000 },
+          "cost_profile": { "cpu_cost_class": "medium", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": { "schema": { "description": "any" } },
+      "output_schema": { "schema": { "description": "any" } },
+      "failure_modes": ["validation_error", "unknown"],
+      "side_effect_class": "read_only",
+      "latency_profile": { "expected_latency_ms": 30, "p95_latency_ms": 300, "max_latency_ms": 10000 },
+      "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+      "auth_requirements": { "methods": [], "required": false },
+      "sandbox_requirements": { "filesystem_access": true, "network_access": false, "device_access": false, "process_access": true, "memory_limit_mb": null, "cpu_limit_percent": null, "time_limit_ms": null, "syscall_limit": null },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
+  "skills": [
+    {
+      "skill_id": "soma.ports.search.text_search",
+      "namespace": "soma.ports.search",
+      "pack": "soma.ports.search",
+      "kind": "primitive",
+      "name": "text_search",
+      "description": "Search for text patterns in files using ripgrep via the search port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "emission", "target_resource": null, "description": "emit matching lines and locations", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "text_search completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": { "latency": { "expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 5000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" } },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["search", "text", "ripgrep"],
+      "capability_requirements": ["port:search/text_search"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.search.file_search",
+      "namespace": "soma.ports.search",
+      "pack": "soma.ports.search",
+      "kind": "primitive",
+      "name": "file_search",
+      "description": "Search for files by name or glob pattern via the search port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "emission", "target_resource": null, "description": "emit list of matching file paths", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "file_search completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": { "latency": { "expected_latency_ms": 10, "p95_latency_ms": 100, "max_latency_ms": 2000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "negligible", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" } },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["search", "file", "glob"],
+      "capability_requirements": ["port:search/file_search"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.search.symbol_search",
+      "namespace": "soma.ports.search",
+      "pack": "soma.ports.search",
+      "kind": "primitive",
+      "name": "symbol_search",
+      "description": "Search for code symbols (functions, classes, types) across the codebase via the search port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "emission", "target_resource": null, "description": "emit matching symbol definitions and locations", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "symbol_search completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": { "latency": { "expected_latency_ms": 50, "p95_latency_ms": 500, "max_latency_ms": 10000 }, "resource_cost": { "cpu_cost_class": "medium", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" } },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["search", "symbol", "code"],
+      "capability_requirements": ["port:search/symbol_search"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    }
+  ],
+  "port_dependencies": []
+}

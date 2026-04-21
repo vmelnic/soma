@@ -1,0 +1,497 @@
+{
+  "id": "soma.ports.git",
+  "name": "git",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.git",
+  "description": "Git operations: status, diff, log, blame, branch_list, changed_files, add, commit, init",
+  "capabilities": [
+    {
+      "group_name": "git",
+      "scope": "local",
+      "capabilities": [
+        "status",
+        "diff",
+        "log",
+        "blame",
+        "branch_list",
+        "changed_files",
+        "add",
+        "commit",
+        "init"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
+  },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "status",
+      "diff",
+      "log",
+      "blame",
+      "branch_list",
+      "changed_files",
+      "add",
+      "commit",
+      "init"
+    ],
+    "expected_latency_classes": [
+      "fast",
+      "medium"
+    ],
+    "expected_failure_modes": [
+      "validation_error",
+      "unknown"
+    ],
+    "trace_categories": [
+      "git"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "git",
+    "vcs",
+    "code"
+  ],
+  "ports": [
+    {
+      "port_id": "git",
+      "name": "git",
+      "version": "0.1.0",
+      "kind": "custom",
+      "description": "Git operations: status, diff, log, blame, branch_list, changed_files, add, commit, init",
+      "namespace": "soma.ports.git",
+      "trust_level": "verified",
+      "capabilities": [
+        {
+          "capability_id": "status",
+          "name": "status",
+          "purpose": "Show the working tree status of a git repository",
+          "input_schema": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": { "expected_latency_ms": 10, "p95_latency_ms": 100, "max_latency_ms": 1000 },
+          "cost_profile": { "cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "diff",
+          "name": "diff",
+          "purpose": "Show changes between commits, working tree, and index",
+          "input_schema": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": { "expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 5000 },
+          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "log",
+          "name": "log",
+          "purpose": "Show commit history log",
+          "input_schema": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": { "expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 5000 },
+          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "blame",
+          "name": "blame",
+          "purpose": "Show what revision and author last modified each line of a file",
+          "input_schema": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": { "expected_latency_ms": 50, "p95_latency_ms": 500, "max_latency_ms": 10000 },
+          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "branch_list",
+          "name": "branch_list",
+          "purpose": "List all branches in the repository",
+          "input_schema": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": { "expected_latency_ms": 5, "p95_latency_ms": 50, "max_latency_ms": 500 },
+          "cost_profile": { "cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "changed_files",
+          "name": "changed_files",
+          "purpose": "List files changed between commits or in working tree",
+          "input_schema": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": { "expected_latency_ms": 10, "p95_latency_ms": 100, "max_latency_ms": 1000 },
+          "cost_profile": { "cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "add",
+          "name": "add",
+          "purpose": "Stage file changes for the next commit",
+          "input_schema": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "logical_undo",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": { "expected_latency_ms": 10, "p95_latency_ms": 100, "max_latency_ms": 1000 },
+          "cost_profile": { "cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "commit",
+          "name": "commit",
+          "purpose": "Record changes to the repository",
+          "input_schema": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "logical_undo",
+          "determinism_class": "deterministic",
+          "idempotence_class": "not_idempotent",
+          "risk_class": "low",
+          "latency_profile": { "expected_latency_ms": 50, "p95_latency_ms": 500, "max_latency_ms": 5000 },
+          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "init",
+          "name": "init",
+          "purpose": "Initialize a new git repository",
+          "input_schema": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "logical_undo",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": { "expected_latency_ms": 20, "p95_latency_ms": 100, "max_latency_ms": 1000 },
+          "cost_profile": { "cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": { "schema": { "description": "any" } },
+      "output_schema": { "schema": { "description": "any" } },
+      "failure_modes": ["validation_error", "unknown"],
+      "side_effect_class": "local_state_mutation",
+      "latency_profile": { "expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 10000 },
+      "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+      "auth_requirements": { "methods": [], "required": false },
+      "sandbox_requirements": { "filesystem_access": true, "network_access": false, "device_access": false, "process_access": true, "memory_limit_mb": null, "cpu_limit_percent": null, "time_limit_ms": null, "syscall_limit": null },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
+  "skills": [
+    {
+      "skill_id": "soma.ports.git.status",
+      "namespace": "soma.ports.git",
+      "pack": "soma.ports.git",
+      "kind": "primitive",
+      "name": "status",
+      "description": "Show the working tree status of a git repository via the git port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "emission", "target_resource": null, "description": "emit working tree status", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "status completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": { "latency": { "expected_latency_ms": 10, "p95_latency_ms": 100, "max_latency_ms": 1000 }, "resource_cost": { "cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "negligible" } },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["git", "vcs", "status"],
+      "capability_requirements": ["port:git/status"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.git.diff",
+      "namespace": "soma.ports.git",
+      "pack": "soma.ports.git",
+      "kind": "primitive",
+      "name": "diff",
+      "description": "Show changes between commits, working tree, and index via the git port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "emission", "target_resource": null, "description": "emit diff output", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "diff completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": { "latency": { "expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 5000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" } },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["git", "vcs", "diff"],
+      "capability_requirements": ["port:git/diff"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.git.log",
+      "namespace": "soma.ports.git",
+      "pack": "soma.ports.git",
+      "kind": "primitive",
+      "name": "log",
+      "description": "Show commit history log via the git port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "emission", "target_resource": null, "description": "emit commit history", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "log completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": { "latency": { "expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 5000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" } },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["git", "vcs", "log"],
+      "capability_requirements": ["port:git/log"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.git.blame",
+      "namespace": "soma.ports.git",
+      "pack": "soma.ports.git",
+      "kind": "primitive",
+      "name": "blame",
+      "description": "Show what revision and author last modified each line of a file via the git port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "emission", "target_resource": null, "description": "emit blame annotations", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "blame completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": { "latency": { "expected_latency_ms": 50, "p95_latency_ms": 500, "max_latency_ms": 10000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" } },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["git", "vcs", "blame"],
+      "capability_requirements": ["port:git/blame"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.git.branch_list",
+      "namespace": "soma.ports.git",
+      "pack": "soma.ports.git",
+      "kind": "primitive",
+      "name": "branch_list",
+      "description": "List all branches in the repository via the git port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "emission", "target_resource": null, "description": "emit branch list", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "branch_list completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": { "latency": { "expected_latency_ms": 5, "p95_latency_ms": 50, "max_latency_ms": 500 }, "resource_cost": { "cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "negligible" } },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["git", "vcs", "branch"],
+      "capability_requirements": ["port:git/branch_list"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.git.changed_files",
+      "namespace": "soma.ports.git",
+      "pack": "soma.ports.git",
+      "kind": "primitive",
+      "name": "changed_files",
+      "description": "List files changed between commits or in working tree via the git port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "emission", "target_resource": null, "description": "emit list of changed files", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "changed_files completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": { "latency": { "expected_latency_ms": 10, "p95_latency_ms": 100, "max_latency_ms": 1000 }, "resource_cost": { "cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "negligible" } },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["git", "vcs", "changed"],
+      "capability_requirements": ["port:git/changed_files"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.git.add",
+      "namespace": "soma.ports.git",
+      "pack": "soma.ports.git",
+      "kind": "primitive",
+      "name": "add",
+      "description": "Stage file changes for the next commit via the git port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "update", "target_resource": null, "description": "stage files in the git index", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "add completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "logical_undo", "compensation_skill": null, "description": "git reset to unstage" },
+      "cost_prior": { "latency": { "expected_latency_ms": 10, "p95_latency_ms": 100, "max_latency_ms": 1000 }, "resource_cost": { "cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "negligible" } },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["git", "vcs", "stage"],
+      "capability_requirements": ["port:git/add"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.git.commit",
+      "namespace": "soma.ports.git",
+      "pack": "soma.ports.git",
+      "kind": "primitive",
+      "name": "commit",
+      "description": "Record changes to the repository via the git port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "creation", "target_resource": null, "description": "create a new commit object", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "commit completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "logical_undo", "compensation_skill": null, "description": "git reset --soft HEAD~ to undo commit" },
+      "cost_prior": { "latency": { "expected_latency_ms": 50, "p95_latency_ms": 500, "max_latency_ms": 5000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" } },
+      "risk_class": "low",
+      "determinism": "deterministic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["git", "vcs", "commit"],
+      "capability_requirements": ["port:git/commit"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.git.init",
+      "namespace": "soma.ports.git",
+      "pack": "soma.ports.git",
+      "kind": "primitive",
+      "name": "init",
+      "description": "Initialize a new git repository via the git port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object", "properties": { "cwd": { "type": "string" } }, "required": ["cwd"] } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "creation", "target_resource": null, "description": "initialize a .git directory", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "init completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "logical_undo", "compensation_skill": null, "description": "remove .git directory to undo" },
+      "cost_prior": { "latency": { "expected_latency_ms": 20, "p95_latency_ms": 100, "max_latency_ms": 1000 }, "resource_cost": { "cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "negligible" } },
+      "risk_class": "low",
+      "determinism": "deterministic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["git", "vcs", "init"],
+      "capability_requirements": ["port:git/init"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    }
+  ],
+  "port_dependencies": []
+}

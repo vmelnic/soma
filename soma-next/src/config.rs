@@ -394,6 +394,10 @@ pub struct PortsSection {
     #[serde(default)]
     pub plugin_path: Vec<String>,
 
+    /// Allow pack ports to spawn child processes.
+    #[serde(default)]
+    pub process_access_enabled: bool,
+
     /// Require Ed25519 signatures for dynamic port libraries.
     /// When true, port libraries without valid `.sig`/`.pub` sidecar files are
     /// rejected. Default false for development; set true for production.
@@ -407,6 +411,7 @@ impl Default for PortsSection {
             filesystem_enabled: true,
             http_enabled: true,
             plugin_path: Vec::new(),
+            process_access_enabled: false,
             require_signatures: false,
         }
     }

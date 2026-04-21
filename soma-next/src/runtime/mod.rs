@@ -25,3 +25,4 @@ pub mod scheduler;
 pub mod world_state;
 pub mod port_health;
 pub mod belief_projection;
+pub mod trace_notifier;

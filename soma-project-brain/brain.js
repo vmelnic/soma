@@ -74,6 +74,16 @@ class StdioMcpClient {
     this.cwd = cwd;
     this.nextId = 1;
     this.pending = new Map();
+    this.notificationHandlers = new Map();
+  }
+
+  onNotification(method, handler) {
+    let list = this.notificationHandlers.get(method);
+    if (!list) {
+      list = [];
+      this.notificationHandlers.set(method, list);
+    }
+    list.push(handler);
   }
 
   async start() {
@@ -94,6 +104,14 @@ class StdioMcpClient {
       try {
         payload = JSON.parse(line);
       } catch {
+        return;
+      }
+      // JSON-RPC notification: has method, no id
+      if (payload.method && payload.id === undefined) {
+        const handlers = this.notificationHandlers.get(payload.method);
+        if (handlers) {
+          for (const h of handlers) h(payload.params);
+        }
         return;
       }
       const entry = this.pending.get(String(payload.id));
@@ -391,7 +409,24 @@ async function main() {
       }
     }
 
-    // 2. Poll loop
+    // 2. Push-notification listener (alongside poll fallback)
+    let lastPushedStep = -1;
+    soma.onNotification("notifications/goal/trace_step", (params) => {
+      if (params.goal_id !== goalId) return;
+      const ev = params.event;
+      if (ev) {
+        const ok = ev.observation_success ? "ok" : "FAIL";
+        console.log(
+          `[push] step ${ev.step_index}: ${ev.selected_skill} [${ok}] Δ${ev.progress_delta}`
+        );
+        lastPushedStep = ev.step_index;
+      }
+      if (params.terminal) {
+        console.log(`[push] goal terminal — status: ${params.status}`);
+      }
+    });
+
+    // Poll loop (still needed for WaitingForInput reaction; push gives live trace)
     let brainCalls = 0;
     const maxBrainCalls = 20;
 

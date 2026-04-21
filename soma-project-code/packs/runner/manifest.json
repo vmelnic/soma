@@ -1,0 +1,316 @@
+{
+  "id": "soma.ports.runner",
+  "name": "runner",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.runner",
+  "description": "Process runner operations: exec, npm_install, npm_test, npm_run, node_run",
+  "capabilities": [
+    {
+      "group_name": "runner",
+      "scope": "local",
+      "capabilities": [
+        "exec",
+        "npm_install",
+        "npm_test",
+        "npm_run",
+        "node_run"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
+  },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "exec",
+      "npm_install",
+      "npm_test",
+      "npm_run",
+      "node_run"
+    ],
+    "expected_latency_classes": [
+      "fast",
+      "medium",
+      "slow"
+    ],
+    "expected_failure_modes": [
+      "validation_error",
+      "timeout",
+      "unknown"
+    ],
+    "trace_categories": [
+      "runner"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "runner",
+    "exec",
+    "npm",
+    "node"
+  ],
+  "ports": [
+    {
+      "port_id": "runner",
+      "name": "runner",
+      "version": "0.1.0",
+      "kind": "custom",
+      "description": "Process runner operations: exec, npm_install, npm_test, npm_run, node_run",
+      "namespace": "soma.ports.runner",
+      "trust_level": "verified",
+      "capabilities": [
+        {
+          "capability_id": "exec",
+          "name": "exec",
+          "purpose": "Execute an arbitrary command in a subprocess",
+          "input_schema": { "schema": { "type": "object" } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "high",
+          "latency_profile": { "expected_latency_ms": 100, "p95_latency_ms": 5000, "max_latency_ms": 60000 },
+          "cost_profile": { "cpu_cost_class": "medium", "memory_cost_class": "medium", "io_cost_class": "medium", "network_cost_class": "low", "energy_cost_class": "low" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "npm_install",
+          "name": "npm_install",
+          "purpose": "Install npm dependencies for a project",
+          "input_schema": { "schema": { "type": "object" } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "logical_undo",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "low",
+          "latency_profile": { "expected_latency_ms": 5000, "p95_latency_ms": 30000, "max_latency_ms": 120000 },
+          "cost_profile": { "cpu_cost_class": "medium", "memory_cost_class": "medium", "io_cost_class": "high", "network_cost_class": "high", "energy_cost_class": "medium" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "npm_test",
+          "name": "npm_test",
+          "purpose": "Run the test suite for a project via npm test",
+          "input_schema": { "schema": { "type": "object" } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": { "expected_latency_ms": 2000, "p95_latency_ms": 30000, "max_latency_ms": 120000 },
+          "cost_profile": { "cpu_cost_class": "medium", "memory_cost_class": "medium", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "medium" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "npm_run",
+          "name": "npm_run",
+          "purpose": "Run a named npm script",
+          "input_schema": { "schema": { "type": "object" } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "medium",
+          "latency_profile": { "expected_latency_ms": 1000, "p95_latency_ms": 15000, "max_latency_ms": 120000 },
+          "cost_profile": { "cpu_cost_class": "medium", "memory_cost_class": "medium", "io_cost_class": "medium", "network_cost_class": "low", "energy_cost_class": "low" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "node_run",
+          "name": "node_run",
+          "purpose": "Run a Node.js script file directly",
+          "input_schema": { "schema": { "type": "object" } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "external_state_mutation",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "medium",
+          "latency_profile": { "expected_latency_ms": 500, "p95_latency_ms": 5000, "max_latency_ms": 60000 },
+          "cost_profile": { "cpu_cost_class": "medium", "memory_cost_class": "medium", "io_cost_class": "low", "network_cost_class": "low", "energy_cost_class": "low" },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": { "schema": { "description": "any" } },
+      "output_schema": { "schema": { "description": "any" } },
+      "failure_modes": ["validation_error", "timeout", "unknown"],
+      "side_effect_class": "external_state_mutation",
+      "latency_profile": { "expected_latency_ms": 1000, "p95_latency_ms": 15000, "max_latency_ms": 120000 },
+      "cost_profile": { "cpu_cost_class": "medium", "memory_cost_class": "medium", "io_cost_class": "medium", "network_cost_class": "low", "energy_cost_class": "low" },
+      "auth_requirements": { "methods": [], "required": false },
+      "sandbox_requirements": { "filesystem_access": true, "network_access": true, "device_access": false, "process_access": true, "memory_limit_mb": null, "cpu_limit_percent": null, "time_limit_ms": null, "syscall_limit": null },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
+  "skills": [
+    {
+      "skill_id": "soma.ports.runner.exec",
+      "namespace": "soma.ports.runner",
+      "pack": "soma.ports.runner",
+      "kind": "primitive",
+      "name": "exec",
+      "description": "Execute an arbitrary command in a subprocess via the runner port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object" } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "update", "target_resource": null, "description": "execute a command that may modify external state", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "exec completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "arbitrary command, no automatic rollback" },
+      "cost_prior": { "latency": { "expected_latency_ms": 100, "p95_latency_ms": 5000, "max_latency_ms": 60000 }, "resource_cost": { "cpu_cost_class": "medium", "memory_cost_class": "medium", "io_cost_class": "medium", "network_cost_class": "low", "energy_cost_class": "low" } },
+      "risk_class": "high",
+      "determinism": "stochastic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["runner", "exec", "command"],
+      "capability_requirements": ["port:runner/exec"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.runner.npm_install",
+      "namespace": "soma.ports.runner",
+      "pack": "soma.ports.runner",
+      "kind": "primitive",
+      "name": "npm_install",
+      "description": "Install npm dependencies for a project via the runner port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object" } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "creation", "target_resource": null, "description": "install node_modules into the project directory", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "npm_install completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "logical_undo", "compensation_skill": null, "description": "remove node_modules to compensate" },
+      "cost_prior": { "latency": { "expected_latency_ms": 5000, "p95_latency_ms": 30000, "max_latency_ms": 120000 }, "resource_cost": { "cpu_cost_class": "medium", "memory_cost_class": "medium", "io_cost_class": "high", "network_cost_class": "high", "energy_cost_class": "medium" } },
+      "risk_class": "low",
+      "determinism": "stochastic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["runner", "npm", "install"],
+      "capability_requirements": ["port:runner/npm_install"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.runner.npm_test",
+      "namespace": "soma.ports.runner",
+      "pack": "soma.ports.runner",
+      "kind": "primitive",
+      "name": "npm_test",
+      "description": "Run the test suite for a project via npm test via the runner port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object" } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "emission", "target_resource": null, "description": "emit test results", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "npm_test completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": { "latency": { "expected_latency_ms": 2000, "p95_latency_ms": 30000, "max_latency_ms": 120000 }, "resource_cost": { "cpu_cost_class": "medium", "memory_cost_class": "medium", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "medium" } },
+      "risk_class": "negligible",
+      "determinism": "stochastic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["runner", "npm", "test"],
+      "capability_requirements": ["port:runner/npm_test"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.runner.npm_run",
+      "namespace": "soma.ports.runner",
+      "pack": "soma.ports.runner",
+      "kind": "primitive",
+      "name": "npm_run",
+      "description": "Run a named npm script via the runner port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object" } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "update", "target_resource": null, "description": "execute an npm script that may modify external state", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "npm_run completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "script effects vary, no automatic rollback" },
+      "cost_prior": { "latency": { "expected_latency_ms": 1000, "p95_latency_ms": 15000, "max_latency_ms": 120000 }, "resource_cost": { "cpu_cost_class": "medium", "memory_cost_class": "medium", "io_cost_class": "medium", "network_cost_class": "low", "energy_cost_class": "low" } },
+      "risk_class": "medium",
+      "determinism": "stochastic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["runner", "npm", "script"],
+      "capability_requirements": ["port:runner/npm_run"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.runner.node_run",
+      "namespace": "soma.ports.runner",
+      "pack": "soma.ports.runner",
+      "kind": "primitive",
+      "name": "node_run",
+      "description": "Run a Node.js script file directly via the runner port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object" } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "update", "target_resource": null, "description": "execute a Node.js script that may modify external state", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "node_run completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "script effects vary, no automatic rollback" },
+      "cost_prior": { "latency": { "expected_latency_ms": 500, "p95_latency_ms": 5000, "max_latency_ms": 60000 }, "resource_cost": { "cpu_cost_class": "medium", "memory_cost_class": "medium", "io_cost_class": "low", "network_cost_class": "low", "energy_cost_class": "low" } },
+      "risk_class": "medium",
+      "determinism": "stochastic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["runner", "node", "script"],
+      "capability_requirements": ["port:runner/node_run"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    }
+  ],
+  "port_dependencies": []
+}

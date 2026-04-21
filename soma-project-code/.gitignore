@@ -1,0 +1,13 @@
+node_modules/
+.DS_Store
+.env
+.env.local
+data/
+
+# Build artifacts — rebuild via soma-next and soma-ports
+bin/soma
+packs/*/*.dylib
+packs/*/*.so
+packs/*/*.dll
+soma.db
+workspace/

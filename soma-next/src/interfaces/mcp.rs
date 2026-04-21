@@ -127,6 +127,10 @@ pub struct RuntimeHandle {
     /// `reload_pack` to rebuild a `DynamicPortLoader` on demand.
     pub plugin_search_paths: Vec<std::path::PathBuf>,
     pub require_port_signatures: bool,
+    /// Push-based trace notifier for async goals. Fires JSON-RPC
+    /// notifications on every control-loop step so the brain doesn't
+    /// have to poll `stream_goal_observations`.
+    pub trace_notifier: Arc<dyn crate::runtime::trace_notifier::TraceNotifier>,
 }
 
 impl RuntimeHandle {
@@ -163,6 +167,7 @@ impl RuntimeHandle {
             skill_stats: runtime.skill_stats,
             plugin_search_paths: runtime.plugin_search_paths,
             require_port_signatures: runtime.require_port_signatures,
+            trace_notifier: Arc::new(crate::runtime::trace_notifier::NoopTraceNotifier),
         }
     }
 
@@ -209,6 +214,7 @@ impl RuntimeHandle {
         let embedder = Arc::clone(&self.embedder);
         let world_state = Arc::clone(&self.world_state);
         let skill_stats = Arc::clone(&self.skill_stats);
+        let trace_notifier = Arc::clone(&self.trace_notifier);
 
         Arc::new(move |objective: String, max_steps: Option<u32>| {
             let input = crate::runtime::goal::GoalInput::NaturalLanguage {
@@ -256,6 +262,7 @@ impl RuntimeHandle {
                 Arc::clone(&checkpoint_store),
                 checkpoint_every_n,
                 ctx,
+                Arc::clone(&trace_notifier),
             );
             Ok(goal_id)
         })
@@ -910,6 +917,7 @@ impl McpServer {
             std::sync::Arc::clone(&rt.checkpoint_store),
             rt.checkpoint_every_n_steps,
             ctx,
+            std::sync::Arc::clone(&rt.trace_notifier),
         );
 
         Ok(Self::success_response(
@@ -1519,6 +1527,7 @@ impl McpServer {
                     Arc::clone(&rt.checkpoint_store),
                     rt.checkpoint_every_n_steps,
                     ctx,
+                    Arc::clone(&rt.trace_notifier),
                 );
             } else {
                 let mut ctrl = rt.session_controller.lock().unwrap();
@@ -2164,6 +2173,7 @@ impl McpServer {
                     Arc::clone(&rt.checkpoint_store),
                     rt.checkpoint_every_n_steps,
                     ctx,
+                    Arc::clone(&rt.trace_notifier),
                 );
                 new_status_str = "Running".to_string();
             } else {
@@ -5663,7 +5673,7 @@ impl McpServer {
             },
             McpTool {
                 name: "stream_goal_observations".to_string(),
-                description: "Pull observations produced by an async goal since a given step. Brain polls this with the last seen step_index for near-real-time visibility into long-running async goals (proprioception). Returns events plus a `terminal` flag — once true, no further events will arrive.".to_string(),
+                description: "Pull observations produced by an async goal since a given step. Useful for catch-up after reconnect or missed notifications. The server also pushes `notifications/goal/trace_step` in real time for each control-loop step — clients that handle those notifications may not need to poll at all. Returns events plus a `terminal` flag — once true, no further events will arrive.".to_string(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {

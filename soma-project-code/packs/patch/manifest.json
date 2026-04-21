@@ -1,0 +1,221 @@
+{
+  "id": "soma.ports.patch",
+  "name": "patch",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.patch",
+  "description": "Patch operations: apply_patch, check_patch, create_patch",
+  "capabilities": [
+    {
+      "group_name": "patch",
+      "scope": "local",
+      "capabilities": [
+        "apply_patch",
+        "check_patch",
+        "create_patch"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
+  },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [
+      "apply_patch",
+      "check_patch",
+      "create_patch"
+    ],
+    "expected_latency_classes": [
+      "fast",
+      "medium"
+    ],
+    "expected_failure_modes": [
+      "validation_error",
+      "unknown"
+    ],
+    "trace_categories": [
+      "patch"
+    ],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": [
+    "patch",
+    "diff",
+    "code"
+  ],
+  "ports": [
+    {
+      "port_id": "patch",
+      "name": "patch",
+      "version": "0.1.0",
+      "kind": "custom",
+      "description": "Patch operations: apply_patch, check_patch, create_patch",
+      "namespace": "soma.ports.patch",
+      "trust_level": "verified",
+      "capabilities": [
+        {
+          "capability_id": "apply_patch",
+          "name": "apply_patch",
+          "purpose": "Apply a unified diff patch to files on disk",
+          "input_schema": { "schema": { "type": "object" } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "local_state_mutation",
+          "rollback_support": "logical_undo",
+          "determinism_class": "deterministic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "medium",
+          "latency_profile": { "expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 5000 },
+          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "check_patch",
+          "name": "check_patch",
+          "purpose": "Verify whether a patch can be cleanly applied without modifying files",
+          "input_schema": { "schema": { "type": "object" } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": { "expected_latency_ms": 10, "p95_latency_ms": 100, "max_latency_ms": 2000 },
+          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "create_patch",
+          "name": "create_patch",
+          "purpose": "Generate a unified diff patch from file changes",
+          "input_schema": { "schema": { "type": "object" } },
+          "output_schema": { "schema": { "description": "any" } },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "deterministic",
+          "idempotence_class": "idempotent",
+          "risk_class": "negligible",
+          "latency_profile": { "expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 5000 },
+          "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": { "schema": { "description": "any" } },
+      "output_schema": { "schema": { "description": "any" } },
+      "failure_modes": ["validation_error", "unknown"],
+      "side_effect_class": "local_state_mutation",
+      "latency_profile": { "expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 5000 },
+      "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" },
+      "auth_requirements": { "methods": [], "required": false },
+      "sandbox_requirements": { "filesystem_access": true, "network_access": false, "device_access": false, "process_access": false, "memory_limit_mb": null, "cpu_limit_percent": null, "time_limit_ms": null, "syscall_limit": null },
+      "observable_fields": [],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
+  "skills": [
+    {
+      "skill_id": "soma.ports.patch.apply_patch",
+      "namespace": "soma.ports.patch",
+      "pack": "soma.ports.patch",
+      "kind": "primitive",
+      "name": "apply_patch",
+      "description": "Apply a unified diff patch to files on disk via the patch port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object" } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "update", "target_resource": null, "description": "modify files on disk according to the patch", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "apply_patch completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "logical_undo", "compensation_skill": null, "description": "apply reverse patch to compensate" },
+      "cost_prior": { "latency": { "expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 5000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" } },
+      "risk_class": "medium",
+      "determinism": "deterministic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["patch", "apply", "diff"],
+      "capability_requirements": ["port:patch/apply_patch"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.patch.check_patch",
+      "namespace": "soma.ports.patch",
+      "pack": "soma.ports.patch",
+      "kind": "primitive",
+      "name": "check_patch",
+      "description": "Verify whether a patch can be cleanly applied without modifying files via the patch port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object" } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "emission", "target_resource": null, "description": "emit patch applicability result", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "check_patch completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": { "latency": { "expected_latency_ms": 10, "p95_latency_ms": 100, "max_latency_ms": 2000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "low", "network_cost_class": "negligible", "energy_cost_class": "negligible" } },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["patch", "check", "validate"],
+      "capability_requirements": ["port:patch/check_patch"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    },
+    {
+      "skill_id": "soma.ports.patch.create_patch",
+      "namespace": "soma.ports.patch",
+      "pack": "soma.ports.patch",
+      "kind": "primitive",
+      "name": "create_patch",
+      "description": "Generate a unified diff patch from file changes via the patch port",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object" } },
+      "outputs": { "schema": { "description": "any" } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "emission", "target_resource": null, "description": "emit unified diff patch content", "patch": null }
+      ],
+      "observables": [{ "field": "success", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "success": true }, "description": "create_patch completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "operation failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": { "latency": { "expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 5000 }, "resource_cost": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" } },
+      "risk_class": "negligible",
+      "determinism": "deterministic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["patch", "create", "diff"],
+      "capability_requirements": ["port:patch/create_patch"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    }
+  ],
+  "port_dependencies": []
+}

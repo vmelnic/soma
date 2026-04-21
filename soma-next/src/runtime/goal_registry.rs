@@ -13,6 +13,8 @@ use std::thread::JoinHandle;
 use serde::Serialize;
 use uuid::Uuid;
 
+use super::trace_notifier::TraceNotifier;
+
 use crate::memory::checkpoint::SessionCheckpointStore;
 use crate::memory::embedder::GoalEmbedder;
 use crate::memory::episodes::EpisodeStore;
@@ -165,6 +167,7 @@ pub fn spawn_async_goal(
     checkpoint_store: Arc<SessionCheckpointStore>,
     checkpoint_every_n: u32,
     episode_ctx: OwnedEpisodeContext,
+    notifier: Arc<dyn TraceNotifier>,
 ) {
     let handle = std::thread::Builder::new()
         .name(format!("soma-goal-{}", entry.goal_id))
@@ -173,6 +176,8 @@ pub fn spawn_async_goal(
             move || {
                 *entry.status.lock().unwrap() = AsyncGoalStatus::Running;
                 let mut steps_since_save: u32 = 0;
+                let mut prev_step_count: usize = entry.session.lock().unwrap().trace.steps.len();
+                let mut sent_terminal = false;
 
                 loop {
                     if entry.cancel.load(Ordering::Relaxed) {
@@ -190,6 +195,28 @@ pub fn spawn_async_goal(
                         let mut session = entry.session.lock().unwrap();
                         ctrl.run_step(&mut session)
                     };
+
+                    // Push notification for any newly recorded trace step.
+                    {
+                        let session = entry.session.lock().unwrap();
+                        let cur = session.trace.steps.len();
+                        if cur > prev_step_count {
+                            if let Some(step) = session.trace.steps.last() {
+                                let (status_str, terminal) = match &step_result {
+                                    Ok(StepResult::Continue) => ("running", false),
+                                    Ok(StepResult::Completed) => ("completed", true),
+                                    Ok(StepResult::Failed(_)) => ("failed", true),
+                                    Ok(StepResult::Aborted) => ("aborted", true),
+                                    Ok(StepResult::WaitingForInput(_)) => ("waiting_for_input", false),
+                                    Ok(StepResult::WaitingForRemote(_)) => ("waiting_for_remote", false),
+                                    Err(_) => ("error", true),
+                                };
+                                notifier.notify_step(entry.goal_id, step, status_str, terminal);
+                                sent_terminal = terminal;
+                            }
+                            prev_step_count = cur;
+                        }
+                    }
 
                     match step_result {
                         Ok(StepResult::Continue) => {
@@ -238,6 +265,28 @@ pub fn spawn_async_goal(
                             *entry.status.lock().unwrap() = AsyncGoalStatus::Error;
                             break;
                         }
+                    }
+                }
+
+                // Terminal notification for cases where no trace step was
+                // produced in the final iteration (e.g. early cancellation).
+                {
+                    let session = entry.session.lock().unwrap();
+                    if !sent_terminal && session.trace.steps.len() == prev_step_count {
+                        let status = entry.current_status();
+                        let status_str = match status {
+                            AsyncGoalStatus::Completed => "completed",
+                            AsyncGoalStatus::Failed => "failed",
+                            AsyncGoalStatus::Aborted => "aborted",
+                            AsyncGoalStatus::Error => "error",
+                            _ => "unknown",
+                        };
+                        let err = entry.last_error();
+                        notifier.notify_terminal(
+                            entry.goal_id,
+                            status_str,
+                            err.as_deref(),
+                        );
                     }
                 }
 

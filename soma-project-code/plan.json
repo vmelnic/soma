@@ -1,0 +1,177 @@
+{
+  "objective": "Build an Express API with user CRUD and SQLite",
+  "workspace": "/Users/vm/Projects/personal/soma/soma-project-code/workspace",
+  "created": "2026-04-21T19:21:49.549Z",
+  "steps": [
+    {
+      "step": 1,
+      "description": "Create project directory structure",
+      "port_id": "filesystem",
+      "capability_id": "mkdir",
+      "input": {
+        "path": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api"
+      }
+    },
+    {
+      "step": 2,
+      "description": "Create src directory",
+      "port_id": "filesystem",
+      "capability_id": "mkdir",
+      "input": {
+        "path": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api/src"
+      }
+    },
+    {
+      "step": 3,
+      "description": "Create tests directory",
+      "port_id": "filesystem",
+      "capability_id": "mkdir",
+      "input": {
+        "path": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api/tests"
+      }
+    },
+    {
+      "step": 4,
+      "description": "Create package.json",
+      "port_id": "filesystem",
+      "capability_id": "writefile",
+      "input": {
+        "path": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api/package.json"
+      }
+    },
+    {
+      "step": 5,
+      "description": "Create .gitignore",
+      "port_id": "filesystem",
+      "capability_id": "writefile",
+      "input": {
+        "path": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api/.gitignore"
+      }
+    },
+    {
+      "step": 6,
+      "description": "Install npm dependencies",
+      "port_id": "runner",
+      "capability_id": "npm_install",
+      "input": {
+        "cwd": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api"
+      }
+    },
+    {
+      "step": 7,
+      "description": "Create database initialization file",
+      "port_id": "filesystem",
+      "capability_id": "writefile",
+      "input": {
+        "path": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api/src/db.js"
+      }
+    },
+    {
+      "step": 8,
+      "description": "Create user model",
+      "port_id": "filesystem",
+      "capability_id": "writefile",
+      "input": {
+        "path": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api/src/models/user.js"
+      }
+    },
+    {
+      "step": 9,
+      "description": "Create user routes",
+      "port_id": "filesystem",
+      "capability_id": "writefile",
+      "input": {
+        "path": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api/src/routes/users.js"
+      }
+    },
+    {
+      "step": 10,
+      "description": "Create user controller",
+      "port_id": "filesystem",
+      "capability_id": "writefile",
+      "input": {
+        "path": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api/src/controllers/userController.js"
+      }
+    },
+    {
+      "step": 11,
+      "description": "Create main app file",
+      "port_id": "filesystem",
+      "capability_id": "writefile",
+      "input": {
+        "path": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api/src/app.js"
+      }
+    },
+    {
+      "step": 12,
+      "description": "Create server entry point",
+      "port_id": "filesystem",
+      "capability_id": "writefile",
+      "input": {
+        "path": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api/src/server.js"
+      }
+    },
+    {
+      "step": 13,
+      "description": "Create user tests",
+      "port_id": "filesystem",
+      "capability_id": "writefile",
+      "input": {
+        "path": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api/tests/users.test.js"
+      }
+    },
+    {
+      "step": 14,
+      "description": "Create README documentation",
+      "port_id": "filesystem",
+      "capability_id": "writefile",
+      "input": {
+        "path": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api/README.md"
+      }
+    },
+    {
+      "step": 15,
+      "description": "Run npm tests",
+      "port_id": "runner",
+      "capability_id": "npm_test",
+      "input": {
+        "cwd": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api"
+      }
+    },
+    {
+      "step": 16,
+      "description": "Initialize git repository",
+      "port_id": "git",
+      "capability_id": "init",
+      "input": {
+        "cwd": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api"
+      }
+    },
+    {
+      "step": 17,
+      "description": "Add all files to git",
+      "port_id": "git",
+      "capability_id": "add",
+      "input": {
+        "cwd": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api",
+        "paths": [
+          ".gitignore",
+          "package.json",
+          "README.md",
+          "src/",
+          "tests/"
+        ]
+      }
+    },
+    {
+      "step": 18,
+      "description": "Create initial commit",
+      "port_id": "git",
+      "capability_id": "commit",
+      "input": {
+        "cwd": "/Users/vm/Projects/personal/soma/soma-project-code/workspace/express-api",
+        "message": "Initial commit: Express API with user CRUD and SQLite"
+      }
+    }
+  ]
+}
