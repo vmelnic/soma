@@ -1,0 +1,9 @@
+{
+  "name": "soma-project-brain",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node brain.js"
+  }
+}
