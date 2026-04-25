@@ -4581,6 +4581,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "soma-port-github"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "reqwest",
+ "serde_json",
+ "soma-port-sdk",
+]
+
+[[package]]
 name = "soma-port-google-calendar"
 version = "0.1.0"
 dependencies = [
@@ -4606,6 +4616,15 @@ dependencies = [
  "reqwest",
  "serde_json",
  "soma-port-sdk",
+]
+
+[[package]]
+name = "soma-port-gridworld"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "soma-port-sdk",
+ "uuid",
 ]
 
 [[package]]

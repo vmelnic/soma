@@ -140,9 +140,19 @@ impl BeliefRuntime for DefaultBeliefRuntime {
                 existing.subject = updated.subject.clone();
                 existing.predicate = updated.predicate.clone();
                 existing.value = updated.value.clone();
-                existing.confidence = updated.confidence;
                 existing.provenance = updated.provenance;
                 existing.timestamp = updated.timestamp;
+                existing.prior_confidence = updated.prior_confidence;
+                existing.prediction_error = updated.prediction_error;
+                existing.confidence = match updated.prediction_error {
+                    Some(pe) if pe > 0.5 => {
+                        (existing.confidence * (1.0 - pe * 0.5)).clamp(0.01, 0.99)
+                    }
+                    Some(pe) if pe < 0.2 => {
+                        ((existing.confidence + updated.confidence) / 2.0).min(0.95)
+                    }
+                    _ => updated.confidence,
+                };
             } else {
                 // Update target not found — treat as add.
                 belief.facts.push(updated.clone());
@@ -274,7 +284,7 @@ mod tests {
             confidence: 0.9,
             provenance: FactProvenance::Asserted,
             timestamp: Utc::now(),
-            ttl_ms: None,
+            ttl_ms: None, prior_confidence: None, prediction_error: None,
         }
     }
 
@@ -303,7 +313,7 @@ mod tests {
             added_facts: vec![],
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
 
         rt.apply_patch(&mut belief, patch).unwrap();
@@ -324,7 +334,7 @@ mod tests {
             added_facts: vec![],
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
 
@@ -338,7 +348,7 @@ mod tests {
             added_facts: vec![],
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
 
@@ -359,7 +369,7 @@ mod tests {
             added_facts: vec![],
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
 
@@ -371,7 +381,7 @@ mod tests {
             added_facts: vec![],
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         let result = rt.apply_patch(&mut belief, patch);
         assert!(result.is_err());
@@ -392,7 +402,7 @@ mod tests {
             added_facts: vec![],
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
         assert_eq!(belief.resources.len(), 2);
@@ -404,7 +414,7 @@ mod tests {
             added_facts: vec![],
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
         assert_eq!(belief.resources.len(), 1);
@@ -427,7 +437,7 @@ mod tests {
             ],
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
 
@@ -450,7 +460,7 @@ mod tests {
             added_facts: vec![make_fact("f1", "user:alice", "is_active")],
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
         assert_eq!(belief.facts.len(), 1);
@@ -462,7 +472,7 @@ mod tests {
             added_facts: vec![],
             updated_facts: vec![],
             removed_fact_ids: vec!["f1".to_string()],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
         assert!(belief.facts.is_empty());
@@ -486,6 +496,7 @@ mod tests {
                 source: "session".to_string(),
                 confidence: 1.0,
             }],
+            free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
         assert_eq!(belief.active_bindings.len(), 1);
@@ -505,6 +516,7 @@ mod tests {
                 source: "session".to_string(),
                 confidence: 1.0,
             }],
+            free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
         assert_eq!(belief.active_bindings.len(), 1);
@@ -526,7 +538,7 @@ mod tests {
             added_facts: vec![],
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
 
@@ -562,7 +574,7 @@ mod tests {
             added_facts: vec![],
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
         let h2 = rt.compute_world_hash(&belief);
@@ -588,6 +600,7 @@ mod tests {
                 source: "config".to_string(),
                 confidence: 1.0,
             }],
+            free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
 
@@ -616,7 +629,7 @@ mod tests {
                 confidence: 0.95,
                 provenance: FactProvenance::Observed,
                 timestamp: Utc::now(),
-                ttl_ms: None,
+                ttl_ms: None, prior_confidence: None, prediction_error: None,
             },
             Fact {
                 fact_id: "f2".to_string(),
@@ -626,7 +639,7 @@ mod tests {
                 confidence: 0.7,
                 provenance: FactProvenance::Inferred,
                 timestamp: Utc::now(),
-                ttl_ms: None,
+                ttl_ms: None, prior_confidence: None, prediction_error: None,
             },
             Fact {
                 fact_id: "f3".to_string(),
@@ -636,7 +649,7 @@ mod tests {
                 confidence: 1.0,
                 provenance: FactProvenance::Asserted,
                 timestamp: Utc::now(),
-                ttl_ms: None,
+                ttl_ms: None, prior_confidence: None, prediction_error: None,
             },
             Fact {
                 fact_id: "f4".to_string(),
@@ -646,7 +659,7 @@ mod tests {
                 confidence: 0.3,
                 provenance: FactProvenance::Stale,
                 timestamp: Utc::now(),
-                ttl_ms: None,
+                ttl_ms: None, prior_confidence: None, prediction_error: None,
             },
             Fact {
                 fact_id: "f5".to_string(),
@@ -656,7 +669,7 @@ mod tests {
                 confidence: 0.8,
                 provenance: FactProvenance::Remote,
                 timestamp: Utc::now(),
-                ttl_ms: None,
+                ttl_ms: None, prior_confidence: None, prediction_error: None,
             },
         ];
 
@@ -667,7 +680,7 @@ mod tests {
             added_facts: facts,
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
 
@@ -694,7 +707,7 @@ mod tests {
             added_facts: vec![],
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
 
@@ -706,7 +719,7 @@ mod tests {
             added_facts: vec![],
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         let result = rt.apply_patch(&mut belief, patch);
         assert!(result.is_err());
@@ -724,7 +737,7 @@ mod tests {
             added_facts: vec![make_fact("f1", "user:alice", "is_active")],
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         rt.apply_patch(&mut belief, patch).unwrap();
 
@@ -735,7 +748,7 @@ mod tests {
             added_facts: vec![make_fact("f1", "user:alice", "is_active")],
             updated_facts: vec![],
             removed_fact_ids: vec![],
-            binding_updates: vec![],
+            binding_updates: vec![], free_energy_delta: None,
         };
         let result = rt.apply_patch(&mut belief, patch);
         assert!(result.is_err());

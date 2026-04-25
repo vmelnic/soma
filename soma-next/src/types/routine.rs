@@ -124,6 +124,8 @@ pub struct Routine {
     pub policy_scope: Option<String>,
     #[serde(default)]
     pub version: u32,
+    #[serde(default)]
+    pub model_evidence: f64,
 }
 
 impl Routine {
@@ -179,6 +181,7 @@ mod tests {
             exclusive: false,
             policy_scope: None,
             version: 0,
+            model_evidence: 0.0,
         }
     }
 

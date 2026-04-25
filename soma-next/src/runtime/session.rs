@@ -760,37 +760,70 @@ impl SessionController {
         }
     }
 
-    /// Build a belief patch from an observation (minimal: records facts from the result).
-    fn build_belief_patch(observation: &Observation) -> BeliefPatch {
-        let mut added_facts = Vec::new();
+    /// Build a belief patch from an observation. When a prior fact exists for the
+    /// same skill, computes prediction error and free energy delta.
+    fn build_belief_patch(observation: &Observation, belief: &BeliefState) -> BeliefPatch {
+        let subject = observation
+            .skill_id
+            .clone()
+            .unwrap_or_else(|| "unknown".into());
+        let predicate: String = if observation.success {
+            "succeeded".into()
+        } else {
+            "failed".into()
+        };
 
-        // Record the observation result as a fact.
-        added_facts.push(Fact {
+        let prior = belief
+            .facts
+            .iter()
+            .find(|f| f.subject == subject && f.predicate == predicate);
+
+        let (prior_confidence, prediction_error) = match prior {
+            Some(p) => (
+                Some(p.confidence),
+                Some((observation.confidence - p.confidence).abs()),
+            ),
+            None => (None, None),
+        };
+
+        let fe_before = belief.total_free_energy();
+
+        let new_fact = Fact {
             fact_id: format!("obs:{}", observation.observation_id),
-            subject: observation
-                .skill_id
-                .clone()
-                .unwrap_or_else(|| "unknown".into()),
-            predicate: if observation.success {
-                "succeeded".into()
-            } else {
-                "failed".into()
-            },
+            subject,
+            predicate,
             value: observation.structured_result.clone(),
             confidence: observation.confidence,
             provenance: FactProvenance::Observed,
             timestamp: observation.timestamp,
-                    ttl_ms: None,
-        });
+            ttl_ms: None,
+            prior_confidence,
+            prediction_error,
+        };
+
+        let fe_after = BeliefState::fact_free_energy(&new_fact);
+        let prior_fe = prior
+            .map(BeliefState::fact_free_energy)
+            .unwrap_or(0.0);
+        let free_energy_delta = Some(fe_after - prior_fe);
+
+        let (added_facts, updated_facts) = if prior.is_some() {
+            (Vec::new(), vec![new_fact])
+        } else {
+            (vec![new_fact], Vec::new())
+        };
+
+        let _ = fe_before;
 
         BeliefPatch {
             added_resources: Vec::new(),
             updated_resources: Vec::new(),
             removed_resource_ids: Vec::new(),
             added_facts,
-            updated_facts: Vec::new(),
+            updated_facts,
             removed_fact_ids: Vec::new(),
             binding_updates: Vec::new(),
+            free_energy_delta,
         }
     }
 
@@ -1628,7 +1661,7 @@ impl SessionController {
             .extend(output_bindings.clone());
 
         // -- 6. Apply effect patch (belief update) ----------------------------
-        let belief_patch = Self::build_belief_patch(&observation);
+        let belief_patch = Self::build_belief_patch(&observation, &session.belief);
         if let Err(e) = self
             .belief_source
             .apply_patch(&mut session.belief, &belief_patch)
@@ -2258,13 +2291,31 @@ impl SessionRuntime for SessionController {
             (vec![plan_score], skill, reason)
         } else {
             // Normal deliberation path: score, rank, choose.
-            let scores = self.predictor.score(
-                &candidates,
-                &session.goal,
-                &session.belief,
-                &episodes,
-            );
-            let top_scores = self.predictor.predict_top(&scores, 3);
+            let (scores, top_scores) = if let crate::types::goal::ExplorationStrategy::ActiveInference {
+                pragmatic_weight,
+                epistemic_weight,
+            } = session.goal.exploration
+            {
+                let aip = crate::runtime::active_inference::ActiveInferencePredictor::new(
+                    &*self.predictor,
+                    pragmatic_weight,
+                    epistemic_weight,
+                    &session.goal,
+                    &session.budget_remaining,
+                );
+                let s = aip.score(&candidates, &session.goal, &session.belief, &episodes);
+                let t = aip.predict_top(&s, 3);
+                (s, t)
+            } else {
+                let s = self.predictor.score(
+                    &candidates,
+                    &session.goal,
+                    &session.belief,
+                    &episodes,
+                );
+                let t = self.predictor.predict_top(&s, 3);
+                (s, t)
+            };
             if top_scores.is_empty() {
                 session.status = SessionStatus::Failed;
                 session.updated_at = Utc::now();
@@ -2407,7 +2458,7 @@ impl SessionRuntime for SessionController {
                     confidence: 0.0,
                     timestamp: Utc::now(),
                 };
-                let patch = Self::build_belief_patch(&empty_obs);
+                let patch = Self::build_belief_patch(&empty_obs, &session.belief);
                 Self::record_trace_step(
                     session,
                     step_index,
@@ -2516,7 +2567,7 @@ impl SessionRuntime for SessionController {
                     confidence: 0.0,
                     timestamp: Utc::now(),
                 };
-                let patch = Self::build_belief_patch(&synthetic_obs);
+                let patch = Self::build_belief_patch(&synthetic_obs, &session.belief);
                 Self::record_trace_step(
                     session,
                     step_index,
@@ -5012,7 +5063,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
-            version: 0,
+            version: 0, model_evidence: 0.0,
         }
     }
 

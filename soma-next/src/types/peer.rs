@@ -179,6 +179,8 @@ pub struct RoutineTransfer {
     pub policy_scope: Option<String>,
     #[serde(default)]
     pub version: u32,
+    #[serde(default)]
+    pub model_evidence: f64,
 }
 
 /// Observation in a distributed stream — 10 required fields from distributed.md.

@@ -24,5 +24,6 @@ pub mod proprioception;
 pub mod scheduler;
 pub mod world_state;
 pub mod port_health;
+pub mod active_inference;
 pub mod belief_projection;
 pub mod trace_notifier;

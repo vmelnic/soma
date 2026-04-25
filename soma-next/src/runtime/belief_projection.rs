@@ -79,7 +79,7 @@ mod tests {
             confidence,
             provenance: FactProvenance::Observed,
             timestamp: Utc::now(),
-            ttl_ms: None,
+            ttl_ms: None, prior_confidence: None, prediction_error: None,
         }
     }
 
@@ -193,7 +193,7 @@ mod tests {
                 confidence: 0.0,
                 provenance: FactProvenance::Observed,
                 timestamp: Utc::now(),
-                ttl_ms: None,
+                ttl_ms: None, prior_confidence: None, prediction_error: None,
             })
             .collect();
 

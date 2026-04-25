@@ -3105,6 +3105,7 @@ impl McpServer {
                     exclusive: routine.exclusive,
                     policy_scope: routine.policy_scope.clone(),
                     version: routine.version,
+                    model_evidence: routine.model_evidence,
                 };
 
                 match exec.transfer_routine(&peer_id, &transfer) {
@@ -3267,6 +3268,7 @@ impl McpServer {
                         exclusive: routine.exclusive,
                         policy_scope: routine.policy_scope.clone(),
                         version: routine.version,
+                        model_evidence: routine.model_evidence,
                     };
                     let _ = exec.transfer_routine(&peer_id, &transfer);
                     let skill_ids: Vec<String> = routine.effective_steps().iter().filter_map(|s| {
@@ -3424,7 +3426,7 @@ impl McpServer {
                 confidence: if succeeded { 1.0 } else { 0.5 },
                 provenance: crate::types::common::FactProvenance::Observed,
                 timestamp: chrono::Utc::now(),
-                            ttl_ms: None,
+                            ttl_ms: None, prior_confidence: None, prediction_error: None,
             };
             let _ = ws.add_fact(fact);
         }
@@ -4280,6 +4282,7 @@ impl McpServer {
             exclusive: routine.exclusive,
             policy_scope: routine.policy_scope.clone(),
             version: routine.version,
+            model_evidence: routine.model_evidence,
         };
 
         let mut successes = Vec::new();
@@ -4508,6 +4511,7 @@ impl McpServer {
             exclusive,
             policy_scope,
             version: 0,
+            model_evidence: 0.0,
         };
 
         let rt = match self.runtime.get() {
@@ -5205,7 +5209,7 @@ impl McpServer {
             }),
             confidence: 1.0,
             provenance: crate::types::common::FactProvenance::Asserted,
-            timestamp: now, ttl_ms: None,
+            timestamp: now, ttl_ms: None, prior_confidence: None, prediction_error: None,
         };
         let mut ws = rt.world_state.lock().unwrap();
         ws.add_fact(fact)?;
@@ -5251,7 +5255,7 @@ impl McpServer {
             value: serde_json::json!({"device_id": device_id, "ts": ts}),
             confidence: 1.0,
             provenance: crate::types::common::FactProvenance::Asserted,
-            timestamp: now, ttl_ms: None,
+            timestamp: now, ttl_ms: None, prior_confidence: None, prediction_error: None,
         };
         let mut ws = rt.world_state.lock().unwrap();
         ws.add_fact(fact)?;
@@ -5434,7 +5438,7 @@ impl McpServer {
                     confidence: if obs.success { 1.0 } else { 0.5 },
                     provenance: crate::types::common::FactProvenance::Observed,
                     timestamp: chrono::Utc::now(),
-                                    ttl_ms: None,
+                                    ttl_ms: None, prior_confidence: None, prediction_error: None,
                 };
                 let _ = ws.add_fact(fact);
             }
@@ -8015,7 +8019,7 @@ mod tests {
                 priority: 1,
                 exclusive: false,
                 policy_scope: None,
-                version: 0,
+                version: 0, model_evidence: 0.0,
             })
             .unwrap();
         }

@@ -49,6 +49,8 @@ cargo build --release --manifest-path soma-ports/redis/Cargo.toml
 # Proof harnesses exit 0 iff all phases PASS
 cd soma-project-autonomy  && cargo run --release
 cd soma-project-multistep && cargo run
+cd soma-project-inference && cargo run --release
+cd soma-project-minigrid && cargo run --release
 ```
 
 After rebuilding a port, re-copy the `.dylib` to any `soma-project-*/packs/` that uses it. After rebuilding soma-next for a project, on macOS: `xattr -d com.apple.quarantine bin/soma && codesign -fs - bin/soma`.
@@ -61,7 +63,8 @@ A change that violates any of these is an architectural redirection, not a bug f
 - **Input binding** comes from brain, belief state, working memory, or goal fields. Never hardcoded domain extraction.
 - **Every external interaction** produces a typed `PortCallRecord`.
 - **Sessions carry finite budgets.** Exhaustion terminates the session.
-- **Learning mines structure**, not content.
+- **Learning mines structure**, not content. Belief updates minimize free energy (KL divergence + prediction error). Skill selection minimizes expected free energy (pragmatic×precision + epistemic×(1−precision)). Routine compilation applies Bayesian Model Reduction (accuracy vs complexity gate). No gradients.
+- **Routines compose hierarchically.** `CompiledStep::SubRoutine` pushes the plan stack, executes a child routine, and pops back. Max nesting depth 16.
 - **Interfaces are self-describing** at runtime.
 
 ## How to think

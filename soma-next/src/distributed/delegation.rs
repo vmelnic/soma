@@ -320,7 +320,7 @@ impl DelegationManager for DefaultDelegationManager {
                         priority: 0,
                         exclusive: false,
                         policy_scope: None,
-                        version: 0,
+                        version: 0, model_evidence: 0.0,
                     };
                     executor.transfer_routine(peer_id, &routine)?;
                 } else {
@@ -427,6 +427,7 @@ impl DelegationManager for DefaultDelegationManager {
                             exclusive: false,
                             policy_scope: None,
                             version: 0,
+                            model_evidence: 0.0,
                         };
                         executor.transfer_routine(peer_id, &chunk_routine)?;
                     }

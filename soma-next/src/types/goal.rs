@@ -39,6 +39,16 @@ pub enum ExplorationStrategy {
     #[default]
     Greedy,
     EpsilonGreedy { epsilon: f64 },
+    ActiveInference {
+        #[serde(default = "default_one")]
+        pragmatic_weight: f64,
+        #[serde(default = "default_one")]
+        epistemic_weight: f64,
+    },
+}
+
+fn default_one() -> f64 {
+    1.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

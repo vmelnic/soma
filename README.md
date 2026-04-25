@@ -12,7 +12,7 @@ No application source code. A goal-driven runtime receives intent, selects skill
 Two execution paths:
 
 - **LLM-driven** — an LLM calls `invoke_port` via MCP to execute operations directly (database queries, email, S3, auth). SOMA is the body, the LLM is the brain. `--pack auto` discovers all available ports from dylib search paths without any manifest.
-- **Autonomous** — SOMA executes goals through its own control loop: skill selection, port invocation, observation, belief update, repeat. Learned routines bypass deliberation (plan-following mode). When the body can't resolve inputs, it pauses (`WaitingForInput`) and an external brain provides them via MCP — any LLM, any provider, no API keys in the runtime.
+- **Autonomous** — SOMA executes goals through its own control loop: skill selection, port invocation, observation, belief update, repeat. Belief updates minimize variational free energy (KL divergence + prediction error). Skill selection minimizes expected free energy — balancing exploration (epistemic value) and exploitation (pragmatic value) via budget-dependent precision. Routine compilation applies Bayesian Model Reduction, accepting only routines where accuracy gain exceeds complexity cost. Routines compose hierarchically (sub-routine plan stack, max depth 16). No gradients anywhere. When the body can't resolve inputs, it pauses (`WaitingForInput`) and an external brain provides them via MCP — any LLM, any provider, no API keys in the runtime.
 
 The same architecture runs on microcontrollers. `soma-project-esp32` deploys a `no_std` leaf firmware to ESP32-S3 and ESP32 LX6 chips with 12 hardware ports, runtime-configurable pins, mDNS auto-discovery, and an SSD1306 OLED display port. A brain-side loop reading the thermistor and drawing temperature on the OLED was verified on the physical panel — the leaf has no concept of "every 5 seconds" or "read sensor, show on screen". Both are the brain's composition. Server SOMA reaches the leaf via `invoke_remote_skill` over TCP after discovering it via `_soma._tcp.local.`.
 
@@ -37,6 +37,8 @@ The same architecture runs on microcontrollers. `soma-project-esp32` deploys a `
 | [soma-project-mcp-bridge](soma-project-mcp-bridge/) | `PortBackend::McpClient` proof. Python, Node.js, and PHP each a pure-stdlib MCP server running as a SOMA port. Writing a port in any language is now "write an MCP server in that language." | Proven |
 | [soma-project-web](soma-project-web/) | **soma-next in a browser tab.** Wasm core runtime with in-tab `dom` / `audio` / `voice` ports, autonomous goal execution through the real `SessionController`, plan-following dispatch, and an LLM brain over HTTP. | Proven |
 | [soma-project-terminal](soma-project-terminal/) | **Multi-user SOMA-native web platform.** Fallout-inspired terminal UI, conversation-first architecture. Operator logs in via magic link, creates named contexts, talks to a tool-calling chat brain that invokes real SOMA ports via `invoke_port` over MCP. | Production |
+| [soma-project-inference](soma-project-inference/) | End-to-end proof of active inference formalizations: belief free energy minimization, EFE-driven skill selection, BMR-gated routine compilation, learning transfer across task instances, and hierarchical routine composition (routines built from routines via SubRoutine plan stack). | Proven |
+| [soma-project-minigrid](soma-project-minigrid/) | **DoorKey-8x8 grid navigation benchmark.** Custom `gridworld` cdylib port with BFS pathfinding. Brain-guided episodes → PrefixSpan schema → BMR routine → 10/10 autonomous plan-following solves on novel grid layouts. First benchmark-comparable proof domain. | Proven |
 | [soma-project-body](soma-project-body/) | Full MCP body with all ports loaded. Claude Code integration, mDNS peer discovery, autonomous goals, routine authoring, world state, scheduling. | Production |
 
 Legacy (not active): `soma-core/`, `soma-plugins/`, `soma-synthesizer/`, `poc/`, `pow/`.
@@ -85,7 +87,7 @@ Schemas (neocortex)      → patterns extracted via PrefixSpan sequence mining
 Routines (basal ganglia) → compiled fast-paths, bypass deliberation, plan-following mode
 ```
 
-Consolidation cycle: episodes accumulate → HashEmbedder clusters by semantic similarity → PrefixSpan extracts frequent skill subsequences → schemas induced → routines compiled → consolidated episodes evicted.
+Consolidation cycle: episodes accumulate → HashEmbedder clusters by semantic similarity → PrefixSpan extracts frequent skill subsequences → schemas induced → BMR-gated routine compilation (rejects routines where ΔF > threshold) → hierarchical composition (routines call sub-routines) → consolidated episodes evicted. The entire pipeline is gradient-free — an embodied program synthesizer that learns through active inference.
 
 ## Documentation
 
@@ -100,6 +102,8 @@ Consolidation cycle: episodes accumulate → HashEmbedder clusters by semantic s
 - [Distributed](docs/distributed.md) — Peer transport, delegation, sync
 - [Building Projects](docs/building-projects.md) — How to create `soma-project-*`
 - [HelperBook](docs/helperbook.md) — Service marketplace application
+- [Embodied Program Synthesis](docs/embodied-program-synthesis.md) — Research brief: active inference + program synthesis convergence, gradient-free learning
+- [Proof Domains](docs/proof-domains.md) — Benchmark environments, leaderboards, and measurement strategy for SOMA's learning pipeline
 
 ## License
 

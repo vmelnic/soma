@@ -78,7 +78,7 @@
           "effect_class": "local_state_mutation",
           "rollback_support": "logical_undo",
           "determinism_class": "deterministic",
-          "idempotence_class": "non_idempotent",
+          "idempotence_class": "not_idempotent",
           "risk_class": "medium",
           "latency_profile": { "expected_latency_ms": 20, "p95_latency_ms": 200, "max_latency_ms": 5000 },
           "cost_profile": { "cpu_cost_class": "low", "memory_cost_class": "low", "io_cost_class": "medium", "network_cost_class": "negligible", "energy_cost_class": "negligible" },

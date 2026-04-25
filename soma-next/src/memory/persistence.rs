@@ -596,7 +596,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
-            version: 0,
+            version: 0, model_evidence: 0.0,
         }
     }
 
@@ -922,7 +922,7 @@ mod tests {
             confidence: 1.0,
             provenance: FactProvenance::Observed,
             timestamp: Utc::now(),
-            ttl_ms: None,
+            ttl_ms: None, prior_confidence: None, prediction_error: None,
         }
     }
 

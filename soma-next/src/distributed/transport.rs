@@ -839,6 +839,7 @@ impl IncomingHandler for LocalDispatchHandler {
                         exclusive: routine.exclusive,
                         policy_scope: routine.policy_scope,
                         version: routine.version,
+                        model_evidence: routine.model_evidence,
                     };
                     match store.lock().unwrap().register(routine_to_store) {
                         Ok(()) => {
@@ -1917,7 +1918,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
-            version: 0,
+            version: 0, model_evidence: 0.0,
         };
 
         let result = executor.transfer_routine("peer-1", &routine);

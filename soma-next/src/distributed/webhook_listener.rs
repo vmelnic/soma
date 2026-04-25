@@ -286,7 +286,7 @@ fn handle_webhook_request(
                 confidence: 1.0,
                 provenance: FactProvenance::Observed,
                 timestamp: now,
-                            ttl_ms: None,
+                            ttl_ms: None, prior_confidence: None, prediction_error: None,
             };
             {
                 let mut ws = world_state.lock().unwrap();

@@ -915,7 +915,7 @@ mod tests {
             priority: 0,
             exclusive: false,
             policy_scope: None,
-            version: 0,
+            version: 0, model_evidence: 0.0,
         }
     }
 

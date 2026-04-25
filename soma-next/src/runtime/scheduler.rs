@@ -272,7 +272,7 @@ pub fn start_scheduler_thread_with_launcher(
                                 confidence: 1.0,
                                 provenance: crate::types::common::FactProvenance::Observed,
                                 timestamp: chrono::Utc::now(),
-                                                            ttl_ms: None,
+                                                            ttl_ms: None, prior_confidence: None, prediction_error: None,
                             };
                             let _ = ws.add_fact(fact);
                         }

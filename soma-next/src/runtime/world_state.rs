@@ -333,7 +333,7 @@ pub fn start_reactive_monitor(
                                     confidence: 1.0,
                                     provenance: crate::types::common::FactProvenance::Observed,
                                     timestamp: chrono::Utc::now(),
-                                                                    ttl_ms: None,
+                                                                    ttl_ms: None, prior_confidence: None, prediction_error: None,
                                 };
                                 let _ = ws.add_fact(fact);
                             }
@@ -371,7 +371,7 @@ pub fn start_reactive_monitor(
                             confidence: 1.0,
                             provenance: crate::types::common::FactProvenance::Observed,
                             timestamp: chrono::Utc::now(),
-                                                    ttl_ms: None,
+                                                    ttl_ms: None, prior_confidence: None, prediction_error: None,
                         };
                         let _ = ws.add_fact(fact);
                         // Clear any prior failure fact.
@@ -389,7 +389,7 @@ pub fn start_reactive_monitor(
                             confidence: 1.0,
                             provenance: crate::types::common::FactProvenance::Observed,
                             timestamp: chrono::Utc::now(),
-                                                    ttl_ms: None,
+                                                    ttl_ms: None, prior_confidence: None, prediction_error: None,
                         };
                         let _ = ws.add_fact(fact);
                         // Clear any prior success fact.
@@ -466,7 +466,7 @@ mod tests {
             confidence: 1.0,
             provenance: FactProvenance::Observed,
             timestamp: Utc::now(),
-            ttl_ms: None,
+            ttl_ms: None, prior_confidence: None, prediction_error: None,
         }
     }
 

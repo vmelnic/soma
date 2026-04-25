@@ -184,7 +184,7 @@ pub fn start_port_health_monitor(
                             confidence: 1.0,
                             provenance: crate::types::common::FactProvenance::Observed,
                             timestamp: chrono::Utc::now(),
-                            ttl_ms: None,
+                            ttl_ms: None, prior_confidence: None, prediction_error: None,
                         };
                         if let Ok(mut ws) = world_state.lock() {
                             let _ = ws.add_fact(fact);
