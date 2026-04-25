@@ -1,0 +1,6 @@
+{
+  "name": "organize",
+  "description": "Organize the kitchen: push board, store jar, insert knife, press processor, manage drawer and window",
+  "preset": "organize",
+  "seed": 42
+}

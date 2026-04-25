@@ -90,6 +90,67 @@ Receive order, validate inventory, pick items, pack, ship, confirm delivery, han
 
 **Benchmark:** No standard leaderboard. Compare against hardcoded workflow engines (Temporal, Airflow) on adaptability when process changes.
 
+## Visual proof concepts (ML10-complete)
+
+Three web UI concepts that cover all 10 Meta-World ML10 manipulation tasks (reach, push, pick-place, door-open, drawer-close, drawer-open, button-press, peg-insert-side, window-open, window-close) in a single coherent 2D browser simulation.
+
+### Tiny Kitchen (top-down countertop)
+
+Robot arm in center of a kitchen counter. Objects: spice jars, cutting board, cabinet with hinged door, utensil drawer, sliding window above sink, food processor with button, knife block with peg slots.
+
+| ML10 Task | Kitchen Action |
+|---|---|
+| reach | Move arm to ingredient on counter |
+| push | Slide cutting board to target position |
+| pick-place | Pick spice jar, place on shelf |
+| door-open | Open cabinet door (pull handle) |
+| drawer-close | Close utensil drawer |
+| drawer-open | Open utensil drawer |
+| button-press | Press food processor button |
+| peg-insert-side | Insert knife into block slot |
+| window-open | Slide kitchen window open |
+| window-close | Slide kitchen window closed |
+
+**Operator interaction:** Drag objects to arbitrary positions, toggle active tasks, adjust difficulty (randomize positions, add obstacles). ~1000 LOC. Requires 2-link arm inverse kinematics. Universal metaphor — everyone understands a kitchen.
+
+### Clockmaker's Workbench (side-view)
+
+Steampunk brass mechanical hand on a watchmaker's desk. Objects: gears, springs, cuckoo clock housing with door, parts cabinet with drawers, stamp press, pin holes, glass display case with sliding panels.
+
+| ML10 Task | Clockmaker Action |
+|---|---|
+| reach | Move hand to component |
+| push | Slide gear along track to meshing position |
+| pick-place | Pick spring, place into clock housing |
+| door-open | Open cuckoo clock door |
+| drawer-close | Close parts drawer |
+| drawer-open | Open parts drawer (reveals components) |
+| button-press | Press stamp/punch tool down onto piece |
+| peg-insert-side | Insert pin into clock mechanism hole |
+| window-open | Slide glass case panel open |
+| window-close | Slide glass case panel closed |
+
+**Operator interaction:** Place components, open parts catalog sidebar, toggle X-ray mode to see inside housing/drawers. Ghost trails show arm paths from prior episodes — directly visualizes learning. ~1300 LOC. Side-view 2-link arm IK. Most visually striking aesthetic but highest implementation cost.
+
+### Post Office Sorting Room (isometric)
+
+Gantry robot on overhead rail above a conveyor belt. Objects: mail slots, package bins, service window, stamp machine, cabinet with door, category drawers, pegboard for sorting tags.
+
+| ML10 Task | Post Office Action |
+|---|---|
+| reach | Move claw to mail piece on conveyor |
+| push | Push package along conveyor to sorting zone |
+| pick-place | Pick letter, drop into correct mail slot |
+| door-open | Open mailroom cabinet |
+| drawer-close | Close category drawer |
+| drawer-open | Open category drawer |
+| button-press | Stamp a letter (press down on stamp pad) |
+| peg-insert-side | Hang sorting tag on pegboard hook |
+| window-open | Open service window |
+| window-close | Close service window |
+
+**Operator interaction:** Spawn mail items onto conveyor, label drawers with categories, rearrange room layout, set conveyor speed, view scoreboard with improvement graph. ~850 LOC. No IK needed — gantry arm is X-rail + Y-drop. Conveyor creates natural motion. Scoreboard directly visualizes SOMA learning throughput.
+
 ## Established benchmarks with leaderboards
 
 | Benchmark | Domain | Metrics | Where | Best fit for SOMA |

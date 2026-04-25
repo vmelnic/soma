@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+<meta charset="UTF-8">
+<title>Tiny Kitchen — SOMA ML10</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/pixi.js@7.4.3/dist/pixi.min.js"></script>
+<script>
+tailwind.config = {
+  theme: { extend: { colors: {
+    soma: { bg: '#0f0f1a', panel: '#161625', surface: '#1c1c30', accent: '#00d4ff', danger: '#e94560', ok: '#4caf50' },
+  }}}
+}
+</script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  body { font-family: 'Inter', system-ui, sans-serif; }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+  #pixi-container canvas { border-radius: 12px; }
+</style>
+</head>
+<body class="h-full bg-soma-bg text-gray-200 overflow-hidden">
+<div class="h-full flex flex-col">
+
+  <header class="flex items-center justify-between px-5 py-2.5 bg-soma-panel border-b border-white/5">
+    <div class="flex items-center gap-3">
+      <div class="w-7 h-7 rounded-lg bg-soma-accent/20 flex items-center justify-center">
+        <svg class="w-3.5 h-3.5 text-soma-accent" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      </div>
+      <h1 class="text-sm font-semibold text-white">SOMA <span class="text-soma-accent">Tiny Kitchen</span></h1>
+      <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-soma-accent/10 text-soma-accent font-medium">ML10</span>
+    </div>
+    <div id="header-status" class="text-xs text-gray-500">Ready</div>
+  </header>
+
+  <div class="flex-1 flex min-h-0">
+
+    <!-- LEFT -->
+    <aside class="w-60 bg-soma-panel border-r border-white/5 flex flex-col overflow-y-auto shrink-0">
+      <div class="p-4 space-y-4 border-b border-white/5">
+        <div class="space-y-1.5">
+          <label class="text-[10px] font-medium uppercase tracking-wider text-gray-500">Seed</label>
+          <input type="number" id="seed" value="42" min="1" max="9999"
+            class="w-full bg-soma-surface border border-white/10 rounded-md px-3 py-1.5 text-sm text-white focus:outline-none focus:border-soma-accent/50">
+        </div>
+        <div class="space-y-1.5">
+          <label class="text-[10px] font-medium uppercase tracking-wider text-gray-500">Speed</label>
+          <div class="flex items-center gap-2">
+            <input type="range" id="speed" min="1" max="10" value="5" class="flex-1 accent-soma-accent h-1">
+            <span id="speed-label" class="text-xs text-gray-400 w-4 text-right">5</span>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button id="btn-play" onclick="runScenario()"
+            class="flex-1 py-2 px-3 rounded-md bg-soma-accent text-black text-xs font-semibold hover:bg-soma-accent/80 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed transition">Play</button>
+          <button onclick="flushMemory()"
+            class="py-2 px-3 rounded-md bg-soma-danger/20 text-soma-danger text-xs font-semibold hover:bg-soma-danger/30 transition">Flush</button>
+        </div>
+      </div>
+      <div class="p-4 space-y-2 border-b border-white/5">
+        <h3 class="text-[10px] font-medium uppercase tracking-wider text-gray-500">ML10 Tasks</h3>
+        <div class="space-y-0.5" id="tasks-grid"></div>
+      </div>
+      <div class="p-4 space-y-2">
+        <h3 class="text-[10px] font-medium uppercase tracking-wider text-gray-500">Legend</h3>
+        <div class="grid grid-cols-2 gap-y-1 gap-x-2 text-[10px]">
+          <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-[#e94560]"></span>Arm</div>
+          <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-[#ffc107]"></span>Jar</div>
+          <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded bg-[#c4a882]"></span>Board</div>
+          <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded bg-[#bdbdbd]"></span>Knife</div>
+          <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded bg-[#a04820]"></span>Cabinet</div>
+          <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded bg-[#b08050]"></span>Drawer</div>
+          <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded bg-[#4090c0]"></span>Window</div>
+          <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded bg-[#80c840]"></span>Processor</div>
+          <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded bg-[#c0a080]"></span>Block</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MIDDLE -->
+    <main class="flex-1 flex items-center justify-center bg-[#0a0a14] min-w-0 p-2">
+      <div id="pixi-container"></div>
+    </main>
+
+    <!-- RIGHT -->
+    <aside class="w-64 bg-soma-panel border-l border-white/5 flex flex-col overflow-hidden shrink-0">
+      <div class="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
+        <h3 class="text-[10px] font-medium uppercase tracking-wider text-gray-500">Trace</h3>
+        <span id="trace-summary" class="text-[10px] text-gray-500"></span>
+      </div>
+      <div class="flex-1 overflow-y-auto p-2 space-y-0.5" id="trace-steps">
+        <div class="text-xs text-gray-600 text-center py-8">Press Play to run</div>
+      </div>
+      <div id="step-detail" class="border-t border-white/5 p-3 text-[10px] space-y-1 hidden">
+        <div class="flex justify-between"><span class="text-gray-500">Skill</span><span id="detail-skill" class="text-white font-medium"></span></div>
+        <div class="flex justify-between"><span class="text-gray-500">Status</span><span id="detail-status"></span></div>
+        <div class="flex justify-between"><span class="text-gray-500">Step</span><span id="detail-step" class="text-gray-300"></span></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+//  Constants
+// ═══════════════════════════════════════════════════
+var PW = 760, PH = 490;
+var ISO = { TW: 64, TH: 32, ZH: 26, OX: 340, OY: 95 };
+
+function toScr(c, r, z) {
+  return [ISO.OX + (c - r) * ISO.TW / 2, ISO.OY + (c + r) * ISO.TH / 2 - (z || 0) * ISO.ZH];
+}
+
+function depth(c, r) { return Math.round((c + r) * 100); }
+
+var K = {
+  counter:   { c: 1.5, r: 1.2, w: 5.5, d: 2.8, h: 1.1 },
+  cabinet:   { c: 0.3, r: 4.8, w: 1.8, d: 1.2, h: 1.6 },
+  shelf:     { c: 0.3, r: 3.8, w: 1.8, d: 0.8, h: 0.08 },
+  drawer:    { c: 3.0, r: 5.2, w: 1.6, d: 1.0, h: 1.0 },
+  window:    { c: 2.5, r: -0.3, w: 3.5, d: 0.25, h: 2.8 },
+  processor: { c: 5.8, r: 5.0, w: 1.2, d: 1.2, h: 1.4 },
+  block:     { c: 7.5, r: 2.0, w: 0.7, d: 0.7, h: 0.9 },
+};
+
+function portToGrid(px, py) {
+  return { c: 1.5 + (px / 600) * 5.5, r: 1.2 + (py / 400) * 2.8 };
+}
+
+// ═══════════════════════════════════════════════════
+//  PixiJS Setup
+// ═══════════════════════════════════════════════════
+var app = new PIXI.Application({
+  width: PW, height: PH,
+  backgroundColor: 0x0a0a14,
+  antialias: true,
+  resolution: window.devicePixelRatio || 1,
+  autoDensity: true,
+});
+document.getElementById('pixi-container').appendChild(app.view);
+
+var stage = new PIXI.Container();
+stage.sortableChildren = true;
+app.stage.addChild(stage);
+
+// ═══════════════════════════════════════════════════
+//  Sprite Loading
+// ═══════════════════════════════════════════════════
+var sprites = {};
+
+async function tryLoadSprites() {
+  try {
+    var res = await fetch('sprites/manifest.json');
+    var manifest = await res.json();
+    var toLoad = [];
+    for (var key in manifest) {
+      if (key[0] === '_') continue;
+      if (manifest[key]) toLoad.push({ key: key, path: 'sprites/' + manifest[key] });
+    }
+    for (var entry of toLoad) {
+      try {
+        sprites[entry.key] = await PIXI.Assets.load(entry.path);
+      } catch (e) { /* sprite not found, use graphics fallback */ }
+    }
+    if (Object.keys(sprites).length > 0) {
+      console.log('Loaded ' + Object.keys(sprites).length + ' sprite(s)');
+      rebuildScene();
+    }
+  } catch (e) { /* no manifest, using graphics */ }
+}
+
+// ═══════════════════════════════════════════════════
+//  Isometric Drawing Helpers
+// ═══════════════════════════════════════════════════
+function isoBlock(g, c, r, z, w, d, h, top, left, right, outline) {
+  var bl = toScr(c, r, z), br = toScr(c+w, r, z);
+  var fr = toScr(c+w, r+d, z), fl = toScr(c, r+d, z);
+  var BL = toScr(c, r, z+h), BR = toScr(c+w, r, z+h);
+  var FR = toScr(c+w, r+d, z+h), FL = toScr(c, r+d, z+h);
+
+  var ls = outline ? 1 : 0;
+  var lo = outline || 0;
+
+  // Left face
+  g.lineStyle(ls, lo, 0.35);
+  g.beginFill(left);
+  g.drawPolygon([fl[0],fl[1], fr[0],fr[1], FR[0],FR[1], FL[0],FL[1]]);
+  g.endFill();
+  // Right face
+  g.beginFill(right);
+  g.drawPolygon([fr[0],fr[1], br[0],br[1], BR[0],BR[1], FR[0],FR[1]]);
+  g.endFill();
+  // Top face
+  g.lineStyle(ls, lo, 0.2);
+  g.beginFill(top);
+  g.drawPolygon([BL[0],BL[1], BR[0],BR[1], FR[0],FR[1], FL[0],FL[1]]);
+  g.endFill();
+  g.lineStyle(0);
+}
+
+function isoShadow(g, c, r, w, d) {
+  var p0 = toScr(c,r,0), p1 = toScr(c+w,r,0);
+  var p2 = toScr(c+w,r+d,0), p3 = toScr(c,r+d,0);
+  g.beginFill(0x000000, 0.1);
+  g.drawPolygon([p0[0],p0[1], p1[0],p1[1], p2[0],p2[1], p3[0],p3[1]]);
+  g.endFill();
+}
+
+function isoLabel(text, c, r, z, color, size) {
+  var t = new PIXI.Text(text, {
+    fontSize: size || 9, fill: color || 0xffffff,
+    fontFamily: 'Inter, system-ui, sans-serif', fontWeight: '600',
+  });
+  t.anchor.set(0.5, 0.5);
+  var p = toScr(c, r, z);
+  t.x = p[0]; t.y = p[1];
+  return t;
+}
+
+// ═══════════════════════════════════════════════════
+//  Kitchen Object Builders
+// ═══════════════════════════════════════════════════
+function buildFloor() {
+  var g = new PIXI.Graphics();
+  for (var r = 0; r < 7; r++) {
+    for (var c = 0; c < 9; c++) {
+      var col = (c + r) % 2 === 0 ? 0xe0d0b0 : 0xd0c0a0;
+      var p0 = toScr(c,r,0), p1 = toScr(c+1,r,0);
+      var p2 = toScr(c+1,r+1,0), p3 = toScr(c,r+1,0);
+      g.lineStyle(0.5, 0x000000, 0.05);
+      g.beginFill(col);
+      g.drawPolygon([p0[0],p0[1], p1[0],p1[1], p2[0],p2[1], p3[0],p3[1]]);
+      g.endFill();
+    }
+  }
+  g.zIndex = 0;
+  return g;
+}
+
+function buildWall() {
+  var g = new PIXI.Graphics();
+  isoBlock(g, 0, -0.4, 0, 9, 0.4, 3.6, 0x484860, 0x3a3a50, 0x2e2e42, 0x222238);
+  g.zIndex = 1;
+  return g;
+}
+
+function buildWindow() {
+  var con = new PIXI.Container();
+  con.zIndex = 2;
+  var W = K.window;
+
+  // Closed state
+  var closed = new PIXI.Graphics();
+  isoBlock(closed, W.c, W.r, 0.3, W.w, W.d+0.06, W.h, 0x5a7a88, 0x4a6a78, 0x3a5a68, 0x2a4a58);
+  isoBlock(closed, W.c+0.15, W.r-0.01, 0.5, W.w-0.3, W.d, W.h-0.4, 0x88c8e8, 0x78b8d8, 0x68a8c8);
+  con.addChild(closed);
+
+  // Open state
+  var opened = new PIXI.Graphics();
+  isoBlock(opened, W.c, W.r, 0.3, W.w, W.d+0.06, W.h, 0x5a7a88, 0x4a6a78, 0x3a5a68, 0x2a4a58);
+  isoBlock(opened, W.c+0.15, W.r-0.01, 0.5, W.w-0.3, W.d, W.h-0.4, 0x2a6a8a, 0x1e5a7a, 0x185070);
+  isoBlock(opened, W.c+0.15, W.r-0.01, 0.5, (W.w-0.3)*0.45, W.d+0.02, W.h-0.4, 0x90d8f0, 0x70c0e0, 0x60b0d0);
+  con.addChild(opened);
+  opened.addChild(isoLabel('OPEN', W.c+W.w*0.7, W.r+W.d/2, 1.8, 0xa0e0ff, 9));
+  opened.visible = false;
+
+  con._update = function(isOpen) { closed.visible = !isOpen; opened.visible = isOpen; };
+  return con;
+}
+
+function buildCounter() {
+  var g = new PIXI.Graphics();
+  var C = K.counter;
+  isoShadow(g, C.c-0.1, C.r-0.1, C.w+0.2, C.d+0.2);
+  isoBlock(g, C.c, C.r, 0, C.w, C.d, C.h, 0xd4a860, 0xc09048, 0xa07838, 0x806028);
+  // Surface highlight
+  var t0 = toScr(C.c+0.1,C.r+0.1,C.h+0.005);
+  var t1 = toScr(C.c+C.w-0.1,C.r+0.1,C.h+0.005);
+  var t2 = toScr(C.c+C.w-0.1,C.r+C.d-0.1,C.h+0.005);
+  var t3 = toScr(C.c+0.1,C.r+C.d-0.1,C.h+0.005);
+  g.beginFill(0xffffff, 0.06);
+  g.drawPolygon([t0[0],t0[1], t1[0],t1[1], t2[0],t2[1], t3[0],t3[1]]);
+  g.endFill();
+  g.zIndex = depth(C.c, C.r);
+  return g;
+}
+
+function buildCabinet() {
+  var con = new PIXI.Container();
+  var B = K.cabinet;
+  con.zIndex = depth(B.c, B.r);
+
+  var closed = new PIXI.Graphics();
+  isoShadow(closed, B.c, B.r, B.w, B.d);
+  isoBlock(closed, B.c, B.r, 0, B.w, B.d, B.h, 0xa85828, 0x904820, 0x783818, 0x582810);
+  // Handle
+  var hp = toScr(B.c+B.w-0.3, B.r+B.d, B.h*0.5);
+  closed.beginFill(0xddc070);
+  closed.drawCircle(hp[0], hp[1], 3);
+  closed.endFill();
+  closed.addChild(isoLabel('Cabinet', B.c+B.w*0.4, B.r+B.d*0.6, B.h*0.5, 0xd0b888, 9));
+  con.addChild(closed);
+
+  var opened = new PIXI.Graphics();
+  isoShadow(opened, B.c, B.r, B.w, B.d);
+  isoBlock(opened, B.c, B.r, 0, B.w, B.d, B.h, 0x6a4a28, 0x5a3a18, 0x4a2a10, 0x3a2008);
+  // Door swung out
+  isoBlock(opened, B.c+B.w-0.12, B.r-0.5, 0, 0.12, B.d+0.5, B.h, 0xa07848, 0x907040, 0x806030, 0x604020);
+  opened.addChild(isoLabel('OPEN', B.c+B.w/2, B.r+B.d/2, B.h/2, 0xc0a070, 9));
+  con.addChild(opened);
+  opened.visible = false;
+
+  con._update = function(isOpen) { closed.visible = !isOpen; opened.visible = isOpen; };
+  return con;
+}
+
+function buildShelf() {
+  var con = new PIXI.Container();
+  var S = K.shelf;
+  con.zIndex = depth(S.c, S.r);
+  var g = new PIXI.Graphics();
+  isoBlock(g, S.c+0.1, S.r, S.h+0.8, S.w-0.2, S.d, S.h, 0x906838, 0x805830, 0x704828, 0x503818);
+  con.addChild(g);
+  con.addChild(isoLabel('Shelf', S.c+S.w/2, S.r+S.d/2, 1.0, 0xb09060, 8));
+  con.visible = false;
+  con._update = function(vis) { con.visible = vis; };
+  return con;
+}
+
+function buildDrawer() {
+  var con = new PIXI.Container();
+  var D = K.drawer;
+  con.zIndex = depth(D.c, D.r);
+
+  var closed = new PIXI.Graphics();
+  isoShadow(closed, D.c, D.r, D.w, D.d);
+  isoBlock(closed, D.c, D.r, 0, D.w, D.d, D.h, 0xb08858, 0x987848, 0x806838, 0x604828);
+  // Pull handle
+  var hp = toScr(D.c+D.w/2, D.r+D.d, D.h*0.55);
+  closed.beginFill(0xc0c0c0);
+  closed.drawRoundedRect(hp[0]-10, hp[1]-2, 20, 4, 2);
+  closed.endFill();
+  closed.addChild(isoLabel('Drawer', D.c+D.w/2, D.r+D.d*0.6, D.h*0.5, 0xc0a888, 9));
+  con.addChild(closed);
+
+  var opened = new PIXI.Graphics();
+  isoShadow(opened, D.c, D.r, D.w, D.d);
+  isoBlock(opened, D.c, D.r, 0, D.w, D.d, D.h, 0xb08858, 0x987848, 0x806838, 0x604828);
+  isoBlock(opened, D.c+0.1, D.r+D.d, 0.3, D.w-0.2, 0.6, 0.15, 0xc0a070, 0xb09060, 0xa08050);
+  opened.addChild(isoLabel('OPEN', D.c+D.w/2, D.r+D.d/2, D.h/2, 0xd0b888, 9));
+  con.addChild(opened);
+  opened.visible = false;
+
+  con._update = function(isOpen) { closed.visible = !isOpen; opened.visible = isOpen; };
+  return con;
+}
+
+function buildProcessor() {
+  var con = new PIXI.Container();
+  var P = K.processor;
+  con.zIndex = depth(P.c, P.r);
+
+  var off = new PIXI.Graphics();
+  isoShadow(off, P.c, P.r, P.w, P.d);
+  isoBlock(off, P.c, P.r, 0, P.w, P.d, P.h, 0x80c840, 0x68a830, 0x509020, 0x387018);
+  var bp = toScr(P.c+P.w/2, P.r+P.d, P.h*0.35);
+  off.beginFill(0xef5350); off.drawCircle(bp[0], bp[1], 8); off.endFill();
+  off.lineStyle(1.5, 0xc62828); off.drawCircle(bp[0], bp[1], 8); off.lineStyle(0);
+  off.addChild(isoLabel('Processor', P.c+P.w/2, P.r+P.d*0.4, P.h*0.75, 0xc0e0a0, 8));
+  con.addChild(off);
+
+  var on = new PIXI.Graphics();
+  isoShadow(on, P.c, P.r, P.w, P.d);
+  isoBlock(on, P.c, P.r, 0, P.w, P.d, P.h, 0x559828, 0x488020, 0x386818, 0x285010);
+  var bp2 = toScr(P.c+P.w/2, P.r+P.d, P.h*0.35);
+  // Button glow
+  on.beginFill(0xf44336, 0.25); on.drawCircle(bp2[0], bp2[1], 14); on.endFill();
+  on.beginFill(0xc62828); on.drawCircle(bp2[0], bp2[1], 8); on.endFill();
+  on.lineStyle(1.5, 0x8b0000); on.drawCircle(bp2[0], bp2[1], 8); on.lineStyle(0);
+  on.addChild(isoLabel('ON', P.c+P.w/2, P.r+P.d, P.h*0.35, 0xffffff, 7));
+  on.addChild(isoLabel('Processor', P.c+P.w/2, P.r+P.d*0.4, P.h*0.75, 0xc0e0a0, 8));
+  con.addChild(on);
+  on.visible = false;
+
+  con._update = function(isOn) { off.visible = !isOn; on.visible = isOn; };
+  return con;
+}
+
+function buildKnifeBlock() {
+  var con = new PIXI.Container();
+  var B = K.block;
+  con.zIndex = depth(B.c, B.r);
+
+  var noKnife = new PIXI.Graphics();
+  isoShadow(noKnife, B.c, B.r, B.w, B.d);
+  isoBlock(noKnife, B.c, B.r, 0, B.w, B.d, B.h, 0xc0a080, 0xa08060, 0x806040, 0x604030);
+  for (var i = 0; i < 3; i++) {
+    var sp = toScr(B.c+0.15+i*0.2, B.r+B.d/2, B.h+0.01);
+    noKnife.beginFill(0x5d4037); noKnife.drawRect(sp[0]-1, sp[1]-8, 3, 16); noKnife.endFill();
+  }
+  noKnife.addChild(isoLabel('Block', B.c+B.w/2, B.r+B.d+0.2, B.h*0.4, 0xd0c0b0, 7));
+  con.addChild(noKnife);
+
+  var withKnife = new PIXI.Graphics();
+  isoShadow(withKnife, B.c, B.r, B.w, B.d);
+  isoBlock(withKnife, B.c, B.r, 0, B.w, B.d, B.h, 0xc0a080, 0xa08060, 0x806040, 0x604030);
+  for (var i = 0; i < 3; i++) {
+    var sp = toScr(B.c+0.15+i*0.2, B.r+B.d/2, B.h+0.01);
+    withKnife.beginFill(0x5d4037); withKnife.drawRect(sp[0]-1, sp[1]-8, 3, 16); withKnife.endFill();
+  }
+  var kp = toScr(B.c+0.15, B.r+B.d/2, B.h);
+  withKnife.beginFill(0xe0e0e0); withKnife.drawRect(kp[0]-1, kp[1]-18, 3, 22); withKnife.endFill();
+  withKnife.beginFill(0x6d4c41); withKnife.drawRect(kp[0]-2, kp[1]+2, 5, 5); withKnife.endFill();
+  withKnife.addChild(isoLabel('Block', B.c+B.w/2, B.r+B.d+0.2, B.h*0.4, 0xd0c0b0, 7));
+  con.addChild(withKnife);
+  withKnife.visible = false;
+
+  con._update = function(hasKnife) { noKnife.visible = !hasKnife; withKnife.visible = hasKnife; };
+  return con;
+}
+
+function buildItemGraphic(kind, gc, gr, z) {
+  var con = new PIXI.Container();
+  var g = new PIXI.Graphics();
+
+  if (kind === 'spice_jar') {
+    if (sprites.spice_jar) {
+      var s = new PIXI.Sprite(sprites.spice_jar);
+      s.anchor.set(0.5, 0.8);
+      var p = toScr(gc, gr, z + 0.2);
+      s.x = p[0]; s.y = p[1];
+      s.scale.set(0.15);
+      con.addChild(s);
+    } else {
+      isoBlock(g, gc-0.2, gr-0.2, z, 0.4, 0.4, 0.35, 0xffe082, 0xffc107, 0xffa000, 0xe68900);
+      con.addChild(g);
+      con.addChild(isoLabel('JAR', gc, gr, z+0.2, 0x5d4037, 7));
+    }
+  } else if (kind === 'cutting_board') {
+    if (sprites.cutting_board) {
+      var s = new PIXI.Sprite(sprites.cutting_board);
+      s.anchor.set(0.5, 0.8);
+      var p = toScr(gc, gr, z + 0.04);
+      s.x = p[0]; s.y = p[1];
+      s.scale.set(0.15);
+      con.addChild(s);
+    } else {
+      isoBlock(g, gc-0.5, gr-0.25, z, 1.0, 0.5, 0.06, 0xc4a882, 0xb09870, 0x9c8860);
+      con.addChild(g);
+      con.addChild(isoLabel('BOARD', gc, gr, z+0.06, 0x6d5540, 6));
+    }
+  } else if (kind === 'knife') {
+    var kp = toScr(gc, gr, z);
+    g.beginFill(0xe0e0e0);
+    g.drawPolygon([kp[0]-1,kp[1]-16, kp[0]+2,kp[1]-16, kp[0]+1,kp[1]+4, kp[0],kp[1]+4]);
+    g.endFill();
+    g.beginFill(0x6d4c41); g.drawRect(kp[0]-2, kp[1]+4, 5, 7); g.endFill();
+    con.addChild(g);
+  }
+
+  var p = toScr(gc, gr, z);
+  con.zIndex = depth(gc, gr);
+  return con;
+}
+
+function buildArm() {
+  var con = new PIXI.Container();
+  con.zIndex = 10000;
+
+  // Ground shadow (offset down by armZ later)
+  var shadow = new PIXI.Graphics();
+  shadow.beginFill(0x000000, 0.18);
+  shadow.drawEllipse(0, 0, 14, 8);
+  shadow.endFill();
+  con.addChild(shadow);
+  con._shadow = shadow;
+
+  // Outer glow
+  var glow = new PIXI.Graphics();
+  glow.beginFill(0xe94560, 0.15);
+  glow.drawCircle(0, 0, 20);
+  glow.endFill();
+  glow.filters = [new PIXI.BlurFilter(6)];
+  con.addChild(glow);
+
+  // Carrying ring (hidden by default)
+  var ring = new PIXI.Graphics();
+  ring.lineStyle(1, 0x00d4ff, 0.4);
+  ring.drawCircle(0, 0, 22);
+  ring.beginFill(0x00d4ff, 0.08);
+  ring.drawCircle(0, 0, 22);
+  ring.endFill();
+  ring.visible = false;
+  con.addChild(ring);
+  con._ring = ring;
+
+  // Body
+  var body = new PIXI.Graphics();
+  body.lineStyle(2, 0xffffff);
+  body.beginFill(0xe94560);
+  body.drawCircle(0, 0, 10);
+  body.endFill();
+  // Crosshair
+  body.lineStyle(1.5, 0xffffff, 0.8);
+  body.moveTo(-5, 0); body.lineTo(5, 0);
+  body.moveTo(0, -5); body.lineTo(0, 5);
+  con.addChild(body);
+
+  // Carry label
+  var label = new PIXI.Text('', {
+    fontSize: 8, fill: 0x00d4ff,
+    fontFamily: 'Inter, system-ui, sans-serif', fontWeight: '500',
+  });
+  label.anchor.set(0.5, 0);
+  label.y = 16;
+  label.visible = false;
+  con.addChild(label);
+  con._label = label;
+
+  return con;
+}
+
+// ═══════════════════════════════════════════════════
+//  Scene Assembly
+// ═══════════════════════════════════════════════════
+var objs = {};
+var itemsCon = null;
+
+function buildScene() {
+  stage.removeChildren();
+
+  objs.floor = buildFloor();
+  objs.wall = buildWall();
+  objs.window = buildWindow();
+  objs.counter = buildCounter();
+  objs.shelf = buildShelf();
+  objs.cabinet = buildCabinet();
+  objs.drawer = buildDrawer();
+  objs.processor = buildProcessor();
+  objs.block = buildKnifeBlock();
+  objs.arm = buildArm();
+
+  itemsCon = new PIXI.Container();
+  itemsCon.sortableChildren = true;
+  itemsCon.zIndex = depth(K.counter.c + 2, K.counter.r + 1);
+
+  stage.addChild(objs.floor);
+  stage.addChild(objs.wall);
+  stage.addChild(objs.window);
+  stage.addChild(objs.counter);
+  stage.addChild(itemsCon);
+  stage.addChild(objs.shelf);
+  stage.addChild(objs.block);
+  stage.addChild(objs.cabinet);
+  stage.addChild(objs.drawer);
+  stage.addChild(objs.processor);
+  stage.addChild(objs.arm);
+
+  // Initial arm position
+  var ap = toScr(4.25, 2.6, 2.4);
+  objs.arm.x = ap[0]; objs.arm.y = ap[1];
+  objs.arm._shadow.y = 2.4 * ISO.ZH;
+}
+
+function rebuildScene() {
+  var curState = scene.state;
+  buildScene();
+  if (curState) updateState(curState);
+}
+
+buildScene();
+
+// ═══════════════════════════════════════════════════
+//  State Management
+// ═══════════════════════════════════════════════════
+var scene = {
+  state: null,
+  armC: 4.25, armR: 2.6, armZ: 2.4,
+  targetC: 4.25, targetR: 2.6, targetZ: 2.4,
+  animating: false,
+  pendingState: null,
+};
+
+function updateState(st) {
+  scene.state = st;
+  if (!st) return;
+
+  objs.window._update(st.window_open);
+  objs.cabinet._update(st.cabinet_open);
+  objs.shelf._update(st.cabinet_open);
+  objs.drawer._update(st.drawer_open);
+  objs.processor._update(st.processor_on);
+  objs.block._update(st.knife_in_block);
+
+  // Carrying indicator
+  if (st.carrying) {
+    objs.arm._ring.visible = true;
+    objs.arm._label.visible = true;
+    objs.arm._label.text = st.carrying.kind.replace(/_/g, ' ');
+  } else {
+    objs.arm._ring.visible = false;
+    objs.arm._label.visible = false;
+  }
+
+  // Items
+  itemsCon.removeChildren();
+  if (st.items) {
+    st.items.forEach(function(item) {
+      var gp = portToGrid(item.pos[0], item.pos[1]);
+      var z = item.pos[1] < 300 ? K.counter.h + 0.15 : 0.15;
+      var obj = buildItemGraphic(item.kind, gp.c, gp.r, z);
+      itemsCon.addChild(obj);
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════
+//  Animation
+// ═══════════════════════════════════════════════════
+var bobTime = 0;
+
+app.ticker.add(function(delta) {
+  bobTime += 0.03 * delta;
+
+  // Arm interpolation
+  if (scene.animating) {
+    var speed = 0.08 * delta;
+    scene.armC += (scene.targetC - scene.armC) * speed;
+    scene.armR += (scene.targetR - scene.armR) * speed;
+    scene.armZ += (scene.targetZ - scene.armZ) * speed;
+    var dc = Math.abs(scene.targetC - scene.armC);
+    var dr = Math.abs(scene.targetR - scene.armR);
+    if (dc < 0.02 && dr < 0.02) {
+      scene.armC = scene.targetC;
+      scene.armR = scene.targetR;
+      scene.armZ = scene.targetZ;
+      scene.animating = false;
+      if (scene.pendingState) {
+        updateState(scene.pendingState);
+        scene.pendingState = null;
+      }
+    }
+  }
+
+  // Arm position + bob
+  var bob = Math.sin(bobTime) * 0.04;
+  var ap = toScr(scene.armC, scene.armR, scene.armZ + bob);
+  objs.arm.x = ap[0];
+  objs.arm.y = ap[1];
+  objs.arm._shadow.y = (scene.armZ + bob) * ISO.ZH;
+});
+
+// ═══════════════════════════════════════════════════
+//  ML10 Tasks
+// ═══════════════════════════════════════════════════
+var ML10 = [
+  { id: 'reach', label: 'reach' }, { id: 'push', label: 'push' },
+  { id: 'pick_place', label: 'pick-place' }, { id: 'door_open', label: 'door-open' },
+  { id: 'drawer_close', label: 'drawer-close' }, { id: 'drawer_open', label: 'drawer-open' },
+  { id: 'button_press', label: 'button-press' }, { id: 'peg_insert', label: 'peg-insert' },
+  { id: 'window_open', label: 'window-open' }, { id: 'window_close', label: 'window-close' },
+];
+var SKILL_TASK = {
+  'kitchen.scan':'reach','kitchen.push_board':'push',
+  'kitchen.pick_jar':'pick_place','kitchen.place_shelf':'pick_place',
+  'kitchen.place_counter':'pick_place','kitchen.door_open':'door_open',
+  'kitchen.drawer_close':'drawer_close','kitchen.drawer_open':'drawer_open',
+  'kitchen.button_press':'button_press','kitchen.peg_insert':'peg_insert',
+  'kitchen.window_open':'window_open','kitchen.window_close':'window_close',
+};
+
+(function() {
+  var grid = document.getElementById('tasks-grid');
+  ML10.forEach(function(t) {
+    var el = document.createElement('div');
+    el.dataset.task = t.id;
+    el.className = 'flex items-center gap-2 px-2 py-1 rounded text-[11px] bg-soma-surface transition-colors';
+    var dot = document.createElement('span');
+    dot.className = 'task-dot w-1.5 h-1.5 rounded-full bg-gray-600 shrink-0';
+    el.appendChild(dot);
+    var lbl = document.createElement('span');
+    lbl.textContent = t.label;
+    el.appendChild(lbl);
+    grid.appendChild(el);
+  });
+})();
+
+function updateTasks(done) {
+  document.querySelectorAll('[data-task]').forEach(function(el) {
+    var d = done && done.indexOf(el.dataset.task) >= 0;
+    el.classList.toggle('bg-soma-ok/20', d);
+    el.classList.toggle('bg-soma-surface', !d);
+    var dot = el.querySelector('.task-dot');
+    dot.classList.toggle('bg-soma-ok', d);
+    dot.classList.toggle('bg-gray-600', !d);
+  });
+}
+
+// ═══════════════════════════════════════════════════
+//  Trace & Playback
+// ═══════════════════════════════════════════════════
+var traceData = null;
+var animStep = -1;
+var playTimer = null;
+
+function setStatus(text, cls) {
+  var el = document.getElementById('header-status');
+  el.textContent = text;
+  el.className = 'text-xs ' + (cls === 'solved' ? 'text-soma-ok' : cls === 'failed' ? 'text-soma-danger' : cls === 'running' ? 'text-soma-accent' : 'text-gray-500');
+}
+
+function buildTrace(steps) {
+  var c = document.getElementById('trace-steps');
+  while (c.firstChild) c.removeChild(c.firstChild);
+  steps.forEach(function(step, i) {
+    var el = document.createElement('div');
+    el.className = 'flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-white/5 group';
+    var num = document.createElement('span');
+    num.className = 'w-5 h-5 rounded flex items-center justify-center text-[10px] font-semibold shrink-0 ' +
+      (step.success ? 'bg-soma-ok/20 text-soma-ok' : 'bg-soma-danger/20 text-soma-danger');
+    num.textContent = i + 1;
+    el.appendChild(num);
+    var name = document.createElement('span');
+    name.className = 'text-[11px] text-gray-300 group-hover:text-white truncate';
+    name.textContent = step.skill.replace('kitchen.', '');
+    el.appendChild(name);
+    var ml = SKILL_TASK[step.skill];
+    if (ml) {
+      var badge = document.createElement('span');
+      badge.className = 'ml-auto text-[9px] px-1 py-0.5 rounded bg-white/5 text-gray-500 shrink-0';
+      badge.textContent = ml.replace('_', '-');
+      el.appendChild(badge);
+    }
+    (function(idx) { el.addEventListener('click', function() { showStep(idx); }); })(i);
+    c.appendChild(el);
+  });
+  document.getElementById('trace-summary').textContent = steps.length + ' steps';
+}
+
+function showStep(idx) {
+  if (!traceData || !traceData.steps[idx]) return;
+  animStep = idx;
+  var step = traceData.steps[idx];
+  var obs = step.observation;
+
+  var c = document.getElementById('trace-steps');
+  Array.from(c.children).forEach(function(el, i) {
+    el.classList.toggle('bg-soma-accent/10', i === idx);
+    el.classList.toggle('ring-1', i === idx);
+    el.classList.toggle('ring-soma-accent/30', i === idx);
+  });
+
+  if (obs && obs.arm_pos) {
+    var gp = portToGrid(obs.arm_pos[0], obs.arm_pos[1]);
+    scene.targetC = gp.c;
+    scene.targetR = gp.r;
+    scene.targetZ = obs.arm_pos[1] < 300 ? 2.4 : 1.6;
+    scene.pendingState = obs;
+    scene.animating = true;
+    updateTasks(obs.tasks_done);
+  }
+
+  document.getElementById('step-detail').classList.remove('hidden');
+  document.getElementById('detail-skill').textContent = step.skill.replace('kitchen.', '');
+  var ds = document.getElementById('detail-status');
+  ds.textContent = step.success ? 'Success' : 'Failed';
+  ds.className = step.success ? 'font-medium text-soma-ok' : 'font-medium text-soma-danger';
+  document.getElementById('detail-step').textContent = (idx + 1) + ' / ' + traceData.steps.length;
+
+  var active = c.children[idx];
+  if (active) active.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function startPlay() {
+  if (!traceData || !traceData.steps.length) return;
+  animStep = -1;
+  var speed = parseInt(document.getElementById('speed').value);
+  var delay = 1400 - speed * 110;
+  playTimer = setInterval(function() {
+    animStep++;
+    if (animStep >= traceData.steps.length) { stopPlay(); return; }
+    showStep(animStep);
+  }, delay);
+}
+
+function stopPlay() {
+  if (playTimer) { clearInterval(playTimer); playTimer = null; }
+}
+
+async function runScenario() {
+  var btn = document.getElementById('btn-play');
+  btn.disabled = true;
+  setStatus('Running SOMA...', 'running');
+  stopPlay();
+  traceData = null;
+  try {
+    var res = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'kitchen_run', description: 'Web editor run', preset: 'organize',
+        seed: parseInt(document.getElementById('seed').value) || 42,
+      }),
+    });
+    var data = await res.json();
+    if (data.error) { setStatus('Error: ' + data.error, 'failed'); return; }
+    traceData = data;
+    var s = data.solved ? 'SOLVED' : 'FAILED';
+    var p = data.plan_following ? ' [PLAN]' : '';
+    setStatus(s + ' in ' + data.step_count + ' steps' + p, data.solved ? 'solved' : 'failed');
+    buildTrace(data.steps);
+    scene.armC = 4.25; scene.armR = 2.6; scene.armZ = 2.4;
+    scene.state = null;
+    updateState(null);
+    startPlay();
+  } catch (err) {
+    setStatus('Error: ' + err.message, 'failed');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function flushMemory() {
+  if (!confirm('Clear all learned state?')) return;
+  try {
+    var res = await fetch('/api/flush-memory', { method: 'POST' });
+    var data = await res.json();
+    setStatus('Flushed ' + data.deleted + ' file(s)', '');
+  } catch (err) {
+    setStatus('Flush error: ' + err.message, 'failed');
+  }
+}
+
+document.getElementById('speed').addEventListener('input', function(e) {
+  document.getElementById('speed-label').textContent = e.target.value;
+  if (playTimer) { stopPlay(); startPlay(); }
+});
+
+// Boot: try to load sprites in background
+tryLoadSprites();
+</script>
+</body>
+</html>

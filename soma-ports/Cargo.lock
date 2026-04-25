@@ -4638,6 +4638,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "soma-port-kitchen"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "soma-port-sdk",
+ "uuid",
+]
+
+[[package]]
 name = "soma-port-mongodb"
 version = "0.1.0"
 dependencies = [

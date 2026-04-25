@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SOMA MiniGrid World Editor</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; display: flex; height: 100vh; overflow: hidden; }
+
+.sidebar { width: 280px; background: #16213e; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; border-right: 1px solid #0f3460; }
+.sidebar h2 { font-size: 14px; color: #8899aa; text-transform: uppercase; letter-spacing: 1px; }
+
+.main { flex: 1; display: flex; flex-direction: column; }
+.toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: #16213e; border-bottom: 1px solid #0f3460; flex-wrap: wrap; }
+
+.canvas-area { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
+canvas { cursor: crosshair; image-rendering: pixelated; }
+
+.results-panel { width: 420px; background: #16213e; border-left: 1px solid #0f3460; display: flex; flex-direction: column; overflow: hidden; }
+.results-panel h2 { padding: 12px 16px; font-size: 14px; color: #8899aa; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #0f3460; }
+.results-content { flex: 1; overflow-y: auto; padding: 12px; }
+
+.tool-btn { padding: 6px 12px; border: 2px solid #333; border-radius: 6px; background: #1a1a2e; color: #e0e0e0; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 5px; }
+.tool-btn:hover { border-color: #555; }
+.tool-btn.active { border-color: #e94560; background: #e94560; color: #fff; }
+
+.swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+
+.action-btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.btn-save { background: #0f3460; color: #e0e0e0; }
+.btn-save:hover { background: #1a4a8a; }
+.btn-play { background: #e94560; color: #fff; }
+.btn-play:hover { background: #ff6b81; }
+.btn-play:disabled { background: #555; cursor: not-allowed; }
+.btn-clear { background: #333; color: #e0e0e0; }
+.btn-clear:hover { background: #444; }
+
+input[type=text], input[type=number], select {
+  background: #1a1a2e; border: 1px solid #333; border-radius: 4px; color: #e0e0e0; padding: 6px 8px; font-size: 13px; width: 100%;
+}
+input[type=number] { width: 60px; }
+label { font-size: 12px; color: #8899aa; margin-bottom: 2px; display: block; }
+
+.field { display: flex; flex-direction: column; gap: 2px; }
+.field-row { display: flex; gap: 8px; align-items: flex-end; }
+
+.world-list { display: flex; flex-direction: column; gap: 4px; }
+.world-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+.world-item:hover { background: #1a1a2e; }
+.world-item .del { color: #e94560; cursor: pointer; font-size: 11px; padding: 2px 6px; }
+.world-item .del:hover { background: #e94560; color: #fff; border-radius: 3px; }
+
+.gif-container { text-align: center; margin-bottom: 12px; }
+.gif-container img { max-width: 100%; border: 1px solid #333; border-radius: 4px; }
+
+.trace-step { padding: 6px 8px; border-radius: 4px; margin-bottom: 4px; font-size: 12px; font-family: monospace; }
+.trace-step.ok { background: #0a3d2a; border-left: 3px solid #28a745; }
+.trace-step.fail { background: #3d0a0a; border-left: 3px solid #e94560; }
+
+.status-bar { padding: 6px 16px; font-size: 12px; color: #8899aa; border-top: 1px solid #0f3460; }
+
+.spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #555; border-top-color: #e94560; border-radius: 50%; animation: spin 0.6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.sep { width: 1px; height: 24px; background: #333; }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <h2>Worlds</h2>
+  <div class="field">
+    <label>Name</label>
+    <input type="text" id="world-name" placeholder="my_world" value="custom_world">
+  </div>
+  <div class="field-row">
+    <div class="field">
+      <label>Size</label>
+      <input type="number" id="grid-size" min="5" max="20" value="8">
+    </div>
+    <div class="field">
+      <label>Fog</label>
+      <input type="number" id="view-radius" min="1" max="20" value="3" title="View radius (fog of war)">
+    </div>
+    <button class="action-btn btn-clear" onclick="resizeGrid()">Resize</button>
+  </div>
+  <div style="display:flex; gap:6px; flex-wrap:wrap;">
+    <button class="action-btn btn-save" onclick="saveWorld()">Save</button>
+    <button class="action-btn btn-play" id="btn-play" onclick="runWorld()">Play</button>
+    <button class="action-btn btn-clear" onclick="exportJSON()">Export</button>
+    <button class="action-btn btn-clear" onclick="flushMemory()" title="Clear learned episodes, routines, and explored maps">Flush Memory</button>
+  </div>
+  <h2>Saved Worlds</h2>
+  <div class="world-list" id="world-list"></div>
+</div>
+
+<div class="main">
+  <div class="toolbar">
+    <button class="tool-btn active" data-tool="." title="Floor (1)"><span class="swatch" style="background:#e6e6e6"></span> Floor</button>
+    <button class="tool-btn" data-tool="W" title="Wall (2)"><span class="swatch" style="background:#646464"></span> Wall</button>
+    <button class="tool-btn" data-tool="K" title="Key (3)"><span class="swatch" style="background:#ffd700"></span> Key</button>
+    <button class="tool-btn" data-tool="D" title="Door (4)"><span class="swatch" style="background:#b42828"></span> Door</button>
+    <button class="tool-btn" data-tool="G" title="Goal (5)"><span class="swatch" style="background:#28c828"></span> Goal</button>
+    <button class="tool-btn" data-tool="L" title="Lava (6)"><span class="swatch" style="background:#ff6414"></span> Lava</button>
+    <button class="tool-btn" data-tool="B" title="Ball (7)"><span class="swatch" style="background:#a050c8"></span> Ball</button>
+    <button class="tool-btn" data-tool="X" title="Box (8)"><span class="swatch" style="background:#8c643c"></span> Box</button>
+    <button class="tool-btn" data-tool="A" title="Agent (9)"><span class="swatch" style="background:#1e78ff"></span> Agent</button>
+    <div class="sep"></div>
+    <button class="action-btn btn-clear" onclick="clearGrid()">Clear</button>
+    <button class="action-btn btn-clear" onclick="fillWalls()">Walls</button>
+  </div>
+  <div class="canvas-area">
+    <canvas id="grid-canvas"></canvas>
+  </div>
+  <div class="status-bar" id="status-bar">Ready &mdash; keys 1-9 select tools, Ctrl+Enter runs</div>
+</div>
+
+<div class="results-panel">
+  <h2>Results</h2>
+  <div class="results-content" id="results-content">
+    <p style="color:#555; font-size:13px;">Paint a world and click Play to run SOMA.</p>
+  </div>
+</div>
+
+<script>
+const CELL_COLORS = {
+  '.': '#e6e6e6', W: '#646464', K: '#ffd700', D: '#b42828',
+  O: '#3cb43c', G: '#28c828', L: '#ff6414', A: '#1e78ff',
+  B: '#a050c8', X: '#8c643c'
+};
+const CELL_LABELS = { K: 'K', D: 'D', G: '★', L: '≈', A: '▶', B: '●', X: '■' };
+
+let gridSize = 8;
+let cells = [];
+let agentPos = [1, 1];
+let currentTool = '.';
+let painting = false;
+
+const canvas = document.getElementById('grid-canvas');
+const ctx = canvas.getContext('2d');
+
+function initGrid(size) {
+  gridSize = size;
+  cells = [];
+  for (let y = 0; y < size; y++) {
+    const row = [];
+    for (let x = 0; x < size; x++) {
+      if (x === 0 || y === 0 || x === size-1 || y === size-1) row.push('W');
+      else row.push('.');
+    }
+    cells.push(row);
+  }
+  agentPos = [1, 1];
+  resizeCanvas();
+  draw();
+}
+
+function resizeCanvas() {
+  const area = document.querySelector('.canvas-area');
+  const maxDim = Math.min(area.clientWidth - 40, area.clientHeight - 40);
+  const cellPx = Math.floor(maxDim / gridSize);
+  canvas.width = cellPx * gridSize;
+  canvas.height = cellPx * gridSize;
+  canvas._cellPx = cellPx;
+}
+
+function draw() {
+  const px = canvas._cellPx;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  for (let y = 0; y < gridSize; y++) {
+    for (let x = 0; x < gridSize; x++) {
+      const cell = cells[y][x];
+      ctx.fillStyle = CELL_COLORS[cell] || '#e6e6e6';
+      ctx.fillRect(x * px, y * px, px, px);
+
+      if (x === agentPos[0] && y === agentPos[1]) {
+        ctx.fillStyle = CELL_COLORS.A;
+        ctx.fillRect(x * px, y * px, px, px);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold ' + Math.floor(px * 0.6) + 'px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('▶', x * px + px/2, y * px + px/2);
+      } else if (CELL_LABELS[cell]) {
+        ctx.fillStyle = cell === 'K' ? '#8a6d00' : cell === 'L' ? '#993c0a' : '#fff';
+        ctx.font = 'bold ' + Math.floor(px * 0.5) + 'px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(CELL_LABELS[cell], x * px + px/2, y * px + px/2);
+      }
+
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x * px, y * px, px, px);
+    }
+  }
+}
+
+function cellFromEvent(e) {
+  const rect = canvas.getBoundingClientRect();
+  const px = canvas._cellPx;
+  const x = Math.floor((e.clientX - rect.left) / px);
+  const y = Math.floor((e.clientY - rect.top) / px);
+  if (x >= 0 && x < gridSize && y >= 0 && y < gridSize) return [x, y];
+  return null;
+}
+
+function paintCell(x, y) {
+  if (currentTool === 'A') {
+    agentPos = [x, y];
+    if (cells[y][x] !== '.') cells[y][x] = '.';
+  } else {
+    cells[y][x] = currentTool;
+    if (x === agentPos[0] && y === agentPos[1] && currentTool !== '.') {
+      agentPos = [-1, -1];
+    }
+  }
+  draw();
+}
+
+canvas.addEventListener('mousedown', function(e) { painting = true; var c = cellFromEvent(e); if (c) paintCell(c[0], c[1]); });
+canvas.addEventListener('mousemove', function(e) {
+  var c = cellFromEvent(e);
+  if (c) setStatus('[' + c[0] + ',' + c[1] + ']  ' + (cells[c[1]][c[0]] === '.' ? 'floor' : cells[c[1]][c[0]]));
+  if (painting && c) paintCell(c[0], c[1]);
+});
+canvas.addEventListener('mouseup', function() { painting = false; });
+canvas.addEventListener('mouseleave', function() { painting = false; });
+
+document.querySelectorAll('.tool-btn[data-tool]').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.tool-btn').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    currentTool = btn.dataset.tool;
+  });
+});
+
+function clearGrid() {
+  for (var y = 0; y < gridSize; y++)
+    for (var x = 0; x < gridSize; x++)
+      cells[y][x] = '.';
+  agentPos = [1, 1];
+  draw();
+}
+
+function fillWalls() {
+  for (var y = 0; y < gridSize; y++)
+    for (var x = 0; x < gridSize; x++)
+      if (x === 0 || y === 0 || x === gridSize-1 || y === gridSize-1)
+        cells[y][x] = 'W';
+  draw();
+}
+
+function resizeGrid() {
+  var size = parseInt(document.getElementById('grid-size').value) || 8;
+  initGrid(Math.max(3, Math.min(25, size)));
+}
+
+function getWorldSpec() {
+  var name = document.getElementById('world-name').value || 'custom_world';
+  var viewRadius = parseInt(document.getElementById('view-radius').value) || 3;
+  return {
+    name: name,
+    size: gridSize,
+    description: 'Custom ' + gridSize + 'x' + gridSize + ' world',
+    cells: cells.map(function(row) { return row.slice(); }),
+    agent: agentPos.slice(),
+    view_radius: viewRadius,
+  };
+}
+
+function loadWorldSpec(world) {
+  document.getElementById('world-name').value = world.name;
+  document.getElementById('view-radius').value = world.view_radius || 3;
+  if (world.cells) {
+    gridSize = world.cells.length;
+    document.getElementById('grid-size').value = gridSize;
+    cells = world.cells.map(function(row) { return row.slice(); });
+    agentPos = world.agent || [1, 1];
+  } else {
+    gridSize = world.size || 8;
+    document.getElementById('grid-size').value = gridSize;
+    initGrid(gridSize);
+    return;
+  }
+  resizeCanvas();
+  draw();
+}
+
+function saveWorld() {
+  var world = getWorldSpec();
+  fetch('/api/worlds', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(world) })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      setStatus('Saved: ' + data.saved);
+      loadWorldList();
+    });
+}
+
+function exportJSON() {
+  var world = getWorldSpec();
+  var blob = new Blob([JSON.stringify(world, null, 2)], { type: 'application/json' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = world.name + '.json'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function flushMemory() {
+  if (!confirm('Clear all learned memory (episodes, routines, explored maps)?')) return;
+  fetch('/api/flush-memory', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) { setStatus('Memory flushed: ' + data.deleted + ' files removed'); })
+    .catch(function(err) { setStatus('Flush failed: ' + err.message); });
+}
+
+function runWorld() {
+  var btn = document.getElementById('btn-play');
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  setStatus('Running SOMA...');
+
+  var world = getWorldSpec();
+  if (!cells.flat().includes('G')) {
+    showError('Place at least one Goal');
+    btn.disabled = false; btn.textContent = 'Play';
+    return;
+  }
+  if (agentPos[0] < 0) {
+    showError('Place the agent on the grid');
+    btn.disabled = false; btn.textContent = 'Play';
+    return;
+  }
+
+  fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(world) })
+    .then(function(r) { return r.json(); })
+    .then(function(data) { showResults(data); })
+    .catch(function(err) { showError(err.message); })
+    .finally(function() { btn.disabled = false; btn.textContent = 'Play'; });
+}
+
+function showResults(data) {
+  var el = document.getElementById('results-content');
+  while (el.firstChild) el.removeChild(el.firstChild);
+
+  if (data.solved) {
+    setStatus('SOLVED');
+    document.getElementById('status-bar').style.color = '#28a745';
+  } else {
+    setStatus('FAILED' + (data.error ? ' - ' + data.error : ''));
+    document.getElementById('status-bar').style.color = '#e94560';
+  }
+  setTimeout(function() { document.getElementById('status-bar').style.color = ''; }, 5000);
+
+  if (data.gif) {
+    var gifDiv = document.createElement('div');
+    gifDiv.className = 'gif-container';
+    var img = document.createElement('img');
+    img.src = data.gif + '?t=' + Date.now();
+    img.alt = 'Solution GIF';
+    gifDiv.appendChild(img);
+    el.appendChild(gifDiv);
+  }
+
+  if (data.trace) {
+    var t = data.trace;
+    var summary = document.createElement('div');
+    summary.style.cssText = 'margin-bottom:8px; font-size:13px;';
+    summary.textContent = (t.solved ? 'Solved' : 'Failed') + ' in ' + t.step_count + ' steps';
+    if (t.plan_following) {
+      var badge = document.createElement('span');
+      badge.style.color = '#ffd700';
+      badge.textContent = ' [PLAN-FOLLOWING]';
+      summary.appendChild(badge);
+    }
+    el.appendChild(summary);
+
+    var skillLine = document.createElement('div');
+    skillLine.style.cssText = 'margin-bottom:8px; font-size:12px; color:#8899aa;';
+    skillLine.textContent = 'Skills: ' + t.skills.join(' → ');
+    el.appendChild(skillLine);
+
+    t.steps.forEach(function(step) {
+      var div = document.createElement('div');
+      div.className = 'trace-step ' + (step.success ? 'ok' : 'fail');
+      var text = step.step_index + '. ' + step.skill;
+      if (step.observation && step.observation.agent_pos) {
+        text += '  pos=[' + step.observation.agent_pos + ']';
+      }
+      if (step.observation && step.observation.carrying && step.observation.carrying !== 'none') {
+        text += '  carrying=' + step.observation.carrying;
+      }
+      if (step.observation && step.observation.done) {
+        text += '  DONE';
+      }
+      div.textContent = text;
+      el.appendChild(div);
+    });
+  }
+
+  if (data.stdout) {
+    var details = document.createElement('details');
+    details.style.marginTop = '12px';
+    var summ = document.createElement('summary');
+    summ.style.cssText = 'cursor:pointer; font-size:12px; color:#555;';
+    summ.textContent = 'Raw output';
+    details.appendChild(summ);
+    var pre = document.createElement('pre');
+    pre.style.cssText = 'font-size:11px; padding:8px; background:#111; border-radius:4px; overflow-x:auto; margin-top:4px;';
+    pre.textContent = data.stdout;
+    details.appendChild(pre);
+    el.appendChild(details);
+  }
+}
+
+function showError(msg) { setStatus('Error: ' + msg); }
+function setStatus(text) { document.getElementById('status-bar').textContent = text; }
+
+function loadWorldList() {
+  fetch('/api/worlds').then(function(r) { return r.json(); }).then(function(worlds) {
+    var el = document.getElementById('world-list');
+    while (el.firstChild) el.removeChild(el.firstChild);
+    worlds.forEach(function(w) {
+      var item = document.createElement('div');
+      item.className = 'world-item';
+      item.onclick = function() { loadSavedWorld(w.file); };
+
+      var label = document.createElement('span');
+      label.textContent = w.name;
+      var info = document.createElement('span');
+      info.style.cssText = 'color:#555; font-size:11px; margin-left:4px;';
+      info.textContent = w.cells ? w.size + 'x' + w.size : (w.env || 'doorkey') + ' ' + w.size;
+      label.appendChild(info);
+
+      var del = document.createElement('span');
+      del.className = 'del';
+      del.textContent = '×';
+      del.onclick = function(e) { e.stopPropagation(); deleteWorld(w.file); };
+
+      item.appendChild(label);
+      item.appendChild(del);
+      el.appendChild(item);
+    });
+  });
+}
+
+function loadSavedWorld(file) {
+  fetch('/api/worlds/' + file).then(function(r) { return r.json(); }).then(function(world) {
+    loadWorldSpec(world);
+    setStatus('Loaded: ' + world.name);
+  });
+}
+
+function deleteWorld(file) {
+  fetch('/api/worlds/' + file, { method: 'DELETE' }).then(function() { loadWorldList(); });
+}
+
+document.addEventListener('keydown', function(e) {
+  var tools = { '1': '.', '2': 'W', '3': 'K', '4': 'D', '5': 'G', '6': 'L', '7': 'B', '8': 'X', '9': 'A' };
+  if (tools[e.key] && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'INPUT') {
+    currentTool = tools[e.key];
+    document.querySelectorAll('.tool-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.tool === currentTool); });
+  }
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) runWorld();
+});
+
+window.addEventListener('resize', function() { resizeCanvas(); draw(); });
+
+initGrid(8);
+loadWorldList();
+</script>
+</body>
+</html>

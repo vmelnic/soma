@@ -110,6 +110,62 @@ pub fn longest_frequent_subsequence(
     max_pattern_length: usize,
     max_results: usize,
 ) -> Option<FrequentSequence> {
+    if sequences.is_empty() {
+        return None;
+    }
+
+    let total_weight: f64 = weights.map_or(sequences.len() as f64, |ws| ws.iter().sum());
+    let min_weighted_count = min_support * total_weight;
+    let total = sequences.len();
+
+    // Direct O(n*m) approach: find items with sufficient weighted support,
+    // take their order from the first sequence, then verify the combined
+    // pattern is a subsequence of enough input sequences.
+    // PrefixSpan's alphabetical exploration can hit max_results before
+    // discovering long patterns in sequences with many items.
+    let mut item_support: HashMap<String, (f64, usize)> = HashMap::new();
+    for (i, seq) in sequences.iter().enumerate() {
+        let w = weights.map_or(1.0, |ws| ws[i]);
+        let mut seen = std::collections::HashSet::new();
+        for item in seq {
+            if seen.insert(item.clone()) {
+                let entry = item_support.entry(item.clone()).or_insert((0.0, 0));
+                entry.0 += w;
+                entry.1 += 1;
+            }
+        }
+    }
+
+    let frequent: std::collections::HashSet<&str> = item_support
+        .iter()
+        .filter(|(_, (wc, _))| *wc >= min_weighted_count)
+        .map(|(item, _)| item.as_str())
+        .collect();
+
+    let pattern: Vec<String> = sequences[0]
+        .iter()
+        .filter(|s| frequent.contains(s.as_str()))
+        .take(max_pattern_length)
+        .cloned()
+        .collect();
+
+    if !pattern.is_empty() {
+        let support = sequences
+            .iter()
+            .filter(|seq| is_subsequence(&pattern, seq))
+            .count();
+        let support_ratio = support as f64 / total as f64;
+        if support_ratio >= min_support {
+            return Some(FrequentSequence {
+                pattern,
+                support,
+                support_ratio,
+            });
+        }
+    }
+
+    // Fallback to PrefixSpan for cases where item-level support doesn't
+    // guarantee pattern-level support (rare in practice).
     let results = prefix_span(sequences, min_support, weights, max_pattern_length, max_results);
     results.into_iter().max_by(|a, b| {
         a.pattern
@@ -117,6 +173,16 @@ pub fn longest_frequent_subsequence(
             .cmp(&b.pattern.len())
             .then_with(|| a.support.cmp(&b.support))
     })
+}
+
+fn is_subsequence(pattern: &[String], sequence: &[String]) -> bool {
+    let mut pi = 0;
+    for item in sequence {
+        if pi < pattern.len() && *item == pattern[pi] {
+            pi += 1;
+        }
+    }
+    pi == pattern.len()
 }
 
 /// Build the projected database for a given item: for each weighted sequence containing the item,
@@ -476,5 +542,33 @@ mod tests {
         assert!(longest.is_some());
         let longest = longest.unwrap();
         assert_eq!(pattern_strs(&longest), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn longest_subsequence_many_items() {
+        let skills = s(&[
+            "kitchen.scan",
+            "kitchen.push_board",
+            "kitchen.pick_jar",
+            "kitchen.door_open",
+            "kitchen.place_shelf",
+            "kitchen.door_close",
+            "kitchen.drawer_close",
+            "kitchen.drawer_open",
+            "kitchen.pick_knife",
+            "kitchen.peg_insert",
+            "kitchen.button_press",
+            "kitchen.window_open",
+            "kitchen.window_close",
+        ]);
+        let sequences = vec![skills.clone(), skills.clone(), skills.clone()];
+        let longest =
+            longest_frequent_subsequence(&sequences, 0.7, None, 20, 1000);
+        assert!(longest.is_some());
+        let longest = longest.unwrap();
+        assert_eq!(longest.pattern.len(), 13);
+        assert_eq!(longest.pattern[0], "kitchen.scan");
+        assert_eq!(longest.pattern[12], "kitchen.window_close");
+        assert_eq!(longest.support, 3);
     }
 }

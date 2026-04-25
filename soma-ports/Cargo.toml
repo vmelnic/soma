@@ -1,4 +1,4 @@
 [workspace]
-members = ["sdk", "image", "s3", "push", "timer", "smtp", "crypto", "auth", "geo", "postgres", "google-calendar", "google-drive", "google-mail", "stripe", "twilio", "slack", "pdf", "mysql", "mongodb", "elasticsearch", "calendar", "youtube", "assemblyai", "deepgram", "sqlite", "git", "search", "runner", "patch", "github", "gridworld"]
+members = ["sdk", "image", "s3", "push", "timer", "smtp", "crypto", "auth", "geo", "postgres", "google-calendar", "google-drive", "google-mail", "stripe", "twilio", "slack", "pdf", "mysql", "mongodb", "elasticsearch", "calendar", "youtube", "assemblyai", "deepgram", "sqlite", "git", "search", "runner", "patch", "github", "gridworld", "kitchen"]
 exclude = ["redis"]
 resolver = "2"

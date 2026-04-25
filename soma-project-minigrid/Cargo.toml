@@ -3,9 +3,13 @@ name = "soma-project-minigrid"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "minigrid"
+path = "src/lib.rs"
+
 [[bin]]
-name = "prove-minigrid"
-path = "src/main.rs"
+name = "run-minigrid"
+path = "src/run.rs"
 
 [dependencies]
 soma-next = { path = "../soma-next" }
