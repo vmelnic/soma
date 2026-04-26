@@ -1,0 +1,12 @@
+[package]
+name = "soma-port-towerdefence"
+version = "0.1.0"
+edition = "2024"
+description = "SOMA port: grid-based tower defence simulation"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soma-port-sdk = { path = "../sdk" }
+serde_json = "1"

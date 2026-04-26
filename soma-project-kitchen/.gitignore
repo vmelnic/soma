@@ -2,3 +2,5 @@ target/
 data/
 output/
 editor/node_modules/
+editor/public/sprites/_raw/
+editor/public/kenney_test.html

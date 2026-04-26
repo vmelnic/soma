@@ -1,9 +1,15 @@
 {
-  "counter": "counter.png",
+  "k_cabinet": "k_cabinet.png",
+  "k_drawer": "k_drawer.png",
+  "k_sink": "k_sink.png",
+  "k_stove": "k_stove.png",
+  "k_fridge": "k_fridge.png",
+  "k_upper": "k_upper.png",
+  "k_upper_double": "k_upper_double.png",
   "cabinet_closed": "cabinet_closed.png",
   "shelf": "shelf.png",
-  "cutting_board": "cutting_board.png",
   "processor_off": "processor_off.png",
   "knife_block": "knife_block.png",
+  "cutting_board": "cutting_board.png",
   "spice_jar": "spice_jar.png"
 }
