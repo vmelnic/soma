@@ -39,7 +39,17 @@ The same architecture runs on microcontrollers. `soma-project-esp32` deploys a `
 | [soma-project-terminal](soma-project-terminal/) | **Multi-user SOMA-native web platform.** Fallout-inspired terminal UI, conversation-first architecture. Operator logs in via magic link, creates named contexts, talks to a tool-calling chat brain that invokes real SOMA ports via `invoke_port` over MCP. | Production |
 | [soma-project-inference](soma-project-inference/) | End-to-end proof of active inference formalizations: belief free energy minimization, EFE-driven skill selection, BMR-gated routine compilation, learning transfer across task instances, and hierarchical routine composition (routines built from routines via SubRoutine plan stack). | Proven |
 | [soma-project-minigrid](soma-project-minigrid/) | **DoorKey-8x8 grid navigation benchmark.** Custom `gridworld` cdylib port with BFS pathfinding. Brain-guided episodes → PrefixSpan schema → BMR routine → 10/10 autonomous plan-following solves on novel grid layouts. First benchmark-comparable proof domain. | Proven |
+| [soma-project-kitchen](soma-project-kitchen/) | **ML10 manipulation benchmark.** Custom `kitchen` cdylib port. 10 Meta-World ML10 tasks (reach, push, pick-place, door-open/close, drawer-open/close, button-press, peg-insert, window-open/close) in a single kitchen scenario. Web editor with trace playback. | Proven |
+| [soma-project-towerdefence](soma-project-towerdefence/) | Grid-based tower defence environment. Place, upgrade, and sell towers to survive enemy waves. | WIP |
 | [soma-project-body](soma-project-body/) | Full MCP body with all ports loaded. Claude Code integration, mDNS peer discovery, autonomous goals, routine authoring, world state, scheduling. | Production |
+| [soma-project-brain](soma-project-brain/) | External LLM brain driving SOMA via MCP — proves the brain/body separation end-to-end. | Proven |
+| [soma-project-code](soma-project-code/) | SOMA as Context OS for LLM-driven code generation. Git, patch, and runner ports. | Proven |
+| [soma-project-distributed](soma-project-distributed/) | 3 SOMA instances cooperating over TCP — full distributed body test. | Proven |
+| [soma-project-github](soma-project-github/) | GitHub API via SOMA MCP. Issues, PRs, files, branches. | Production |
+| [soma-project-narrator](soma-project-narrator/) | Interpreter LLM that narrates the body's activity in natural-language, first-person-of-body voice. | Production |
+| [soma-project-builder](soma-project-builder/) | Routine compiler + Vue renderer SDK. Compiles authored routines into data-driven UIs. | WIP |
+| [soma-project-mercury](soma-project-mercury/) | Multi-agent consensus engine. Blessed TUI, multiple LLM brains deliberate over SOMA ports. | WIP |
+| [soma-research](soma-research/) | Standalone research projects: soma-brain (LTC+SDM), soma-engram, soma-graft, qwen-knn. | Research |
 
 Legacy (not active): `soma-core/`, `soma-plugins/`, `soma-synthesizer/`, `poc/`, `pow/`.
 

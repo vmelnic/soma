@@ -35,6 +35,11 @@ pub enum CompiledStep {
         on_failure: NextStep,
         #[serde(default)]
         conditions: Vec<DataCondition>,
+        /// Per-step input overrides injected into active_bindings before
+        /// this step's input binding pass. Values can be literals or
+        /// `$field` references resolved from the current belief/bindings.
+        #[serde(default)]
+        input_overrides: std::collections::HashMap<String, serde_json::Value>,
     },
     /// Call another routine as a sub-routine. Pushes the current
     /// plan state onto the stack, executes the referenced routine,
@@ -143,6 +148,7 @@ impl Routine {
                 on_success: NextStep::Continue,
                 on_failure: NextStep::Abandon,
                 conditions: vec![],
+                input_overrides: Default::default(),
             })
             .collect()
     }
@@ -193,6 +199,7 @@ mod tests {
                 on_success: NextStep::Continue,
                 on_failure: NextStep::Abandon,
                 conditions: vec![],
+                input_overrides: Default::default(),
             },
             CompiledStep::SubRoutine {
                 routine_id: "sub_r".to_string(),
@@ -254,6 +261,7 @@ mod tests {
             on_success: NextStep::Goto { step_index: 3, max_iterations: None },
             on_failure: NextStep::Abandon,
             conditions: vec![],
+            input_overrides: Default::default(),
         };
         assert!(matches!(skill_step.on_success(), NextStep::Goto { step_index: 3, .. }));
         assert!(matches!(skill_step.on_failure(), NextStep::Abandon));
@@ -287,6 +295,7 @@ mod tests {
             on_success: NextStep::Goto { step_index: 2, max_iterations: None },
             on_failure: NextStep::Abandon,
             conditions: vec![],
+            input_overrides: Default::default(),
         };
         let json = serde_json::to_string(&skill).unwrap();
         let deserialized: CompiledStep = serde_json::from_str(&json).unwrap();
@@ -372,6 +381,7 @@ mod tests {
             on_success: NextStep::Continue,
             on_failure: NextStep::Abandon,
             conditions: conds.clone(),
+            input_overrides: Default::default(),
         };
         assert_eq!(skill_step.conditions().len(), 1);
         assert_eq!(skill_step.conditions()[0].description, "no results");
@@ -391,6 +401,7 @@ mod tests {
             on_success: NextStep::Continue,
             on_failure: NextStep::Abandon,
             conditions: vec![],
+            input_overrides: Default::default(),
         };
         assert!(empty_step.conditions().is_empty());
     }
@@ -415,6 +426,7 @@ mod tests {
             on_success: NextStep::Continue,
             on_failure: NextStep::Abandon,
             conditions: vec![cond],
+            input_overrides: Default::default(),
         };
         let step_json = serde_json::to_string(&step).unwrap();
         let step_back: CompiledStep = serde_json::from_str(&step_json).unwrap();

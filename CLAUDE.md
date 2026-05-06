@@ -17,11 +17,31 @@ Brain decides. Body executes. A hand doesn't decide where to reach; it provides 
 soma-next/              Rust runtime. Single binary. All core code in src/.
 soma-ports/             Port adapters + SDK. cdylib crates, export soma_port_init.
 soma-project-*/         Proof/demo apps. Each is manifests + bin/ + packs/.
+soma-research/          Standalone research projects. Not part of the runtime.
+                        Includes soma-brain, soma-engram, soma-graft, qwen-knn.
 docs/                   Architecture, design proposals, protocol specs.
 .mcp.json               Root MCP config for Claude Code.
 ```
 
 Legacy (not active): `soma-core/`, `soma-plugins/`, `soma-synthesizer/`, `poc/`, `pow/`.
+
+## soma-brain — NOT a transformer LLM
+
+`soma-research/soma-brain/` is a fundamentally different architecture. Never confuse it with transformer LLM training.
+
+**What it is:** A small liquid reasoning core (ODE-based) that retrieves knowledge from Sparse Distributed Memory (RAM) and reasons over it. Knowledge lives in SDM, not in weights. The core learns HOW to reason, not WHAT to know.
+
+**What it is NOT:** A transformer, a GPT, or any model that bakes knowledge into parameters via next-token prediction on a corpus. It does not need billions of tokens of pretraining. It does not need GPU clusters. It does not need massive VRAM.
+
+**Architecture:** Liquid core (LTC cells) + SDM (content-addressable memory in RAM) + TTT (test-time training — learns during inference) + Predictive coding (free energy minimization).
+
+**Training:** Two phases — (1) ingest documents into SDM, (2) train the core to retrieve and reason over SDM content. Never train on random data. Never do raw next-token prediction on a corpus. The training teaches retrieval and reasoning patterns, not memorization.
+
+**Key invariants:**
+- Knowledge goes to SDM (RAM), never to model weights
+- The core stays small (~1-3B target) because it only reasons
+- Training data must be meaningful documents, never synthetic/random
+- If you're writing code that looks like standard LLM training, stop — the approach is wrong
 
 ## Authoritative sources — check these, don't guess
 
@@ -66,13 +86,6 @@ A change that violates any of these is an architectural redirection, not a bug f
 - **Learning mines structure**, not content. Belief updates minimize free energy (KL divergence + prediction error). Skill selection minimizes expected free energy (pragmatic×precision + epistemic×(1−precision)). Routine compilation applies Bayesian Model Reduction (accuracy vs complexity gate). No gradients.
 - **Routines compose hierarchically.** `CompiledStep::SubRoutine` pushes the plan stack, executes a child routine, and pops back. Max nesting depth 16.
 - **Interfaces are self-describing** at runtime.
-
-## How to think
-
-- **Think first.** Surface tradeoffs and state assumptions before writing code. Present multiple interpretations when ambiguity exists.
-- **Simplicity first.** Minimum code that solves the problem. No speculative features, unnecessary abstractions, or over-engineered error handling.
-- **Surgical changes.** Touch only what you must. Don't reformat unrelated code, don't remove pre-existing dead code unless asked.
-- **Goal-driven.** Define success criteria. Loop until verified against real behavior, not just compilation.
 
 ## Working rules
 

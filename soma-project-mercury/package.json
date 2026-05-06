@@ -1,0 +1,16 @@
+{
+  "name": "soma-consensus",
+  "version": "0.1.0",
+  "description": "Three-brain composition TUI — SOMA learns to chain LLMs",
+  "main": "index.js",
+  "bin": {
+    "soma-consensus": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "blessed": "^0.1.81",
+    "dotenv": "^16.4.7"
+  }
+}

@@ -322,6 +322,30 @@ pub struct SessionController {
 /// - Otherwise, the result's value for that key must equal the expression's value exactly.
 ///
 /// All entries must match (AND semantics). Non-object expressions always return false.
+fn resolve_dollar_refs(
+    value: &serde_json::Value,
+    bindings: &[crate::types::belief::Binding],
+    output_bindings: &[crate::types::session::OutputBinding],
+    facts: &[crate::types::belief::Fact],
+) -> serde_json::Value {
+    match value {
+        serde_json::Value::String(s) if s.starts_with('$') => {
+            let ref_name = &s[1..];
+            bindings.iter().find(|b| b.name == ref_name).map(|b| b.value.clone())
+                .or_else(|| output_bindings.iter().find(|ob| ob.name == ref_name).map(|ob| ob.value.clone()))
+                .or_else(|| facts.iter().rev().find_map(|f| f.value.as_object().and_then(|obj| obj.get(ref_name)).cloned()))
+                .unwrap_or_else(|| value.clone())
+        }
+        serde_json::Value::Array(arr) => {
+            serde_json::Value::Array(arr.iter().map(|v| resolve_dollar_refs(v, bindings, output_bindings, facts)).collect())
+        }
+        serde_json::Value::Object(obj) => {
+            serde_json::Value::Object(obj.iter().map(|(k, v)| (k.clone(), resolve_dollar_refs(v, bindings, output_bindings, facts))).collect())
+        }
+        other => other.clone(),
+    }
+}
+
 fn data_condition_matches(expression: &serde_json::Value, result: &serde_json::Value) -> bool {
     match expression {
         serde_json::Value::Object(expr_map) => {
@@ -755,7 +779,8 @@ impl SessionController {
                     "plan step triggered abandon"
                 );
                 wm.clear_plan();
-                CriticDecision::Revise
+                wm.plan_abandoned = true;
+                CriticDecision::Stop
             }
         }
     }
@@ -1932,6 +1957,7 @@ impl SessionRuntime for SessionController {
                 active_policy_scope: None,
                 loop_counts: std::collections::HashMap::new(),
                 pending_input_request: None,
+                plan_abandoned: false,
             },
             status: SessionStatus::Created,
             trace: SessionTrace { steps: Vec::new() },
@@ -2489,6 +2515,30 @@ impl SessionRuntime for SessionController {
         }
 
         // ---------------------------------------------------------------
+        // Inject per-step input_overrides from the compiled step into
+        // belief.active_bindings so the binding pass can find them.
+        // ---------------------------------------------------------------
+        if let Some(ref steps) = session.working_memory.active_steps
+            && let Some(crate::types::routine::CompiledStep::Skill { input_overrides, .. }) = steps.get(session.working_memory.plan_step)
+        {
+            for (key, value) in input_overrides {
+                let resolved = resolve_dollar_refs(
+                    value,
+                    &session.belief.active_bindings,
+                    &session.working_memory.output_bindings,
+                    &session.belief.facts,
+                );
+                session.belief.active_bindings.retain(|b| b.name != *key);
+                session.belief.active_bindings.push(crate::types::belief::Binding {
+                    name: key.clone(),
+                    value: resolved,
+                    source: "step_override".to_string(),
+                    confidence: 1.0,
+                });
+            }
+        }
+
+        // ---------------------------------------------------------------
         // Execute the full skill lifecycle (bind → preconditions →
         // authorize → execute → collect → patch belief → termination)
         // ---------------------------------------------------------------
@@ -2698,7 +2748,7 @@ impl SessionRuntime for SessionController {
             );
             if session.working_memory.plan_step != prev_step {
                 session.belief.active_bindings.retain(|b| {
-                    b.source == "goal_field" || b.source == "goal"
+                    b.source == "goal_field" || b.source == "goal" || b.source == "routine"
                 });
                 session.working_memory.active_bindings.clear();
             }
@@ -2748,7 +2798,11 @@ impl SessionRuntime for SessionController {
         // critic already detected a dead end (repeated identical failures).
         // ---------------------------------------------------------------
         let step_result = if !observation.success {
-            if critic_decision == CriticDecision::Stop {
+            if session.working_memory.plan_abandoned {
+                session.working_memory.plan_abandoned = false;
+                session.status = SessionStatus::Aborted;
+                StepResult::Aborted
+            } else if critic_decision == CriticDecision::Stop {
                 StepResult::Completed
             } else {
             let recovery = self.handle_failure(session, &chosen_skill, &observation, step_index);
@@ -2844,7 +2898,13 @@ impl SessionRuntime for SessionController {
             }
         } else {
             // Successful observation — use the critic's decision.
-            let result = Self::critic_to_step_result(critic_decision);
+            let result = if session.working_memory.plan_abandoned {
+                session.working_memory.plan_abandoned = false;
+                session.status = SessionStatus::Aborted;
+                StepResult::Aborted
+            } else {
+                Self::critic_to_step_result(critic_decision)
+            };
 
             // On backtrack, store a marker for the next step to re-plan from.
             if critic_decision == CriticDecision::Backtrack {
@@ -5086,6 +5146,7 @@ mod tests {
             active_policy_scope: None,
             loop_counts: std::collections::HashMap::new(),
             pending_input_request: None,
+            plan_abandoned: false,
         }
     }
 
@@ -5096,6 +5157,7 @@ mod tests {
             on_success: NextStep::Continue,
             on_failure: NextStep::Abandon,
             conditions: vec![],
+            input_overrides: Default::default(),
         }
     }
 
@@ -5304,7 +5366,8 @@ mod tests {
         assert!(wm.active_steps.is_none());
         assert_eq!(wm.plan_step, 0);
         assert!(wm.plan_stack.is_empty());
-        assert_eq!(decision, CriticDecision::Revise);
+        assert!(wm.plan_abandoned);
+        assert_eq!(decision, CriticDecision::Stop);
     }
 
     #[test]
@@ -5403,6 +5466,7 @@ mod tests {
                 description: "no rows returned".to_string(),
                 next_step: NextStep::Goto { step_index: 2, max_iterations: None },
             }],
+            input_overrides: Default::default(),
         };
 
         let steps = vec![
@@ -5451,6 +5515,7 @@ mod tests {
                 description: "no rows returned".to_string(),
                 next_step: NextStep::Goto { step_index: 2, max_iterations: None },
             }],
+            input_overrides: Default::default(),
         };
 
         let steps = vec![

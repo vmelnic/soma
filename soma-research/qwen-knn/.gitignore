@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.env
+.DS_Store
+.pytest_cache/
+index/
+*.faiss
+*.npy
+*.bin
+*.safetensors
+logs/

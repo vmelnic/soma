@@ -214,6 +214,7 @@ impl RuntimeHandle {
         let embedder = Arc::clone(&self.embedder);
         let world_state = Arc::clone(&self.world_state);
         let skill_stats = Arc::clone(&self.skill_stats);
+        let port_runtime = Arc::clone(&self.port_runtime);
         let trace_notifier = Arc::clone(&self.trace_notifier);
 
         Arc::new(move |objective: String, max_steps: Option<u32>| {
@@ -255,6 +256,7 @@ impl RuntimeHandle {
                 embedder: Arc::clone(&embedder),
                 world_state: Arc::clone(&world_state),
                 skill_stats: Some(Arc::clone(&skill_stats)),
+                port_runtime: Some(Arc::clone(&port_runtime)),
             };
             crate::runtime::goal_registry::spawn_async_goal(
                 Arc::clone(&entry),
@@ -745,6 +747,7 @@ impl McpServer {
                 embedder: &rt.embedder,
                 world_state: &rt.world_state,
                 skill_stats: Some(&rt.skill_stats),
+                port_runtime: Some(&rt.port_runtime),
             };
             crate::runtime::goal_executor::finalize_episode(&session, &ctx);
         }
@@ -909,6 +912,7 @@ impl McpServer {
             embedder: std::sync::Arc::clone(&rt.embedder),
             world_state: std::sync::Arc::clone(&rt.world_state),
             skill_stats: Some(std::sync::Arc::clone(&rt.skill_stats)),
+            port_runtime: Some(std::sync::Arc::clone(&rt.port_runtime)),
         };
 
         crate::runtime::goal_registry::spawn_async_goal(
@@ -1495,6 +1499,7 @@ impl McpServer {
                             on_success: crate::types::routine::NextStep::Continue,
                             on_failure: crate::types::routine::NextStep::Continue,
                             conditions: vec![],
+                            input_overrides: Default::default(),
                         },
                     ]);
                     session.working_memory.plan_step = 0;
@@ -1520,6 +1525,7 @@ impl McpServer {
                     embedder: Arc::clone(&rt.embedder),
                     world_state: Arc::clone(&rt.world_state),
                     skill_stats: Some(Arc::clone(&rt.skill_stats)),
+                    port_runtime: Some(Arc::clone(&rt.port_runtime)),
                 };
                 crate::runtime::goal_registry::spawn_async_goal(
                     Arc::clone(entry),
@@ -1574,6 +1580,7 @@ impl McpServer {
                             on_success: crate::types::routine::NextStep::Continue,
                             on_failure: crate::types::routine::NextStep::Continue,
                             conditions: vec![],
+                            input_overrides: Default::default(),
                         },
                     ]);
                     session.working_memory.plan_step = 0;
@@ -2166,6 +2173,7 @@ impl McpServer {
                     embedder: Arc::clone(&rt.embedder),
                     world_state: Arc::clone(&rt.world_state),
                     skill_stats: Some(Arc::clone(&rt.skill_stats)),
+                    port_runtime: Some(Arc::clone(&rt.port_runtime)),
                 };
                 crate::runtime::goal_registry::spawn_async_goal(
                     Arc::clone(entry),
@@ -3326,6 +3334,17 @@ impl McpServer {
             }
         }
 
+        // Compiled routines are pre-authored and trusted — auto-confirm
+        // so the policy engine does not gate each step.
+        session.belief.active_bindings.push(
+            crate::types::belief::Binding {
+                name: "confirmed".to_string(),
+                value: serde_json::Value::Bool(true),
+                source: "routine".to_string(),
+                confidence: 1.0,
+            },
+        );
+
         // Pre-load the routine's steps as the session's active plan.
         let steps = routine.effective_steps();
         if !steps.is_empty() {
@@ -3346,9 +3365,13 @@ impl McpServer {
                 Ok(StepResult::Completed) => {
                     final_status = "completed".to_string();
                     if let Some(last_step) = session.trace.steps.last() {
+                        let last_result = last_step.port_calls.last()
+                            .map(|pc| pc.structured_result.clone())
+                            .unwrap_or(serde_json::Value::Null);
                         result_data = serde_json::json!({
                             "steps": session.trace.steps.len(),
                             "last_skill": last_step.selected_skill,
+                            "data": last_result,
                         });
                     }
                     break;
@@ -4414,6 +4437,9 @@ impl McpServer {
                             crate::types::routine::NextStep::Abandon,
                         ),
                         conditions,
+                        input_overrides: step.get("input_overrides")
+                            .and_then(|v| serde_json::from_value(v.clone()).ok())
+                            .unwrap_or_default(),
                     });
                 }
                 "sub_routine" => {
@@ -5069,6 +5095,7 @@ impl McpServer {
                         on_success,
                         on_failure,
                         conditions,
+                        ..
                     } => serde_json::json!({
                         "step": i,
                         "type": "skill",

@@ -1,0 +1,19 @@
+[project]
+name = "soma-brain"
+version = "0.2.0"
+description = "Liquid reasoning core + SDM + TTT + masked diffusion decoder"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.0",
+    "numpy",
+    "tiktoken",
+]
+
+[project.optional-dependencies]
+train = ["datasets", "sentence-transformers"]
+
+[project.scripts]
+soma-brain-prepare = "prepare_data:main"
+soma-brain-train = "train:main"
+soma-brain-benchmark = "benchmark:main"
+soma-brain-chat = "chat:main"

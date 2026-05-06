@@ -1,0 +1,77 @@
+{
+  "type": "screen",
+  "id": "book_appointment",
+  "title": "Book Appointment",
+  "children": [
+    {
+      "type": "form",
+      "submit": {
+        "routine": "book_appointment",
+        "bind": {
+          "token": "{{token}}"
+        },
+        "on_success": "appointments",
+        "on_failure": "book_appointment"
+      },
+      "submit_label": "Book Now",
+      "children": [
+        {
+          "type": "field:select",
+          "name": "provider_id",
+          "label": "Provider",
+          "required": true,
+          "placeholder": "Select a provider...",
+          "options_source": "list_providers"
+        },
+        {
+          "type": "field:text",
+          "name": "service",
+          "label": "Service",
+          "required": true,
+          "placeholder": "e.g. Hair styling, Plumbing..."
+        },
+        {
+          "type": "field:datetime",
+          "name": "start_time",
+          "label": "Start Time",
+          "required": true
+        },
+        {
+          "type": "field:datetime",
+          "name": "end_time",
+          "label": "End Time",
+          "required": true
+        },
+        {
+          "type": "field:text",
+          "name": "location",
+          "label": "Location",
+          "placeholder": "Address or meeting point"
+        },
+        {
+          "type": "field:number",
+          "name": "rate_amount",
+          "label": "Rate (EUR)",
+          "placeholder": "0.00"
+        },
+        {
+          "type": "field:select",
+          "name": "rate_type",
+          "label": "Rate Type",
+          "options": [
+            { "value": "hourly", "label": "Hourly" },
+            { "value": "fixed", "label": "Fixed" },
+            { "value": "negotiable", "label": "Negotiable" }
+          ],
+          "default": "hourly"
+        },
+        {
+          "type": "field:text",
+          "name": "notes",
+          "label": "Notes",
+          "placeholder": "Any special requests..."
+        }
+      ]
+    }
+  ]
+}

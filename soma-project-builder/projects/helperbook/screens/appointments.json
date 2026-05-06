@@ -1,0 +1,67 @@
+{
+  "type": "screen",
+  "id": "appointments",
+  "title": "My Appointments",
+  "children": [
+    {
+      "type": "entity_list",
+      "source": "list_appointments",
+      "bind": {
+        "token": "{{token}}"
+      },
+      "item": {
+        "type": "card",
+        "title": "{{service}}",
+        "subtitle": "{{start_time}} - {{end_time}}",
+        "children": [
+          {
+            "type": "status_badge",
+            "value": "{{status}}",
+            "variant_map": {
+              "proposed": "info",
+              "confirmed": "success",
+              "in_progress": "warning",
+              "completed": "success",
+              "cancelled": "danger",
+              "dismissed": "neutral",
+              "no_show": "danger"
+            }
+          },
+          {
+            "type": "action_button",
+            "label": "Cancel",
+            "variant": "danger",
+            "confirm": "Are you sure you want to cancel this appointment?",
+            "action": {
+              "routine": "cancel_appointment",
+              "bind": {
+                "token": "{{token}}",
+                "appointment_id": "{{id}}"
+              },
+              "on_success": "appointments"
+            }
+          }
+        ]
+      },
+      "empty": {
+        "type": "empty_state",
+        "title": "No appointments yet",
+        "message": "Book an appointment with a service provider.",
+        "action": {
+          "routine": "list_providers",
+          "label": "Browse providers",
+          "on_success": "book_appointment"
+        }
+      }
+    },
+    {
+      "type": "action_button",
+      "label": "Book Appointment",
+      "variant": "primary",
+      "action": {
+        "routine": "list_providers",
+        "on_success": "book_appointment"
+      }
+    }
+  ]
+}

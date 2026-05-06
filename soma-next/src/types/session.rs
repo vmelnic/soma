@@ -117,6 +117,10 @@ pub struct WorkingMemory {
     /// Key: "step_{index}" string. Cleared by `clear_plan`.
     #[serde(default)]
     pub loop_counts: std::collections::HashMap<String, u32>,
+    /// Set when a plan-following condition triggers `NextStep::Abandon`.
+    /// The run_step loop checks this to return `Aborted` instead of continuing.
+    #[serde(default)]
+    pub plan_abandoned: bool,
     /// Populated when the session enters `WaitingForInput` due to unresolved
     /// bindings. The external brain reads this to know which slots to fill.
     /// Cleared when `provide_session_input` delivers the bindings.

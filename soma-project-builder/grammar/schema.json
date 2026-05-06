@@ -1,0 +1,297 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://soma.dev/grammar/v1/schema.json",
+  "title": "SOMA UI Grammar",
+  "description": "Semantic UI component grammar. Describes what the UI means, not how it looks. Platform renderers map these to native components.",
+
+  "$defs": {
+    "binding": {
+      "type": "string",
+      "description": "Mustache binding expression, e.g. {{name}} resolved from routine result context"
+    },
+
+    "action": {
+      "type": "object",
+      "description": "An action that invokes a routine",
+      "properties": {
+        "routine": { "type": "string", "description": "Routine ID to execute" },
+        "bind": {
+          "type": "object",
+          "description": "Map of input parameter names to binding expressions or literal values",
+          "additionalProperties": { "type": "string" }
+        },
+        "on_success": {
+          "type": "string",
+          "description": "Navigation target or behavior after success, e.g. screen ID or 'back'"
+        },
+        "on_failure": {
+          "type": "string",
+          "description": "Navigation target or behavior after failure"
+        }
+      },
+      "required": ["routine"]
+    },
+
+    "component": {
+      "oneOf": [
+        { "$ref": "#/$defs/screen" },
+        { "$ref": "#/$defs/card" },
+        { "$ref": "#/$defs/entity_list" },
+        { "$ref": "#/$defs/form" },
+        { "$ref": "#/$defs/field" },
+        { "$ref": "#/$defs/detail" },
+        { "$ref": "#/$defs/modal" },
+        { "$ref": "#/$defs/action_button" },
+        { "$ref": "#/$defs/tabs" },
+        { "$ref": "#/$defs/empty_state" },
+        { "$ref": "#/$defs/status_badge" },
+        { "$ref": "#/$defs/nav" }
+      ]
+    },
+
+    "screen": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "screen" },
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/component" }
+        }
+      },
+      "required": ["type", "id", "title", "children"]
+    },
+
+    "card": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "card" },
+        "title": { "$ref": "#/$defs/binding" },
+        "subtitle": { "$ref": "#/$defs/binding" },
+        "image": { "$ref": "#/$defs/binding" },
+        "action": { "$ref": "#/$defs/action" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/component" }
+        }
+      },
+      "required": ["type"]
+    },
+
+    "entity_list": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "entity_list" },
+        "source": {
+          "type": "string",
+          "description": "Routine ID to call for fetching list data"
+        },
+        "bind": {
+          "type": "object",
+          "description": "Input parameters passed to the source routine",
+          "additionalProperties": { "type": "string" }
+        },
+        "item": {
+          "$ref": "#/$defs/component",
+          "description": "Template component rendered for each item in the result"
+        },
+        "empty": {
+          "$ref": "#/$defs/empty_state",
+          "description": "Shown when the list has no items"
+        }
+      },
+      "required": ["type", "source", "item"]
+    },
+
+    "form": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "form" },
+        "submit": { "$ref": "#/$defs/action" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/component" }
+        }
+      },
+      "required": ["type", "submit", "children"]
+    },
+
+    "field": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "field:text",
+            "field:datetime",
+            "field:select",
+            "field:image",
+            "field:number",
+            "field:phone"
+          ]
+        },
+        "name": { "type": "string", "description": "Field name in the submitted form data" },
+        "label": { "type": "string" },
+        "placeholder": { "type": "string" },
+        "required": { "type": "boolean", "default": false },
+        "options": {
+          "type": "array",
+          "description": "For field:select only",
+          "items": {
+            "type": "object",
+            "properties": {
+              "value": { "type": "string" },
+              "label": { "type": "string" }
+            },
+            "required": ["value", "label"]
+          }
+        },
+        "options_source": {
+          "type": "string",
+          "description": "Routine ID to fetch select options dynamically"
+        },
+        "default": { "type": "string", "description": "Default value or binding expression" }
+      },
+      "required": ["type", "name", "label"]
+    },
+
+    "detail": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "detail" },
+        "source": {
+          "type": "string",
+          "description": "Routine ID to call for fetching detail data"
+        },
+        "bind": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": { "type": "string", "description": "Display label" },
+              "value": { "$ref": "#/$defs/binding" }
+            },
+            "required": ["key", "value"]
+          }
+        },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/component" }
+        }
+      },
+      "required": ["type", "fields"]
+    },
+
+    "modal": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "modal" },
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/component" }
+        }
+      },
+      "required": ["type", "id", "title", "children"]
+    },
+
+    "action_button": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "action_button" },
+        "label": { "type": "string" },
+        "action": { "$ref": "#/$defs/action" },
+        "confirm": {
+          "type": "string",
+          "description": "Confirmation message shown before executing"
+        },
+        "variant": {
+          "type": "string",
+          "enum": ["primary", "secondary", "danger"],
+          "default": "primary"
+        }
+      },
+      "required": ["type", "label", "action"]
+    },
+
+    "tabs": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "tabs" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "label": { "type": "string" },
+              "children": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/component" }
+              }
+            },
+            "required": ["id", "label", "children"]
+          }
+        }
+      },
+      "required": ["type", "items"]
+    },
+
+    "empty_state": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "empty_state" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "action": { "$ref": "#/$defs/action" }
+      },
+      "required": ["type", "title"]
+    },
+
+    "status_badge": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "status_badge" },
+        "value": { "$ref": "#/$defs/binding" },
+        "variant_map": {
+          "type": "object",
+          "description": "Maps status values to semantic variants (success, warning, danger, info, neutral)",
+          "additionalProperties": {
+            "type": "string",
+            "enum": ["success", "warning", "danger", "info", "neutral"]
+          }
+        }
+      },
+      "required": ["type", "value"]
+    },
+
+    "nav": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "nav" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "label": { "type": "string" },
+              "screen": { "type": "string", "description": "Screen ID to navigate to" },
+              "icon": { "type": "string", "description": "Semantic icon name" }
+            },
+            "required": ["id", "label", "screen"]
+          }
+        }
+      },
+      "required": ["type", "items"]
+    }
+  },
+
+  "$ref": "#/$defs/component"
+}

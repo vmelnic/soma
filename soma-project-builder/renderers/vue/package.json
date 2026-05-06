@@ -1,0 +1,9 @@
+{
+  "name": "@soma/vue-renderer",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.js",
+  "dependencies": {
+    "vue": "^3.4.0"
+  }
+}

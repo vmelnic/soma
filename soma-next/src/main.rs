@@ -1132,6 +1132,13 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             }
         }
     }
+
+    // Stdin closed (EOF). If a WebSocket listener is active, keep the
+    // process alive so WS clients can still reach the runtime.
+    if distributed.mcp_ws_listen.is_some() {
+        eprintln!("MCP: stdin closed, WebSocket transport still active");
+        std::thread::park();
+    }
 }
 
 /// Interactive REPL: read goals from stdin, execute, print results.

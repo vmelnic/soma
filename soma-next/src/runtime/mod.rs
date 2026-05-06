@@ -26,4 +26,5 @@ pub mod world_state;
 pub mod port_health;
 pub mod active_inference;
 pub mod belief_projection;
+pub mod brain_fallback;
 pub mod trace_notifier;

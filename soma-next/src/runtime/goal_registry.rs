@@ -134,6 +134,7 @@ pub struct OwnedEpisodeContext {
     pub embedder: Arc<dyn GoalEmbedder + Send + Sync>,
     pub world_state: Arc<Mutex<dyn WorldStateStore + Send>>,
     pub skill_stats: Option<crate::memory::skill_stats::SharedSkillStats>,
+    pub port_runtime: Option<Arc<Mutex<crate::runtime::port::DefaultPortRuntime>>>,
 }
 
 impl OwnedEpisodeContext {
@@ -145,6 +146,7 @@ impl OwnedEpisodeContext {
             embedder: &self.embedder,
             world_state: &self.world_state,
             skill_stats: self.skill_stats.as_ref(),
+            port_runtime: self.port_runtime.as_ref(),
         }
     }
 }
@@ -395,6 +397,7 @@ mod tests {
                 active_policy_scope: None,
                 loop_counts: std::collections::HashMap::new(),
                 pending_input_request: None,
+                plan_abandoned: false,
             },
             status: SessionStatus::Created,
             trace: SessionTrace { steps: vec![] },

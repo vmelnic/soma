@@ -409,7 +409,7 @@ impl PostgresPort {
             .unwrap_or("id");
         Self::validate_identifier(id_column)?;
 
-        let sql = format!("SELECT * FROM {table} WHERE {id_column} = $1 LIMIT 1");
+        let sql = format!("SELECT * FROM {table} WHERE {id_column}::text = $1::text LIMIT 1");
         let client = self.connect().map_err(|e| e.to_string())?;
 
         self.rt().block_on(async {
@@ -690,14 +690,12 @@ impl PostgresPort {
         }
 
         let mut columns = Vec::new();
-        let mut placeholders = Vec::new();
-        let mut param_values: Vec<String> = Vec::new();
+        let mut sql_values = Vec::new();
 
-        for (i, (col, val)) in values.iter().enumerate() {
+        for (col, val) in values.iter() {
             Self::validate_identifier(col)?;
             columns.push(col.as_str());
-            placeholders.push(format!("${}", i + 1));
-            param_values.push(Self::json_to_sql_string(val));
+            sql_values.push(Self::json_to_sql_literal(val));
         }
 
         let returning = input
@@ -708,19 +706,14 @@ impl PostgresPort {
         let sql = format!(
             "INSERT INTO {table} ({}) VALUES ({}) RETURNING {returning}",
             columns.join(", "),
-            placeholders.join(", ")
+            sql_values.join(", ")
         );
 
         let client = self.connect().map_err(|e| e.to_string())?;
 
         self.rt().block_on(async {
-            let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = param_values
-                .iter()
-                .map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync))
-                .collect();
-
             let row_opt = client
-                .query_opt(&*sql, &param_refs)
+                .query_opt(&*sql, &[])
                 .await
                 .map_err(|e| Self::format_pg_error(&e))?;
 
@@ -755,14 +748,10 @@ impl PostgresPort {
         }
 
         let mut set_clauses = Vec::new();
-        let mut param_values: Vec<String> = Vec::new();
-        let mut param_idx = 1;
 
         for (col, val) in set_values {
             Self::validate_identifier(col)?;
-            set_clauses.push(format!("{col} = ${param_idx}"));
-            param_values.push(Self::json_to_sql_string(val));
-            param_idx += 1;
+            set_clauses.push(format!("{col} = {}", Self::json_to_sql_literal(val)));
         }
 
         let mut sql = format!("UPDATE {table} SET {}", set_clauses.join(", "));
@@ -777,13 +766,8 @@ impl PostgresPort {
         let client = self.connect().map_err(|e| e.to_string())?;
 
         self.rt().block_on(async {
-            let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = param_values
-                .iter()
-                .map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync))
-                .collect();
-
             let count = client
-                .execute(&*sql, &param_refs)
+                .execute(&*sql, &[])
                 .await
                 .map_err(|e| Self::format_pg_error(&e))?;
 
@@ -973,14 +957,19 @@ impl PostgresPort {
         }
     }
 
-    /// Convert a JSON value to a string suitable for use as a parameterized value.
-    fn json_to_sql_string(val: &serde_json::Value) -> String {
+    /// Convert a JSON value to a SQL literal with proper escaping.
+    fn json_to_sql_literal(val: &serde_json::Value) -> String {
         match val {
-            serde_json::Value::Null => String::new(),
+            serde_json::Value::Null => "NULL".to_string(),
             serde_json::Value::Bool(b) => b.to_string(),
             serde_json::Value::Number(n) => n.to_string(),
-            serde_json::Value::String(s) => s.clone(),
-            other => other.to_string(),
+            serde_json::Value::String(s) => {
+                format!("'{}'", s.replace('\'', "''"))
+            }
+            other => {
+                let s = other.to_string();
+                format!("'{}'", s.replace('\'', "''"))
+            }
         }
     }
 

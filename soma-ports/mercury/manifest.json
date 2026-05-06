@@ -1,0 +1,117 @@
+{
+  "id": "soma.ports.mercury",
+  "name": "Mercury",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.mercury",
+  "description": "Diffusion LLM brain via Inception Labs Mercury API — parallel token generation through iterative denoising",
+  "capabilities": [
+    {
+      "group_name": "inference",
+      "scope": "remote",
+      "capabilities": ["generate", "reason"]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
+  },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {"version": "0.1.0"},
+    "dependency_status": [
+      {"name": "inception-api", "kind": "http", "endpoint": "https://api.inceptionlabs.ai/v1"}
+    ],
+    "capability_inventory": ["generate", "reason"],
+    "expected_latency_classes": ["medium", "slow"],
+    "expected_failure_modes": ["validation_error", "dependency_unavailable", "transport_error", "external_error", "timeout"],
+    "trace_categories": ["inference", "diffusion_llm"],
+    "metric_names": ["latency_ms", "token_count", "reasoning_effort"],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": ["llm", "diffusion", "mercury", "inference", "brain"],
+  "ports": [
+    {
+      "port_id": "mercury",
+      "name": "Mercury",
+      "version": "0.1.0",
+      "kind": "custom",
+      "description": "Diffusion LLM brain — parallel token generation via iterative denoising",
+      "namespace": "soma.ports.mercury",
+      "trust_level": "verified",
+      "capabilities": [
+        {
+          "capability_id": "generate",
+          "name": "Generate",
+          "purpose": "Chat completion with configurable reasoning effort",
+          "input_schema": {"schema": {"type": "object", "properties": {"messages": {"type": "array"}, "model": {"type": "string"}, "temperature": {"type": "number"}, "max_tokens": {"type": "integer"}, "reasoning_effort": {"type": "string"}}}},
+          "output_schema": {"schema": {"type": "object", "properties": {"content": {"type": "string"}, "model": {"type": "string"}, "usage": {"type": "object"}, "reasoning_effort": {"type": "string"}, "finish_reason": {"type": "string"}}}},
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {"expected_latency_ms": 500, "p95_latency_ms": 3000, "max_latency_ms": 120000},
+          "cost_profile": {"cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low"},
+          "remote_exposable": false
+        },
+        {
+          "capability_id": "reason",
+          "name": "Reason",
+          "purpose": "Deep reasoning with reasoning_effort=high for complex tasks",
+          "input_schema": {"schema": {"type": "object", "properties": {"messages": {"type": "array"}, "model": {"type": "string"}, "max_tokens": {"type": "integer"}}}},
+          "output_schema": {"schema": {"type": "object", "properties": {"content": {"type": "string"}, "model": {"type": "string"}, "usage": {"type": "object"}, "reasoning_effort": {"type": "string"}, "finish_reason": {"type": "string"}}}},
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": {"expected_latency_ms": 2000, "p95_latency_ms": 10000, "max_latency_ms": 120000},
+          "cost_profile": {"cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low"},
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": {"schema": {"type": "object"}},
+      "output_schema": {"schema": {"type": "object"}},
+      "failure_modes": ["validation_error", "dependency_unavailable", "transport_error", "external_error", "timeout"],
+      "side_effect_class": "read_only",
+      "latency_profile": {"expected_latency_ms": 500, "p95_latency_ms": 5000, "max_latency_ms": 120000},
+      "cost_profile": {"cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low"},
+      "auth_requirements": {"methods": ["api_key"], "required": true},
+      "sandbox_requirements": {"filesystem_access": false, "network_access": true, "device_access": false, "process_access": false, "memory_limit_mb": null, "cpu_limit_percent": null, "time_limit_ms": 120000, "syscall_limit": null},
+      "observable_fields": ["latency_ms", "model", "reasoning_effort", "token_count"],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
+  "skills": [
+    {
+      "skill_id": "mercury_generate",
+      "name": "Mercury Generate",
+      "description": "Generate text using diffusion LLM — fast parallel token production",
+      "port_binding": "mercury",
+      "capability_binding": "generate",
+      "default_parameters": {"model": "mercury-2", "temperature": 0.75, "max_tokens": 8192, "reasoning_effort": "medium"},
+      "tags": ["llm", "generate", "diffusion"]
+    },
+    {
+      "skill_id": "mercury_reason",
+      "name": "Mercury Reason",
+      "description": "Deep reasoning using diffusion LLM with high reasoning effort",
+      "port_binding": "mercury",
+      "capability_binding": "reason",
+      "default_parameters": {"model": "mercury-2", "max_tokens": 8192},
+      "tags": ["llm", "reason", "diffusion"]
+    }
+  ],
+  "port_dependencies": []
+}

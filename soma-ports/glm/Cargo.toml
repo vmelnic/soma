@@ -1,0 +1,13 @@
+[package]
+name = "soma-port-glm"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soma-port-sdk = { path = "../sdk" }
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+reqwest = { version = "0.12", features = ["blocking", "json"] }

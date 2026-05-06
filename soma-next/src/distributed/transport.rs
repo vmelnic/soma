@@ -640,6 +640,7 @@ impl IncomingHandler for LocalDispatchHandler {
                         on_success: Default::default(),
                         on_failure: Default::default(),
                         conditions: Vec::new(),
+                        input_overrides: Default::default(),
                     },
                 ]);
                 session.working_memory.plan_step = 0;

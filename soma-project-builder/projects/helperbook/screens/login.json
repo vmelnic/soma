@@ -1,0 +1,69 @@
+{
+  "type": "screen",
+  "id": "login",
+  "title": "Sign In",
+  "children": [
+    {
+      "type": "tabs",
+      "items": [
+        {
+          "id": "phone",
+          "label": "Enter Phone",
+          "children": [
+            {
+              "type": "form",
+              "submit": {
+                "routine": "login_otp",
+                "on_success": "verify"
+              },
+              "submit_label": "Send Code",
+              "children": [
+                {
+                  "type": "field:phone",
+                  "name": "phone",
+                  "label": "Phone Number",
+                  "required": true,
+                  "placeholder": "+373 XX XXX XXX"
+                },
+                {
+                  "type": "field:text",
+                  "name": "email",
+                  "label": "Email",
+                  "required": true,
+                  "placeholder": "you@example.com"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "verify",
+          "label": "Verify Code",
+          "children": [
+            {
+              "type": "form",
+              "submit": {
+                "routine": "verify_otp",
+                "bind": {
+                  "phone": "{{phone}}"
+                },
+                "on_success": "home",
+                "on_failure": "login"
+              },
+              "submit_label": "Verify",
+              "children": [
+                {
+                  "type": "field:text",
+                  "name": "code",
+                  "label": "Verification Code",
+                  "required": true,
+                  "placeholder": "Enter 6-digit code"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

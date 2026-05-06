@@ -1763,6 +1763,7 @@ mod tests {
                 active_policy_scope: None,
                 loop_counts: std::collections::HashMap::new(),
                 pending_input_request: None,
+                plan_abandoned: false,
             },
             status: SessionStatus::Created,
             trace: SessionTrace { steps: vec![] },

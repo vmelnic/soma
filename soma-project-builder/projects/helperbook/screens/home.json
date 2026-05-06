@@ -1,0 +1,95 @@
+{
+  "type": "screen",
+  "id": "home",
+  "title": "HelperBook",
+  "children": [
+    {
+      "type": "nav",
+      "items": [
+        { "id": "appointments", "label": "Appointments", "screen": "appointments", "icon": "calendar" },
+        { "id": "contacts", "label": "Contacts", "screen": "contacts", "icon": "people" },
+        { "id": "profile", "label": "Profile", "screen": "profile", "icon": "person" }
+      ]
+    },
+    {
+      "type": "tabs",
+      "items": [
+        {
+          "id": "upcoming",
+          "label": "Upcoming",
+          "children": [
+            {
+              "type": "entity_list",
+              "source": "list_appointments",
+              "bind": {
+                "token": "{{token}}"
+              },
+              "item": {
+                "type": "card",
+                "title": "{{service}}",
+                "subtitle": "{{start_time}}",
+                "action": {
+                  "routine": "get_user_profile",
+                  "bind": { "token": "{{token}}", "id": "{{provider_id}}" },
+                  "on_success": "profile"
+                },
+                "children": [
+                  {
+                    "type": "status_badge",
+                    "value": "{{status}}",
+                    "variant_map": {
+                      "proposed": "info",
+                      "confirmed": "success",
+                      "in_progress": "warning",
+                      "completed": "success",
+                      "cancelled": "danger",
+                      "dismissed": "neutral",
+                      "no_show": "danger"
+                    }
+                  }
+                ]
+              },
+              "empty": {
+                "type": "empty_state",
+                "title": "No upcoming appointments",
+                "message": "Book your first appointment to get started.",
+                "action": {
+                  "routine": "list_providers",
+                  "label": "Find a provider",
+                  "on_success": "book_appointment"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "providers",
+          "label": "Providers",
+          "children": [
+            {
+              "type": "entity_list",
+              "source": "list_providers",
+              "bind": {},
+              "item": {
+                "type": "card",
+                "title": "{{name}}",
+                "subtitle": "{{bio}}",
+                "image": "{{photo_url}}",
+                "action": {
+                  "routine": "get_user_profile",
+                  "bind": { "token": "{{token}}", "id": "{{id}}" },
+                  "on_success": "profile"
+                }
+              },
+              "empty": {
+                "type": "empty_state",
+                "title": "No providers found",
+                "message": "Check back later for available service providers."
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

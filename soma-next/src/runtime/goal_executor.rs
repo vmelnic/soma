@@ -8,6 +8,7 @@ use crate::memory::episodes::EpisodeStore;
 use crate::memory::routines::RoutineStore;
 use crate::memory::schemas::SchemaStore;
 use crate::memory::skill_stats::SharedSkillStats;
+use crate::runtime::port::DefaultPortRuntime;
 use crate::runtime::session::{SessionController, SessionRuntime, StepResult};
 use crate::runtime::world_state::WorldStateStore;
 use crate::types::session::ControlSession;
@@ -24,6 +25,9 @@ pub struct EpisodeContext<'a> {
     /// updates the per-skill EMA stats so the predictor sees calibrated
     /// latency/cost/success priors on subsequent goals.
     pub skill_stats: Option<&'a SharedSkillStats>,
+    /// When present and a "brain" port is loaded, completed episodes are
+    /// forwarded to the brain for SDM consolidation.
+    pub port_runtime: Option<&'a Arc<Mutex<DefaultPortRuntime>>>,
 }
 
 /// Drive the 16-step control loop until it returns any non-Continue
@@ -116,6 +120,12 @@ pub fn finalize_episode(session: &ControlSession, ctx: &EpisodeContext<'_>) {
         }
     }
 
+    let episode_json = if ctx.port_runtime.is_some() {
+        serde_json::to_value(&episode).ok()
+    } else {
+        None
+    };
+
     let adapter =
         EpisodeMemoryAdapter::new(Arc::clone(ctx.episode_store), Arc::clone(ctx.embedder));
     if let Err(e) = adapter.store(episode) {
@@ -129,4 +139,8 @@ pub fn finalize_episode(session: &ControlSession, ctx: &EpisodeContext<'_>) {
         &fingerprint,
         &**ctx.embedder,
     );
+
+    if let (Some(port_rt), Some(ep_json)) = (ctx.port_runtime, episode_json) {
+        crate::runtime::brain_fallback::consolidate_episode_to_brain(port_rt, &ep_json);
+    }
 }

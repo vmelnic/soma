@@ -349,6 +349,7 @@ impl DefaultCliRunner {
                 embedder: &rt.embedder,
                 world_state: &rt.world_state,
                 skill_stats: Some(&rt.skill_stats),
+                port_runtime: Some(&rt.port_runtime),
             };
             crate::runtime::goal_executor::finalize_episode(&session, &ctx);
         }

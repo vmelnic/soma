@@ -1,0 +1,8 @@
+torch>=2.4
+transformers>=4.45
+accelerate>=0.34
+faiss-cpu>=1.8
+numpy
+tqdm
+sentencepiece
+einops

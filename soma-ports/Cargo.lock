@@ -4591,6 +4591,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "soma-port-glm"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "soma-port-sdk",
+]
+
+[[package]]
 name = "soma-port-google-calendar"
 version = "0.1.0"
 dependencies = [
@@ -4638,12 +4648,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "soma-port-kimi"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "soma-port-sdk",
+]
+
+[[package]]
 name = "soma-port-kitchen"
 version = "0.1.0"
 dependencies = [
  "serde_json",
  "soma-port-sdk",
  "uuid",
+]
+
+[[package]]
+name = "soma-port-mercury"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "soma-port-sdk",
 ]
 
 [[package]]

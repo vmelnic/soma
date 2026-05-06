@@ -140,6 +140,7 @@ impl Runtime {
                 embedder: &self.embedder,
                 world_state: &self.world_state,
                 skill_stats: Some(&self.skill_stats),
+                port_runtime: Some(&self.port_runtime),
             };
             let checkpoint_store = Arc::clone(&self.checkpoint_store);
             let every_n = self.checkpoint_every_n_steps;
@@ -363,6 +364,18 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
 
     let policy_engine = PolicyEngineAdapter::new(policy_runtime, config.runtime.max_steps);
 
+    let brain_fallback: Option<Box<dyn crate::runtime::session::BrainFallback>> = {
+        let has_brain = port_runtime.lock().is_ok_and(|rt| rt.get_port("brain").is_some());
+        if has_brain {
+            tracing::info!("brain port detected — wiring as skill selection fallback");
+            Some(Box::new(crate::runtime::brain_fallback::PortBrainFallback::new(
+                Arc::clone(&port_runtime),
+            )))
+        } else {
+            None
+        }
+    };
+
     let deps = SessionControllerDeps {
         belief_source: Box::new(SimpleBeliefSource::new()),
         episode_memory: Box::new(episode_memory),
@@ -375,7 +388,7 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
         policy_engine: Box::new(policy_engine),
         remote_executor: None,
         capability_scope_checker: None,
-        brain_fallback: None,
+        brain_fallback,
         delegation_manager: None,
         belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
     };
@@ -580,6 +593,18 @@ pub fn bootstrap_with_remote(
 
     let policy_engine = PolicyEngineAdapter::new(policy_runtime, config.runtime.max_steps);
 
+    let brain_fallback: Option<Box<dyn crate::runtime::session::BrainFallback>> = {
+        let has_brain = port_runtime.lock().is_ok_and(|rt| rt.get_port("brain").is_some());
+        if has_brain {
+            tracing::info!("brain port detected — wiring as skill selection fallback");
+            Some(Box::new(crate::runtime::brain_fallback::PortBrainFallback::new(
+                Arc::clone(&port_runtime),
+            )))
+        } else {
+            None
+        }
+    };
+
     let deps = SessionControllerDeps {
         belief_source: Box::new(SimpleBeliefSource::new()),
         episode_memory: Box::new(episode_memory),
@@ -592,7 +617,7 @@ pub fn bootstrap_with_remote(
         policy_engine: Box::new(policy_engine),
         remote_executor: Some(remote_executor),
         capability_scope_checker: None,
-        brain_fallback: None,
+        brain_fallback,
         delegation_manager: None,
         belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
     };
@@ -745,6 +770,18 @@ pub fn bootstrap_from_specs(
 
     let policy_engine = PolicyEngineAdapter::new(policy_runtime, config.runtime.max_steps);
 
+    let brain_fallback: Option<Box<dyn crate::runtime::session::BrainFallback>> = {
+        let has_brain = port_runtime.lock().is_ok_and(|rt| rt.get_port("brain").is_some());
+        if has_brain {
+            tracing::info!("brain port detected — wiring as skill selection fallback");
+            Some(Box::new(crate::runtime::brain_fallback::PortBrainFallback::new(
+                Arc::clone(&port_runtime),
+            )))
+        } else {
+            None
+        }
+    };
+
     let deps = SessionControllerDeps {
         belief_source: Box::new(SimpleBeliefSource::new()),
         episode_memory: Box::new(episode_memory),
@@ -757,7 +794,7 @@ pub fn bootstrap_from_specs(
         policy_engine: Box::new(policy_engine),
         remote_executor: None,
         capability_scope_checker: None,
-        brain_fallback: None,
+        brain_fallback,
         delegation_manager: None,
         belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
     };
@@ -933,6 +970,18 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
 
     let policy_engine = PolicyEngineAdapter::new(policy_runtime, config.runtime.max_steps);
 
+    let brain_fallback: Option<Box<dyn crate::runtime::session::BrainFallback>> = {
+        let has_brain = port_runtime.lock().is_ok_and(|rt| rt.get_port("brain").is_some());
+        if has_brain {
+            tracing::info!("brain port detected — wiring as skill selection fallback");
+            Some(Box::new(crate::runtime::brain_fallback::PortBrainFallback::new(
+                Arc::clone(&port_runtime),
+            )))
+        } else {
+            None
+        }
+    };
+
     let deps = SessionControllerDeps {
         belief_source: Box::new(SimpleBeliefSource::new()),
         episode_memory: Box::new(episode_memory),
@@ -945,7 +994,7 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
         policy_engine: Box::new(policy_engine),
         remote_executor: None,
         capability_scope_checker: None,
-        brain_fallback: None,
+        brain_fallback,
         delegation_manager: None,
         belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
     };

@@ -1,0 +1,40 @@
+{
+  "type": "screen",
+  "id": "profile",
+  "title": "My Profile",
+  "children": [
+    {
+      "type": "detail",
+      "source": "get_user_profile",
+      "bind": {
+        "token": "{{token}}",
+        "id": "{{user_id}}"
+      },
+      "fields": [
+        { "key": "Name", "value": "{{name}}" },
+        { "key": "Phone", "value": "{{phone}}" },
+        { "key": "Location", "value": "{{location_lat}}, {{location_lon}}" },
+        { "key": "Role", "value": "{{role}}" },
+        { "key": "Plan", "value": "{{subscription_plan}}" },
+        { "key": "Verified", "value": "{{is_verified}}" },
+        { "key": "Member since", "value": "{{created_at}}" }
+      ],
+      "children": [
+        {
+          "type": "card",
+          "title": "Bio",
+          "subtitle": "{{bio}}"
+        },
+        {
+          "type": "status_badge",
+          "value": "{{subscription_plan}}",
+          "variant_map": {
+            "free": "neutral",
+            "basic": "info",
+            "premium": "success"
+          }
+        }
+      ]
+    }
+  ]
+}

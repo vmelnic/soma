@@ -1,0 +1,17 @@
+[package]
+name = "soma-project-mercury"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "prove-mercury"
+path = "src/main.rs"
+
+[dependencies]
+soma-next = { path = "../soma-next" }
+soma-port-sdk = { path = "../soma-ports/sdk" }
+soma-port-mercury = { path = "../soma-ports/mercury" }
+soma-port-kimi = { path = "../soma-ports/kimi" }
+soma-port-glm = { path = "../soma-ports/glm" }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }

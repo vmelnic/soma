@@ -1,0 +1,56 @@
+{
+  "type": "screen",
+  "id": "contacts",
+  "title": "Contacts",
+  "children": [
+    {
+      "type": "entity_list",
+      "source": "list_contacts",
+      "bind": {
+        "token": "{{token}}"
+      },
+      "item": {
+        "type": "card",
+        "title": "{{name}}",
+        "subtitle": "{{phone}}",
+        "image": "{{photo_url}}",
+        "action": {
+          "routine": "get_user_profile",
+          "bind": {
+            "token": "{{token}}",
+            "id": "{{id}}"
+          },
+          "on_success": "profile"
+        },
+        "children": [
+          {
+            "type": "status_badge",
+            "value": "{{role}}",
+            "variant_map": {
+              "client": "info",
+              "provider": "success",
+              "both": "warning"
+            }
+          },
+          {
+            "type": "action_button",
+            "label": "Message",
+            "variant": "secondary",
+            "action": {
+              "routine": "send_message",
+              "bind": {
+                "token": "{{token}}",
+                "recipient_id": "{{id}}"
+              }
+            }
+          }
+        ]
+      },
+      "empty": {
+        "type": "empty_state",
+        "title": "No contacts yet",
+        "message": "Connect with service providers to add them to your contacts."
+      }
+    }
+  ]
+}

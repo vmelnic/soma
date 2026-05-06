@@ -1,0 +1,5 @@
+projects/*/bin/
+projects/*/packs/*/*.dylib
+projects/*/data/
+node_modules/
+dist/
