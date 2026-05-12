@@ -1,0 +1,12 @@
+{
+  "name": "soma-project-coder",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "plan": "node src/plan.js",
+    "execute": "node src/execute.js",
+    "prove": "node src/prove.js",
+    "consolidate": "node src/consolidate.js"
+  }
+}

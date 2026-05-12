@@ -1,0 +1,8 @@
+.env
+node_modules/
+workspace/
+bin/
+packs/
+data/
+plan.json
+*.dylib
