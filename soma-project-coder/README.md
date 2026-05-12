@@ -48,15 +48,24 @@ cp .env.example .env   # edit with your Ollama host and API keys
 ./build.sh             # builds soma-next + ports, copies to bin/ and packs/
 ```
 
-For RTX 3090 with SSH tunnel:
+### Windows RTX 3090 setup
+
+On the Windows host:
+```bash
+ollama pull dieKeule/qwen3.6_27b:latest
+```
+
+Start Ollama with performance flags (34 tok/s on RTX 3090):
+```
+OLLAMA_HOST=0.0.0.0:11434 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 ollama serve
+```
+
+SSH tunnel from macOS:
 ```bash
 ssh -f -N -L 11434:127.0.0.1:11434 user@windows-host
 ```
 
-Ollama server flags for performance (34 tok/s on RTX 3090):
-```
-OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 ollama serve
-```
+`num_ctx=4096` is sent per-request by `llm.js` — no server-side config needed.
 
 ## Usage
 
