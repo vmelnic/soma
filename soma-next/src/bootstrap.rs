@@ -344,6 +344,28 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
     let schema_memory = SchemaMemoryAdapter::new(Arc::clone(&schema_store));
     let routine_memory = RoutineMemoryAdapter::new(Arc::clone(&routine_store));
 
+    // Register routines declared in pack manifests (DNA + pack-authored).
+    for pack_spec in &pack_specs {
+        for routine in &pack_spec.routines {
+            let mut rs = routine_store.lock().unwrap();
+            if let Err(e) = rs.register(routine.clone()) {
+                tracing::warn!(
+                    routine_id = %routine.routine_id,
+                    pack = %pack_spec.id,
+                    error = %e,
+                    "pack routine registration failed, skipping"
+                );
+            } else {
+                tracing::info!(
+                    routine_id = %routine.routine_id,
+                    pack = %pack_spec.id,
+                    autonomous = routine.autonomous,
+                    "pack routine registered"
+                );
+            }
+        }
+    }
+
     // Build the policy engine with default safety rules from host config.
     let policy_runtime = DefaultPolicyRuntime::new();
     register_default_safety_policies(&policy_runtime, config)?;
@@ -575,6 +597,27 @@ pub fn bootstrap_with_remote(
     let schema_memory = SchemaMemoryAdapter::new(Arc::clone(&schema_store));
     let routine_memory = RoutineMemoryAdapter::new(Arc::clone(&routine_store));
 
+    for pack_spec in &pack_specs {
+        for routine in &pack_spec.routines {
+            let mut rs = routine_store.lock().unwrap();
+            if let Err(e) = rs.register(routine.clone()) {
+                tracing::warn!(
+                    routine_id = %routine.routine_id,
+                    pack = %pack_spec.id,
+                    error = %e,
+                    "pack routine registration failed, skipping"
+                );
+            } else {
+                tracing::info!(
+                    routine_id = %routine.routine_id,
+                    pack = %pack_spec.id,
+                    autonomous = routine.autonomous,
+                    "pack routine registered"
+                );
+            }
+        }
+    }
+
     let policy_runtime = DefaultPolicyRuntime::new();
     register_default_safety_policies(&policy_runtime, config)?;
 
@@ -751,6 +794,27 @@ pub fn bootstrap_from_specs(
     let episode_memory = EpisodeMemoryAdapter::new(Arc::clone(&episode_store), Arc::clone(&embedder));
     let schema_memory = SchemaMemoryAdapter::new(Arc::clone(&schema_store));
     let routine_memory = RoutineMemoryAdapter::new(Arc::clone(&routine_store));
+
+    for pack_spec in &pack_specs {
+        for routine in &pack_spec.routines {
+            let mut rs = routine_store.lock().unwrap();
+            if let Err(e) = rs.register(routine.clone()) {
+                tracing::warn!(
+                    routine_id = %routine.routine_id,
+                    pack = %pack_spec.id,
+                    error = %e,
+                    "pack routine registration failed, skipping"
+                );
+            } else {
+                tracing::info!(
+                    routine_id = %routine.routine_id,
+                    pack = %pack_spec.id,
+                    autonomous = routine.autonomous,
+                    "pack routine registered"
+                );
+            }
+        }
+    }
 
     let policy_runtime = DefaultPolicyRuntime::new();
     register_default_safety_policies(&policy_runtime, config)?;

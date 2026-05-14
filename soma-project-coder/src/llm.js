@@ -73,39 +73,41 @@ async function callOllama(system, prompt, opts = {}) {
   }
 }
 
-// ── Anthropic (Tier 3) ───────────────────────────────────────────────────────
+// ── OpenAI (Tier 3) ─────────────────────────────────────────────────────────
 
-async function callAnthropic(system, prompt, opts = {}) {
+async function callOpenAI(system, prompt, opts = {}) {
   const env = await loadEnv();
-  const apiKey = env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set — cannot escalate");
-  const model = env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
+  const apiKey = env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("OPENAI_API_KEY not set — cannot escalate");
+  const model = env.OPENAI_MODEL || "gpt-4o-mini";
 
   const start = Date.now();
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
+      "Authorization": `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model,
       max_tokens: opts.maxTokens ?? 8192,
-      system,
-      messages: [{ role: "user", content: prompt }],
+      temperature: opts.temperature ?? 0.3,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: prompt },
+      ],
     }),
   });
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Anthropic ${res.status}: ${text.slice(0, 200)}`);
+    throw new Error(`OpenAI ${res.status}: ${text.slice(0, 200)}`);
   }
 
   const json = await res.json();
-  const text = json.content[0].text;
-  const inputTokens = json.usage?.input_tokens || 0;
-  const outputTokens = json.usage?.output_tokens || 0;
+  const text = json.choices[0].message.content;
+  const outputTokens = json.usage?.completion_tokens || 0;
+  const inputTokens = json.usage?.prompt_tokens || 0;
 
   return {
     text,
@@ -141,7 +143,7 @@ function looksStalled(text) {
  */
 export async function callLLM(system, prompt, opts = {}) {
   if (opts.forceCloud) {
-    return callAnthropic(system, prompt, opts);
+    return callOpenAI(system, prompt, opts);
   }
 
   // Try Ollama first
@@ -158,7 +160,7 @@ export async function callLLM(system, prompt, opts = {}) {
 
   // Fallback to Anthropic
   try {
-    const result = await callAnthropic(system, prompt, opts);
+    const result = await callOpenAI(system, prompt, opts);
     result.escalated = true;
     return result;
   } catch (err) {

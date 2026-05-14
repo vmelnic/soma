@@ -120,11 +120,18 @@ fn bootstrap_runtime() -> soma_next::bootstrap::Runtime {
     std::fs::create_dir_all(&data_dir).unwrap();
     config.soma.data_dir = data_dir.to_string_lossy().to_string();
     config.runtime.max_steps = 200;
+    config.runtime.reactive_monitor_interval_secs = 5;
 
     let pack_path = std::env::var("SOMA_KITCHEN_PACK")
         .unwrap_or_else(|_| "packs/kitchen/manifest.json".to_string());
 
-    let runtime = bootstrap(&config, &[pack_path])
+    let mut packs = vec![pack_path];
+    let dna_path = "packs/dna/manifest.json";
+    if Path::new(dna_path).exists() {
+        packs.push(dna_path.to_string());
+    }
+
+    let runtime = bootstrap(&config, &packs)
         .unwrap_or_else(|e| {
             eprintln!("Bootstrap failed: {e}");
             std::process::exit(1);
@@ -133,9 +140,6 @@ fn bootstrap_runtime() -> soma_next::bootstrap::Runtime {
     for pack in &runtime.pack_specs {
         for schema in &pack.schemas {
             let _ = runtime.schema_store.lock().unwrap().register(schema.clone());
-        }
-        for routine in &pack.routines {
-            let _ = runtime.routine_store.lock().unwrap().register(routine.clone());
         }
     }
 

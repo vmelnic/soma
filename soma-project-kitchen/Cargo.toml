@@ -11,6 +11,10 @@ path = "src/lib.rs"
 name = "run-kitchen"
 path = "src/run.rs"
 
+[[bin]]
+name = "prove-transfer"
+path = "src/transfer.rs"
+
 [dependencies]
 soma-next = { path = "../soma-next" }
 serde = { version = "1", features = ["derive"] }

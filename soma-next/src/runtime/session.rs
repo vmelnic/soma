@@ -2349,39 +2349,45 @@ impl SessionRuntime for SessionController {
             }
             let mut chosen_score = &top_scores[0];
 
-            // If the top candidate's score is very low and a brain fallback
-            // is available, delegate the selection to the external brain.
-            // The brain picks from the same candidate list -- it cannot
-            // invent skills that don't exist.
-            if chosen_score.score < 0.3
+            // Brain-primary deliberation: when no plan is active (the
+            // session is in deliberation mode), the brain is the primary
+            // selector — it decides what to do, the predictor is fallback.
+            // When a plan IS active, the brain only overrides on low
+            // confidence (score < 0.3).
+            let in_deliberation = session.working_memory.active_steps.is_none()
+                && session.working_memory.active_plan.is_none()
+                && !session.working_memory.used_plan_following;
+            let brain_should_decide = if in_deliberation {
+                true
+            } else {
+                chosen_score.score < 0.3
+            };
+            if brain_should_decide
                 && let Some(ref fallback) = self.brain_fallback
             {
-                    let candidate_ids: Vec<String> = candidates.iter()
-                        .map(|c| c.skill_id.clone())
-                        .collect();
-                    let belief_json = self.belief_projector
-                        .project_to_toon(&session.belief);
-                    if let Ok(selected) = fallback.select_skill(
-                        &session.goal.objective.description,
-                        &candidate_ids,
-                        &belief_json,
-                    ) {
-                        // The brain's pick must be a valid candidate. Search
-                        // the full scored list, not just top_scores, so the
-                        // brain can override with any candidate.
-                        if let Some(brain_pick) = scores.iter().find(|s| s.skill_id == selected) {
-                            debug!(
-                                session_id = %session.session_id,
-                                original = %chosen_score.skill_id,
-                                brain_pick = %brain_pick.skill_id,
-                                original_score = chosen_score.score,
-                                "brain fallback overrode low-confidence selection"
-                            );
-                            chosen_score = brain_pick;
-                        }
-                    }
+                let candidate_ids: Vec<String> = candidates.iter()
+                    .map(|c| c.skill_id.clone())
+                    .collect();
+                let belief_json = self.belief_projector
+                    .project_to_toon(&session.belief);
+                if let Ok(selected) = fallback.select_skill(
+                    &session.goal.objective.description,
+                    &candidate_ids,
+                    &belief_json,
+                )
+                    && let Some(brain_pick) = scores.iter().find(|s| s.skill_id == selected)
+                {
+                    debug!(
+                        session_id = %session.session_id,
+                        original = %chosen_score.skill_id,
+                        brain_pick = %brain_pick.skill_id,
+                        original_score = chosen_score.score,
+                        deliberation = in_deliberation,
+                        "brain selected skill"
+                    );
+                    chosen_score = brain_pick;
+                }
             }
-            // end brain fallback
 
             // Exploration: with probability ε, pick uniformly from top_scores
             // instead of the greedy top-1. Reported via SelectionReason so

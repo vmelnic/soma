@@ -1,0 +1,132 @@
+{
+  "id": "soma.dna",
+  "name": "dna",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.dna",
+  "description": "Domain-agnostic DNA routines: bootstrap curiosity reflexes that fire autonomously on world state changes",
+  "capabilities": [],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [
+    {
+      "routine_id": "dna.orient",
+      "namespace": "soma.dna",
+      "origin": "pack_authored",
+      "match_conditions": [
+        {
+          "condition_type": "world_state",
+          "expression": { "event.detected": true },
+          "description": "fires when any event is detected in world state"
+        }
+      ],
+      "compiled_skill_path": [],
+      "compiled_steps": [],
+      "guard_conditions": [],
+      "expected_cost": 0.1,
+      "expected_effect": [],
+      "confidence": 0.9,
+      "autonomous": true,
+      "priority": 10,
+      "exclusive": false,
+      "version": 1,
+      "model_evidence": 0.0
+    },
+    {
+      "routine_id": "dna.explore",
+      "namespace": "soma.dna",
+      "origin": "pack_authored",
+      "match_conditions": [
+        {
+          "condition_type": "world_state",
+          "expression": { "novelty.detected": true },
+          "description": "fires when novelty is detected — unknown files, new patterns, unfamiliar state"
+        }
+      ],
+      "compiled_skill_path": [],
+      "compiled_steps": [],
+      "guard_conditions": [],
+      "expected_cost": 0.2,
+      "expected_effect": [],
+      "confidence": 0.9,
+      "autonomous": true,
+      "priority": 8,
+      "exclusive": false,
+      "version": 1,
+      "model_evidence": 0.0
+    },
+    {
+      "routine_id": "dna.anomaly",
+      "namespace": "soma.dna",
+      "origin": "pack_authored",
+      "match_conditions": [
+        {
+          "condition_type": "world_state",
+          "expression": { "anomaly.detected": true },
+          "description": "fires when an anomaly is detected — unexpected output, error patterns, state divergence"
+        }
+      ],
+      "compiled_skill_path": [],
+      "compiled_steps": [],
+      "guard_conditions": [],
+      "expected_cost": 0.3,
+      "expected_effect": [],
+      "confidence": 0.9,
+      "autonomous": true,
+      "priority": 12,
+      "exclusive": false,
+      "version": 1,
+      "model_evidence": 0.0
+    },
+    {
+      "routine_id": "dna.deliberate",
+      "namespace": "soma.dna",
+      "origin": "pack_authored",
+      "match_conditions": [
+        {
+          "condition_type": "world_state",
+          "expression": { "deliberation.needed": true },
+          "description": "fires when a situation requires brain-guided reasoning — no pre-wired response exists"
+        }
+      ],
+      "compiled_skill_path": [],
+      "compiled_steps": [],
+      "guard_conditions": [],
+      "expected_cost": 0.5,
+      "expected_effect": [],
+      "confidence": 0.9,
+      "autonomous": true,
+      "priority": 5,
+      "exclusive": true,
+      "version": 1,
+      "model_evidence": 0.0
+    }
+  ],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
+  },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": {
+      "version": "0.1.0"
+    },
+    "dependency_status": [],
+    "capability_inventory": [],
+    "expected_latency_classes": ["fast"],
+    "expected_failure_modes": [],
+    "trace_categories": ["dna", "curiosity"],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": ["dna", "curiosity", "autonomous", "bootstrap"],
+  "ports": [],
+  "skills": [],
+  "port_dependencies": []
+}

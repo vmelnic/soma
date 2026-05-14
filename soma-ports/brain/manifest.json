@@ -1,0 +1,111 @@
+{
+  "id": "soma.ports.brain",
+  "name": "brain",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "soma.ports.brain",
+  "description": "LLM brain port for skill selection and reasoning. Wraps OpenAI/Kimi/GLM APIs via SOMA_BRAIN_PROVIDER env var.",
+  "capabilities": [
+    {
+      "group_name": "reasoning",
+      "scope": "local",
+      "capabilities": ["reason"]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": true
+  },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": { "version": "0.1.0" },
+    "dependency_status": [],
+    "capability_inventory": ["reason"],
+    "expected_latency_classes": ["medium"],
+    "expected_failure_modes": ["validation_error", "dependency_unavailable", "transport_error", "external_error", "timeout"],
+    "trace_categories": ["brain", "reasoning"],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": [],
+  "tags": ["brain", "llm", "reasoning", "skill-selection"],
+  "ports": [
+    {
+      "port_id": "brain",
+      "name": "brain",
+      "version": "0.1.0",
+      "kind": "custom",
+      "description": "LLM brain for skill selection. Set SOMA_BRAIN_PROVIDER (openai/kimi/glm) and corresponding API key.",
+      "namespace": "soma.ports.brain",
+      "trust_level": "verified",
+      "capabilities": [
+        {
+          "capability_id": "reason",
+          "name": "reason",
+          "purpose": "Select the best skill given goal, belief state, and candidates",
+          "input_schema": { "schema": { "type": "object", "properties": { "query": { "type": "string" }, "top_k_sources": { "type": "integer" } }, "required": ["query"] } },
+          "output_schema": { "schema": { "type": "object", "properties": { "skill_recommendations": { "type": "array" }, "confidence": { "type": "number" } } } },
+          "effect_class": "read_only",
+          "rollback_support": "irreversible",
+          "determinism_class": "stochastic",
+          "idempotence_class": "non_idempotent",
+          "risk_class": "low",
+          "latency_profile": { "expected_latency_ms": 1000, "p95_latency_ms": 5000, "max_latency_ms": 30000 },
+          "cost_profile": { "cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
+          "remote_exposable": false
+        }
+      ],
+      "input_schema": { "schema": { "description": "any" } },
+      "output_schema": { "schema": { "description": "any" } },
+      "failure_modes": ["validation_error", "dependency_unavailable", "transport_error", "external_error", "timeout"],
+      "side_effect_class": "read_only",
+      "latency_profile": { "expected_latency_ms": 1000, "p95_latency_ms": 5000, "max_latency_ms": 30000 },
+      "cost_profile": { "cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" },
+      "auth_requirements": { "methods": ["api_key"], "required": true },
+      "sandbox_requirements": { "filesystem_access": false, "network_access": true, "device_access": false, "process_access": false, "memory_limit_mb": null, "cpu_limit_percent": null, "time_limit_ms": 30000, "syscall_limit": null },
+      "observable_fields": ["latency_ms", "model"],
+      "validation_rules": [],
+      "remote_exposure": false
+    }
+  ],
+  "skills": [
+    {
+      "skill_id": "soma.ports.brain.reason",
+      "namespace": "soma.ports.brain",
+      "pack": "soma.ports.brain",
+      "kind": "primitive",
+      "name": "reason",
+      "description": "Select the best skill given goal, belief state, and candidates via LLM reasoning",
+      "version": "0.1.0",
+      "inputs": { "schema": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] } },
+      "outputs": { "schema": { "type": "object", "properties": { "skill_recommendations": { "type": "array" }, "confidence": { "type": "number" } } } },
+      "required_resources": [],
+      "preconditions": [],
+      "expected_effects": [
+        { "effect_type": "emission", "target_resource": null, "description": "emit skill recommendation", "patch": null }
+      ],
+      "observables": [{ "field": "confidence", "role": "confirm_success" }],
+      "termination_conditions": [
+        { "condition_type": "success", "expression": { "confidence": true }, "description": "reasoning completed" },
+        { "condition_type": "failure", "expression": { "error": "any" }, "description": "reasoning failed" }
+      ],
+      "rollback_or_compensation": { "support": "irreversible", "compensation_skill": null, "description": "read-only, no rollback needed" },
+      "cost_prior": { "latency": { "expected_latency_ms": 1000, "p95_latency_ms": 5000, "max_latency_ms": 30000 }, "resource_cost": { "cpu_cost_class": "negligible", "memory_cost_class": "negligible", "io_cost_class": "low", "network_cost_class": "medium", "energy_cost_class": "low" } },
+      "risk_class": "low",
+      "determinism": "stochastic",
+      "remote_exposure": { "remote_scope": "local", "peer_trust_requirements": "none", "serialization_requirements": "json", "rate_limits": "none", "replay_protection": false, "observation_streaming": false, "delegation_support": false, "enabled": false },
+      "tags": ["brain", "reasoning", "skill-selection"],
+      "capability_requirements": ["port:brain/reason"],
+      "confidence_threshold": null, "locality": null, "remote_endpoint": null, "remote_trust_requirement": null, "remote_capability_contract": null, "fallback_skill": null, "partial_success_behavior": null
+    }
+  ],
+  "port_dependencies": []
+}

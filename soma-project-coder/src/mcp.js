@@ -4,25 +4,25 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { projectRoot } from "./env.js";
 
 export class StdioMcpClient {
-  constructor(command, args, cwd) {
+  constructor(command, args, cwd, env) {
     this.command = command;
     this.args = args;
     this.cwd = cwd;
+    this.env = env;
     this.nextId = 1;
     this.pending = new Map();
   }
 
   async start() {
-    this.child = spawn(this.command, this.args, {
-      cwd: this.cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    const opts = { cwd: this.cwd, stdio: ["pipe", "pipe", "pipe"] };
+    if (this.env) opts.env = this.env;
+    this.child = spawn(this.command, this.args, opts);
     this.child.stderr.on("data", (chunk) => process.stderr.write(chunk));
     this.child.on("exit", (code) => {
       for (const { reject } of this.pending.values())
@@ -82,6 +82,25 @@ export async function invokePort(soma, portId, capabilityId, input) {
   return extractToolContent(result);
 }
 
+function loadDotEnv() {
+  const p = path.join(projectRoot, ".env");
+  if (!existsSync(p)) return {};
+  const env = {};
+  for (const line of readFileSync(p, "utf8").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
+      value = value.slice(1, -1);
+    env[key] = value;
+  }
+  return env;
+}
+
 export function connectSoma() {
   const somaPath = path.join(projectRoot, "bin/soma");
   if (!existsSync(somaPath)) {
@@ -99,5 +118,6 @@ export function connectSoma() {
     }
   }
 
-  return new StdioMcpClient(somaPath, ["--mcp", ...packArgs], projectRoot);
+  const childEnv = { ...process.env, ...loadDotEnv() };
+  return new StdioMcpClient(somaPath, ["--mcp", ...packArgs], projectRoot, childEnv);
 }

@@ -5,6 +5,7 @@ data_dir = "./data"
 
 [runtime]
 max_steps = 200
+reactive_monitor_interval_secs = 5
 
 [ports]
 filesystem_enabled = true

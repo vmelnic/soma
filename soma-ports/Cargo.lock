@@ -4509,6 +4509,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "soma-port-brain"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "soma-port-sdk",
+]
+
+[[package]]
 name = "soma-port-calendar"
 version = "0.1.0"
 dependencies = [

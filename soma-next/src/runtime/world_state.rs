@@ -244,16 +244,24 @@ pub fn start_reactive_monitor(
                     let mut ctrl = session_controller.lock().unwrap();
                     match ctrl.create_session(goal) {
                         Ok(mut session) => {
-                            // Pre-load the routine's steps.
+                            // Pre-load the routine's steps when present.
+                            // When both compiled_steps and compiled_skill_path
+                            // are empty, leave the session in deliberation mode
+                            // so the control loop uses active inference to select
+                            // skills. This is the brainstem→cortex bridge: the
+                            // DNA routine orients (fires on novelty), the brain
+                            // decides what to do.
                             let steps = routine.effective_steps();
                             if !steps.is_empty() {
                                 session.working_memory.active_steps = Some(steps);
-                            } else {
+                                session.working_memory.plan_step = 0;
+                                session.working_memory.used_plan_following = true;
+                            } else if !routine.compiled_skill_path.is_empty() {
                                 session.working_memory.active_plan =
                                     Some(routine.compiled_skill_path.clone());
+                                session.working_memory.plan_step = 0;
+                                session.working_memory.used_plan_following = true;
                             }
-                            session.working_memory.plan_step = 0;
-                            session.working_memory.used_plan_following = true;
 
                             // Inject bindings from the world state snapshot.
                             // The snapshot keys are "subject.predicate" and values
