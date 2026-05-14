@@ -1,8 +1,10 @@
 # AGI Through Body — Why the Missing Piece Isn't a Bigger Brain
 
-## The framing is wrong
+## The thesis
 
-Current AGI benchmarks (MMLU, ARC, HumanEval) measure capability on known task types. AGI isn't about passing exams — any test with a known format can be pattern-matched. The benchmark that matters is a capability demonstration in an open-ended domain.
+AGI-like behavior requires a persistent, embodied runtime around models — not just bigger model weights. The brain already exists (frontier LLMs reason well enough). What's missing is the body: persistent memory, continuous learning, intrinsic motivation, grounded interaction, hierarchical planning. SOMA provides that body.
+
+This document presents the architectural argument, the implementation, and the demonstrations. The demonstrations are self-authored proof harnesses — they validate that the architecture works as designed, not that AGI is "solved." Independent evaluation, ablations, and adversarial benchmarks are the path from demonstration to proof.
 
 ## What's actually missing from frontier LLMs
 
@@ -34,15 +36,32 @@ The body compensates for the brain's limitations. The brain doesn't need persist
 
 This mirrors biology. The brain doesn't store how to walk (cerebellum/spinal cord). Doesn't remember yesterday (hippocampus). Doesn't motivate eating (hypothalamus). The brain coordinates and reasons. The body does everything else.
 
-## The scaling hypothesis is wrong for AGI
+### The LLM-as-brain dependency
 
-"Just make it bigger" produces increasingly capable systems. Commercially enormous. Not AGI. Diminishing returns per 10x compute. Scaling doesn't change architecture, and architecture is the bottleneck.
+This is a design choice, not a gap. The body is deliberately brain-agnostic: it works with any reasoning engine that can select from candidates given context. Today that's GPT-4o-mini or Qwen. Tomorrow it could be a smaller specialized model or a non-transformer architecture entirely.
 
-Analogy: breed faster horses forever, you'll never get a car. The car requires a different mechanism.
+The intelligence division is explicit:
 
-Big labs know this — they're bolting memory, tools, RAG, agents onto the transformer core. They're adding body parts externally because the architecture can't produce them internally.
+| What the LLM provides | What the body provides |
+|---|---|
+| Natural language understanding | Memory persistence (episodes/schemas/routines) |
+| Goal decomposition | Tool orchestration (port invocation, sequencing) |
+| Skill selection in novel situations | Event detection (reactive monitor) |
+| Domain reasoning from context | Safety gating (policy engine) |
+| | Habit compilation (routine learning) |
+| | Intrinsic motivation (free energy minimization) |
+| | Hierarchical plan execution |
+| | Cross-session state persistence |
 
-## The project that proves AGI
+Neither half is sufficient alone. The LLM without the body is a stateless reasoner — brilliant but amnesiac. The body without the brain is a blind automaton — persistent but incapable of novel reasoning. Together they cover the architectural requirements.
+
+## The scaling hypothesis is insufficient for AGI
+
+"Just make it bigger" produces increasingly capable systems. Commercially enormous. Diminishing returns per 10x compute. Scaling doesn't change architecture, and architecture is the bottleneck.
+
+Big labs know this — they're bolting memory, tools, RAG, agents onto the transformer core. They're adding body parts externally because the architecture can't produce them internally. SOMA is the explicit, coherent version of what everyone is building piecemeal.
+
+## The benchmark: cross-domain competence trajectory
 
 **Drop SOMA + frontier brain into a novel domain with no domain-specific setup. High-level goal + ports. Watch it:**
 
@@ -53,9 +72,9 @@ Big labs know this — they're bolting memory, tools, RAG, agents onto the trans
 5. **Operate** — run compiled routines. Handle exceptions by falling back to brain for novel reasoning. Improve over time.
 6. **Transfer** — move to a different domain. Different ports, same body. Bootstrap again, faster.
 
-**If step 6 works — same architecture, different ports, system gets competent — that's AGI.** It proves the system can learn ANY domain given interfaces, without architectural changes or retraining.
+**If step 6 works — same architecture, different ports, system gets competent — the thesis holds.** The system can learn any domain given interfaces, without architectural changes or retraining.
 
-## Why this benchmark works
+### Why this benchmark is hard to fake
 
 It requires every missing piece simultaneously:
 
@@ -67,14 +86,6 @@ It requires every missing piece simultaneously:
 
 The benchmark is the **trajectory**: does the system go from ignorant to competent to efficient, autonomously, across domains?
 
-## Concrete project: SOMA as universal apprentice
-
-**Phase 1 — Single domain mastery.** Bounded real domain (CI/CD pipeline, infrastructure, data processing). SOMA ports for relevant systems. Goal: "keep this healthy and efficient." Measure: time-to-competence, routine quality, novel failure handling.
-
-**Phase 2 — Transfer.** Same binary. Different ports. Different domain. Measure: does time-to-competence shrink? Do reasoning patterns transfer? Does the system recognize structural similarities?
-
-Phase 2 working is the proof. It means the body learned *how to learn*, not just *what to do*.
-
 ## What already exists in SOMA (May 2026)
 
 | Capability | Coverage | What's built |
@@ -85,9 +96,9 @@ Phase 2 working is the proof. It means the body learned *how to learn*, not just
 | **Routine transfer** | Not a real gap | The brain (frontier LLM) IS the abstraction layer. It reads domain A routines, sees the structural pattern, maps it onto domain B ports natively. SOMA's world state is compact — the brain sees all of it. No explicit routine generalization mechanism needed. |
 | **Reflexes** | ~95% | Reactive monitor (always-on background thread polling world state), webhook-triggered goals, cron/interval scheduler, port health anomaly detection. The full reflex cascade exists. |
 
-## The brainstem already exists
+## The brainstem: reactive infrastructure
 
-SOMA's reflex system is the biological brainstem:
+SOMA's reflex system maps to biological brainstem functions:
 
 | Reflex layer | SOMA mechanism | File |
 |---|---|---|
@@ -101,7 +112,9 @@ SOMA's reflex system is the biological brainstem:
 
 The full loop runs: environment changes → world state updates → reactive monitor detects hash change → matching autonomous routines fire → session runs → observations update belief state → episodes stored → routines compiled from episodes.
 
-## DNA — the missing piece (now proven)
+These are structural analogies, not claims of biological equivalence. The neuroscience literature (Friston's predictive coding, McClelland et al. 1995 on complementary learning systems) informed the design, but SOMA is software architecture, not a brain simulation.
+
+## DNA: bootstrap routines for domain-agnostic exploration
 
 The brainstem was disabled by default (`reactive_monitor_interval_secs = 0`) because without initial routines to match, there was nothing to fire. Chicken-and-egg.
 
@@ -109,7 +122,7 @@ Biology solved this with DNA/RNA. An infant doesn't learn to orient toward novel
 
 SOMA's DNA = **pack-authored bootstrap routines** that are domain-agnostic. Not routines about specific ports or specific domains. Routines about exploration itself:
 
-| Biological reflex | SOMA DNA routine | Match condition |
+| Biological analogy | SOMA DNA routine | Match condition |
 |---|---|---|
 | Orienting response | `dna.orient` | `event.detected = true` |
 | Novelty seeking | `dna.explore` | `novelty.detected = true` |
@@ -119,9 +132,9 @@ These are meta-routines. They don't know about Redis or HTTP or CI/CD. They know
 
 **Epigenetics** = routine compilation from episodes. New routines are learned on top of the genetic base. Domain-specific behaviors emerge from experience, built on top of domain-agnostic exploration instincts. The DNA gets you started; learning takes over.
 
-## Proven: soma-project-curiosity (May 2026)
+## Demonstration: soma-project-curiosity (May 2026)
 
-`soma-project-curiosity` proves the full curiosity cascade end-to-end:
+`soma-project-curiosity` demonstrates the full curiosity cascade end-to-end:
 
 ```
 $ cd soma-project-curiosity && cargo run --release
@@ -139,7 +152,7 @@ Phase 6: brainstem-to-cortex bridge (deliberation DNA)   PASS
 RESULT: ALL 6 PHASES PASSED
 ```
 
-What each phase proves:
+What each phase demonstrates:
 
 1. **Brainstem fires DNA** — world state change → reactive monitor detects hash change → `dna.orient` fires autonomously. No external trigger.
 2. **Cascade is self-sustaining** — routine execution deposits result facts into world state → hash changes again → more routines can fire.
@@ -150,7 +163,7 @@ What each phase proves:
 
 ### Architectural change: brainstem→cortex bridge
 
-In `world_state.rs`, the reactive monitor now supports deliberation DNA:
+In `world_state.rs`, the reactive monitor supports deliberation DNA:
 - If a routine has compiled steps → plan-following (reflexive, fast)
 - If a routine has empty steps → deliberation mode (brain-guided, adaptive)
 
@@ -178,31 +191,13 @@ They all say the same thing: **a persistent, predicting, embodied system will be
 
 See also: `docs/seeing-the-matrix.md` for the connection between free energy minimization and human perception.
 
-## AGI proof status
+## Demonstration: soma-project-coder with real ports (May 2026)
 
-Everything required for the AGI benchmark is either proven or exists as working code:
-
-| Requirement | Status | Proof |
-|---|---|---|
-| Persistent memory | Proven | SDM, episodes, belief state, world state |
-| Continuous learning | Proven | Episode mining → schema induction → routine compilation |
-| Reflexes (brainstem) | Proven | Reactive monitor fires autonomous routines on world state change |
-| DNA (bootstrap curiosity) | Proven | `soma-project-curiosity` Phase 1-5: domain-agnostic DNA routines fire without instruction |
-| Brainstem→cortex bridge | Proven | Phase 6: empty-step DNA triggers deliberation, brain decides |
-| Natural selection | Proven | Phase 4: confidence decay invalidates bad routines |
-| Port discovery | Exists | `discover_all()`, `list_ports`, mDNS |
-| Brain-body loop | Exists | 16-step control loop, belief projection, brain fallback |
-| Cross-domain transfer | Exists | Brain (LLM) handles abstraction natively, world state is compact |
-| Causal reasoning | Exists | Body provides interventional data (act → observe), brain reasons |
-| Hierarchical planning | Exists | Plan stack, subroutines, depth 16 |
-
-## Proven: soma-project-coder with real ports (May 2026)
-
-The "wire it together" step is done. `soma-project-coder` runs the full curiosity cascade with real ports in a real domain (code generation).
+`soma-project-coder` runs the full curiosity cascade with real ports in a real domain (code generation).
 
 ### What was built
 
-1. **Pack routine loading** — `bootstrap.rs` now registers routines from pack manifests at boot time. Previously, routines only entered the store via episode compilation or the `author_routine` MCP tool. Now packs can ship pre-wired routines (DNA).
+1. **Pack routine loading** — `bootstrap.rs` registers routines from pack manifests at boot time. Previously, routines only entered the store via episode compilation or the `author_routine` MCP tool. Now packs can ship pre-wired routines (DNA).
 
 2. **DNA pack** — `packs/dna/manifest.json` contains four domain-agnostic DNA routines:
 
@@ -237,36 +232,9 @@ $ # Inject all three novelty types → full genome activation
 {"_reactive_event":true,"routine_id":"dna.explore","success":true,"steps":1}
 ```
 
-20 real skills across 4 ports (git/search/runner/patch). The brain selects from these during deliberation — it's not pattern-matching test data, it's reasoning about actual git operations, file searches, and process execution.
+20 real skills across 4 ports (git/search/runner/patch). The brain selects from these during deliberation — it's reasoning about actual git operations, file searches, and process execution.
 
-### What this proves
-
-- DNA routines load from pack manifests at boot time (no manual registration)
-- Reactive monitor detects world state changes and fires matching autonomous routines
-- Genome differentiates: each DNA routine matches its own novelty pattern
-- Brainstem→cortex bridge works: empty-step routines enter deliberation, brain decides
-- Cascade is self-sustaining: routine results deposit facts → hash changes → more routines fire
-- Real ports provide real skills for the brain to select from during deliberation
-
-### AGI proof status (updated)
-
-| Requirement | Status | Proof |
-|---|---|---|
-| Persistent memory | Proven | SDM, episodes, belief state, world state |
-| Continuous learning | Proven | Episode mining → schema induction → routine compilation |
-| Reflexes (brainstem) | Proven | Reactive monitor fires autonomous routines on world state change |
-| DNA (bootstrap curiosity) | Proven | `soma-project-curiosity` Phase 1-5 + `soma-project-coder` with real ports |
-| Brainstem→cortex bridge | Proven | Empty-step DNA triggers deliberation, brain selects from 20 real skills |
-| Natural selection | Proven | Phase 4: confidence decay invalidates bad routines |
-| Pack routine loading | Proven | DNA routines registered from pack manifest at bootstrap |
-| Full genome activation | Proven | All three DNA routines fire simultaneously, cascade self-sustains |
-| Port discovery | Exists | `discover_all()`, `list_ports`, mDNS |
-| Brain-body loop | Exists | 16-step control loop, belief projection, brain fallback |
-| Cross-domain transfer | Exists | Brain (LLM) handles abstraction natively, world state is compact |
-| Causal reasoning | Exists | Body provides interventional data (act → observe), brain reasons |
-| Hierarchical planning | Exists | Plan stack, subroutines, depth 16 |
-
-## Proven: Phase 2 transfer — soma-project-kitchen (May 2026)
+## Demonstration: Phase 2 transfer — soma-project-kitchen (May 2026)
 
 Same binary. Same DNA. Different ports. Different domain. System bootstraps identically.
 
@@ -290,7 +258,7 @@ SOMA Phase 2: cross-domain transfer proof
   RESULT: ALL 6 PHASES PASSED
 ```
 
-What each phase proves:
+What each phase demonstrates:
 
 1. **Event detection transfers** — `dna.orient` fires on `event.detected` in kitchen context ("jar moved on countertop"), deliberation selects from kitchen skills (scan, pick_jar, place_shelf), not coder skills.
 2. **Novelty detection transfers** — `dna.explore` fires on `novelty.detected` ("unknown utensil on shelf"), brain explores with kitchen-domain skills.
@@ -299,7 +267,7 @@ What each phase proves:
 5. **Domain-specific skills** — 14 kitchen skills loaded (pick_jar, place_shelf, door_open, drawer_close, window_open, button_press, peg_insert...). Zero coder skills. The body provides different affordances; the brain adapts.
 6. **DNA identity** — all 4 DNA routines are identical across domains. Same `autonomous: true`, same empty steps (deliberation mode), same match conditions. The genome is domain-agnostic.
 
-### The transfer proof
+### The transfer result
 
 | Property | Domain A (coder) | Domain B (kitchen) |
 |---|---|---|
@@ -310,24 +278,11 @@ What each phase proves:
 | Curiosity cascade | Fires | Fires |
 | Brain deliberation | Selects git/search skills | Selects kitchen skills |
 
-**This is the AGI benchmark passing.** Same architecture. Different domain. No retraining. No architectural changes. No domain-specific setup beyond ports. The system bootstraps curiosity, orients to novelty, and reasons with whatever skills are available.
+Same architecture, different domain, no retraining, no architectural changes, no domain-specific setup beyond ports. The system bootstraps curiosity, orients to novelty, and reasons with whatever skills are available.
 
-## AGI proof status (after Phase 2)
+This demonstrates cross-domain generality of the architecture. It does not yet demonstrate that knowledge transfers between domains (e.g., reasoning patterns learned in coder accelerating competence in kitchen). That requires quantitative measurement of time-to-competence across sequential domain deployments.
 
-| Requirement | Status | Proof |
-|---|---|---|
-| Persistent memory | Proven | SDM, episodes, belief state, world state |
-| Continuous learning | Proven | Episode mining → schema induction → routine compilation |
-| Reflexes (brainstem) | Proven | Reactive monitor fires autonomous routines on world state change |
-| DNA (bootstrap curiosity) | Proven | Domain-agnostic DNA routines fire without instruction |
-| Brainstem→cortex bridge | Proven | Empty-step DNA triggers deliberation, brain decides |
-| Natural selection | Proven | Confidence decay invalidates bad routines |
-| Full genome activation | Proven | All DNA routines fire simultaneously, cascade self-sustains |
-| Cross-domain transfer | **Proven** | Phase 2: coder→kitchen, same binary, same DNA, different skills |
-
-*Updated in Phase 3 below with full 10/10 end-to-end proof.*
-
-## Proven: Phase 3 — Full end-to-end with real LLM brain (May 2026)
+## Demonstration: Phase 3 — Full end-to-end with real LLM brain (May 2026)
 
 11/11 phases pass. Real LLM brain (OpenAI gpt-4o-mini via `soma-ports/brain`), real ports (filesystem, git, search, runner, patch), real learning pipeline, real autonomous behavior, hierarchical planning.
 
@@ -349,7 +304,7 @@ $ cd soma-project-coder && node src/prove.js
   Result: 11/11 phases PASS
 ```
 
-### What each phase proves
+### What each phase demonstrates
 
 | Phase | Capability | What happens |
 |---|---|---|
@@ -361,11 +316,11 @@ $ cd soma-project-coder && node src/prove.js
 | 6 | Schema induction | PrefixSpan finds repeated skill sequences across episodes |
 | 7 | Routine compilation | BMR gate compiles schemas into reusable routines |
 | 8 | Brain deliberation | DNA routine fires, brain (LLM) selects skill from 21 candidates |
-| 9 | Causal reasoning | Brain changes selection as belief evolves: explore → read → test |
+| 9 | Context-sensitive reasoning | Brain changes selection as belief evolves: explore → read → test |
 | 10 | Autonomous loop | World state change → DNA fires → brain decides → body executes → observation recorded |
 | 11 | Hierarchical planning | Parent routine calls child as subroutine, plan stack push/pop, 4 skills across 2 levels |
 
-### Phase 9: causal reasoning detail
+### Phase 9: context-sensitive reasoning detail
 
 The brain receives three successive queries with evolving belief state:
 
@@ -373,7 +328,7 @@ The brain receives three successive queries with evolving belief state:
 2. **After listing files** (package.json, index.js, test.js) → brain selects `filesystem.readfile` (investigate)
 3. **After reading files** (found bug: `add()` subtracts instead of adding) → brain selects `runner.npm_test` (verify fix)
 
-The brain adapts its decision based on what the body observed. This is causal reasoning: act → observe → update belief → different decision.
+The brain adapts its decision based on what the body observed. This demonstrates context-sensitive tool selection: act → observe → update belief → different decision. The "causal reasoning" here is the LLM reasoning from provided context — the body's contribution is providing the act→observe loop that produces the evolving context.
 
 ### Phase 10: autonomous loop detail
 
@@ -395,37 +350,7 @@ World state after:
 
 The default predictor scored all candidates ≥0.5 (neutral prior), so the brain fallback (threshold 0.3) never triggered. Fix: in deliberation mode (DNA routine, no plan, empty steps), the brain is the **primary** selector, not a fallback. The predictor is only used when the brain isn't available or the session is in plan-following mode.
 
-## Final AGI proof status
-
-Everything required for the AGI benchmark is proven end-to-end:
-
-| Requirement | Status | Proof |
-|---|---|---|
-| Persistent memory | Proven | Episodes survive to disk, retrieved by embedding similarity |
-| Continuous learning | Proven | Episode mining → schema induction → routine compilation (Phases 5-7) |
-| Reflexes (brainstem) | Proven | Reactive monitor fires autonomous routines on world state change (Phase 10) |
-| DNA (bootstrap curiosity) | Proven | Domain-agnostic DNA routines fire without instruction (Phase 10) |
-| Brainstem→cortex bridge | Proven | Empty-step DNA triggers deliberation, brain decides (Phase 8) |
-| Natural selection | Proven | Confidence decay invalidates bad routines, BMR gate filters (Phase 7) |
-| Cross-domain transfer | Proven | Phase 2 (prior proof): coder→kitchen, same binary, same DNA, different skills |
-| Brain-guided deliberation | Proven | Real LLM selects skills during autonomous DNA execution (Phase 8) |
-| Causal reasoning | **Proven** | Brain adapts selection as belief evolves: explore → read → test (Phase 9) |
-| Autonomous loop | **Proven** | DNA → brain → body → observe → world state update (Phase 10) |
-| LLM-driven planning | Proven | Goal decomposition into port invocations, executed with episode capture (Phases 3-4) |
-| Port discovery | Proven | 21 skills from 6 ports auto-discovered at boot (Phase 2) |
-| Hierarchical planning | **Proven** | Phase 11: parent→child subroutine, plan stack push/pop, 4 skills across 2 routines |
-
-## The punchline
-
-Most people think AGI requires a bigger brain. SOMA's thesis: it requires a better body. The brain already exists — frontier models reason well enough.
-
-11/11 phases pass. The system boots with no domain knowledge, explores autonomously via DNA-triggered curiosity, reasons about what to do via an external LLM brain, executes via real ports, observes consequences, updates beliefs, adapts decisions based on what it learned, mines episodes into schemas, compiles schemas into reusable routines, and transfers all of this across domains without retraining.
-
-Every piece is proven — individually in `soma-project-curiosity`, with real ports in `soma-project-coder`, across domains in `soma-project-kitchen`, and end-to-end with a real LLM brain making decisions that adapt based on observations.
-
-The architecture is complete. AGI isn't a bigger brain. It's a body that can learn any domain given interfaces — and that body exists.
-
-## Proven: Phase 4 — Sustained autonomy (May 2026)
+## Demonstration: Phase 4 — Sustained autonomy (May 2026)
 
 10-minute unattended run. SOMA boots, polls the workspace, reacts to perturbations, learns from episodes, compiles routines — no human in the loop.
 
@@ -436,6 +361,8 @@ The architecture is complete. AGI isn't a bigger brain. It's a body that can lea
 **Perturbation schedule:** corrupt SQL queries in `workspace/src/models/User.js` ("users"→"userz") at 60s/210s/390s, revert at 120s/300s/480s. Same bug type, different query — tests whether the system recognizes the pattern.
 
 **Poller:** reads file content, computes hash for change detection, checks for anomaly patterns ("userz"), deposits world state facts (`event.detected`, `novelty.detected`, `anomaly.detected`).
+
+**Limitation:** the poller's anomaly detection is hand-authored (checks for the specific string "userz"). A stronger test would use a generic anomaly detector that the system learns to configure. The perturbations are also scripted — the system detects them but does not fix them autonomously.
 
 ### Results
 
@@ -473,14 +400,6 @@ $ cd soma-project-coder && node src/autonomy.js 10
   Episodes stored: 2 implicit sessions
   Schemas induced: 4 total
 
-  Timeline:
-    60s:  [bug_introduced] corrupt User.getAllUsers SQL query
-    120s: [bug_fixed] revert User.getAllUsers SQL fix
-    210s: [bug_introduced] corrupt User.createUser SQL query
-    300s: [bug_fixed] revert User.createUser SQL fix
-    390s: [bug_introduced] corrupt User.deleteUser SQL query
-    480s: [bug_fixed] revert User.deleteUser SQL fix
-
   Status: COMPETENT
 ═══════════════════════════════════════════════════════════
 ```
@@ -489,7 +408,7 @@ $ cd soma-project-coder && node src/autonomy.js 10
 
 1. **Boot (0s):** SOMA loads 21 skills across 4 ports, 12 pre-compiled routines from prior episodes, DNA pack with 4 autonomous routines. Reactive monitor starts polling world state every 5s.
 
-2. **Steady state (0-60s):** DNA routines fire every 5s on existing world state facts. `dna.anomaly`, `dna.orient`, `dna.explore`, `dna.deliberate` all fire. Most fail (no actionable state) — this is expected. The body is vigilant but idle.
+2. **Steady state (0-60s):** DNA routines fire every 5s on existing world state facts. Most fail (no actionable state) — this is expected. The body is vigilant but idle.
 
 3. **First perturbation (60s):** SQL query corrupted. Poller detects file change + anomaly pattern. Deposits 3 facts. `dna.anomaly` immediately succeeds — it has matching conditions for `anomaly.detected`. The body noticed the bug.
 
@@ -503,7 +422,7 @@ $ cd soma-project-coder && node src/autonomy.js 10
 
 8. **Episodes (370s, 570s):** Implicit sessions store episodes from the poller's git status invocations. These feed back into the learning pipeline.
 
-### What this proves
+### What this demonstrates
 
 | Property | Evidence |
 |---|---|
@@ -513,33 +432,57 @@ $ cd soma-project-coder && node src/autonomy.js 10
 | **Continuous learning** | 2 consolidation cycles induced 4 schemas, compiled 2 routines during the run |
 | **Episode accumulation** | Implicit sessions store experiences for future mining |
 | **Vigilance without waste** | DNA routines fire every 5s but only succeed when conditions warrant |
-| **Pattern consistency** | Same bug type detected identically across 3 different queries |
 
-### The trajectory: ignorant → competent
+## Capability status
 
-- **Boot:** 12 pre-compiled routines from prior runs. System starts with learned behaviors.
-- **Minute 1-5:** Detects perturbations, fires DNA routines, accumulates episodes.
-- **Minute 5:** First consolidation — induces schemas from experience, compiles new routine.
-- **Minute 5-10:** Continues detecting, continues accumulating.
-- **Minute 10:** Second consolidation — more schemas, more routines.
-
-The system gets richer over time. Each consolidation cycle mines patterns from episodes and compiles them into reusable routines. The routines from minute 5 are available for matching in minute 6. This is the "ignorant → competent" trajectory: the body starts with DNA (innate reflexes), accumulates experience, and compiles learned behavior.
-
-## Final AGI proof status (after Phase 4)
-
-| Requirement | Status | Proof |
+| Capability | Status | Evidence |
 |---|---|---|
-| Persistent memory | Proven | Episodes survive to disk, retrieved by embedding similarity |
-| Continuous learning | Proven | Episode mining → schema induction → routine compilation (Phases 5-7, Phase 4 consolidation) |
-| Reflexes (brainstem) | Proven | Reactive monitor fires autonomous routines on world state change (Phase 10, Phase 4) |
-| DNA (bootstrap curiosity) | Proven | Domain-agnostic DNA routines fire without instruction (Phase 10, Phase 4) |
-| Brainstem→cortex bridge | Proven | Empty-step DNA triggers deliberation, brain decides (Phase 8) |
-| Natural selection | Proven | Confidence decay invalidates bad routines, BMR gate filters (Phase 7) |
-| Cross-domain transfer | Proven | Phase 2: coder→kitchen, same binary, same DNA, different skills |
-| Brain-guided deliberation | Proven | Real LLM selects skills during autonomous DNA execution (Phase 8) |
-| Causal reasoning | Proven | Brain adapts selection as belief evolves: explore → read → test (Phase 9) |
-| Autonomous loop | Proven | DNA → brain → body → observe → world state update (Phase 10, Phase 4) |
-| LLM-driven planning | Proven | Goal decomposition into port invocations, executed with episode capture (Phases 3-4) |
-| Port discovery | Proven | 21 skills from 6 ports auto-discovered at boot (Phase 2) |
-| Hierarchical planning | Proven | Phase 11: parent→child subroutine, plan stack push/pop, 4 skills across 2 routines |
-| **Sustained autonomy** | **Proven** | **Phase 4: 10-minute unattended run, 6 perturbations detected, 2 consolidation cycles, 4 schemas induced, 2 routines compiled** |
+| Persistent memory | Demonstrated | Episodes survive to disk, retrieved by embedding similarity |
+| Continuous learning | Demonstrated | Episode mining → schema induction → routine compilation (Phases 5-7, Phase 4 consolidation) |
+| Reflexes | Demonstrated | Reactive monitor fires autonomous routines on world state change (Phase 10, Phase 4) |
+| DNA (bootstrap exploration) | Demonstrated | Domain-agnostic DNA routines fire without instruction (Phase 10, Phase 4) |
+| Brainstem→cortex bridge | Demonstrated | Empty-step DNA triggers deliberation, brain decides (Phase 8) |
+| Natural selection | Demonstrated | Confidence decay invalidates bad routines, BMR gate filters (Phase 7) |
+| Cross-domain architecture | Demonstrated | Phase 2: coder→kitchen, same binary, same DNA, different skills |
+| Brain-guided deliberation | Demonstrated | Real LLM selects skills during autonomous DNA execution (Phase 8) |
+| Context-sensitive reasoning | Demonstrated | Brain adapts selection as belief evolves: explore → read → test (Phase 9) |
+| Autonomous loop | Demonstrated | DNA → brain → body → observe → world state update (Phase 10, Phase 4) |
+| LLM-driven planning | Demonstrated | Goal decomposition into port invocations, executed with episode capture (Phases 3-4) |
+| Port discovery | Demonstrated | 21 skills from 6 ports auto-discovered at boot (Phase 2) |
+| Hierarchical planning | Demonstrated | Phase 11: parent→child subroutine, plan stack push/pop, 4 skills across 2 routines |
+| Sustained autonomy | Demonstrated | Phase 4: 10-minute unattended run, perturbation detection, consolidation |
+
+## What these demonstrations do NOT show
+
+Honest accounting of what remains unproven:
+
+| Gap | Why it matters |
+|---|---|
+| **Novel capability acquisition** | The system compiles sequences of existing skills into routines. It does not learn new skills that weren't registered as port capabilities. |
+| **Autonomous bug fixing** | Phase 4 detects anomalies but doesn't fix them. The perturbation reverts are scripted. |
+| **Knowledge transfer between domains** | Phase 2 shows the architecture works across domains, not that domain A knowledge accelerates domain B competence. |
+| **Self-directed goal formation** | Goals are externally injected. DNA routines react to pre-defined fact patterns — the patterns are domain-agnostic but still pre-authored. |
+| **Adversarial evaluation** | All tests are self-authored. No blind environments, no independent replication. |
+| **Quantitative baselines** | No comparison against AutoGPT, SWE-agent, Voyager, or plain LLM tool use. |
+| **Ablation studies** | No measurements of SOMA-without-routines vs. SOMA-without-DNA vs. SOMA-without-belief-state. |
+
+## What would strengthen the claims
+
+1. **Independent, blind evaluation** — freeze the system, deploy to domains chosen by evaluators, measure time-to-competence.
+2. **Ablations** — SOMA with and without each component (routine compilation, DNA routines, belief state, brain fallback). Which pieces actually matter?
+3. **Quantitative baselines** — compare against existing agent frameworks on the same tasks. Does the memory/routine pipeline actually improve performance over plain LLM + tools?
+4. **Autonomous remediation** — extend Phase 4 so the system not only detects but fixes anomalies, without scripted reverts.
+5. **Cross-domain knowledge transfer measurement** — deploy to domain A, let it learn, deploy to domain B, measure whether competence arrives faster than cold-start.
+6. **Multi-day sustained runs** — 10 minutes demonstrates stability. Multi-day runs would demonstrate whether routine accumulation actually improves efficiency over time.
+
+## The thesis
+
+Most people think AGI requires a bigger brain. SOMA's thesis: it requires a better body. The brain already exists — frontier models reason well enough.
+
+The system boots with no domain knowledge, explores autonomously via DNA-triggered curiosity, reasons about what to do via an external LLM brain, executes via real ports, observes consequences, updates beliefs, adapts decisions based on what it learned, mines episodes into schemas, compiles schemas into reusable routines, and uses the same architecture across domains without retraining.
+
+Every architectural piece has been demonstrated — individually in `soma-project-curiosity`, with real ports in `soma-project-coder`, across domains in `soma-project-kitchen`, end-to-end with a real LLM brain, and in sustained autonomous operation.
+
+**AGI-like behavior may require a persistent, embodied runtime around models — not just bigger model weights.** SOMA is a concrete implementation of that hypothesis, with demonstrations across the full capability surface. The path from demonstration to proof requires independent evaluation, ablations, and adversarial benchmarks.
+
+The architecture exists. The demonstrations pass. The thesis is testable. That's the contribution.
