@@ -1,0 +1,247 @@
+{
+  "id": "interceptor.v1",
+  "name": "Drone Interceptor",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "interceptor",
+  "description": "Autonomous kamikaze drone interceptor. Detect, track, and neutralize hostile drones using sensor fusion, proportional navigation, and learned intercept geometries.",
+  "capabilities": [
+    {
+      "group_name": "sensors",
+      "scope": "local",
+      "capabilities": [
+        "rf_scan",
+        "visual_detect",
+        "ir_detect",
+        "acoustic_detect",
+        "imu_read",
+        "gps_read",
+        "fuse_target_state"
+      ]
+    },
+    {
+      "group_name": "navigation",
+      "scope": "local",
+      "capabilities": [
+        "set_heading",
+        "set_throttle",
+        "set_altitude",
+        "set_waypoint",
+        "compute_intercept_vector",
+        "proportional_navigation",
+        "lead_pursuit",
+        "pure_pursuit"
+      ]
+    },
+    {
+      "group_name": "engagement",
+      "scope": "local",
+      "capabilities": [
+        "arm",
+        "disarm",
+        "detonate_proximity",
+        "abort_engagement",
+        "report_kill",
+        "report_miss"
+      ]
+    },
+    {
+      "group_name": "comms",
+      "scope": "local",
+      "capabilities": [
+        "beacon_status",
+        "receive_tasking",
+        "share_target",
+        "upload_episode",
+        "download_routines",
+        "iff_query"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [
+    {
+      "schema_id": "intercept_standard",
+      "namespace": "interceptor",
+      "pack": "interceptor.v1",
+      "name": "Standard Intercept",
+      "version": "0.1.0",
+      "trigger_conditions": [
+        { "condition_type": "world_state", "expression": { "target.confirmed": true } }
+      ],
+      "resource_requirements": [],
+      "subgoal_structure": [
+        { "subgoal": "acquire_target", "skills": ["sensors.fuse_target_state", "comms.iff_query"] },
+        { "subgoal": "compute_geometry", "skills": ["navigation.compute_intercept_vector"] },
+        { "subgoal": "prosecute", "skills": ["navigation.proportional_navigation", "navigation.lead_pursuit"] },
+        { "subgoal": "terminal", "skills": ["engagement.arm", "engagement.detonate_proximity"] }
+      ],
+      "candidate_skill_ordering": [
+        "interceptor.sensors.fuse_target_state",
+        "interceptor.comms.iff_query",
+        "interceptor.navigation.compute_intercept_vector",
+        "interceptor.navigation.proportional_navigation",
+        "interceptor.engagement.arm",
+        "interceptor.engagement.detonate_proximity",
+        "interceptor.comms.report_kill"
+      ]
+    },
+    {
+      "schema_id": "intercept_evasive",
+      "namespace": "interceptor",
+      "pack": "interceptor.v1",
+      "name": "Evasive Target Intercept",
+      "version": "0.1.0",
+      "trigger_conditions": [
+        { "condition_type": "world_state", "expression": { "target.evasive": true } }
+      ],
+      "resource_requirements": [],
+      "subgoal_structure": [
+        { "subgoal": "predict_maneuver", "skills": ["sensors.fuse_target_state"] },
+        { "subgoal": "lead_intercept", "skills": ["navigation.lead_pursuit", "navigation.set_throttle"] },
+        { "subgoal": "terminal_sprint", "skills": ["engagement.arm", "engagement.detonate_proximity"] }
+      ],
+      "candidate_skill_ordering": [
+        "interceptor.sensors.fuse_target_state",
+        "interceptor.navigation.lead_pursuit",
+        "interceptor.navigation.set_throttle",
+        "interceptor.engagement.arm",
+        "interceptor.engagement.detonate_proximity",
+        "interceptor.comms.report_kill"
+      ]
+    }
+  ],
+  "routines": [
+    {
+      "routine_id": "interceptor.loiter_scan",
+      "namespace": "interceptor",
+      "origin": "pack_authored",
+      "match_conditions": [],
+      "compiled_skill_path": [],
+      "compiled_steps": [
+        { "type": "skill", "skill_id": "interceptor.sensors.rf_scan", "input_overrides": {} },
+        { "type": "skill", "skill_id": "interceptor.sensors.visual_detect", "input_overrides": {} },
+        { "type": "skill", "skill_id": "interceptor.sensors.acoustic_detect", "input_overrides": {} },
+        { "type": "skill", "skill_id": "interceptor.comms.beacon_status", "input_overrides": { "state": "loiter" } }
+      ],
+      "guard_conditions": [],
+      "expected_cost": 0.05,
+      "expected_effect": [],
+      "confidence": 1.0,
+      "autonomous": false,
+      "priority": 1,
+      "exclusive": false,
+      "version": 1,
+      "model_evidence": 0.0
+    },
+    {
+      "routine_id": "interceptor.standard_intercept",
+      "namespace": "interceptor",
+      "origin": "pack_authored",
+      "match_conditions": [
+        {
+          "condition_type": "world_state",
+          "expression": { "target.confirmed": true },
+          "description": "fires when a hostile target is confirmed by sensor fusion + IFF"
+        }
+      ],
+      "compiled_skill_path": [],
+      "compiled_steps": [
+        { "type": "skill", "skill_id": "interceptor.sensors.fuse_target_state", "input_overrides": {} },
+        { "type": "skill", "skill_id": "interceptor.navigation.compute_intercept_vector", "input_overrides": {} },
+        { "type": "skill", "skill_id": "interceptor.navigation.proportional_navigation", "input_overrides": {} },
+        { "type": "skill", "skill_id": "interceptor.engagement.arm", "input_overrides": {} },
+        { "type": "skill", "skill_id": "interceptor.engagement.detonate_proximity", "input_overrides": {} },
+        { "type": "skill", "skill_id": "interceptor.comms.report_kill", "input_overrides": {} }
+      ],
+      "guard_conditions": [
+        { "condition_type": "world_state", "expression": { "iff.hostile": true }, "description": "only engage confirmed hostiles" }
+      ],
+      "expected_cost": 0.9,
+      "expected_effect": [
+        { "fact_id": "target.neutralized", "subject": "target", "predicate": "neutralized" }
+      ],
+      "confidence": 0.7,
+      "autonomous": true,
+      "priority": 15,
+      "exclusive": true,
+      "version": 1,
+      "model_evidence": 0.0
+    },
+    {
+      "routine_id": "interceptor.abort_friendly",
+      "namespace": "interceptor",
+      "origin": "pack_authored",
+      "match_conditions": [
+        {
+          "condition_type": "world_state",
+          "expression": { "iff.friendly": true },
+          "description": "immediately abort if target identified as friendly"
+        }
+      ],
+      "compiled_skill_path": [],
+      "compiled_steps": [
+        { "type": "skill", "skill_id": "interceptor.engagement.disarm", "input_overrides": {} },
+        { "type": "skill", "skill_id": "interceptor.engagement.abort_engagement", "input_overrides": {} },
+        { "type": "skill", "skill_id": "interceptor.navigation.set_waypoint", "input_overrides": { "waypoint": "loiter_point" } },
+        { "type": "skill", "skill_id": "interceptor.comms.beacon_status", "input_overrides": { "state": "abort_friendly" } }
+      ],
+      "guard_conditions": [],
+      "expected_cost": 0.01,
+      "expected_effect": [],
+      "confidence": 1.0,
+      "autonomous": true,
+      "priority": 20,
+      "exclusive": true,
+      "version": 1,
+      "model_evidence": 0.0
+    }
+  ],
+  "policies": [
+    {
+      "policy_id": "interceptor.iff_gate",
+      "description": "Never engage without positive hostile identification. Abort immediately if IFF returns friendly or uncertain.",
+      "scope": "engagement.*",
+      "rule": "require iff.hostile == true before any engagement skill",
+      "enforcement": "hard_block"
+    },
+    {
+      "policy_id": "interceptor.altitude_floor",
+      "description": "Never descend below minimum safe altitude except during terminal phase with confirmed target lock.",
+      "scope": "navigation.set_altitude",
+      "rule": "altitude >= MIN_SAFE_ALT unless engagement.armed == true AND target.lock == true",
+      "enforcement": "hard_block"
+    },
+    {
+      "policy_id": "interceptor.geofence",
+      "description": "Never leave designated engagement zone. Abort and return if approaching boundary.",
+      "scope": "navigation.*",
+      "rule": "position within geofence_polygon",
+      "enforcement": "hard_block"
+    }
+  ],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": false
+  },
+  "observability": {
+    "health_checks": ["sensors.imu_read", "sensors.gps_read", "comms.beacon_status"],
+    "version_metadata": { "version": "0.1.0" },
+    "dependency_status": [],
+    "capability_inventory": [],
+    "expected_latency_classes": ["realtime"],
+    "expected_failure_modes": ["sensor_loss", "comms_loss", "gps_denied", "target_lost"],
+    "trace_categories": ["intercept", "engagement", "navigation", "sensor"],
+    "metric_names": ["intercept_time_ms", "miss_distance_m", "target_closure_rate", "engagement_success"],
+    "pack_load_state": "active"
+  },
+  "authors": ["Vladimir Melnic"],
+  "tags": ["defense", "drone", "interceptor", "autonomous", "ukraine"],
+  "ports": [],
+  "skills": [],
+  "port_dependencies": ["sensors", "navigation", "engagement", "comms"]
+}

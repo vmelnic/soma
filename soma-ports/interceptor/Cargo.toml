@@ -1,0 +1,13 @@
+[package]
+name = "soma-port-interceptor"
+version = "0.1.0"
+edition = "2024"
+description = "SOMA port: drone interceptor simulation — 6DOF flight physics, sensor fusion, engagement geometry"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soma-port-sdk = { path = "../sdk" }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }

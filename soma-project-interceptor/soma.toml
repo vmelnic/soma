@@ -1,0 +1,47 @@
+[runtime]
+session_budget_max = 100
+session_timeout_secs = 300
+reactive_monitor_interval_secs = 0
+# In production: reactive_monitor_interval_ms = 5 (custom field for <10ms loop)
+# Standard 5s interval is for ground station testing only
+
+[packs]
+paths = ["packs/interceptor", "packs/dna"]
+
+[brain]
+provider = "edge"
+# In production: soma-brain liquid core on STM32/ESP32-S3
+# In simulation: local Ollama or OpenAI for development
+
+[ports]
+# Simulation ports for development/testing
+# In production: replaced by hardware port adapters (MAVLink, GPIO, SPI sensors)
+sensor_mode = "simulation"
+nav_mode = "simulation"
+engagement_mode = "simulation"
+
+[safety]
+# Hard limits — these CANNOT be overridden by learning
+iff_required = true
+geofence_enforcement = "hard"
+min_altitude_m = 10
+max_engagement_range_m = 2000
+abort_on_comms_loss_secs = 30
+abort_on_sensor_failure = true
+friendly_fire_prevention = "always"
+
+[learning]
+consolidation_interval_secs = 0
+# Learning happens post-flight on ground station, not in-flight
+# Episodes are stored locally and uploaded after landing/recovery
+episode_storage = "local"
+max_episodes_onboard = 50
+
+[distributed]
+# Mesh networking for swarm coordination
+discovery = "manual"
+# In production: uses RF mesh, not mDNS
+peers_file = "peers.json"
+share_targets = true
+share_routines = false
+# Routines only pushed from ground station after validation

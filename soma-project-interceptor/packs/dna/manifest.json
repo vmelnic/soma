@@ -1,0 +1,169 @@
+{
+  "id": "interceptor.dna",
+  "name": "Interceptor DNA",
+  "version": "0.1.0",
+  "runtime_compatibility": ">=0.1.0",
+  "namespace": "interceptor.dna",
+  "description": "Innate reflexes for drone interceptor. These fire without deliberation — hardwired survival and engagement behaviors that execute in <10ms.",
+  "capabilities": [],
+  "dependencies": [],
+  "resources": [],
+  "schemas": [],
+  "routines": [
+    {
+      "routine_id": "dna.threat_detect",
+      "namespace": "interceptor.dna",
+      "origin": "pack_authored",
+      "match_conditions": [
+        {
+          "condition_type": "world_state",
+          "expression": { "threat.detected": true },
+          "description": "fires when any sensor reports potential hostile — RF signature, visual blob, acoustic match"
+        }
+      ],
+      "compiled_skill_path": [],
+      "compiled_steps": [
+        { "type": "skill", "skill_id": "interceptor.sensors.fuse_target_state", "input_overrides": {} },
+        { "type": "skill", "skill_id": "interceptor.comms.iff_query", "input_overrides": {} },
+        { "type": "skill", "skill_id": "interceptor.comms.share_target", "input_overrides": {} }
+      ],
+      "guard_conditions": [],
+      "expected_cost": 0.1,
+      "expected_effect": [
+        { "fact_id": "target.classified", "subject": "target", "predicate": "classified" }
+      ],
+      "confidence": 0.95,
+      "autonomous": true,
+      "priority": 18,
+      "exclusive": false,
+      "version": 1,
+      "model_evidence": 0.0
+    },
+    {
+      "routine_id": "dna.engage",
+      "namespace": "interceptor.dna",
+      "origin": "pack_authored",
+      "match_conditions": [
+        {
+          "condition_type": "world_state",
+          "expression": { "target.confirmed": true, "iff.hostile": true },
+          "description": "fires when target positively identified as hostile — triggers intercept sequence"
+        }
+      ],
+      "compiled_skill_path": [],
+      "compiled_steps": [],
+      "guard_conditions": [
+        { "condition_type": "world_state", "expression": { "iff.hostile": true }, "description": "hard IFF gate" }
+      ],
+      "expected_cost": 0.9,
+      "expected_effect": [],
+      "confidence": 0.9,
+      "autonomous": true,
+      "priority": 16,
+      "exclusive": true,
+      "version": 1,
+      "model_evidence": 0.0
+    },
+    {
+      "routine_id": "dna.abort",
+      "namespace": "interceptor.dna",
+      "origin": "pack_authored",
+      "match_conditions": [
+        {
+          "condition_type": "world_state",
+          "expression": { "abort.required": true },
+          "description": "fires on: IFF friendly, geofence breach, sensor failure, comms loss beyond threshold, low battery critical"
+        }
+      ],
+      "compiled_skill_path": [],
+      "compiled_steps": [
+        { "type": "skill", "skill_id": "interceptor.engagement.disarm", "input_overrides": {} },
+        { "type": "skill", "skill_id": "interceptor.engagement.abort_engagement", "input_overrides": {} },
+        { "type": "skill", "skill_id": "interceptor.navigation.set_waypoint", "input_overrides": { "waypoint": "rtb" } }
+      ],
+      "guard_conditions": [],
+      "expected_cost": 0.01,
+      "expected_effect": [],
+      "confidence": 1.0,
+      "autonomous": true,
+      "priority": 25,
+      "exclusive": true,
+      "version": 1,
+      "model_evidence": 0.0
+    },
+    {
+      "routine_id": "dna.evade",
+      "namespace": "interceptor.dna",
+      "origin": "pack_authored",
+      "match_conditions": [
+        {
+          "condition_type": "world_state",
+          "expression": { "threat.inbound": true },
+          "description": "fires when another hostile is tracking THIS drone — defensive maneuver"
+        }
+      ],
+      "compiled_skill_path": [],
+      "compiled_steps": [
+        { "type": "skill", "skill_id": "interceptor.navigation.set_heading", "input_overrides": { "heading": "perpendicular_to_threat" } },
+        { "type": "skill", "skill_id": "interceptor.navigation.set_throttle", "input_overrides": { "throttle": 100 } },
+        { "type": "skill", "skill_id": "interceptor.navigation.set_altitude", "input_overrides": { "delta": -20 } }
+      ],
+      "guard_conditions": [],
+      "expected_cost": 0.2,
+      "expected_effect": [],
+      "confidence": 0.8,
+      "autonomous": true,
+      "priority": 22,
+      "exclusive": true,
+      "version": 1,
+      "model_evidence": 0.0
+    },
+    {
+      "routine_id": "dna.target_lost",
+      "namespace": "interceptor.dna",
+      "origin": "pack_authored",
+      "match_conditions": [
+        {
+          "condition_type": "world_state",
+          "expression": { "target.lost": true },
+          "description": "fires when target tracking is lost during pursuit"
+        }
+      ],
+      "compiled_skill_path": [],
+      "compiled_steps": [],
+      "guard_conditions": [],
+      "expected_cost": 0.3,
+      "expected_effect": [],
+      "confidence": 0.9,
+      "autonomous": true,
+      "priority": 14,
+      "exclusive": false,
+      "version": 1,
+      "model_evidence": 0.0
+    }
+  ],
+  "policies": [],
+  "exposure": {
+    "local_skills": [],
+    "remote_skills": [],
+    "local_resources": [],
+    "remote_resources": [],
+    "default_deny_destructive": false
+  },
+  "observability": {
+    "health_checks": [],
+    "version_metadata": { "version": "0.1.0" },
+    "dependency_status": [],
+    "capability_inventory": [],
+    "expected_latency_classes": ["realtime"],
+    "expected_failure_modes": [],
+    "trace_categories": ["dna", "intercept", "safety"],
+    "metric_names": [],
+    "pack_load_state": "active"
+  },
+  "authors": ["Vladimir Melnic"],
+  "tags": ["dna", "interceptor", "reflex", "safety", "autonomous"],
+  "ports": [],
+  "skills": [],
+  "port_dependencies": []
+}

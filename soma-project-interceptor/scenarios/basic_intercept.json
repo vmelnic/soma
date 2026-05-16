@@ -1,0 +1,46 @@
+{
+  "scenario_id": "basic_intercept_01",
+  "name": "Single hostile, non-maneuvering, head-on approach",
+  "description": "Simplest case: one hostile drone flying straight toward defended point. Tests basic proportional navigation intercept.",
+  "environment": {
+    "wind_speed_ms": 0,
+    "wind_direction_deg": 0,
+    "visibility_m": 5000,
+    "gps_available": true,
+    "comms_available": true
+  },
+  "interceptor": {
+    "start_position": { "lat": 48.450, "lon": 35.050, "alt_m": 100 },
+    "start_heading_deg": 0,
+    "speed_ms": 30,
+    "max_speed_ms": 50,
+    "sensor_range_m": 1500,
+    "warhead_radius_m": 5
+  },
+  "targets": [
+    {
+      "target_id": "hostile_01",
+      "type": "fixed_wing",
+      "iff": "hostile",
+      "start_position": { "lat": 48.460, "lon": 35.050, "alt_m": 100 },
+      "start_heading_deg": 180,
+      "speed_ms": 20,
+      "behavior": "straight_line",
+      "maneuver_probability": 0.0,
+      "rf_signature": "2.4ghz_fpv",
+      "visual_signature": "small_fixed_wing",
+      "acoustic_signature": "propeller_high_rpm"
+    }
+  ],
+  "success_criteria": {
+    "intercept_within_m": 5,
+    "max_time_secs": 60,
+    "no_friendly_engagement": true,
+    "no_geofence_violation": true
+  },
+  "geofence": {
+    "type": "circle",
+    "center": { "lat": 48.455, "lon": 35.050 },
+    "radius_m": 3000
+  }
+}

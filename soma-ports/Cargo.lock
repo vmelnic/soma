@@ -4658,6 +4658,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "soma-port-interceptor"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "soma-port-sdk",
+ "uuid",
+]
+
+[[package]]
 name = "soma-port-kimi"
 version = "0.1.0"
 dependencies = [

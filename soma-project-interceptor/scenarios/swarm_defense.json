@@ -1,0 +1,77 @@
+{
+  "scenario_id": "swarm_defense_01",
+  "name": "Three hostiles, two interceptors, coordinated defense",
+  "description": "Multiple hostile drones approaching from different vectors. Two interceptors must coordinate target assignment and engage sequentially.",
+  "environment": {
+    "wind_speed_ms": 8,
+    "wind_direction_deg": 180,
+    "visibility_m": 2000,
+    "gps_available": true,
+    "comms_available": true
+  },
+  "interceptors": [
+    {
+      "interceptor_id": "defender_01",
+      "start_position": { "lat": 48.450, "lon": 35.048, "alt_m": 100 },
+      "start_heading_deg": 0,
+      "speed_ms": 30,
+      "max_speed_ms": 50,
+      "sensor_range_m": 1500,
+      "warhead_radius_m": 5
+    },
+    {
+      "interceptor_id": "defender_02",
+      "start_position": { "lat": 48.450, "lon": 35.052, "alt_m": 110 },
+      "start_heading_deg": 0,
+      "speed_ms": 30,
+      "max_speed_ms": 50,
+      "sensor_range_m": 1500,
+      "warhead_radius_m": 5
+    }
+  ],
+  "targets": [
+    {
+      "target_id": "hostile_01",
+      "type": "fixed_wing",
+      "iff": "hostile",
+      "start_position": { "lat": 48.462, "lon": 35.045, "alt_m": 120 },
+      "start_heading_deg": 200,
+      "speed_ms": 25,
+      "behavior": "straight_line",
+      "maneuver_probability": 0.0
+    },
+    {
+      "target_id": "hostile_02",
+      "type": "fixed_wing",
+      "iff": "hostile",
+      "start_position": { "lat": 48.463, "lon": 35.050, "alt_m": 100 },
+      "start_heading_deg": 180,
+      "speed_ms": 22,
+      "behavior": "straight_line",
+      "maneuver_probability": 0.1
+    },
+    {
+      "target_id": "hostile_03",
+      "type": "multirotor",
+      "iff": "hostile",
+      "start_position": { "lat": 48.460, "lon": 35.058, "alt_m": 80 },
+      "start_heading_deg": 210,
+      "speed_ms": 15,
+      "behavior": "evasive_random",
+      "maneuver_interval_secs": [4, 6],
+      "maneuver_magnitude_deg": 30
+    }
+  ],
+  "success_criteria": {
+    "min_kills": 2,
+    "max_time_secs": 120,
+    "no_friendly_engagement": true,
+    "no_geofence_violation": true,
+    "no_mid_air_collision": true
+  },
+  "geofence": {
+    "type": "circle",
+    "center": { "lat": 48.455, "lon": 35.050 },
+    "radius_m": 4000
+  }
+}

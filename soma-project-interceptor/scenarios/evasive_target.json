@@ -1,0 +1,48 @@
+{
+  "scenario_id": "evasive_target_01",
+  "name": "Single hostile, evasive maneuvers, crossing approach",
+  "description": "Hostile drone executing random heading changes every 3-5 seconds. Tests lead pursuit and maneuver prediction.",
+  "environment": {
+    "wind_speed_ms": 5,
+    "wind_direction_deg": 270,
+    "visibility_m": 3000,
+    "gps_available": true,
+    "comms_available": true
+  },
+  "interceptor": {
+    "start_position": { "lat": 48.450, "lon": 35.050, "alt_m": 100 },
+    "start_heading_deg": 45,
+    "speed_ms": 30,
+    "max_speed_ms": 50,
+    "sensor_range_m": 1500,
+    "warhead_radius_m": 5
+  },
+  "targets": [
+    {
+      "target_id": "hostile_02",
+      "type": "multirotor",
+      "iff": "hostile",
+      "start_position": { "lat": 48.455, "lon": 35.060, "alt_m": 100 },
+      "start_heading_deg": 225,
+      "speed_ms": 15,
+      "behavior": "evasive_random",
+      "maneuver_interval_secs": [3, 5],
+      "maneuver_magnitude_deg": 45,
+      "altitude_variation_m": 20,
+      "rf_signature": "5.8ghz_fpv",
+      "visual_signature": "quadcopter",
+      "acoustic_signature": "propeller_multi"
+    }
+  ],
+  "success_criteria": {
+    "intercept_within_m": 5,
+    "max_time_secs": 90,
+    "no_friendly_engagement": true,
+    "no_geofence_violation": true
+  },
+  "geofence": {
+    "type": "circle",
+    "center": { "lat": 48.453, "lon": 35.055 },
+    "radius_m": 3000
+  }
+}
