@@ -161,6 +161,9 @@ pub enum RoutineOrigin {
     EpisodeInduced,
     SchemaCompiled,
     PeerTransferred,
+    /// Produced by a mutation operator from a parent routine. Starts on
+    /// probation confidence and must earn fitness through selection.
+    Mutated,
 }
 
 #[cfg(test)]

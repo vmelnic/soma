@@ -7,7 +7,7 @@ SOMA = body. The runtime is the application; projects are empty shells plus mani
 Two execution paths:
 
 - **LLM-driven**: brain calls `invoke_port` via MCP → runtime invokes ports → returns `PortCallRecord`.
-- **Autonomous**: brain calls `create_goal` → runtime runs control loop → selects skills → invokes ports → observes → learns from episodes → compiles routines → plan-following on repeat.
+- **Autonomous**: brain calls `create_goal` → runtime runs control loop → selects skills → invokes ports → observes → learns from episodes → compiles routines → plan-following on repeat. Under `mutation_enabled`, the reactive monitor also evolves routines: it reinforces confidence on success and decays it on failure (selection), breeds mutated routine variants that compete for the same niche (variation), and broadcasts proven mutants to peers over the transport (horizontal gene transfer). See `docs/evolutionary-soma.md`.
 
 Brain decides. Body executes. A hand doesn't decide where to reach; it provides proprioception so the brain can.
 
@@ -71,6 +71,8 @@ cd soma-project-autonomy  && cargo run --release
 cd soma-project-multistep && cargo run
 cd soma-project-inference && cargo run --release
 cd soma-project-minigrid && cargo run --release
+cd soma-project-evolution && cargo run --release   # mutation + selection → adaptation
+cd soma-project-swarm     && cargo run --release   # horizontal gene transfer over TCP
 ```
 
 After rebuilding a port, re-copy the `.dylib` to any `soma-project-*/packs/` that uses it. After rebuilding soma-next for a project, on macOS: `xattr -d com.apple.quarantine bin/soma && codesign -fs - bin/soma`.
@@ -90,6 +92,7 @@ A change that violates any of these is an architectural redirection, not a bug f
 ## Working rules
 
 - **NEVER GUESS.** Read the code. Read the spec. If neither answers, ask.
+- **CLAIMS ARE CHECKED — EVEN IN BRAINSTORMS.** "Never guess" applies to ideas, pitches, and proposals, not just answers. Before stating that SOMA *can* do something, verify it against code and tag it proven (`file:line`) or assumption. Never present an unverified capability as fact and walk it back later. Speculation is fine only when labeled: "would require building X." If an idea depends on a mechanic, name the mechanic and whether it exists today.
 - **NO HEDGING.** Don't call work "hard" or "1-2 weeks". Ship the first concrete step.
 - **TIMEBOX DEBUGGING.** If two patches don't fix the bug, the diagnosis is wrong — back out and re-examine. Round or absurd panic values usually indicate uninitialized memory, stack corruption, or format-string mismatch. Check heap/stack size, buffer overflow, missing init first.
 - **HONEST STATUS.** "Proven" = expected user-visible behavior end-to-end on real data. "Compiles", "boots", "got further" are NOT proof. 15/16 passing is not "working" — report the failing case.

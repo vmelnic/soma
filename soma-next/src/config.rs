@@ -61,6 +61,10 @@ const fn default_port_health_interval_secs() -> u64 {
     0
 }
 
+const fn default_mutation_enabled() -> bool {
+    false
+}
+
 const fn default_checkpoint_every_n_steps() -> u32 {
     0
 }
@@ -127,6 +131,14 @@ const fn default_max_pattern_length() -> usize {
 
 const fn default_max_results() -> usize {
     1000
+}
+
+const fn default_sdm_max_entries() -> usize {
+    10_000
+}
+
+const fn default_sdm_boot_decay() -> f64 {
+    1.0
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +242,13 @@ pub struct RuntimeSection {
     /// non-zero `checkpoint_every_n_steps` to be useful in practice.
     #[serde(default = "default_resume_on_boot")]
     pub resume_sessions_on_boot: bool,
+
+    /// When true, the reactive monitor breeds routine variants: a routine that
+    /// sustains success has its confidence reinforced (not only decayed on
+    /// failure) and spawns mutated offspring that compete for the same niche.
+    /// Requires a non-zero `reactive_monitor_interval_secs`.
+    #[serde(default = "default_mutation_enabled")]
+    pub mutation_enabled: bool,
 }
 
 impl Default for RuntimeSection {
@@ -244,6 +263,7 @@ impl Default for RuntimeSection {
             port_health_interval_secs: default_port_health_interval_secs(),
             checkpoint_every_n_steps: default_checkpoint_every_n_steps(),
             resume_sessions_on_boot: default_resume_on_boot(),
+            mutation_enabled: default_mutation_enabled(),
         }
     }
 }
@@ -446,6 +466,12 @@ pub struct LearningSection {
     /// Maximum number of frequent patterns returned by PrefixSpan.
     #[serde(default = "default_max_results")]
     pub max_results: usize,
+
+    #[serde(default = "default_sdm_max_entries")]
+    pub sdm_max_entries: usize,
+
+    #[serde(default = "default_sdm_boot_decay")]
+    pub sdm_boot_decay: f64,
 }
 
 impl Default for LearningSection {
@@ -457,6 +483,8 @@ impl Default for LearningSection {
             embedder_dimensions: default_embedder_dimensions(),
             max_pattern_length: default_max_pattern_length(),
             max_results: default_max_results(),
+            sdm_max_entries: default_sdm_max_entries(),
+            sdm_boot_decay: default_sdm_boot_decay(),
         }
     }
 }
@@ -673,6 +701,10 @@ impl SomaConfig {
         if let Ok(v) = std::env::var("SOMA_RUNTIME_RESUME_SESSIONS_ON_BOOT")
             && let Ok(b) = v.parse::<bool>() {
                 self.runtime.resume_sessions_on_boot = b;
+            }
+        if let Ok(v) = std::env::var("SOMA_RUNTIME_MUTATION_ENABLED")
+            && let Ok(b) = v.parse::<bool>() {
+                self.runtime.mutation_enabled = b;
             }
         if let Ok(v) = std::env::var("SOMA_MCP_TRANSPORT") {
             self.mcp.transport = v;

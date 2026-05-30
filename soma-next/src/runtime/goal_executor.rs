@@ -28,6 +28,9 @@ pub struct EpisodeContext<'a> {
     /// When present and a "brain" port is loaded, completed episodes are
     /// forwarded to the brain for SDM consolidation.
     pub port_runtime: Option<&'a Arc<Mutex<DefaultPortRuntime>>>,
+    /// When present, finalized episodes are written to SDM for
+    /// content-addressable retrieval during future skill selection.
+    pub sdm: Option<&'a crate::memory::sdm::SharedSdm>,
 }
 
 /// Drive the 16-step control loop until it returns any non-Continue
@@ -142,5 +145,24 @@ pub fn finalize_episode(session: &ControlSession, ctx: &EpisodeContext<'_>) {
 
     if let (Some(port_rt), Some(ep_json)) = (ctx.port_runtime, episode_json) {
         crate::runtime::brain_fallback::consolidate_episode_to_brain(port_rt, &ep_json);
+    }
+
+    if let Some(sdm_store) = ctx.sdm
+        && let Some(last_step) = session.trace.steps.last()
+    {
+        let last_skill = &last_step.selected_skill;
+        let obs = last_step.port_calls.last()
+            .map(|pc| pc.structured_result.clone())
+            .unwrap_or(serde_json::json!({}));
+        let world_snapshot = ctx.world_state.lock()
+            .ok()
+            .map(|ws| ws.snapshot())
+            .unwrap_or(serde_json::json!({}));
+        let address = crate::memory::sdm::encode_snapshot(&world_snapshot, &**ctx.embedder);
+        let data = crate::memory::sdm::encode_outcome(last_skill, succeeded, &obs, &**ctx.embedder);
+        let label = format!("{}:{}", last_skill, if succeeded { "ok" } else { "fail" });
+        if let Ok(mut sdm) = sdm_store.lock() {
+            let _ = sdm.write(address, data, label);
+        }
     }
 }

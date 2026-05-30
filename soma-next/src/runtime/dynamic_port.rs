@@ -26,6 +26,31 @@ use crate::errors::{Result, SomaError};
 use crate::runtime::port::Port;
 use crate::runtime::port_verify;
 
+/// Extract a human-readable message from a panic payload.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic payload".to_string()
+    }
+}
+
+/// Run a closure that calls into a dynamically-loaded port, converting a panic
+/// that unwinds out of the port into an `Err(String)`.
+///
+/// A loaded port is foreign code living in a separate cdylib. Without this
+/// guard, a panic inside the port (an `.unwrap()` on bad input, a `partial_cmp`
+/// on a NaN, an out-of-bounds index) unwinds across the library boundary and
+/// takes down the entire runtime process — every session, not just the one
+/// call. Catching it here turns a misbehaving port into a single failed
+/// invocation the control loop already knows how to handle.
+fn guard_port_call<T>(call: impl FnOnce() -> T) -> std::result::Result<T, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(call))
+        .map_err(|payload| panic_message(&*payload))
+}
+
 /// Loads port adapters from shared libraries at runtime.
 ///
 /// `search_paths` lists directories that may contain `.dylib`/`.so` files.
@@ -245,7 +270,8 @@ impl SdkPortAdapter {
         // Call spec_json() through the vtable so serialization happens inside
         // the dylib using its own struct layout. This avoids ABI mismatches
         // when the host binary and the dylib were compiled separately.
-        let json_str = inner.spec_json();
+        let json_str = guard_port_call(|| inner.spec_json())
+            .map_err(|panic| SomaError::Port(format!("port panicked in spec_json: {panic}")))?;
         let spec: crate::types::port::PortSpec = serde_json::from_str(&json_str).map_err(|e| {
             SomaError::Port(format!("failed to parse port spec JSON: {e}"))
         })?;
@@ -265,7 +291,14 @@ impl Port for SdkPortAdapter {
     ) -> Result<crate::types::observation::PortCallRecord> {
         // Serialize input to JSON string so no serde_json::Value crosses ABI.
         let input_json = serde_json::to_string(&input).unwrap_or_else(|_| "{}".to_string());
-        match self.inner.invoke_json(capability_id, &input_json) {
+        let invoke_result = guard_port_call(|| self.inner.invoke_json(capability_id, &input_json))
+            .map_err(|panic| {
+                SomaError::Port(format!(
+                    "port '{}' panicked during invoke of '{capability_id}': {panic}",
+                    self.spec.port_id
+                ))
+            })?;
+        match invoke_result {
             Ok(json_str) => {
                 let record: crate::types::observation::PortCallRecord =
                     serde_json::from_str(&json_str).map_err(|e| {
@@ -283,14 +316,24 @@ impl Port for SdkPortAdapter {
         input: &serde_json::Value,
     ) -> Result<()> {
         let input_json = serde_json::to_string(input).unwrap_or_else(|_| "{}".to_string());
-        self.inner
-            .validate_input_json(capability_id, &input_json)
+        guard_port_call(|| self.inner.validate_input_json(capability_id, &input_json))
+            .map_err(|panic| {
+                SomaError::Port(format!(
+                    "port '{}' panicked during validation of '{capability_id}': {panic}",
+                    self.spec.port_id
+                ))
+            })?
             .map_err(SomaError::Port)
     }
 
     fn lifecycle_state(&self) -> crate::types::port::PortLifecycleState {
-        // Serialize through JSON to avoid ABI layout assumptions
-        let sdk_state = self.inner.lifecycle_state();
+        // Serialize through JSON to avoid ABI layout assumptions. A port that
+        // panics here is misbehaving, so report it as Degraded rather than
+        // crashing the runtime.
+        let sdk_state = match guard_port_call(|| self.inner.lifecycle_state()) {
+            Ok(state) => state,
+            Err(_) => return crate::types::port::PortLifecycleState::Degraded,
+        };
         let json = serde_json::to_value(sdk_state).unwrap_or_default();
         serde_json::from_value(json).unwrap_or(crate::types::port::PortLifecycleState::Loaded)
     }
@@ -303,6 +346,53 @@ unsafe impl Sync for SdkPortAdapter {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guard_returns_value_when_no_panic() {
+        let result: std::result::Result<i32, String> = guard_port_call(|| 42);
+        assert_eq!(result, Ok(42));
+    }
+
+    #[test]
+    fn guard_passes_through_inner_result() {
+        let ok: std::result::Result<std::result::Result<i32, String>, String> =
+            guard_port_call(|| Ok(7));
+        assert_eq!(ok, Ok(Ok(7)));
+        let err: std::result::Result<std::result::Result<i32, String>, String> =
+            guard_port_call(|| Err("boom".to_string()));
+        assert_eq!(err, Ok(Err("boom".to_string())));
+    }
+
+    #[test]
+    fn guard_converts_panic_to_err() {
+        let result: std::result::Result<i32, String> = guard_port_call(|| panic!("port exploded"));
+        let msg = result.expect_err("a panicking port call must become Err, not abort the runtime");
+        assert!(msg.contains("port exploded"), "got: {msg}");
+    }
+
+    #[test]
+    fn guard_handles_unwrap_panic() {
+        // The exact failure mode this guard exists for: a port that unwraps None.
+        let result: std::result::Result<i32, String> =
+            guard_port_call(|| Option::<i32>::None.unwrap());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn panic_message_extracts_str_and_string_payloads() {
+        let from_str = guard_port_call::<()>(|| panic!("static message")).unwrap_err();
+        assert!(from_str.contains("static message"), "got: {from_str}");
+
+        let dynamic = String::from("owned message");
+        let from_string = guard_port_call::<()>(move || panic!("{dynamic}")).unwrap_err();
+        assert!(from_string.contains("owned message"), "got: {from_string}");
+    }
+
+    #[test]
+    fn panic_message_falls_back_for_unknown_payload() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new(42u8);
+        assert_eq!(panic_message(&*payload), "unknown panic payload");
+    }
 
     #[test]
     fn new_loader_starts_empty() {

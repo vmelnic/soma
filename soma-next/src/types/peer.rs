@@ -183,6 +183,29 @@ pub struct RoutineTransfer {
     pub model_evidence: f64,
 }
 
+impl RoutineTransfer {
+    /// Project a `Routine` onto the wire form. Drops `namespace` and `origin`
+    /// — the receiver synthesizes those (origin becomes `PeerTransferred`).
+    pub fn from_routine(r: &super::routine::Routine) -> Self {
+        Self {
+            routine_id: r.routine_id.clone(),
+            match_conditions: r.match_conditions.clone(),
+            compiled_skill_path: r.compiled_skill_path.clone(),
+            compiled_steps: r.compiled_steps.clone(),
+            guard_conditions: r.guard_conditions.clone(),
+            expected_cost: r.expected_cost,
+            expected_effect: r.expected_effect.clone(),
+            confidence: r.confidence,
+            autonomous: r.autonomous,
+            priority: r.priority,
+            exclusive: r.exclusive,
+            policy_scope: r.policy_scope.clone(),
+            version: r.version,
+            model_evidence: r.model_evidence,
+        }
+    }
+}
+
 /// Observation in a distributed stream — 10 required fields from distributed.md.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamedObservation {

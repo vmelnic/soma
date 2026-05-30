@@ -95,6 +95,8 @@ pub struct Runtime {
     /// Whether dylib signature checking is required when loading port
     /// libraries via the dynamic loader.
     pub require_port_signatures: bool,
+    /// Sparse Distributed Memory -- content-addressable episode memory.
+    pub sdm: crate::memory::sdm::SharedSdm,
 }
 
 impl Runtime {
@@ -141,6 +143,7 @@ impl Runtime {
                 world_state: &self.world_state,
                 skill_stats: Some(&self.skill_stats),
                 port_runtime: Some(&self.port_runtime),
+                sdm: Some(&self.sdm),
             };
             let checkpoint_store = Arc::clone(&self.checkpoint_store);
             let every_n = self.checkpoint_every_n_steps;
@@ -185,6 +188,7 @@ impl Runtime {
                 .map(|pr| pr.list_ports(None).len() as u64)
                 .unwrap_or(0),
             peer_connections: 0, // updated by distributed layer when available
+            sdm_entry_count: self.sdm.lock().map(|s| s.count()).unwrap_or(0),
         };
 
         proprioception::snapshot(self.start_time, &counts)
@@ -386,6 +390,22 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
 
     let policy_engine = PolicyEngineAdapter::new(policy_runtime, config.runtime.max_steps);
 
+    let dim = config.learning.embedder_dimensions;
+    let max = config.learning.sdm_max_entries;
+    let sdm: crate::memory::sdm::SharedSdm = if data_dir.as_os_str().is_empty() {
+        Arc::new(Mutex::new(crate::memory::sdm::DefaultSdm::with_max_entries(dim, dim, max)))
+    } else {
+        Arc::new(Mutex::new(
+            crate::memory::persistence::DiskSdm::with_max_entries(&data_dir, dim, dim, max)?
+        ))
+    };
+    if config.learning.sdm_boot_decay < 1.0
+        && let Ok(mut s) = sdm.lock()
+    {
+        let removed = s.decay(config.learning.sdm_boot_decay);
+        tracing::info!(factor = config.learning.sdm_boot_decay, removed, "applied SDM boot decay");
+    }
+
     let brain_fallback: Option<Box<dyn crate::runtime::session::BrainFallback>> = {
         let has_brain = port_runtime.lock().is_ok_and(|rt| rt.get_port("brain").is_some());
         if has_brain {
@@ -393,10 +413,19 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
             Some(Box::new(crate::runtime::brain_fallback::PortBrainFallback::new(
                 Arc::clone(&port_runtime),
             )))
+        } else if sdm.lock().is_ok_and(|s| s.count() > 0) {
+            tracing::info!("no brain port — using SDM as skill selection fallback");
+            Some(Box::new(crate::memory::sdm::SdmBrainFallback::new(
+                Arc::clone(&sdm),
+                Arc::clone(&embedder),
+            )))
         } else {
             None
         }
     };
+
+    let predictor = SimpleCandidatePredictor::new()
+        .with_sdm(Arc::clone(&sdm), Arc::clone(&world_state));
 
     let deps = SessionControllerDeps {
         belief_source: Box::new(SimpleBeliefSource::new()),
@@ -405,7 +434,7 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
         routine_memory: Box::new(routine_memory),
         skill_registry: Box::new(skill_registry),
         skill_executor: Box::new(skill_executor),
-        predictor: Box::new(SimpleCandidatePredictor::new()),
+        predictor: Box::new(predictor),
         critic: Box::new(SimpleSessionCritic::new()),
         policy_engine: Box::new(policy_engine),
         remote_executor: None,
@@ -413,6 +442,8 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
         brain_fallback,
         delegation_manager: None,
         belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+        sdm: Some(Arc::clone(&sdm)),
+        sdm_embedder: Some(Arc::clone(&embedder)),
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());
@@ -449,6 +480,7 @@ pub fn bootstrap(config: &SomaConfig, pack_paths: &[String]) -> Result<Runtime> 
             .map(PathBuf::from)
             .collect(),
         require_port_signatures: config.ports.require_signatures,
+        sdm,
     })
 }
 
@@ -636,6 +668,22 @@ pub fn bootstrap_with_remote(
 
     let policy_engine = PolicyEngineAdapter::new(policy_runtime, config.runtime.max_steps);
 
+    let dim = config.learning.embedder_dimensions;
+    let max = config.learning.sdm_max_entries;
+    let sdm: crate::memory::sdm::SharedSdm = if data_dir.as_os_str().is_empty() {
+        Arc::new(Mutex::new(crate::memory::sdm::DefaultSdm::with_max_entries(dim, dim, max)))
+    } else {
+        Arc::new(Mutex::new(
+            crate::memory::persistence::DiskSdm::with_max_entries(&data_dir, dim, dim, max)?
+        ))
+    };
+    if config.learning.sdm_boot_decay < 1.0
+        && let Ok(mut s) = sdm.lock()
+    {
+        let removed = s.decay(config.learning.sdm_boot_decay);
+        tracing::info!(factor = config.learning.sdm_boot_decay, removed, "applied SDM boot decay");
+    }
+
     let brain_fallback: Option<Box<dyn crate::runtime::session::BrainFallback>> = {
         let has_brain = port_runtime.lock().is_ok_and(|rt| rt.get_port("brain").is_some());
         if has_brain {
@@ -643,10 +691,19 @@ pub fn bootstrap_with_remote(
             Some(Box::new(crate::runtime::brain_fallback::PortBrainFallback::new(
                 Arc::clone(&port_runtime),
             )))
+        } else if sdm.lock().is_ok_and(|s| s.count() > 0) {
+            tracing::info!("no brain port — using SDM as skill selection fallback");
+            Some(Box::new(crate::memory::sdm::SdmBrainFallback::new(
+                Arc::clone(&sdm),
+                Arc::clone(&embedder),
+            )))
         } else {
             None
         }
     };
+
+    let predictor = SimpleCandidatePredictor::new()
+        .with_sdm(Arc::clone(&sdm), Arc::clone(&world_state));
 
     let deps = SessionControllerDeps {
         belief_source: Box::new(SimpleBeliefSource::new()),
@@ -655,7 +712,7 @@ pub fn bootstrap_with_remote(
         routine_memory: Box::new(routine_memory),
         skill_registry: Box::new(skill_registry),
         skill_executor: Box::new(skill_executor),
-        predictor: Box::new(SimpleCandidatePredictor::new()),
+        predictor: Box::new(predictor),
         critic: Box::new(SimpleSessionCritic::new()),
         policy_engine: Box::new(policy_engine),
         remote_executor: Some(remote_executor),
@@ -663,6 +720,8 @@ pub fn bootstrap_with_remote(
         brain_fallback,
         delegation_manager: None,
         belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+        sdm: Some(Arc::clone(&sdm)),
+        sdm_embedder: Some(Arc::clone(&embedder)),
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());
@@ -699,6 +758,7 @@ pub fn bootstrap_with_remote(
             .map(PathBuf::from)
             .collect(),
         require_port_signatures: config.ports.require_signatures,
+        sdm,
     })
 }
 
@@ -834,6 +894,13 @@ pub fn bootstrap_from_specs(
 
     let policy_engine = PolicyEngineAdapter::new(policy_runtime, config.runtime.max_steps);
 
+    let dim = config.learning.embedder_dimensions;
+    let max = config.learning.sdm_max_entries;
+    let sdm: crate::memory::sdm::SharedSdm =
+        Arc::new(Mutex::new(crate::memory::sdm::DefaultSdm::with_max_entries(dim, dim, max)));
+    let world_state: SharedWorldStateStore =
+        Arc::new(Mutex::new(crate::runtime::world_state::DefaultWorldStateStore::new()));
+
     let brain_fallback: Option<Box<dyn crate::runtime::session::BrainFallback>> = {
         let has_brain = port_runtime.lock().is_ok_and(|rt| rt.get_port("brain").is_some());
         if has_brain {
@@ -841,10 +908,19 @@ pub fn bootstrap_from_specs(
             Some(Box::new(crate::runtime::brain_fallback::PortBrainFallback::new(
                 Arc::clone(&port_runtime),
             )))
+        } else if sdm.lock().is_ok_and(|s| s.count() > 0) {
+            tracing::info!("no brain port — using SDM as skill selection fallback");
+            Some(Box::new(crate::memory::sdm::SdmBrainFallback::new(
+                Arc::clone(&sdm),
+                Arc::clone(&embedder),
+            )))
         } else {
             None
         }
     };
+
+    let predictor = SimpleCandidatePredictor::new()
+        .with_sdm(Arc::clone(&sdm), Arc::clone(&world_state));
 
     let deps = SessionControllerDeps {
         belief_source: Box::new(SimpleBeliefSource::new()),
@@ -853,7 +929,7 @@ pub fn bootstrap_from_specs(
         routine_memory: Box::new(routine_memory),
         skill_registry: Box::new(skill_registry),
         skill_executor: Box::new(skill_executor),
-        predictor: Box::new(SimpleCandidatePredictor::new()),
+        predictor: Box::new(predictor),
         critic: Box::new(SimpleSessionCritic::new()),
         policy_engine: Box::new(policy_engine),
         remote_executor: None,
@@ -861,6 +937,8 @@ pub fn bootstrap_from_specs(
         brain_fallback,
         delegation_manager: None,
         belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+        sdm: Some(Arc::clone(&sdm)),
+        sdm_embedder: Some(Arc::clone(&embedder)),
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());
@@ -868,9 +946,6 @@ pub fn bootstrap_from_specs(
     let session_controller = SessionController::new(deps, Arc::clone(&metrics));
     let goal_runtime = DefaultGoalRuntime::new();
 
-    // On wasm there is no host filesystem for checkpoints. A store rooted
-    // at an ephemeral path keeps the Runtime shape uniform; it is never
-    // touched as long as `checkpoint_every_n_steps` stays zero.
     let checkpoint_store = Arc::new(
         crate::memory::checkpoint::SessionCheckpointStore::new(
             &std::path::PathBuf::from("."),
@@ -889,7 +964,7 @@ pub fn bootstrap_from_specs(
         metrics,
         embedder,
         schedule_store: Arc::new(Mutex::new(DefaultScheduleStore::new())),
-        world_state: Arc::new(Mutex::new(crate::runtime::world_state::DefaultWorldStateStore::new())),
+        world_state,
         routine_router: Arc::new(crate::distributed::routing::DefaultRoutineRouter::new()),
         start_time: Instant::now(),
         checkpoint_store,
@@ -902,6 +977,7 @@ pub fn bootstrap_from_specs(
             .map(PathBuf::from)
             .collect(),
         require_port_signatures: config.ports.require_signatures,
+        sdm,
     })
 }
 
@@ -1034,6 +1110,22 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
 
     let policy_engine = PolicyEngineAdapter::new(policy_runtime, config.runtime.max_steps);
 
+    let dim = config.learning.embedder_dimensions;
+    let max = config.learning.sdm_max_entries;
+    let sdm: crate::memory::sdm::SharedSdm = if data_dir.as_os_str().is_empty() {
+        Arc::new(Mutex::new(crate::memory::sdm::DefaultSdm::with_max_entries(dim, dim, max)))
+    } else {
+        Arc::new(Mutex::new(
+            crate::memory::persistence::DiskSdm::with_max_entries(&data_dir, dim, dim, max)?
+        ))
+    };
+    if config.learning.sdm_boot_decay < 1.0
+        && let Ok(mut s) = sdm.lock()
+    {
+        let removed = s.decay(config.learning.sdm_boot_decay);
+        tracing::info!(factor = config.learning.sdm_boot_decay, removed, "applied SDM boot decay");
+    }
+
     let brain_fallback: Option<Box<dyn crate::runtime::session::BrainFallback>> = {
         let has_brain = port_runtime.lock().is_ok_and(|rt| rt.get_port("brain").is_some());
         if has_brain {
@@ -1041,10 +1133,19 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
             Some(Box::new(crate::runtime::brain_fallback::PortBrainFallback::new(
                 Arc::clone(&port_runtime),
             )))
+        } else if sdm.lock().is_ok_and(|s| s.count() > 0) {
+            tracing::info!("no brain port — using SDM as skill selection fallback");
+            Some(Box::new(crate::memory::sdm::SdmBrainFallback::new(
+                Arc::clone(&sdm),
+                Arc::clone(&embedder),
+            )))
         } else {
             None
         }
     };
+
+    let predictor = SimpleCandidatePredictor::new()
+        .with_sdm(Arc::clone(&sdm), Arc::clone(&world_state));
 
     let deps = SessionControllerDeps {
         belief_source: Box::new(SimpleBeliefSource::new()),
@@ -1053,7 +1154,7 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
         routine_memory: Box::new(routine_memory),
         skill_registry: Box::new(skill_registry),
         skill_executor: Box::new(skill_executor),
-        predictor: Box::new(SimpleCandidatePredictor::new()),
+        predictor: Box::new(predictor),
         critic: Box::new(SimpleSessionCritic::new()),
         policy_engine: Box::new(policy_engine),
         remote_executor: None,
@@ -1061,6 +1162,8 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
         brain_fallback,
         delegation_manager: None,
         belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+        sdm: Some(Arc::clone(&sdm)),
+        sdm_embedder: Some(Arc::clone(&embedder)),
     };
 
     let metrics = Arc::new(RuntimeMetrics::new());
@@ -1097,6 +1200,7 @@ pub fn bootstrap_auto(config: &SomaConfig) -> Result<Runtime> {
             .map(PathBuf::from)
             .collect(),
         require_port_signatures: config.ports.require_signatures,
+        sdm,
     })
 }
 

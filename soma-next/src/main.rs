@@ -369,11 +369,14 @@ fn main() {
     if has_any_listener {
         let schema_store = Arc::clone(&runtime.schema_store);
         let routine_store = Arc::clone(&runtime.routine_store);
+        let sdm_for_handler = Arc::clone(&runtime.sdm);
+        let embedder_for_handler = Arc::clone(&runtime.embedder);
         let world_state_for_webhook = Arc::clone(&runtime.world_state);
         let runtime_arc = Arc::new(Mutex::new(runtime));
         let handler: Arc<dyn soma_next::distributed::transport::IncomingHandler> =
             Arc::new(LocalDispatchHandler::with_stores(
-                Arc::clone(&runtime_arc), schema_store, routine_store));
+                Arc::clone(&runtime_arc), schema_store, routine_store)
+                .with_sdm(sdm_for_handler, embedder_for_handler));
 
         if let Some(addr) = listen_addr {
             if let Some(ref tls) = tls_config {
@@ -904,10 +907,34 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
         && let Some((ws, rs, sc, gr, es, emb)) = monitor_arcs
     {
         let interval = config.runtime.reactive_monitor_interval_secs;
+        let mutation_enabled = config.runtime.mutation_enabled;
+        // Wire horizontal gene transfer: proven mutants bred by the monitor are
+        // broadcast to configured TCP peers. Dormant unless both mutation and
+        // peers are present.
+        let broadcaster: Option<Arc<dyn soma_next::runtime::world_state::RoutineBroadcaster>> =
+            if mutation_enabled && has_tcp_peers {
+                make_executor().map(|exec_box| {
+                    let exec: Arc<dyn soma_next::runtime::remote::RemoteExecutor> =
+                        Arc::from(exec_box);
+                    let peers: Vec<String> = shared_peer_ids.lock().unwrap().clone();
+                    eprintln!(
+                        "MCP: evolved-routine broadcast enabled to {} peer(s)",
+                        peers.len()
+                    );
+                    Arc::new(soma_next::runtime::remote::RemoteRoutineBroadcaster::new(
+                        exec, peers,
+                    )) as Arc<dyn soma_next::runtime::world_state::RoutineBroadcaster>
+                })
+            } else {
+                None
+            };
         let _handle = soma_next::runtime::world_state::start_reactive_monitor(
-            ws, rs, sc, gr, es, emb, interval,
+            ws, rs, sc, gr, es, emb, interval, mutation_enabled, broadcaster,
         );
         eprintln!("MCP: reactive monitor started ({}s interval)", interval);
+        if mutation_enabled {
+            eprintln!("MCP: routine mutation + breeding enabled");
+        }
     }
 
     // Start the port health monitor background thread.
@@ -1023,10 +1050,13 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             Ok(listener_rt) => {
                 let schema_store = Arc::clone(&listener_rt.schema_store);
                 let routine_store = Arc::clone(&listener_rt.routine_store);
+                let sdm_store = Arc::clone(&listener_rt.sdm);
+                let embedder = Arc::clone(&listener_rt.embedder);
                 let runtime_arc = Arc::new(Mutex::new(listener_rt));
                 let handler: Arc<dyn soma_next::distributed::transport::IncomingHandler> =
                     Arc::new(LocalDispatchHandler::with_stores(
-                        Arc::clone(&runtime_arc), schema_store, routine_store));
+                        Arc::clone(&runtime_arc), schema_store, routine_store)
+                        .with_sdm(sdm_store, embedder));
                 let _tcp_handle = start_listener_background(addr, handler);
                 eprintln!("MCP: TCP transport listening on {}", addr);
             }
@@ -1049,10 +1079,13 @@ fn run_mcp_server(pack_paths: &[String], distributed: McpDistributedConfig) {
             Ok(listener_rt) => {
                 let schema_store = Arc::clone(&listener_rt.schema_store);
                 let routine_store = Arc::clone(&listener_rt.routine_store);
+                let sdm_store = Arc::clone(&listener_rt.sdm);
+                let embedder = Arc::clone(&listener_rt.embedder);
                 let runtime_arc = Arc::new(Mutex::new(listener_rt));
                 let handler: Arc<dyn soma_next::distributed::transport::IncomingHandler> =
                     Arc::new(LocalDispatchHandler::with_stores(
-                        Arc::clone(&runtime_arc), schema_store, routine_store));
+                        Arc::clone(&runtime_arc), schema_store, routine_store)
+                        .with_sdm(sdm_store, embedder));
                 let _unix_handle =
                     soma_next::distributed::unix_transport::start_unix_listener_background(
                         path.clone(), handler);

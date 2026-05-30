@@ -46,7 +46,7 @@ pub enum CliCommand {
     VerifyPort { path: String },
     /// Dump runtime state as structured JSON for LLM context integration.
     /// Sections: "full", "belief", "episodes", "schemas", "routines",
-    /// "sessions", "skills", "ports", "packs", "metrics".
+    /// "sessions", "skills", "ports", "packs", "metrics", "sdm".
     Dump { sections: Vec<String> },
     /// Start interactive REPL mode.
     Repl,
@@ -225,9 +225,10 @@ impl CliRunner for DefaultCliRunner {
                         "--ports" => sections.push("ports".to_string()),
                         "--packs" => sections.push("packs".to_string()),
                         "--metrics" => sections.push("metrics".to_string()),
+                        "--sdm" => sections.push("sdm".to_string()),
                         _ => {
                             return Err(SomaError::Interface(format!(
-                                "unknown dump flag: '{}'. valid flags: --full, --belief, --episodes, --schemas, --routines, --sessions, --skills, --ports, --packs, --metrics",
+                                "unknown dump flag: '{}'. valid flags: --full, --belief, --episodes, --schemas, --routines, --sessions, --skills, --ports, --packs, --metrics, --sdm",
                                 arg
                             )));
                         }
@@ -350,6 +351,7 @@ impl DefaultCliRunner {
                 world_state: &rt.world_state,
                 skill_stats: Some(&rt.skill_stats),
                 port_runtime: Some(&rt.port_runtime),
+                sdm: Some(&rt.sdm),
             };
             crate::runtime::goal_executor::finalize_episode(&session, &ctx);
         }
@@ -1359,10 +1361,10 @@ mod tests {
         let r = runner();
         let cmd = r.parse_args(args(&[
             "soma", "dump", "--belief", "--episodes", "--schemas", "--routines",
-            "--sessions", "--skills", "--ports", "--packs", "--metrics",
+            "--sessions", "--skills", "--ports", "--packs", "--metrics", "--sdm",
         ])).unwrap();
         if let CliCommand::Dump { sections } = cmd {
-            assert_eq!(sections.len(), 9);
+            assert_eq!(sections.len(), 10);
         } else {
             panic!("expected Dump command");
         }

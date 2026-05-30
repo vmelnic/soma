@@ -1,10 +1,12 @@
 pub mod working;
 pub mod episodes;
 pub mod schemas;
+pub mod mutation;
 pub mod routines;
 pub mod persistence;
 pub mod world;
 pub mod checkpoint;
 pub mod embedder;
+pub mod sdm;
 pub mod sequence_mining;
 pub mod skill_stats;

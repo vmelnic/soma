@@ -13,6 +13,8 @@
 //! exist on wasm even though no implementation is available there — the
 //! field is simply always `None` in that build.
 
+use std::sync::Arc;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -152,4 +154,40 @@ pub trait RemoteExecutor: Send + Sync {
     /// Transfer a routine to a remote peer. MUST respect trust, pack policy,
     /// exposure, confidentiality, and replay protection constraints.
     fn transfer_routine(&self, peer_id: &str, routine: &RoutineTransfer) -> Result<()>;
+}
+
+/// Broadcasts proven evolved routines to a fixed set of peers over any
+/// `RemoteExecutor`. Wired into the reactive monitor's breeding loop so a
+/// mutation that earns its fitness on one node spreads to the others —
+/// horizontal gene transfer. A failed send to one peer never blocks the rest.
+pub struct RemoteRoutineBroadcaster {
+    executor: Arc<dyn RemoteExecutor>,
+    peers: Vec<String>,
+}
+
+impl RemoteRoutineBroadcaster {
+    pub fn new(executor: Arc<dyn RemoteExecutor>, peers: Vec<String>) -> Self {
+        Self { executor, peers }
+    }
+}
+
+impl crate::runtime::world_state::RoutineBroadcaster for RemoteRoutineBroadcaster {
+    fn broadcast(&self, routine: &crate::types::routine::Routine) {
+        let transfer = RoutineTransfer::from_routine(routine);
+        for peer in &self.peers {
+            match self.executor.transfer_routine(peer, &transfer) {
+                Ok(()) => tracing::info!(
+                    peer = %peer,
+                    routine = %routine.routine_id,
+                    "broadcast evolved routine to peer"
+                ),
+                Err(e) => tracing::warn!(
+                    peer = %peer,
+                    routine = %routine.routine_id,
+                    error = %e,
+                    "routine broadcast failed"
+                ),
+            }
+        }
+    }
 }

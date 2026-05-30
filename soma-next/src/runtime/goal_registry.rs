@@ -135,6 +135,7 @@ pub struct OwnedEpisodeContext {
     pub world_state: Arc<Mutex<dyn WorldStateStore + Send>>,
     pub skill_stats: Option<crate::memory::skill_stats::SharedSkillStats>,
     pub port_runtime: Option<Arc<Mutex<crate::runtime::port::DefaultPortRuntime>>>,
+    pub sdm: Option<crate::memory::sdm::SharedSdm>,
 }
 
 impl OwnedEpisodeContext {
@@ -147,6 +148,7 @@ impl OwnedEpisodeContext {
             world_state: &self.world_state,
             skill_stats: self.skill_stats.as_ref(),
             port_runtime: self.port_runtime.as_ref(),
+            sdm: self.sdm.as_ref(),
         }
     }
 }

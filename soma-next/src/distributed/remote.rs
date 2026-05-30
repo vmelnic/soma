@@ -670,7 +670,7 @@ mod tests {
             success: true,
             observation: serde_json::json!({"files": ["a.txt", "b.txt"]}),
             latency_ms: 42,
-            timestamp: chrono::Utc::now(),
+            timestamp: Utc::now(),
             trace_id: Uuid::new_v4(),
         };
         let json = serde_json::to_value(&resp).unwrap();
@@ -689,7 +689,7 @@ mod tests {
             version: 5,
             provenance: "local".to_string(),
             freshness_ms: 100,
-            timestamp: chrono::Utc::now(),
+            timestamp: Utc::now(),
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["resource_type"], "filesystem");
@@ -791,11 +791,11 @@ mod tests {
             latency_class: "low".to_string(),
             cost_class: "low".to_string(),
             current_load: 0.0,
-            last_seen: chrono::Utc::now(),
+            last_seen: Utc::now(),
             replay_support: true,
             observation_streaming: true,
             advertisement_version: 1,
-            advertisement_expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+            advertisement_expires_at: Utc::now() + chrono::Duration::hours(1),
         }
     }
 
@@ -1453,7 +1453,7 @@ mod tests {
                 success: false,
                 observation: serde_json::json!({"error": "mock: invoke_skill not supported by freshness executor"}),
                 latency_ms: 0,
-                timestamp: chrono::Utc::now(),
+                timestamp: Utc::now(),
                 trace_id: uuid::Uuid::new_v4(),
             })
         }
@@ -1471,7 +1471,7 @@ mod tests {
                 version: 1,
                 provenance: "remote".to_string(),
                 freshness_ms: self.freshness_ms,
-                timestamp: chrono::Utc::now(),
+                timestamp: Utc::now(),
             })
         }
         fn transfer_schema(&self, _peer_id: &str, _schema: &SchemaTransfer) -> Result<()> {
@@ -1591,11 +1591,11 @@ mod tests {
             latency_class: "low".to_string(),
             cost_class: "low".to_string(),
             current_load: 0.0,
-            last_seen: chrono::Utc::now(),
+            last_seen: Utc::now(),
             replay_support: true,
             observation_streaming: true,
             advertisement_version: 1,
-            advertisement_expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+            advertisement_expires_at: Utc::now() + chrono::Duration::hours(1),
         }
     }
 

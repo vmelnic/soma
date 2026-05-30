@@ -244,9 +244,7 @@ mod tests {
         assert_eq!(b.status, PortHealthStatus::Healthy);
 
         // Add spike samples (~500ms) and analyze.
-        for _ in 0..5 {
-            samples.push(500);
-        }
+        samples.extend(std::iter::repeat_n(500, 5));
         let result = analyze_port(&mut b, &samples, 20);
         assert_eq!(result.unwrap(), PortHealthStatus::Degraded);
     }
@@ -258,16 +256,12 @@ mod tests {
         analyze_port(&mut b, &samples, 0);
 
         // Spike.
-        for _ in 0..5 {
-            samples.push(500);
-        }
+        samples.extend(std::iter::repeat_n(500, 5));
         analyze_port(&mut b, &samples, 20);
         assert_eq!(b.status, PortHealthStatus::Degraded);
 
         // Recovery: more normal samples.
-        for _ in 0..10 {
-            samples.push(12);
-        }
+        samples.extend(std::iter::repeat_n(12, 10));
         let result = analyze_port(&mut b, &samples, 25);
         assert_eq!(result.unwrap(), PortHealthStatus::Healthy);
     }
@@ -306,9 +300,7 @@ mod tests {
         analyze_port(&mut b, &samples, 0);
 
         // Gradual increase to ~13ms — within normal variance.
-        for _ in 0..5 {
-            samples.push(13);
-        }
+        samples.extend(std::iter::repeat_n(13, 5));
         let result = analyze_port(&mut b, &samples, 20);
         assert_eq!(result.unwrap(), PortHealthStatus::Healthy);
     }

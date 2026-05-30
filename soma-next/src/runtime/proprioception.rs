@@ -33,6 +33,8 @@ pub struct SelfModel {
     pub uptime_seconds: u64,
     /// Number of known peer connections (from the peer registry).
     pub peer_connections: u64,
+    /// Number of entries currently stored in Sparse Distributed Memory.
+    pub sdm_entry_count: usize,
 }
 
 impl SelfModel {
@@ -70,6 +72,7 @@ impl SelfModel {
              \x20 registered_ports:  {}\n\
              \x20 uptime:            {}s\n\
              \x20 peer_connections:  {}\n\
+             \x20 sdm_entry_count:  {}\n\
              \x20 load_factor:       {:.3}",
             rss_mb,
             self.rss_bytes,
@@ -80,6 +83,7 @@ impl SelfModel {
             self.registered_ports,
             self.uptime_seconds,
             self.peer_connections,
+            self.sdm_entry_count,
             self.load_factor(),
         )
     }
@@ -96,6 +100,7 @@ impl SelfModel {
             "registered_ports": self.registered_ports,
             "uptime_seconds": self.uptime_seconds,
             "peer_connections": self.peer_connections,
+            "sdm_entry_count": self.sdm_entry_count,
             "load_factor": self.load_factor(),
         })
     }
@@ -254,6 +259,7 @@ pub struct RuntimeCounts {
     pub registered_skills: u64,
     pub registered_ports: u64,
     pub peer_connections: u64,
+    pub sdm_entry_count: usize,
 }
 
 /// Take a full self-model snapshot using provided runtime counts
@@ -268,6 +274,7 @@ pub fn snapshot(start_time: Instant, counts: &RuntimeCounts) -> SelfModel {
         registered_ports: counts.registered_ports,
         uptime_seconds: start_time.elapsed().as_secs(),
         peer_connections: counts.peer_connections,
+        sdm_entry_count: counts.sdm_entry_count,
     }
 }
 
@@ -297,6 +304,7 @@ mod tests {
             registered_skills: 10,
             registered_ports: 4,
             peer_connections: 1,
+            sdm_entry_count: 7,
         };
         let model = snapshot(start, &counts);
 
@@ -320,6 +328,7 @@ mod tests {
             registered_ports: 2,
             uptime_seconds: 60,
             peer_connections: 0,
+            sdm_entry_count: 0,
         };
         let load = model.load_factor();
         assert!(load < 0.1, "idle system should have low load factor, got {load}");
@@ -336,6 +345,7 @@ mod tests {
             registered_ports: 20,
             uptime_seconds: 3600,
             peer_connections: 10,
+            sdm_entry_count: 0,
         };
         let load = model.load_factor();
         assert!(load > 0.7, "busy system should have high load factor, got {load}");
@@ -352,6 +362,7 @@ mod tests {
             registered_ports: 0,
             uptime_seconds: 0,
             peer_connections: 0,
+            sdm_entry_count: 0,
         };
         let load = model.load_factor();
         assert!(
@@ -371,6 +382,7 @@ mod tests {
             registered_ports: 3,
             uptime_seconds: 120,
             peer_connections: 0,
+            sdm_entry_count: 0,
         };
         let report = model.report();
         assert!(report.contains("rss:"), "report should contain rss field");
@@ -391,6 +403,7 @@ mod tests {
             registered_ports: 4,
             uptime_seconds: 10,
             peer_connections: 0,
+            sdm_entry_count: 0,
         };
         let json = model.to_json();
         assert_eq!(json["rss_bytes"], 100_000);

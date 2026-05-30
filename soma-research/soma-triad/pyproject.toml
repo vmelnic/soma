@@ -1,0 +1,16 @@
+[project]
+name = "soma-triad"
+version = "0.1.0"
+description = "LTC + HDC + SDM: non-transformer reasoning via operation sequencing over algebraic composition and content-addressable memory"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.24",
+    "torch>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

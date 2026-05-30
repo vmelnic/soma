@@ -551,6 +551,10 @@ pub struct LocalDispatchHandler {
     routine_store: Option<Arc<Mutex<dyn crate::memory::routines::RoutineStore + Send>>>,
     /// Episode store for receiving cross-peer episode reports.
     episode_store: Option<Arc<Mutex<dyn crate::memory::episodes::EpisodeStore + Send>>>,
+    /// Sparse Distributed Memory for recording skill outcomes from remote invocations.
+    sdm: Option<crate::memory::sdm::SharedSdm>,
+    /// Embedder for encoding world state snapshots and outcomes into SDM vectors.
+    embedder: Option<Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>>,
 }
 
 impl LocalDispatchHandler {
@@ -561,6 +565,8 @@ impl LocalDispatchHandler {
             schema_store: None,
             routine_store: None,
             episode_store: None,
+            sdm: None,
+            embedder: None,
         }
     }
 
@@ -576,6 +582,8 @@ impl LocalDispatchHandler {
             schema_store: Some(schema_store),
             routine_store: Some(routine_store),
             episode_store: None,
+            sdm: None,
+            embedder: None,
         }
     }
 
@@ -586,6 +594,18 @@ impl LocalDispatchHandler {
         episode_store: Arc<Mutex<dyn crate::memory::episodes::EpisodeStore + Send>>,
     ) -> Self {
         self.episode_store = Some(episode_store);
+        self
+    }
+
+    /// Attach SDM and an embedder so remote skill invocations write their
+    /// outcomes to Sparse Distributed Memory, enabling distributed learning.
+    pub fn with_sdm(
+        mut self,
+        sdm: crate::memory::sdm::SharedSdm,
+        embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>,
+    ) -> Self {
+        self.sdm = Some(sdm);
+        self.embedder = Some(embedder);
         self
     }
 }
@@ -699,6 +719,32 @@ impl IncomingHandler for LocalDispatchHandler {
 
                 if final_observation.is_null() && let Some(error) = last_error {
                     final_observation = serde_json::json!({"error": error});
+                }
+
+                // Write skill outcome to SDM so distributed learning accumulates.
+                if let (Some(sdm_store), Some(emb)) = (&self.sdm, &self.embedder) {
+                    let world_snapshot = session
+                        .trace
+                        .steps
+                        .last()
+                        .map(|s| s.belief_summary_before.clone())
+                        .unwrap_or(serde_json::json!({}));
+                    let address =
+                        crate::memory::sdm::encode_snapshot(&world_snapshot, &**emb);
+                    let data = crate::memory::sdm::encode_outcome(
+                        &skill_id,
+                        success,
+                        &final_observation,
+                        &**emb,
+                    );
+                    let label = format!(
+                        "{}:{}",
+                        skill_id,
+                        if success { "ok" } else { "fail" }
+                    );
+                    if let Ok(mut sdm) = sdm_store.lock() {
+                        let _ = sdm.write(address, data, label);
+                    }
                 }
 
                 TransportResponse::SkillResult {

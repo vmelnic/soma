@@ -278,6 +278,8 @@ pub struct SessionControllerDeps {
     /// Projects belief state into minimal, token-efficient summaries for brain
     /// communication. Uses JMESPath filtering + TOON encoding.
     pub belief_projector: super::belief_projection::BeliefProjector,
+    pub sdm: Option<crate::memory::sdm::SharedSdm>,
+    pub sdm_embedder: Option<Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>>,
 }
 
 /// SessionController holds references to all subsystems and manages sessions.
@@ -308,6 +310,8 @@ pub struct SessionController {
     delegation_manager: Option<Arc<dyn DelegationManager>>,
     /// Projects belief state into minimal summaries for brain communication.
     belief_projector: super::belief_projection::BeliefProjector,
+    sdm: Option<crate::memory::sdm::SharedSdm>,
+    sdm_embedder: Option<Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>>,
     /// Default maximum steps per session if goal does not specify.
     default_max_steps: u32,
     /// Shared runtime metrics for recording session lifecycle events,
@@ -381,6 +385,8 @@ impl SessionController {
             brain_fallback: deps.brain_fallback,
             delegation_manager: deps.delegation_manager,
             belief_projector: deps.belief_projector,
+            sdm: deps.sdm,
+            sdm_embedder: deps.sdm_embedder,
             default_max_steps: 100,
             metrics,
         }
@@ -3007,6 +3013,17 @@ impl SessionRuntime for SessionController {
             rollback_invoked,
         );
 
+        if let (Some(sdm_store), Some(embedder)) = (&self.sdm, &self.sdm_embedder) {
+            let belief_json = serde_json::to_value(&session.belief).unwrap_or_default();
+            let address = crate::memory::sdm::encode_snapshot(&belief_json, &**embedder);
+            let obs_json = serde_json::to_value(&observation).unwrap_or_default();
+            let data = crate::memory::sdm::encode_outcome(&chosen_skill.skill_id, observation.success, &obs_json, &**embedder);
+            let label = format!("{}:{}", chosen_skill.skill_id, if observation.success { "ok" } else { "fail" });
+            if let Ok(mut sdm) = sdm_store.lock() {
+                let _ = sdm.write(address, data, label);
+            }
+        }
+
         session.updated_at = Utc::now();
 
         // Keep the internal map in sync.
@@ -3498,6 +3515,8 @@ mod tests {
             brain_fallback: None,
             delegation_manager: None,
             belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+            sdm: None,
+            sdm_embedder: None,
         }, test_metrics())
     }
 
@@ -3517,6 +3536,8 @@ mod tests {
             brain_fallback: None,
             delegation_manager: None,
             belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+            sdm: None,
+            sdm_embedder: None,
         }, test_metrics())
     }
 
@@ -3916,6 +3937,8 @@ mod tests {
             brain_fallback: None,
             delegation_manager: None,
             belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+            sdm: None,
+            sdm_embedder: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -3976,6 +3999,8 @@ mod tests {
             brain_fallback: None,
             delegation_manager: None,
             belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+            sdm: None,
+            sdm_embedder: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -4075,6 +4100,8 @@ mod tests {
             brain_fallback: None,
             delegation_manager: None,
             belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+            sdm: None,
+            sdm_embedder: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -4196,6 +4223,8 @@ mod tests {
             brain_fallback: None,
             delegation_manager: None,
             belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+            sdm: None,
+            sdm_embedder: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -4266,6 +4295,8 @@ mod tests {
             brain_fallback: None,
             delegation_manager: None,
             belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+            sdm: None,
+            sdm_embedder: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -4360,6 +4391,8 @@ mod tests {
             brain_fallback: None,
             delegation_manager: None,
             belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+            sdm: None,
+            sdm_embedder: None,
         }, test_metrics());
 
         let goal = test_goal();
@@ -4626,6 +4659,8 @@ mod tests {
             brain_fallback: None,
             delegation_manager: None,
             belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+            sdm: None,
+            sdm_embedder: None,
         }, test_metrics());
 
         let goal = test_goal(); // User source -> Local scope
@@ -4662,6 +4697,8 @@ mod tests {
             brain_fallback: None,
             delegation_manager: None,
             belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+            sdm: None,
+            sdm_embedder: None,
         }, test_metrics());
 
         // Peer source -> Peer scope, which is broader than the skill's Local scope.
@@ -4706,6 +4743,8 @@ mod tests {
             brain_fallback: None,
             delegation_manager: None,
             belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+            sdm: None,
+            sdm_embedder: None,
         }, test_metrics());
 
         let mut goal = test_goal();
@@ -4736,6 +4775,8 @@ mod tests {
             brain_fallback: None,
             delegation_manager: None,
             belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+            sdm: None,
+            sdm_embedder: None,
         }, test_metrics());
 
         // Even a Peer-sourced goal executes fine without a scope checker.
@@ -4770,6 +4811,8 @@ mod tests {
             brain_fallback: None,
             delegation_manager: None,
             belief_projector: crate::runtime::belief_projection::BeliefProjector::new(),
+            sdm: None,
+            sdm_embedder: None,
         }, test_metrics());
 
         let mut goal = test_goal();

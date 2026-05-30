@@ -144,6 +144,13 @@ impl WorldStateStore for DefaultWorldStateStore {
 // Reactive monitor thread (native only)
 // ---------------------------------------------------------------------------
 
+/// Sink for proven evolved routines — horizontal gene transfer to peers. The
+/// runtime defines the trigger; the transport-backed implementation lives in
+/// `distributed`. Domain-agnostic: it ships a routine, nothing more.
+pub trait RoutineBroadcaster: Send + Sync {
+    fn broadcast(&self, routine: &crate::types::routine::Routine);
+}
+
 #[cfg(feature = "native")]
 #[allow(clippy::too_many_arguments)]
 pub fn start_reactive_monitor(
@@ -154,6 +161,8 @@ pub fn start_reactive_monitor(
     episode_store: Arc<Mutex<dyn crate::memory::episodes::EpisodeStore + Send>>,
     embedder: Arc<dyn crate::memory::embedder::GoalEmbedder + Send + Sync>,
     interval_secs: u64,
+    mutation_enabled: bool,
+    broadcaster: Option<Arc<dyn RoutineBroadcaster>>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
         use crate::runtime::goal::GoalRuntime;
@@ -168,6 +177,15 @@ pub fn start_reactive_monitor(
         let max_consecutive_failures: u32 = 3;
         let confidence_decay: f64 = 0.7; // multiply confidence by this on failure
         let confidence_invalidation_threshold: f64 = 0.3;
+        // Selection-for: reinforce confidence on success and breed offspring
+        // from routines that sustain success. Inert unless mutation_enabled.
+        let mut success_counts: HashMap<String, u32> = HashMap::new();
+        let confidence_reinforce: f64 = 1.15; // multiply confidence by this on success
+        let confidence_ceiling: f64 = 0.95;
+        let breeding_policy = crate::memory::mutation::BreedingPolicy::default();
+        let mut breed_tick: u64 = 0;
+        // Each proven mutant is broadcast to peers at most once.
+        let mut broadcast_set: HashSet<String> = HashSet::new();
 
         loop {
             thread::sleep(Duration::from_secs(interval_secs));
@@ -239,7 +257,10 @@ pub fn start_reactive_monitor(
                     }
                 };
 
-                // Create session, inject plan, step until done.
+                // Create session, inject plan, step until done. On failure,
+                // `failed_skill` records which skill's port call failed, so a
+                // directed rescue can mutate away from it.
+                let mut failed_skill: Option<String> = None;
                 let (success, steps) = {
                     let mut ctrl = session_controller.lock().unwrap();
                     match ctrl.create_session(goal) {
@@ -304,6 +325,19 @@ pub fn start_reactive_monitor(
 
                             // Store episode on failure (same pattern as handle_execute_routine).
                             if !final_success {
+                                // Record the skill whose port call failed, for
+                                // directed rescue in the feedback branch below.
+                                failed_skill = session
+                                    .trace
+                                    .steps
+                                    .iter()
+                                    .rev()
+                                    .find(|s| {
+                                        s.failure_detail.is_some()
+                                            || s.port_calls.iter().any(|p| !p.success)
+                                    })
+                                    .map(|s| s.selected_skill.clone());
+
                                 let mut episode =
                                     crate::interfaces::cli::build_episode_from_session(
                                         &session,
@@ -405,11 +439,87 @@ pub fn start_reactive_monitor(
                     }
                 }
 
-                // Feedback loop: track consecutive failures, decay confidence,
-                // auto-invalidate routines that fail too often.
+                // Feedback loop. Failure: decay confidence, invalidate after
+                // repeated failures (selection-against). Success: reinforce
+                // confidence and, once a routine sustains success, breed
+                // mutated variants that compete for its niche (selection-for).
                 if success {
                     failure_counts.remove(&routine_id);
+                    // Selection-for is opt-in. With mutation disabled the
+                    // monitor behaves exactly as before — failure decay only.
+                    if mutation_enabled {
+                        let consecutive = {
+                            let succ = success_counts.entry(routine_id.clone()).or_insert(0);
+                            *succ += 1;
+                            *succ
+                        };
+
+                        let mut rs = routine_store.lock().unwrap();
+                        if let Some(parent) = rs.get(&routine_id).cloned() {
+                            // Reinforce confidence on success — symmetric to decay.
+                            let boosted = crate::memory::mutation::reinforced_confidence(
+                                parent.confidence,
+                                confidence_reinforce,
+                                confidence_ceiling,
+                            );
+                            if boosted > parent.confidence {
+                                let mut updated = parent.clone();
+                                updated.confidence = boosted;
+                                let _ = rs.register(updated);
+                            }
+
+                            // Horizontal gene transfer: once a mutant proves
+                            // itself (climbs to the fitness floor), share it
+                            // with peers — exactly once.
+                            if let Some(ref bc) = broadcaster {
+                                let mut proven = parent.clone();
+                                proven.confidence = boosted;
+                                if crate::memory::mutation::should_broadcast(
+                                    &proven,
+                                    breeding_policy.confidence_breed_floor,
+                                    broadcast_set.contains(&routine_id),
+                                ) {
+                                    bc.broadcast(&proven);
+                                    broadcast_set.insert(routine_id.clone());
+                                }
+                            }
+
+                            // Breed once the routine has earned it.
+                            let population =
+                                rs.list_all().iter().filter(|r| r.autonomous).count();
+                            if crate::memory::mutation::should_breed(
+                                &breeding_policy,
+                                &parent,
+                                consecutive,
+                                population,
+                            ) {
+                                let alphabet =
+                                    crate::memory::mutation::skill_alphabet(&rs.list_all());
+                                breed_tick = breed_tick.wrapping_add(1);
+                                let seed =
+                                    crate::memory::mutation::seed_for(&routine_id, breed_tick);
+                                let offspring = crate::memory::mutation::mutate(
+                                    &parent,
+                                    &alphabet,
+                                    &breeding_policy.mutation,
+                                    seed,
+                                );
+                                for child in offspring {
+                                    tracing::info!(
+                                        parent = %routine_id,
+                                        child = %child.routine_id,
+                                        confidence = child.confidence,
+                                        "breeding mutated routine variant"
+                                    );
+                                    let _ = rs.register(child);
+                                }
+                                // Reset so the parent must re-earn the next brood.
+                                success_counts.remove(&routine_id);
+                            }
+                        }
+                    }
                 } else {
+                    success_counts.remove(&routine_id);
                     let count = failure_counts.entry(routine_id.clone()).or_insert(0);
                     *count += 1;
                     if *count >= max_consecutive_failures {
@@ -425,6 +535,37 @@ pub fn start_reactive_monitor(
                                 "decaying routine confidence after consecutive failures"
                             );
                             if new_confidence < confidence_invalidation_threshold {
+                                // Directed rescue before death: when mutation is
+                                // enabled, spawn variants that replace the skill
+                                // that just failed. They start on probation and
+                                // must earn their own fitness like any mutant.
+                                if mutation_enabled
+                                    && let Some(ref failed) = failed_skill
+                                {
+                                    let alphabet = crate::memory::mutation::skill_alphabet(
+                                        &rs.list_all(),
+                                    );
+                                    breed_tick = breed_tick.wrapping_add(1);
+                                    let seed = crate::memory::mutation::seed_for(
+                                        &routine_id,
+                                        breed_tick,
+                                    );
+                                    for child in crate::memory::mutation::guided_mutate(
+                                        &routine,
+                                        failed,
+                                        &alphabet,
+                                        &breeding_policy.mutation,
+                                        seed,
+                                    ) {
+                                        tracing::info!(
+                                            parent = %routine_id,
+                                            child = %child.routine_id,
+                                            replaced = %failed,
+                                            "rescuing routine with directed mutation"
+                                        );
+                                        let _ = rs.register(child);
+                                    }
+                                }
                                 tracing::warn!(
                                     routine_id = %routine_id,
                                     "invalidating routine — confidence below threshold"
@@ -527,11 +668,11 @@ mod tests {
             .unwrap();
         assert_eq!(store.list_facts().len(), 1);
 
-        assert_eq!(store.remove_fact("f1").unwrap(), true);
+        assert!(store.remove_fact("f1").unwrap());
         assert!(store.list_facts().is_empty());
 
         // Removing a non-existent fact returns false.
-        assert_eq!(store.remove_fact("f1").unwrap(), false);
+        assert!(!store.remove_fact("f1").unwrap());
     }
 
     #[test]

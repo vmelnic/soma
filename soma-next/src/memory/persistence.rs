@@ -511,6 +511,88 @@ impl WorldStateStore for DiskWorldStateStore {
 }
 
 // ---------------------------------------------------------------------------
+// DiskSdm
+// ---------------------------------------------------------------------------
+
+use crate::memory::sdm::{DefaultSdm, SdmEntry, SdmMatch, SparseDistributedMemoryStore};
+
+pub struct DiskSdm {
+    inner: DefaultSdm,
+    path: PathBuf,
+}
+
+impl DiskSdm {
+    pub fn new(data_dir: &Path, addr_dim: usize, data_dim: usize) -> Result<Self> {
+        let path = data_dir.join("sdm.json");
+        let entries: Vec<SdmEntry> = load_from_disk(&path)?;
+        let count = entries.len();
+        let inner = DefaultSdm::from_entries(addr_dim, data_dim, entries);
+        tracing::info!(path = %path.display(), count, "loaded SDM entries from disk");
+        Ok(Self { inner, path })
+    }
+
+    pub fn with_max_entries(
+        data_dir: &Path,
+        addr_dim: usize,
+        data_dim: usize,
+        max_entries: usize,
+    ) -> Result<Self> {
+        let path = data_dir.join("sdm.json");
+        let entries: Vec<SdmEntry> = load_from_disk(&path)?;
+        let count = entries.len();
+        let inner = DefaultSdm::from_entries_with_max(addr_dim, data_dim, entries, max_entries);
+        tracing::info!(path = %path.display(), count, "loaded SDM entries from disk");
+        Ok(Self { inner, path })
+    }
+
+    fn flush(&self) -> Result<()> {
+        save_to_disk(&self.path, self.inner.entries())
+    }
+}
+
+impl SparseDistributedMemoryStore for DiskSdm {
+    fn write(&mut self, address: Vec<f32>, data: Vec<f32>, label: String) -> Result<()> {
+        self.inner.write(address, data, label)?;
+        self.flush()
+    }
+
+    fn read(&self, query: &[f32], top_k: usize) -> Vec<SdmMatch<'_>> {
+        self.inner.read(query, top_k)
+    }
+
+    fn read_blended(&self, query: &[f32], top_k: usize) -> Option<Vec<f32>> {
+        self.inner.read_blended(query, top_k)
+    }
+
+    fn count(&self) -> usize {
+        self.inner.count()
+    }
+
+    fn prune_below(&mut self, query: &[f32], threshold: f64) -> usize {
+        let removed = self.inner.prune_below(query, threshold);
+        if removed > 0 {
+            let _ = self.flush();
+        }
+        removed
+    }
+
+    fn decay(&mut self, factor: f64) -> usize {
+        let removed = self.inner.decay(factor);
+        let _ = self.flush();
+        removed
+    }
+
+    fn clear(&mut self) {
+        self.inner.clear();
+        let _ = self.flush();
+    }
+
+    fn entries(&self) -> &[SdmEntry] {
+        self.inner.entries()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -967,7 +1049,7 @@ mod tests {
             let mut store = DiskWorldStateStore::new(&dir).unwrap();
             store.add_fact(make_fact("f1", "sensor", "temp", serde_json::json!(20))).unwrap();
             store.add_fact(make_fact("f2", "sensor", "humidity", serde_json::json!(50))).unwrap();
-            assert_eq!(store.remove_fact("f1").unwrap(), true);
+            assert!(store.remove_fact("f1").unwrap());
             assert_eq!(store.list_facts().len(), 1);
         }
 
@@ -1013,7 +1095,7 @@ mod tests {
         let dir = test_dir("ws_remove_noop");
 
         let mut store = DiskWorldStateStore::new(&dir).unwrap();
-        assert_eq!(store.remove_fact("nonexistent").unwrap(), false);
+        assert!(!store.remove_fact("nonexistent").unwrap());
 
         // File should not have been created since no mutation occurred.
         assert!(!dir.join("world_state.json").exists());

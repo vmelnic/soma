@@ -185,7 +185,7 @@ mod tests {
         let projector = BeliefProjector::new();
 
         let mut facts: Vec<Fact> = (0..50)
-            .map(|i| Fact {
+            .map(|_i| Fact {
                 fact_id: format!("obs:{}", Uuid::new_v4()),
                 subject: "soma.ports.google_mail.list_labels".to_string(),
                 predicate: "failed".to_string(),

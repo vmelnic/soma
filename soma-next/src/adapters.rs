@@ -617,6 +617,8 @@ fn port_call_to_observation(
 pub struct SimpleCandidatePredictor {
     failure_counts: std::sync::Mutex<std::collections::HashMap<String, u32>>,
     embedder: crate::memory::embedder::HashEmbedder,
+    sdm: Option<crate::memory::sdm::SharedSdm>,
+    world_state: Option<std::sync::Arc<std::sync::Mutex<dyn crate::runtime::world_state::WorldStateStore + Send>>>,
 }
 
 impl SimpleCandidatePredictor {
@@ -624,7 +626,40 @@ impl SimpleCandidatePredictor {
         Self {
             failure_counts: std::sync::Mutex::new(std::collections::HashMap::new()),
             embedder: crate::memory::embedder::HashEmbedder::new(),
+            sdm: None,
+            world_state: None,
         }
+    }
+
+    pub fn with_sdm(
+        mut self,
+        sdm: crate::memory::sdm::SharedSdm,
+        world_state: std::sync::Arc<std::sync::Mutex<dyn crate::runtime::world_state::WorldStateStore + Send>>,
+    ) -> Self {
+        self.sdm = Some(sdm);
+        self.world_state = Some(world_state);
+        self
+    }
+
+    fn sdm_skill_boosts(&self) -> std::collections::HashMap<String, f64> {
+        let mut boosts = std::collections::HashMap::new();
+        let (Some(sdm_store), Some(ws)) = (&self.sdm, &self.world_state) else {
+            return boosts;
+        };
+        let snapshot = ws.lock().ok().map(|w| w.snapshot()).unwrap_or(serde_json::json!({}));
+        let address = crate::memory::sdm::encode_snapshot(&snapshot, &self.embedder);
+        let Ok(sdm) = sdm_store.lock() else { return boosts };
+        let matches = sdm.read(&address, 10);
+        for m in &matches {
+            if let Some(colon) = m.entry.label.rfind(':') {
+                let skill_id = &m.entry.label[..colon];
+                let outcome = &m.entry.label[colon + 1..];
+                let weight = m.similarity * (1.0_f64 + m.entry.write_count as f64).ln();
+                let sign = if outcome == "ok" { 1.0 } else { -0.5 };
+                *boosts.entry(skill_id.to_string()).or_insert(0.0) += sign * weight;
+            }
+        }
+        boosts
     }
 
     /// Record a skill invocation result for score adjustment.
@@ -708,6 +743,7 @@ impl CandidatePredictor for SimpleCandidatePredictor {
             .collect();
         let goal_embedding = self.embedder.embed(goal_text);
         let failure_counts = self.failure_counts.lock().ok();
+        let sdm_boosts = self.sdm_skill_boosts();
 
         candidates
             .iter()
@@ -737,10 +773,12 @@ impl CandidatePredictor for SimpleCandidatePredictor {
                     .unwrap_or(0);
                 let penalty = 1.0 / (1.0 + failures as f64);
 
+                let sdm_boost = sdm_boosts.get(&skill.skill_id).copied().unwrap_or(0.0);
+
                 CandidateScore {
                     skill_id: skill.skill_id.clone(),
-                    score: relevance * penalty,
-                    predicted_success: 0.9 * penalty,
+                    score: (relevance + sdm_boost) * penalty,
+                    predicted_success: (0.9 + sdm_boost.clamp(-0.4, 0.4)) * penalty,
                     predicted_cost: 0.01,
                     predicted_latency_ms: 10,
                     information_gain: 0.5,

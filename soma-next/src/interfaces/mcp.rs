@@ -131,6 +131,8 @@ pub struct RuntimeHandle {
     /// notifications on every control-loop step so the brain doesn't
     /// have to poll `stream_goal_observations`.
     pub trace_notifier: Arc<dyn crate::runtime::trace_notifier::TraceNotifier>,
+    /// Sparse Distributed Memory store for content-addressable recall.
+    pub sdm: crate::memory::sdm::SharedSdm,
 }
 
 impl RuntimeHandle {
@@ -168,6 +170,7 @@ impl RuntimeHandle {
             plugin_search_paths: runtime.plugin_search_paths,
             require_port_signatures: runtime.require_port_signatures,
             trace_notifier: Arc::new(crate::runtime::trace_notifier::NoopTraceNotifier),
+            sdm: runtime.sdm,
         }
     }
 
@@ -215,6 +218,7 @@ impl RuntimeHandle {
         let world_state = Arc::clone(&self.world_state);
         let skill_stats = Arc::clone(&self.skill_stats);
         let port_runtime = Arc::clone(&self.port_runtime);
+        let sdm = Arc::clone(&self.sdm);
         let trace_notifier = Arc::clone(&self.trace_notifier);
 
         Arc::new(move |objective: String, max_steps: Option<u32>| {
@@ -257,6 +261,7 @@ impl RuntimeHandle {
                 world_state: Arc::clone(&world_state),
                 skill_stats: Some(Arc::clone(&skill_stats)),
                 port_runtime: Some(Arc::clone(&port_runtime)),
+                sdm: Some(Arc::clone(&sdm)),
             };
             crate::runtime::goal_registry::spawn_async_goal(
                 Arc::clone(&entry),
@@ -748,6 +753,7 @@ impl McpServer {
                 world_state: &rt.world_state,
                 skill_stats: Some(&rt.skill_stats),
                 port_runtime: Some(&rt.port_runtime),
+                sdm: Some(&rt.sdm),
             };
             crate::runtime::goal_executor::finalize_episode(&session, &ctx);
         }
@@ -913,6 +919,7 @@ impl McpServer {
             world_state: std::sync::Arc::clone(&rt.world_state),
             skill_stats: Some(std::sync::Arc::clone(&rt.skill_stats)),
             port_runtime: Some(std::sync::Arc::clone(&rt.port_runtime)),
+            sdm: Some(std::sync::Arc::clone(&rt.sdm)),
         };
 
         crate::runtime::goal_registry::spawn_async_goal(
@@ -1194,7 +1201,7 @@ impl McpServer {
                 .find(|e| e.session_id == uuid);
 
             let build_response = |session: &crate::types::session::ControlSession| {
-                serde_json::json!({
+                let mut resp = serde_json::json!({
                     "session_id": session.session_id.to_string(),
                     "status": format!("{:?}", session.status),
                     "objective": session.goal.objective.description,
@@ -1227,7 +1234,72 @@ impl McpServer {
                     "step_count": session.trace.steps.len(),
                     "created_at": session.created_at.to_rfc3339(),
                     "updated_at": session.updated_at.to_rfc3339()
-                })
+                });
+
+                // SDM context: show what boost SDM would give each skill
+                // that appeared in this session's trace.
+                let mut unique_skills: Vec<String> = {
+                    let mut seen = std::collections::HashSet::new();
+                    session.trace.steps.iter()
+                        .filter(|s| !s.selected_skill.is_empty())
+                        .filter_map(|s| {
+                            if seen.insert(s.selected_skill.clone()) {
+                                Some(s.selected_skill.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                };
+                unique_skills.sort();
+
+                let belief_snapshot = serde_json::to_value(&session.belief).unwrap_or_default();
+                let address = crate::memory::sdm::encode_snapshot(&belief_snapshot, &*rt.embedder);
+
+                let mut sdm_entries = Vec::new();
+                if let Ok(sdm) = rt.sdm.lock() {
+                    let all_matches = sdm.read(&address, 10);
+                    for skill_id in &unique_skills {
+                        let mut boost_score: f64 = 0.0;
+                        let mut matching_count: usize = 0;
+                        let mut top_labels: Vec<String> = Vec::new();
+                        for m in &all_matches {
+                            if m.similarity < 0.1 {
+                                continue;
+                            }
+                            let parts: Vec<&str> = m.entry.label.splitn(2, ':').collect();
+                            if parts.is_empty() || parts[0] != skill_id {
+                                continue;
+                            }
+                            matching_count += 1;
+                            let weight = m.similarity * (m.entry.write_count as f64).ln_1p();
+                            let outcome = parts.get(1).copied().unwrap_or("");
+                            if outcome == "ok" {
+                                boost_score += weight;
+                            } else {
+                                boost_score -= weight * 0.5;
+                            }
+                            if top_labels.len() < 3 {
+                                top_labels.push(m.entry.label.clone());
+                            }
+                        }
+                        sdm_entries.push(serde_json::json!({
+                            "skill_id": skill_id,
+                            "sdm_boost_score": boost_score,
+                            "matching_entry_count": matching_count,
+                            "top_matching_labels": top_labels
+                        }));
+                    }
+                }
+
+                if let Some(obj) = resp.as_object_mut() {
+                    obj.insert("sdm_context".to_string(), serde_json::json!({
+                        "query_skill_count": unique_skills.len(),
+                        "skills": sdm_entries
+                    }));
+                }
+
+                resp
             };
 
             if let Some(entry) = async_entry.as_ref() {
@@ -1526,6 +1598,7 @@ impl McpServer {
                     world_state: Arc::clone(&rt.world_state),
                     skill_stats: Some(Arc::clone(&rt.skill_stats)),
                     port_runtime: Some(Arc::clone(&rt.port_runtime)),
+                    sdm: Some(Arc::clone(&rt.sdm)),
                 };
                 crate::runtime::goal_registry::spawn_async_goal(
                     Arc::clone(entry),
@@ -2174,6 +2247,7 @@ impl McpServer {
                     world_state: Arc::clone(&rt.world_state),
                     skill_stats: Some(Arc::clone(&rt.skill_stats)),
                     port_runtime: Some(Arc::clone(&rt.port_runtime)),
+                    sdm: Some(Arc::clone(&rt.sdm)),
                 };
                 crate::runtime::goal_registry::spawn_async_goal(
                     Arc::clone(entry),
@@ -2583,6 +2657,17 @@ impl McpServer {
                 dump.insert("packs".to_string(), serde_json::json!(packs));
             }
 
+            if (full || sections.iter().any(|s| s == "sdm"))
+                && let Ok(sdm) = rt.sdm.lock()
+            {
+                let entries = sdm.entries();
+                let labels: Vec<&str> = entries.iter().map(|e| e.label.as_str()).collect();
+                dump.insert("sdm".to_string(), serde_json::json!({
+                    "count": entries.len(),
+                    "labels": labels,
+                }));
+            }
+
             if full || sections.iter().any(|s| s == "metrics") {
                 use std::sync::atomic::Ordering;
 
@@ -2599,6 +2684,7 @@ impl McpServer {
                         .map(|pr| pr.list_ports(None).len() as u64)
                         .unwrap_or(0),
                     peer_connections: 0,
+                    sdm_entry_count: rt.sdm.lock().map(|s| s.count()).unwrap_or(0),
                 };
                 let self_model = crate::runtime::proprioception::snapshot(rt.start_time, &counts);
 
@@ -3695,11 +3781,17 @@ impl McpServer {
                     &rt.routine_store,
                     &*rt.embedder,
                 );
+            let sdm_candidates = if let Ok(sdm) = rt.sdm.lock() {
+                crate::memory::sdm::discover_routines_from_sdm(&*sdm, 3)
+            } else {
+                vec![]
+            };
             Ok(Self::success_response(
                 id,
                 serde_json::json!({
                     "schemas_induced": schemas_induced,
                     "routines_compiled": routines_compiled,
+                    "sdm_routine_candidates": sdm_candidates,
                 }),
             ))
         } else {
@@ -3708,6 +3800,7 @@ impl McpServer {
                 serde_json::json!({
                     "schemas_induced": 0,
                     "routines_compiled": 0,
+                    "sdm_routine_candidates": [],
                     "note": "stub mode — no runtime available"
                 }),
             ))
@@ -6011,7 +6104,7 @@ impl McpServer {
                             "type": "array",
                             "items": {
                                 "type": "string",
-                                "enum": ["full", "belief", "episodes", "schemas", "routines", "sessions", "skills", "ports", "packs", "metrics"]
+                                "enum": ["full", "belief", "episodes", "schemas", "routines", "sessions", "skills", "ports", "packs", "metrics", "sdm"]
                             },
                             "description": "Which sections to include. Omit or pass [\"full\"] for everything."
                         }
@@ -6515,8 +6608,6 @@ impl Default for McpServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "native-filesystem")]
-    use crate::runtime::port::Port;
 
     fn make_request(method: &str, params: Option<Value>) -> McpRequest {
         McpRequest {
@@ -8071,6 +8162,6 @@ mod tests {
         // Skills not in registry, so they show as unknown.
         assert_eq!(result["safety"], "unknown");
         assert_eq!(result["recommendation"], "needs_review");
-        assert!(result["unknown_skills"].as_array().unwrap().len() > 0);
+        assert!(!result["unknown_skills"].as_array().unwrap().is_empty());
     }
 }
