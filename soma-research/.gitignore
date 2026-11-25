@@ -16,3 +16,4 @@ data/
 *.safetensors
 logs/
 index/
+artifacts/

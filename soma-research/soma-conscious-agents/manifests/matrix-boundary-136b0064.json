@@ -1,0 +1,22 @@
+{
+  "schema": "soma.rtl.instrument.v1",
+  "source": {
+    "id": "official-matrix-task-136b0064",
+    "path": "../data/external/ARC-AGI-2/data/evaluation/136b0064.json",
+    "sha256": "f0dae5cab3d34eeb2a1a795814e1aa9c886f2d8d7aa419e2626e8bb63a4526e6",
+    "provenance_url": "https://github.com/arcprize/ARC-AGI-2/tree/f3283f727488ad98fe575ea6a5ac981e4a188e49",
+    "citation": "ARC-AGI-2 official evaluation data, commit f3283f727488ad98fe575ea6a5ac981e4a188e49",
+    "role": "boundary_protocol"
+  },
+  "protocol": {
+    "kind": "matrix_json",
+    "collections": ["train", "test"],
+    "matrix_fields": ["input", "output"],
+    "interaction": {
+      "demonstration_collection": "train",
+      "query_collection": "test",
+      "observation_field": "input",
+      "action_field": "output"
+    }
+  }
+}

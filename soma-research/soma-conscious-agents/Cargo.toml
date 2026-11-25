@@ -1,0 +1,23 @@
+[package]
+name = "soma-rtl"
+version = "0.1.0"
+edition = "2021"
+description = "A consciousness-first reflective Markov runtime with exact observer traces"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+csv = "1.3"
+hex = "0.4"
+num-bigint = { version = "0.4", features = ["serde"] }
+num-rational = { version = "0.4", features = ["serde"] }
+num-traits = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+
+[profile.release]
+strip = true
+lto = "thin"
+

@@ -1,0 +1,26 @@
+{
+  "schema": "soma.rtl.instrument.v1",
+  "source": {
+    "id": "public-observed-intervention-traces",
+    "path": "../artifacts/observed-intervention-traces.json",
+    "sha256": "f0565e9c51a053402e11172119838b74bb2fae90729e394994ef4e46a7640a22",
+    "provenance_url": "local:artifacts/arc3-observable-probes.json",
+    "citation": "Runtime-observed public intervention probes; exact local provenance is embedded in the source artifact.",
+    "role": "observed_interaction_trace"
+  },
+  "protocol": {
+    "kind": "trace_json",
+    "events_pointer": "/events",
+    "sequence_field": "sequence",
+    "ordinal_field": "ordinal",
+    "state_field": "state",
+    "action_field": "action",
+    "next_state_field": "next_state",
+    "outcome_fields": [
+      "changed_cells",
+      "levels_completed"
+    ],
+    "terminal_field": "terminal",
+    "cost_field": "action_cost"
+  }
+}

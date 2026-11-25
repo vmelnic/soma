@@ -1,0 +1,23 @@
+{
+  "schema": "soma.rtl.instrument.v1",
+  "source": {
+    "id": "menthol-priming-exp1-ratings",
+    "path": "../data/external/menthol-priming-2024/Exp1_Evaluation.csv",
+    "sha256": "92ffbb6868aeb31856d107277867fae462366ea24f1142a9c99e58c9fc25fa6f",
+    "provenance_url": "https://osf.io/nj238/",
+    "citation": "Beyond self-report measures of arousal: A new priming task to capture activation of relaxing and energizing feelings elicited by odors, Food Quality and Preference (2024), DOI 10.1016/j.foodqual.2024.105227",
+    "role": "reported_experience"
+  },
+  "protocol": {
+    "kind": "delimited",
+    "delimiter": ";",
+    "sequence_fields": ["ID"],
+    "experience_fields": ["Odor"],
+    "intervention_fields": ["Odor"],
+    "report_fields": ["Intensity", "Liking", "Familiarity", "Energizing", "Relaxing"],
+    "filters": [
+      { "operator": "not_in", "field": "ID", "values": ["P31", "P32"] }
+    ]
+  }
+}
+

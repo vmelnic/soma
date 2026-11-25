@@ -1,0 +1,31 @@
+{
+  "schema": "soma.rtl.instrument.v1",
+  "source": {
+    "id": "menthol-priming-exp1-trials",
+    "path": "../data/external/menthol-priming-2024/Exp1_oPriming.csv",
+    "sha256": "07ae7106daea9c6f006fda39dc0b4412346208296d3e505f4309376f17ca62dc",
+    "provenance_url": "https://osf.io/nj238/",
+    "citation": "Beyond self-report measures of arousal: A new priming task to capture activation of relaxing and energizing feelings elicited by odors, Food Quality and Preference (2024), DOI 10.1016/j.foodqual.2024.105227",
+    "role": "model"
+  },
+  "protocol": {
+    "kind": "delimited",
+    "delimiter": ";",
+    "sequence_fields": ["ID"],
+    "experience_fields": ["Emotion"],
+    "intervention_fields": ["Prime"],
+    "report_fields": ["Target", "CorrectResponse", "Response", "Accuracy", "RT"],
+    "filters": [
+      { "operator": "equals", "field": "Task", "value": "Test" },
+      { "operator": "equals", "field": "Accuracy", "value": "1" },
+      { "operator": "not_in", "field": "ID", "values": ["P31", "P32"] },
+      {
+        "operator": "numeric_range_inclusive",
+        "field": "RT",
+        "minimum": 300.0,
+        "maximum": 1500.0
+      }
+    ]
+  }
+}
+

@@ -1,0 +1,30 @@
+{
+  "schema": "soma.rtl.validation-suite.v1",
+  "id": "real-observations-2026-10-19",
+  "criteria_frozen_before_evaluation": true,
+  "instruments": [
+    "menthol-trials.json",
+    "menthol-ratings.json",
+    "matrix-boundary-0934a4d8.json",
+    "observed-intervention-traces.json"
+  ],
+  "model_source_id": "menthol-priming-exp1-trials",
+  "reported_experience_source_id": "menthol-priming-exp1-ratings",
+  "boundary_source_id": "official-matrix-task-0934a4d8",
+  "trace_source_id": "public-observed-intervention-traces",
+  "split": {
+    "training_numerator": 4,
+    "training_denominator": 5,
+    "minimum_heldout_transitions": 500
+  },
+  "duration_horizon": 8,
+  "induction": {
+    "maximum_candidates": 32,
+    "maximum_machine_states": 256,
+    "initial_batch": 1,
+    "trace_duration_horizon": 8
+  },
+  "memory_path": "../artifacts/persistent-memory.json",
+  "report_path": "../artifacts/integrated-report.json"
+}
+
